@@ -1,0 +1,6 @@
+[workspace]
+resolver = "2"
+members = ["rayon-jobs", "tokio-jobs"]
+
+[profile.release]
+debug = 1

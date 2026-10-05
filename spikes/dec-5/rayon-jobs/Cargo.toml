@@ -1,0 +1,12 @@
+[package]
+name = "rayon-jobs"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+async-channel = "2.5.0"
+glib = "0.22"
+memchr = "2.8.3"
+memmap2 = "0.9.11"
+rayon = "1.12.0"
