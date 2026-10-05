@@ -1,7 +1,7 @@
 # 0005: Concurrency model
 
 - Story: DEC-5
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-05
 
 ## Question
@@ -56,7 +56,7 @@ python3 spikes/dec-5/run.py
 
 ## Decision
 
-Proposed: **Option A, Rayon + channels + cancel tokens.**
+**Option A, Rayon + channels + cancel tokens.** Accepted 2026-10-05.
 
 1. **The work is data-parallel CPU over an mmap.** Index, parse, sort, filter, inference, and search all fit Rayon's `par_iter` and `par_sort` with work stealing. DEC-4's 2M-row sort needs a parallel sort that tokio doesn't have. File I/O goes through mmap page faults and plain blocking writes, which async can't make non-blocking.
 2. **The UI thread already has an executor.** glib's `MainContext::spawn_local` awaits runtime-agnostic channels, and GTK's own async (portals, `GtkFileDialog`) runs on gio. A tokio runtime would be a second scheduler with nothing to schedule.
