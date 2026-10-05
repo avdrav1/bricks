@@ -1,0 +1,9 @@
+[package]
+name = "egui-grid"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+eframe = "0.36"
+libc = "0.2.190"

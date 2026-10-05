@@ -1,0 +1,180 @@
+{
+ "gtk4": {
+  "scroll": {
+   "mode": "scroll",
+   "rows": 10000000,
+   "window": [
+    1600,
+    1000
+   ],
+   "interval_ms": {
+    "n": 964,
+    "p50": 16.66,
+    "p95": 17.48,
+    "p99": 17.8,
+    "max": 18.95,
+    "mean": 16.67
+   },
+   "cpu_ms": {
+    "n": 965,
+    "p50": 2.0,
+    "p95": 2.66,
+    "p99": 2.97,
+    "max": 4.71,
+    "mean": 2.06
+   },
+   "missed_vsync": 0,
+   "cold_start_ms": 320.0,
+   "peak_rss_mib": 128.7,
+   "snapshot_ms": {
+    "n": 965,
+    "p50": 1.21,
+    "p95": 1.68,
+    "p99": 1.93,
+    "max": 3.68,
+    "mean": 1.26
+   }
+  },
+  "jump": {
+   "mode": "jump",
+   "rows": 10000000,
+   "window": [
+    1600,
+    1000
+   ],
+   "interval_ms": {
+    "n": 965,
+    "p50": 16.68,
+    "p95": 18.3,
+    "p99": 19.57,
+    "max": 34.77,
+    "mean": 16.74
+   },
+   "cpu_ms": {
+    "n": 966,
+    "p50": 4.33,
+    "p95": 5.92,
+    "p99": 6.75,
+    "max": 9.39,
+    "mean": 4.49
+   },
+   "missed_vsync": 4,
+   "cold_start_ms": 334.9,
+   "peak_rss_mib": 129.1,
+   "snapshot_ms": {
+    "n": 966,
+    "p50": 3.49,
+    "p95": 4.86,
+    "p99": 5.55,
+    "max": 7.22,
+    "mean": 3.63
+   }
+  },
+  "latency": {
+   "rows": 10000000,
+   "window": [
+    1600,
+    1000
+   ],
+   "input_to_frame_ms": {
+    "n": 80,
+    "p50": 6.2,
+    "p95": 9.05,
+    "p99": 10.44,
+    "max": 15.29,
+    "mean": 6.64
+   },
+   "input_to_app_event_ms": {
+    "n": 80,
+    "p50": 0.69,
+    "p95": 1.14,
+    "p99": 3.26,
+    "max": 7.81,
+    "mean": 0.83
+   },
+   "misses": 0
+  }
+ },
+ "egui": {
+  "scroll": {
+   "mode": "scroll",
+   "rows": 10000000,
+   "window": [
+    1600,
+    1000
+   ],
+   "interval_ms": {
+    "n": 961,
+    "p50": 16.65,
+    "p95": 17.24,
+    "p99": 17.54,
+    "max": 19.0,
+    "mean": 16.67
+   },
+   "cpu_ms": {
+    "n": 962,
+    "p50": 1.13,
+    "p95": 1.49,
+    "p99": 1.71,
+    "max": 2.18,
+    "mean": 1.14
+   },
+   "missed_vsync": 0,
+   "cold_start_ms": 281.8,
+   "peak_rss_mib": 157.7,
+   "snapshot_ms": null
+  },
+  "jump": {
+   "mode": "jump",
+   "rows": 10000000,
+   "window": [
+    1600,
+    1000
+   ],
+   "interval_ms": {
+    "n": 961,
+    "p50": 16.66,
+    "p95": 17.9,
+    "p99": 18.43,
+    "max": 19.44,
+    "mean": 16.67
+   },
+   "cpu_ms": {
+    "n": 962,
+    "p50": 3.58,
+    "p95": 4.73,
+    "p99": 5.24,
+    "max": 5.83,
+    "mean": 3.7
+   },
+   "missed_vsync": 0,
+   "cold_start_ms": 260.6,
+   "peak_rss_mib": 159.8,
+   "snapshot_ms": null
+  },
+  "latency": {
+   "rows": 10000000,
+   "window": [
+    1600,
+    1000
+   ],
+   "input_to_frame_ms": {
+    "n": 80,
+    "p50": 3.85,
+    "p95": 5.02,
+    "p99": 5.37,
+    "max": 5.88,
+    "mean": 3.97
+   },
+   "input_to_app_event_ms": {
+    "n": 80,
+    "p50": 0.56,
+    "p95": 0.97,
+    "p99": 1.14,
+    "max": 1.24,
+    "mean": 0.6
+   },
+   "misses": 0
+  }
+ }
+}

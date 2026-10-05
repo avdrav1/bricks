@@ -1,0 +1,6 @@
+[workspace]
+resolver = "2"
+members = ["gtk4-grid", "egui-grid"]
+
+[profile.release]
+debug = 1
