@@ -1,0 +1,38 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/csv-engine",
+    "crates/data-model",
+    "crates/grid",
+    "crates/commands",
+    "crates/file-format",
+    "app",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/YOUR_GITHUB/spreadsheet"
+rust-version = "1.75"
+
+[workspace.dependencies]
+csv-engine = { path = "crates/csv-engine" }
+data-model = { path = "crates/data-model" }
+grid = { path = "crates/grid" }
+commands = { path = "crates/commands" }
+file-format = { path = "crates/file-format" }
+
+[workspace.lints.rust]
+unsafe_code = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+debug = 1
+
+[profile.bench]
+debug = true

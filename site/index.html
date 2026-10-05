@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spreadsheet for Linux</title>
+<meta name="description" content="Open, edit, sort, filter, and save huge CSV files on Linux.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #fbfcfb; --ink: #14201a; --muted: #5b6b62;
+    --rule: #d5ded8; --head: #eef2ef; --select: #0b7a5a; --select-tint: #e3f2ec;
+    --font: "Schibsted Grotesk", "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --paper: #111814; --ink: #e6ede9; --muted: #9aaba1; --rule: #2a3630;
+            --head: #18221d; --select: #3fbf91; --select-tint: #17302a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 17px/1.55 var(--font); }
+  .sheet { max-width: 980px; margin: 48px auto 0; padding: 0 20px; }
+  .grid { display: grid; grid-template-columns: 44px 1fr 1fr 1fr; border-top: 1px solid var(--rule); border-left: 1px solid var(--rule); }
+  .grid > div { border-right: 1px solid var(--rule); border-bottom: 1px solid var(--rule); min-height: 40px; padding: 8px 14px; }
+  .h { background: var(--head); color: var(--muted); font-size: 13px; text-align: center; padding: 10px 0 !important; }
+  .rn { background: var(--head); color: var(--muted); font-size: 13px; text-align: center; padding: 10px 0 !important; }
+  .title { grid-column: 2 / 5; padding: 28px 14px 20px !important; }
+  h1 { font-size: clamp(36px, 6vw, 68px); line-height: 1.02; font-weight: 700; letter-spacing: -0.02em; margin: 0; max-width: 14ch; }
+  .lede { grid-column: 2 / 4; color: var(--muted); }
+  .cell-get { position: relative; outline: 2px solid var(--select); outline-offset: -2px; background: var(--select-tint); display: flex; align-items: center; }
+  .cell-get::after { content: ""; position: absolute; right: -4px; bottom: -4px; width: 8px; height: 8px; background: var(--select); border: 1px solid var(--paper); }
+  .cell-get a { color: var(--ink); font-weight: 700; text-decoration: none; font-size: 18px; }
+  .cell-get a:hover, .cell-get a:focus-visible { text-decoration: underline; text-underline-offset: 4px; }
+  a:focus-visible { outline: 2px solid var(--select); outline-offset: 4px; }
+  .facts > div:not(.rn) { font-size: 15px; }
+  .facts b { display: block; font-weight: 500; }
+  .facts span { color: var(--muted); }
+  section.install { max-width: 66ch; margin: 56px 0 0 44px; padding: 0 14px; }
+  h2 { font-size: 22px; margin: 0 0 12px; }
+  pre { background: var(--head); border: 1px solid var(--rule); padding: 14px 16px; overflow-x: auto; font-size: 14px; }
+  .status { position: sticky; bottom: 0; margin-top: 64px; display: flex; border-top: 1px solid var(--rule); background: var(--head); font-size: 13px; color: var(--muted); }
+  .status span { padding: 6px 16px; border-right: 1px solid var(--rule); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .status span:last-child { margin-left: auto; border-right: 0; border-left: 1px solid var(--rule); }
+  @media (max-width: 640px) {
+    .grid { grid-template-columns: 36px 1fr; }
+    .h.c, .h.d, .pad { display: none; }
+    .title, .lede { grid-column: 2; }
+    section.install { margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+<main class="sheet">
+  <div class="grid">
+    <div class="h"></div><div class="h">A</div><div class="h c">B</div><div class="h d">C</div>
+    <div class="rn">1</div><div class="title"><h1>Huge CSV files, opened in a blink.</h1></div>
+    <div class="rn">2</div><div class="lede">A fast, native spreadsheet for Linux. Open, edit, sort, filter, search, and save files with millions of rows, without the wait.</div><div class="pad"></div>
+    <div class="rn">3</div><div class="cell-get"><a id="dl" href="#install">Download for Linux</a></div><div class="pad"></div><div class="pad"></div>
+  </div>
+  <div class="grid facts" style="border-top:0">
+    <div class="rn">4</div><div><b>Gigabyte files</b><span>Built to stay responsive at 1 GB.</span></div><div class="pad"><b>Safe saves</b><span>A crash never corrupts your file.</span></div><div class="pad"><b>Your data, untouched</b><span>00123 stays 00123.</span></div>
+  </div>
+  <section class="install" id="install">
+    <h2>Install</h2>
+    <pre id="cmd">tar xf spreadsheet-*-x86_64-linux.tar.gz
+./spreadsheet-*-x86_64-linux/spreadsheet</pre>
+    <p>Arch Linux package coming to the AUR. Verify your download with the published sha256.</p>
+  </section>
+</main>
+<footer class="status" aria-live="polite">
+  <span id="ver">Loading release</span><span id="size"></span><span id="sha"></span><span>x86_64 Linux</span>
+</footer>
+<script>
+  fetch("latest.json", { cache: "no-store" })
+    .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(rel => {
+      document.getElementById("dl").href = rel.url;
+      document.getElementById("dl").textContent = "Download v" + rel.version;
+      document.getElementById("ver").textContent = "v" + rel.version + " released " + rel.date;
+      document.getElementById("size").textContent = (rel.bytes / 1048576).toFixed(1) + " MB";
+      document.getElementById("sha").textContent = "sha256 " + rel.sha256;
+      document.getElementById("sha").title = rel.sha256;
+    })
+    .catch(() => { document.getElementById("ver").textContent = "No release published yet"; });
+</script>
+</body>
+</html>

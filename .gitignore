@@ -1,0 +1,6 @@
+/target
+/dist
+/corpus
+/spikes/*/target
+.env.ship
+*.swp

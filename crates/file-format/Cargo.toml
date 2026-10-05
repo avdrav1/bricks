@@ -1,0 +1,14 @@
+[package]
+name = "file-format"
+description = "Safe saving: temp file, verify, atomic replace"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+csv-engine.workspace = true
+data-model.workspace = true
+
+[lints]
+workspace = true

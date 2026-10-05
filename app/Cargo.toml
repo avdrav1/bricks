@@ -1,0 +1,22 @@
+[package]
+name = "spreadsheet"
+description = "A fast, lightweight spreadsheet for Linux"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "spreadsheet"
+path = "src/main.rs"
+
+[dependencies]
+csv-engine.workspace = true
+data-model.workspace = true
+grid.workspace = true
+commands.workspace = true
+file-format.workspace = true
+# UI toolkit is added by story DEC-1 (see docs/decisions/0001-ui-toolkit.md).
+
+[lints]
+workspace = true

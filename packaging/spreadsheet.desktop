@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Spreadsheet
+Comment=Open and edit large CSV files fast
+Exec=spreadsheet %f
+Icon=spreadsheet
+Terminal=false
+Categories=Office;Spreadsheet;
+MimeType=text/csv;text/tab-separated-values;

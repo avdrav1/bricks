@@ -1,0 +1,4 @@
+# Cloudflare Pages project for the download site. scripts/ship.sh deploys dist/site.
+name = "spreadsheet"
+pages_build_output_dir = "dist/site"
+compatibility_date = "2026-10-01"
