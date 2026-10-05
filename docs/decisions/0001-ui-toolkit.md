@@ -1,7 +1,7 @@
 # 0001: UI toolkit
 
 - Story: DEC-1
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-05
 
 ## Question
@@ -82,7 +82,7 @@ DEC1_UNICODE=1 target/release/gtk4-grid
 
 ## Decision
 
-Proposed: **GTK4 via gtk4-rs**, with the grid as a custom-drawn widget (`Widget::snapshot`). The `grid` crate stays toolkit-free and owns viewport math.
+**GTK4 via gtk4-rs**, with the grid as a custom-drawn widget (`Widget::snapshot`). The `grid` crate stays toolkit-free and owns viewport math. Accepted 2026-10-05.
 
 1. **Text correctness on arbitrary CSV content.** Pango, HarfBuzz, and fontconfig give font fallback and bidi out of the box. egui needs bundled fonts and still lays RTL text out in the wrong order. A spreadsheet that opens whatever file it is given cannot show tofu or reorder words in a cell.
 2. **Native shell for a Linux-first product.** GTK provides real menus, the portal file dialog, IME, AT-SPI, and system theme. These are the SP-1 exit criteria the execution plan cares about, and egui would cover them with drawn or third-party substitutes.

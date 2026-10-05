@@ -20,7 +20,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 | ID | MS | Pri | Status | Depends | Story | Acceptance |
 | --- | --- | --- | --- | --- | --- | --- |
-| DEC-1 | S0 | P0 | review | - | Choose UI toolkit (GTK4 vs Slint vs egui vs Iced) | Spike renders a 1M-row virtual grid in the top two; ADR 0001 records frame time and input latency |
+| DEC-1 | S0 | P0 | done | - | Choose UI toolkit (GTK4 vs Slint vs egui vs Iced) | Spike renders a 1M-row virtual grid in the top two; ADR 0001 records frame time and input latency |
 | DEC-2 | S0 | P0 | todo | INFRA-2 | Choose source storage (mmap + sparse index vs chunked arena vs columnar) | Spike indexes 1 GB; ADR 0002 records index time, index RAM, random row fetch latency |
 | DEC-3 | S0 | P0 | todo | DEC-2 | Choose edit model (overlay + row map vs piece table) | Spike applies 10k random edits and an insert at row 500k; ADR 0003 shows O(1) or O(log n) per edit |
 | DEC-4 | S0 | P0 | todo | DEC-2 | Choose sort/filter representation | Spike sorts a 2M-row numeric column in under 3 s; ADR 0004 |

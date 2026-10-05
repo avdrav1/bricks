@@ -6,6 +6,7 @@ pkgdesc="A fast, lightweight spreadsheet for large CSV files"
 arch=('x86_64')
 url="https://YOUR_PAGES_DOMAIN"
 license=('MIT' 'Apache-2.0')
+depends=('gtk4')
 source=("https://dl.example.com/releases/v${pkgver}/spreadsheet-${pkgver}-x86_64-linux.tar.gz")
 sha256sums=('SKIP')
 
