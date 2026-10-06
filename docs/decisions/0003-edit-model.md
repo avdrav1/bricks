@@ -1,7 +1,7 @@
 # 0003: Edit model
 
 - Story: DEC-3
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-06
 
 ## Question
@@ -50,7 +50,7 @@ python3 spikes/dec-3/run.py
 
 ## Decision
 
-Proposed: **A, overlay + row map.**
+**A, overlay + row map.** Accepted 2026-10-06.
 
 - **Cell edits:** a cell overlay keyed by a stable `RowId`. A `RowId` is either a source row number or an inserted-row id.
 - **Row order:** a logical-to-`RowId` row map, stored as an order-statistic tree of id runs.
