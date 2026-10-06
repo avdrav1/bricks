@@ -1,7 +1,7 @@
 # 0004: Sort and filter representation
 
 - Story: DEC-4
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-06
 
 ## Question
@@ -54,7 +54,7 @@ python3 spikes/dec-4/run.py
 
 ## Decision
 
-Proposed: **B, key column then sort, with filters as RowId bitmaps.**
+**B, key column then sort, with filters as RowId bitmaps.** Accepted 2026-10-06.
 
 1. **Sort:**
    - One parallel pass reads the column through source and overlay into a typed, order-preserving key per row.
