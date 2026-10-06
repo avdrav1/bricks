@@ -3,11 +3,13 @@
 //! Invariant: the engine never rewrites a field's bytes. What it reads is what
 //! `data-model` treats as the authoritative raw value.
 
+mod fields;
 mod index;
 mod source;
 #[cfg(test)]
 mod testutil;
 
+pub use fields::{split_fields, Field};
 pub use index::{IndexError, SparseRowIndex, STRIDE};
 pub use source::Source;
 

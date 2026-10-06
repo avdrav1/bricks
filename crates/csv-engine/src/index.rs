@@ -9,6 +9,7 @@
 //! literal. `\r\n` and `\n` both end rows; the span includes the terminator so saves can
 //! copy untouched rows byte for byte.
 
+use crate::fields::{split_fields, Field};
 use crate::source::Source;
 use crate::{Dialect, RowIndex};
 use parking_lot::RwLock;
@@ -181,6 +182,21 @@ impl SparseRowIndex {
 
     pub fn source(&self) -> &Arc<Source> {
         &self.source
+    }
+
+    /// Split a row into fields (ENG-3). Returns the row's bytes, which the field ranges in
+    /// `out` index into; a UTF-8 BOM before the first row is not part of its first field.
+    /// `None` past `row_count()` or once the file changed on disk.
+    pub fn row_fields(&self, row: u64, out: &mut Vec<Field>) -> Option<&[u8]> {
+        let span = self.row_span(row)?;
+        let bytes = &self.source.bytes()[span.start as usize..span.end as usize];
+        let bytes = if span.start == 0 {
+            bytes.strip_prefix(UTF8_BOM).unwrap_or(bytes)
+        } else {
+            bytes
+        };
+        split_fields(bytes, &self.dialect, out);
+        (!self.source.changed()).then_some(bytes)
     }
 }
 
