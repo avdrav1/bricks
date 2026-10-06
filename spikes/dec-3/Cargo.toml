@@ -1,0 +1,6 @@
+[workspace]
+resolver = "2"
+members = ["overlay-rowmap", "piece-table"]
+
+[profile.release]
+debug = 1

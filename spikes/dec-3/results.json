@@ -1,0 +1,194 @@
+[
+ {
+  "model": "overlay-treap",
+  "source_rows": 1898604,
+  "rows": 1899605,
+  "index_ms": 17,
+  "open_ms": 0.1,
+  "edit_ms": {
+   "n": 10000,
+   "p50": 0.0001,
+   "p99": 0.0003,
+   "max": 0.3509
+  },
+  "insert_500k_ms": 0.001,
+  "insert_ms": {
+   "n": 1000,
+   "p50": 0.0003,
+   "p99": 0.002,
+   "max": 0.0229
+  },
+  "fetch_100_rows_ms": {
+   "n": 1000,
+   "p50": 0.0319,
+   "p99": 0.0552,
+   "max": 0.0721
+  },
+  "save_ms": 80,
+  "saved_bytes": 104861607,
+  "model_bytes": 769415,
+  "shape": "rowmap=treap runs=2003 edits=11004",
+  "file": "corpus/rows_100mb.csv",
+  "outputs_identical": true
+ },
+ {
+  "model": "overlay-vec",
+  "source_rows": 1898604,
+  "rows": 1899605,
+  "index_ms": 17,
+  "open_ms": 2.0,
+  "edit_ms": {
+   "n": 10000,
+   "p50": 0.0002,
+   "p99": 0.0008,
+   "max": 0.4802
+  },
+  "insert_500k_ms": 0.8358,
+  "insert_ms": {
+   "n": 1000,
+   "p50": 0.1139,
+   "p99": 0.363,
+   "max": 0.7159
+  },
+  "fetch_100_rows_ms": {
+   "n": 1000,
+   "p50": 0.0293,
+   "p99": 0.0486,
+   "max": 0.0664
+  },
+  "save_ms": 473,
+  "saved_bytes": 104861607,
+  "model_bytes": 31065159,
+  "shape": "rowmap=vec edits=11004",
+  "file": "corpus/rows_100mb.csv",
+  "outputs_identical": true
+ },
+ {
+  "model": "piece-table",
+  "source_rows": 1898604,
+  "rows": 1899605,
+  "index_ms": 17,
+  "open_ms": 0.0,
+  "edit_ms": {
+   "n": 10000,
+   "p50": 0.0021,
+   "p99": 0.0045,
+   "max": 0.0788
+  },
+  "insert_500k_ms": 0.0008,
+  "insert_ms": {
+   "n": 1000,
+   "p50": 0.0014,
+   "p99": 0.0041,
+   "max": 0.0106
+  },
+  "fetch_100_rows_ms": {
+   "n": 1000,
+   "p50": 0.0301,
+   "p99": 0.0493,
+   "max": 0.0861
+  },
+  "save_ms": 58,
+  "saved_bytes": 104861607,
+  "model_bytes": 3145728,
+  "shape": "pieces=21887 add_bytes=556260",
+  "file": "corpus/rows_100mb.csv",
+  "outputs_identical": true
+ },
+ {
+  "model": "overlay-treap",
+  "source_rows": 19094580,
+  "rows": 19095581,
+  "index_ms": 672,
+  "open_ms": 0.0,
+  "edit_ms": {
+   "n": 10000,
+   "p50": 0.0001,
+   "p99": 0.0005,
+   "max": 0.3799
+  },
+  "insert_500k_ms": 0.0018,
+  "insert_ms": {
+   "n": 1000,
+   "p50": 0.0003,
+   "p99": 0.0022,
+   "max": 0.0198
+  },
+  "fetch_100_rows_ms": {
+   "n": 1000,
+   "p50": 0.0323,
+   "p99": 0.0534,
+   "max": 0.0722
+  },
+  "save_ms": 463,
+  "saved_bytes": 1073744582,
+  "model_bytes": 769770,
+  "shape": "rowmap=treap runs=2003 edits=11008",
+  "file": "corpus/rows_1024mb.csv",
+  "outputs_identical": true
+ },
+ {
+  "model": "overlay-vec",
+  "source_rows": 19094580,
+  "rows": 19095581,
+  "index_ms": 188,
+  "open_ms": 20.4,
+  "edit_ms": {
+   "n": 10000,
+   "p50": 0.0002,
+   "p99": 0.0008,
+   "max": 0.331
+  },
+  "insert_500k_ms": 11.1433,
+  "insert_ms": {
+   "n": 1000,
+   "p50": 5.5246,
+   "p99": 11.7312,
+   "max": 13.0059
+  },
+  "fetch_100_rows_ms": {
+   "n": 1000,
+   "p50": 0.0285,
+   "p99": 0.036,
+   "max": 0.0394
+  },
+  "save_ms": 4553,
+  "saved_bytes": 1073744582,
+  "model_bytes": 306201130,
+  "shape": "rowmap=vec edits=11008",
+  "file": "corpus/rows_1024mb.csv",
+  "outputs_identical": true
+ },
+ {
+  "model": "piece-table",
+  "source_rows": 19094580,
+  "rows": 19095581,
+  "index_ms": 192,
+  "open_ms": 0.0,
+  "edit_ms": {
+   "n": 10000,
+   "p50": 0.0023,
+   "p99": 0.0052,
+   "max": 0.0882
+  },
+  "insert_500k_ms": 0.0014,
+  "insert_ms": {
+   "n": 1000,
+   "p50": 0.0016,
+   "p99": 0.0044,
+   "max": 0.0171
+  },
+  "fetch_100_rows_ms": {
+   "n": 1000,
+   "p50": 0.0332,
+   "p99": 0.0479,
+   "max": 0.0613
+  },
+  "save_ms": 427,
+  "saved_bytes": 1073744582,
+  "model_bytes": 3145728,
+  "shape": "pieces=21988 add_bytes=564792",
+  "file": "corpus/rows_1024mb.csv",
+  "outputs_identical": true
+ }
+]
