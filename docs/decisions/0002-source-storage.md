@@ -1,7 +1,7 @@
 # 0002: Source storage
 
 - Story: DEC-2
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-05
 
 ## Question
@@ -50,7 +50,7 @@ python3 spikes/dec-2/run.py
 
 ## Decision
 
-Proposed: **A, mmap + sparse row index.** The index stores the byte offset of every 64th row start, and cells are parsed on demand from the mapping.
+**A, mmap + sparse row index.** The index stores the byte offset of every 64th row start, and cells are parsed on demand from the mapping. Accepted 2026-10-06.
 
 1. **It meets every target with the most headroom in RAM.** Index time is under 1 s cold for 1 GB. The index takes about 4 MiB for 19M rows, against ENG-1's 200 MB budget. A visible window costs 26 µs warm and about 2.5 ms p50 cold, against ENG-2's 5 ms. The dense variant buys about 20 µs per window for 146 MiB of RAM per GB, which isn't worth it. The chunked arena pays 1–5 ms per miss. Columnar breaks invariant 2.
 2. **It keeps the source authoritative and untouched.** Bytes are read straight from the file and never copied or rewritten. The edit overlay and row map (DEC-3) refer to source rows by number, and the sparse index resolves those numbers.
