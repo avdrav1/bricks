@@ -4,3 +4,4 @@
 /spikes/*/target
 .env.ship
 *.swp
+__pycache__/

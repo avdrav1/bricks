@@ -26,7 +26,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | DEC-4 | S0 | P0 | todo | DEC-2 | Choose sort/filter representation | Spike sorts a 2M-row numeric column in under 3 s; ADR 0004 |
 | DEC-5 | S0 | P0 | done | - | Choose concurrency model (Rayon + channels + cancel tokens vs async) | Spike runs a search while a timer simulates 60 fps; frame budget held; ADR 0005 |
 | INFRA-1 | S0 | P0 | done | - | CI: fmt, clippy -D warnings, test on every PR | Workflow in .github/workflows/ci.yml passes on main |
-| INFRA-2 | S0 | P0 | todo | - | Test corpus generator | `scripts/gen_corpus.py` builds 10 MB, 100 MB, 1 GB files and the nasty set; corpus/ is gitignored |
+| INFRA-2 | S0 | P0 | done | - | Test corpus generator | `scripts/gen_corpus.py` builds 10 MB, 100 MB, 1 GB files and the nasty set; corpus/ is gitignored |
 | ENG-1 | M0 | P0 | todo | DEC-2 | Stream-index a CSV into a row offset index | 1 GB indexed in under 10 s; index under 200 MB RAM |
 | ENG-2 | M0 | P0 | todo | ENG-1 | Fetch any row range by logical index | 100 visible rows in under 5 ms from anywhere in the file |
 | ENG-3 | M0 | P0 | todo | ENG-1 | RFC 4180 parsing incl. quoted fields with embedded newlines | Nasty corpus parses with no row misalignment |
