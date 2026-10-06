@@ -37,6 +37,7 @@ A fast, lightweight Linux spreadsheet in Rust. V0.1 is the best large-CSV editor
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+cargo test --release --workspace -- --ignored  # perf acceptance tests (timing asserted in release only)
 python3 scripts/gen_corpus.py            # builds corpus/ (gitignored)
 python3 -m unittest discover -s scripts  # script tests (corpus generator)
 cargo bench                              # after BENCH-1

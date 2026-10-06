@@ -7,6 +7,10 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+libc = "0.2.190"
+memchr = "2.8.3"
+memmap2 = "0.9.11"
+parking_lot = "0.12.5"
 
 
 [lints]

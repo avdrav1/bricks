@@ -3,6 +3,14 @@
 //! Invariant: the engine never rewrites a field's bytes. What it reads is what
 //! `data-model` treats as the authoritative raw value.
 
+mod index;
+mod source;
+#[cfg(test)]
+mod testutil;
+
+pub use index::{IndexError, SparseRowIndex, STRIDE};
+pub use source::Source;
+
 /// How a CSV file is delimited and quoted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Dialect {
@@ -41,15 +49,16 @@ pub enum Encoding {
     Latin1,
 }
 
-/// Maps logical row numbers to byte offsets in the source file.
+/// Maps physical row numbers (file order) to byte ranges in the source file.
 ///
-/// Implemented by ENG-1. Design is set by DEC-2 (docs/decisions/0002-storage.md).
+/// Implemented by [`SparseRowIndex`] (ENG-1, ADR 0002).
 pub trait RowIndex: Send + Sync {
     /// Rows indexed so far. Grows while background indexing runs.
     fn row_count(&self) -> u64;
     /// True once the whole file has been indexed.
     fn is_complete(&self) -> bool;
-    /// Byte range of a physical row in the source file.
+    /// Byte range of a physical row in the source file, line terminator included.
+    /// `None` past `row_count()` or once the file changed on disk.
     fn row_span(&self, row: u64) -> Option<std::ops::Range<u64>>;
 }
 

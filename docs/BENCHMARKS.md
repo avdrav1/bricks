@@ -8,7 +8,7 @@ Corpus: `python3 scripts/gen_corpus.py` (1 GB file is about 10M rows).
 | --- | --- | --- | --- |
 | Cold start to empty window | < 300 ms | | |
 | Open to first rows visible | < 500 ms | | |
-| Full index complete | < 10 s | | |
+| Full index complete | < 10 s | 0.70 s cold, single thread (ENG-1; Ryzen 5900, not the reference box) | |
 | Scroll frame time p99 | < 16 ms | | |
 | Peak RAM after open | < 1.5x file size | | |
 | Find first match | < 1 s | | |
