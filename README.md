@@ -4,11 +4,19 @@ A fast, lightweight spreadsheet for Linux, written in Rust. V0.1 goal: open, bro
 
 ## Start here
 
-1. Install Rust stable (`rustup`), Python 3, and Node (for `npx wrangler` when shipping).
+1. Install Rust stable (`rustup`), Python 3, GTK 4.14+ dev files (`gtk4` on Arch, `libgtk-4-dev` on Debian/Ubuntu), and Node (for `npx wrangler` when shipping).
 2. `cargo test --workspace` should pass on a fresh clone.
 3. Paste the product spec into `docs/SPEC.md`.
 4. `python3 scripts/gen_corpus.py` builds test files in `corpus/` (about 5 GB at full size; use `--max-mb 100` to start small).
 5. Open the repo in Claude Code and say **"next story"**.
+
+## Run it
+
+```sh
+cargo run --release -p spreadsheet -- path/to/file.csv
+```
+
+Read-only for now: scroll with the wheel, scrollbars, arrows, Page Up/Down, Home/End. Comma-delimited UTF-8 only until delimiter and encoding detection land (ENG-4, ENG-6).
 
 ## Layout
 
@@ -18,7 +26,7 @@ crates/data-model    cells, edit overlay, types, sort/filter views
 crates/grid          viewport, selection, navigation (no toolkit)
 crates/commands      undo/redo
 crates/file-format   atomic save
-app/                 the desktop app (toolkit chosen in DEC-1)
+app/                 the desktop app (GTK4, ADR 0001)
 BACKLOG.md           the work queue, read by scripts/backlog.py
 docs/                spec, benchmarks, architecture decisions
 site/                download page deployed to Cloudflare Pages

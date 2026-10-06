@@ -3,6 +3,10 @@
 //! Layers (spec section 16), each kept separate:
 //! source (csv-engine) -> overlay (edits) -> view (sort/filter) -> grid.
 
+mod table;
+
+pub use table::{CsvTable, RowBlock, TableSource, MAX_DISPLAY_BYTES};
+
 use std::collections::HashMap;
 
 pub type Row = u64;

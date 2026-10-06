@@ -17,7 +17,7 @@ grid.workspace = true
 commands.workspace = true
 file-format.workspace = true
 # UI toolkit per docs/decisions/0001-ui-toolkit.md; v4_14 matches Ubuntu 24.04's GTK.
-gtk4 = { version = "0.11", features = ["v4_14"] }
+gtk = { package = "gtk4", version = "0.11", features = ["v4_14"] }
 
 [lints]
 workspace = true
