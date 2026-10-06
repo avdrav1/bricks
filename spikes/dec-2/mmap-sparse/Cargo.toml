@@ -1,0 +1,10 @@
+[package]
+name = "mmap-sparse"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+libc = "0.2.190"
+memchr = "2.8.3"
+memmap2 = "0.9.11"

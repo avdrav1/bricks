@@ -1,0 +1,6 @@
+[workspace]
+resolver = "2"
+members = ["mmap-sparse", "chunked-arena", "columnar"]
+
+[profile.release]
+debug = 1
