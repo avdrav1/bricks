@@ -9,7 +9,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 ## Gates
 
-- [ ] S0: decision records DEC-1 to DEC-5 accepted; CI green on every PR
+- [x] S0: decision records DEC-1 to DEC-5 accepted; CI green on every PR
 - [ ] M0: a 1 GB CSV opens, scrolls smoothly, takes one edit, and saves safely
 - [ ] M1: viewer passes the LibreOffice navigation checklist; first rows of 1 GB in under 500 ms
 - [ ] M2: editor round-trips edits, paste, inserts, and undo on 1 GB without full rewrites before save
