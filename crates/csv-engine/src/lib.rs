@@ -60,6 +60,14 @@ pub trait RowIndex: Send + Sync {
     /// Byte range of a physical row in the source file, line terminator included.
     /// `None` past `row_count()` or once the file changed on disk.
     fn row_span(&self, row: u64) -> Option<std::ops::Range<u64>>;
+    /// Spans of the rows in `rows` that are indexed so far, written to `out` (cleared
+    /// first, capacity reused). Returns how many were written. One checkpoint lookup and
+    /// one forward scan for the whole range: this is how the grid fetches a visible page.
+    fn row_spans(
+        &self,
+        rows: std::ops::Range<u64>,
+        out: &mut Vec<std::ops::Range<u64>>,
+    ) -> Result<usize, IndexError>;
 }
 
 /// Guess the dialect from a sample of the file's first bytes. ENG-4.

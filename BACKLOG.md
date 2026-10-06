@@ -28,7 +28,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | INFRA-1 | S0 | P0 | done | - | CI: fmt, clippy -D warnings, test on every PR | Workflow in .github/workflows/ci.yml passes on main |
 | INFRA-2 | S0 | P0 | done | - | Test corpus generator | `scripts/gen_corpus.py` builds 10 MB, 100 MB, 1 GB files and the nasty set; corpus/ is gitignored |
 | ENG-1 | M0 | P0 | done | DEC-2 | Stream-index a CSV into a row offset index | 1 GB indexed in under 10 s; index under 200 MB RAM |
-| ENG-2 | M0 | P0 | todo | ENG-1 | Fetch any row range by logical index | 100 visible rows in under 5 ms from anywhere in the file |
+| ENG-2 | M0 | P0 | done | ENG-1 | Fetch any row range by logical index | 100 visible rows in under 5 ms from anywhere in the file |
 | ENG-3 | M0 | P0 | todo | ENG-1 | RFC 4180 parsing incl. quoted fields with embedded newlines | Nasty corpus parses with no row misalignment |
 | GRID-1 | M0 | P0 | todo | DEC-1, ENG-2 | Virtualized grid renders visible cells plus a buffer | Constant memory regardless of row count; 60 fps scrolling at 2M rows |
 | GRID-2 | M0 | P0 | todo | GRID-1 | Scrollbar drag jumps to arbitrary positions | Jump to row 1.9M renders in under 100 ms |
@@ -80,6 +80,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-06 ENG-2:** `fetch_perf` checks the 5 ms target against the page-cache-warm case, which is the app's state right after open (indexing reads the whole file). There the worst window took 9.7 µs. With the file evicted before every window (memory pressure), p50 is 2.1–2.4 ms and p99 is 2.8–3.8 ms, but the worst case is 8.3–8.6 ms, over 5 ms. That is one NVMe read; revisit with BENCH-1 on the reference box if it matters there.
 - **2026-10-06 ENG-1:** perf acceptance tests (`#[ignore]`) assert timing only in optimized builds. Debug is about 10–25x slower: the quote-heavy file took 15 s to index in debug and 0.59 s in release. Run them with `cargo test --release --workspace -- --ignored`. The next-story skill's `cargo test --workspace -- --ignored` still checks counts and memory. Also: the `pull_request` trigger did not fire for PR #1 either (2026-10-06), so CI is started manually with `gh workflow run ci --ref <branch>` until Actions triggers are fixed in repo settings.
 - **2026-10-05 INFRA-1:** CI passed on `main` at `6f30e9d` ([run 37393662522](https://github.com/avdrav1/bricks/actions/runs/37393662522), started manually through `workflow_dispatch`). Follow-up: none of four pushes to `main` created a `push`-event run, even though Actions is enabled and the workflow is active. The commit check-suites list only third-party apps, not `github-actions`. The `pull_request` trigger is still unverified until the first PR.
 - **2026-10-05 DEC-1:** ADR 0001 proposes GTK4 (custom `snapshot` grid). Follow-up for GRID-1/GRID-2: at 3800x2080, a scrollbar jump that redraws every cell costs about 18 ms of Pango shaping per frame (30 fps). Plan to reuse per-row render nodes or fill cells progressively.

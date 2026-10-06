@@ -197,17 +197,48 @@ impl RowIndex for SparseRowIndex {
         if row >= self.row_count() || self.source.changed() {
             return None;
         }
+        let (mut scanner, mut pos) = self.seek(row)?;
+        Some(self.next_span(&mut scanner, &mut pos))
+    }
+
+    fn row_spans(&self, rows: Range<u64>, out: &mut Vec<Range<u64>>) -> Result<usize, IndexError> {
+        out.clear();
+        let end = rows.end.min(self.row_count());
+        if rows.start < end {
+            let (mut scanner, mut pos) = self.seek(rows.start).ok_or(IndexError::FileChanged)?;
+            for _ in rows.start..end {
+                out.push(self.next_span(&mut scanner, &mut pos));
+            }
+        }
+        if self.source.changed() {
+            out.clear();
+            return Err(IndexError::FileChanged);
+        }
+        Ok(out.len())
+    }
+}
+
+impl SparseRowIndex {
+    /// Scanner positioned at the start of `row`, reached from the nearest checkpoint.
+    fn seek(&self, row: u64) -> Option<(Scanner, usize)> {
         let mut pos = self.checkpoints.read()[(row / STRIDE) as usize] as usize;
         let bytes = self.source.bytes();
         let mut scanner = Scanner::new(&self.dialect);
         for _ in 0..row % STRIDE {
             scanner.next_row_end(bytes, &mut pos, bytes.len())?;
         }
-        let start = pos;
+        Some((scanner, pos))
+    }
+
+    /// Span of the row starting at `*pos`; leaves `*pos` at the next row.
+    fn next_span(&self, scanner: &mut Scanner, pos: &mut usize) -> Range<u64> {
+        let bytes = self.source.bytes();
+        let start = *pos;
         let end = scanner
-            .next_row_end(bytes, &mut pos, bytes.len())
+            .next_row_end(bytes, pos, bytes.len())
             .map_or(bytes.len(), |nl| nl + 1);
-        Some(start as u64..end as u64)
+        *pos = end;
+        start as u64..end as u64
     }
 }
 
@@ -435,6 +466,49 @@ mod tests {
         assert_eq!(idx.bytes_indexed(), content.len() as u64);
         // The partial view is timing-dependent; only report it.
         eprintln!("observed a partial index while building: {seen_partial}");
+    }
+
+    #[test]
+    fn row_spans_match_single_row_lookups_for_any_range() {
+        let mut out = Vec::new();
+        for seed in 0..60 {
+            let bytes = random_csv(seed, b',');
+            let (_f, idx) = index(&bytes, &Dialect::default());
+            let n = idx.row_count();
+            for k in 0..20 {
+                let a = splitmix(seed * 100 + k) % (n + 1);
+                let b = a + splitmix(seed * 100 + k + 50) % 150; // may run past the end
+                let got = idx.row_spans(a..b, &mut out).unwrap();
+                let want: Vec<_> = (a..b.min(n)).map(|r| idx.row_span(r).unwrap()).collect();
+                assert_eq!(got, want.len(), "seed {seed} range {a}..{b}");
+                assert_eq!(out, want, "seed {seed} range {a}..{b}");
+            }
+        }
+    }
+
+    #[test]
+    fn row_spans_report_a_file_changed_underneath() {
+        let content: Vec<u8> = (0..100_000)
+            .flat_map(|i| format!("{i},x\n").into_bytes())
+            .collect();
+        let file = TempFile::new(&content);
+        let idx = SparseRowIndex::new(
+            Arc::new(Source::open(file.path()).unwrap()),
+            &Dialect::default(),
+        );
+        idx.build(&AtomicBool::new(false)).unwrap();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(file.path())
+            .unwrap()
+            .set_len(0)
+            .unwrap();
+        let mut out = Vec::new();
+        assert_eq!(
+            idx.row_spans(99_000..99_100, &mut out),
+            Err(IndexError::FileChanged)
+        );
+        assert!(out.is_empty());
     }
 
     #[test]
