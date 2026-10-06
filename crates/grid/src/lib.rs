@@ -31,7 +31,12 @@ mod tests {
 
     #[test]
     fn renders_a_window_not_the_whole_file() {
-        let v = Viewport { scroll_y: 2_400_000.0, height: 800.0, row_height: 24.0, total_rows: 2_103_814 };
+        let v = Viewport {
+            scroll_y: 2_400_000.0,
+            height: 800.0,
+            row_height: 24.0,
+            total_rows: 2_103_814,
+        };
         let r = v.visible_rows(10);
         assert_eq!(r.start, 99_990);
         assert!(r.end - r.start < 100);

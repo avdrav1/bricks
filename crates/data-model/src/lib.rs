@@ -65,7 +65,10 @@ mod tests {
     #[test]
     fn overlay_keeps_raw_text_exactly() {
         let mut o = EditOverlay::default();
-        let at = CellRef { row: 1_532_817, col: 3 };
+        let at = CellRef {
+            row: 1_532_817,
+            col: 3,
+        };
         assert!(o.set(at, "00123").is_none());
         assert_eq!(o.get(at), Some("00123"));
         assert_eq!(o.set(at, "x").as_deref(), Some("00123"));

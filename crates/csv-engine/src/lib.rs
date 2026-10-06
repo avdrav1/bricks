@@ -30,7 +30,7 @@ pub enum LineEnding {
 }
 
 /// Delimiters V0.1 must detect (spec section 6).
-pub const CANDIDATE_DELIMITERS: [u8; 4] = [b',', b'\t', b';', b'|'];
+pub const CANDIDATE_DELIMITERS: [u8; 4] = *b",\t;|";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Encoding {

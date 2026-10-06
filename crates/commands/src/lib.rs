@@ -17,7 +17,11 @@ pub struct UndoStack<T> {
 
 impl<T> UndoStack<T> {
     pub fn new(limit: usize) -> Self {
-        Self { done: Vec::new(), undone: Vec::new(), limit }
+        Self {
+            done: Vec::new(),
+            undone: Vec::new(),
+            limit,
+        }
     }
 
     pub fn execute(&mut self, mut cmd: Box<dyn Command<T>>, target: &mut T) {
