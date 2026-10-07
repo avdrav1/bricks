@@ -1,6 +1,10 @@
 //! Application shell: windows, menus, dialogs, OS integration. Toolkit: GTK4 (ADR 0001).
 //!
-//! Usage: `spreadsheet FILE.csv [--bench-scroll FRAMES | --bench-jump ROW [--jumps N]]`
+//! Usage: `spreadsheet [FILE.csv] [--bench-scroll FRAMES | --bench-jump ROW [--jumps N]]`
+//!
+//! Without a file it shows a start window; Ctrl+O or an Open button picks one through the
+//! desktop's file dialog (xdg-desktop-portal via `gtk::FileDialog`, APP-1). Each file gets
+//! its own window.
 //!
 //! Benchmark modes print JSON and exit; the acceptance tests run them.
 //! - `--bench-scroll` (GRID-1) waits for indexing, jumps to the middle of the file, scrolls
@@ -22,6 +26,7 @@ use std::time::{Duration, Instant};
 
 const APP_ID: &str = "dev.bricks.Spreadsheet";
 
+#[derive(Clone, Copy)]
 enum Bench {
     Scroll { frames: u32 },
     Jump { row: u64, jumps: u32 },
@@ -29,7 +34,7 @@ enum Bench {
 }
 
 struct Args {
-    file: PathBuf,
+    file: Option<PathBuf>,
     bench: Option<Bench>,
 }
 
@@ -65,45 +70,197 @@ fn parse_args() -> Result<Args, String> {
     if let Some(Bench::Jump { jumps: j, .. }) = &mut bench {
         *j = jumps;
     }
-    Ok(Args {
-        file: file.ok_or("no file given")?,
-        bench,
-    })
+    if bench.is_some() && file.is_none() {
+        return Err("benchmarks need a file".into());
+    }
+    Ok(Args { file, bench })
 }
 
 fn main() -> glib::ExitCode {
     let args = match parse_args() {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("spreadsheet: {e}\nusage: spreadsheet FILE.csv [--bench-scroll FRAMES | --bench-jump ROW [--jumps N]]");
+            eprintln!("spreadsheet: {e}\nusage: spreadsheet [FILE.csv] [--bench-scroll FRAMES | --bench-jump ROW [--jumps N]]");
             return glib::ExitCode::from(2);
         }
     };
-    let session = Rc::new(Session {
-        path: args.file.clone(),
-        choice: Cell::new(DelimiterChoice::Auto),
-        indexing: RefCell::new(Arc::new(AtomicBool::new(false))),
-    });
-    let table = match session.open() {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("spreadsheet: cannot open {}: {e}", args.file.display());
-            return glib::ExitCode::FAILURE;
-        }
+    // A file named on the command line is mapped and indexing before the toolkit starts,
+    // so its first rows show as early as possible (BENCH-1 times this path).
+    let opened = match &args.file {
+        Some(path) => match open_session(path) {
+            Ok(opened) => Some(opened),
+            Err(e) => {
+                eprintln!("spreadsheet: cannot open {}: {e}", path.display());
+                return glib::ExitCode::FAILURE;
+            }
+        },
+        None => None,
     };
 
     let app = gtk::Application::builder()
         .application_id(APP_ID)
         .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
         .build();
-    let args = Rc::new(args);
-    let table = RefCell::new(Some(table));
-    app.connect_activate(move |app| {
-        if let Some(table) = table.take() {
-            build_window(app, &args, &session, table);
-        }
+    app.connect_startup(|app| {
+        let open = gtk::gio::ActionEntry::builder("open")
+            .activate(|app: &gtk::Application, _, _| choose_and_open(app))
+            .build();
+        app.add_action_entries([open]);
+        app.set_accels_for_action("app.open", &["<Control>o"]);
+    });
+    let (opened, bench) = (RefCell::new(opened), args.bench);
+    app.connect_activate(move |app| match opened.take() {
+        Some((session, table)) => build_window(app, &session, table, bench),
+        None if app.windows().is_empty() => start_window(app),
+        None => {}
     });
     app.run_with_args::<&str>(&[])
+}
+
+/// Map `path` and start indexing it.
+fn open_session(path: &Path) -> std::io::Result<(Rc<Session>, CsvTable)> {
+    let session = Rc::new(Session {
+        path: path.to_owned(),
+        choice: Cell::new(DelimiterChoice::Auto),
+        indexing: RefCell::new(Arc::new(AtomicBool::new(false))),
+    });
+    let table = session.open()?;
+    Ok((session, table))
+}
+
+thread_local! {
+    /// Windows showing a file, by canonical path: opening a file again brings its window
+    /// forward instead of a second window that would save over the first one's edits.
+    static OPEN_WINDOWS: RefCell<Vec<(PathBuf, glib::WeakRef<gtk::ApplicationWindow>)>> =
+        const { RefCell::new(Vec::new()) };
+}
+
+fn canonical(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned())
+}
+
+/// The window already showing `path`, if any.
+fn window_for(path: &Path) -> Option<gtk::ApplicationWindow> {
+    let path = canonical(path);
+    OPEN_WINDOWS.with_borrow_mut(|open| {
+        open.retain(|(_, w)| w.upgrade().is_some());
+        open.iter()
+            .find(|(p, _)| *p == path)
+            .and_then(|(_, w)| w.upgrade())
+    })
+}
+
+/// Shown when the app starts without a file: one button that opens the file dialog.
+fn start_window(app: &gtk::Application) {
+    let heading = gtk::Label::new(Some("Open a CSV file"));
+    heading.add_css_class("title-2");
+    let open = gtk::Button::with_label("Open…");
+    open.add_css_class("suggested-action");
+    open.add_css_class("pill");
+    open.set_halign(gtk::Align::Center);
+    open.set_action_name(Some("app.open"));
+    let hint = gtk::Label::new(Some("Ctrl+O, or run: spreadsheet FILE.csv"));
+    hint.add_css_class("dim-label");
+    let page = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(12)
+        .halign(gtk::Align::Center)
+        .valign(gtk::Align::Center)
+        .build();
+    page.append(&heading);
+    page.append(&open);
+    page.append(&hint);
+    let window = gtk::ApplicationWindow::builder()
+        .application(app)
+        .title("Spreadsheet")
+        .default_width(900)
+        .default_height(600)
+        .child(&page)
+        .build();
+    window.set_widget_name(START_WINDOW);
+    window.set_titlebar(Some(&gtk::HeaderBar::new()));
+    window.present();
+    open.grab_focus();
+}
+
+const START_WINDOW: &str = "start";
+
+/// The file dialog (APP-1). `gtk::FileDialog` goes through xdg-desktop-portal's
+/// FileChooser when one is running, so each desktop shows its own dialog (GTK falls back
+/// to its built-in one without a portal).
+fn choose_and_open(app: &gtk::Application) {
+    let csv = gtk::FileFilter::new();
+    csv.set_name(Some("CSV and text files"));
+    for mime in ["text/csv", "text/tab-separated-values", "text/plain"] {
+        csv.add_mime_type(mime);
+    }
+    for suffix in ["csv", "tsv", "tab", "psv", "txt"] {
+        csv.add_suffix(suffix);
+    }
+    let all = gtk::FileFilter::new();
+    all.set_name(Some("All files"));
+    all.add_pattern("*");
+    let filters = gtk::gio::ListStore::new::<gtk::FileFilter>();
+    filters.append(&csv);
+    filters.append(&all);
+    let dialog = gtk::FileDialog::builder()
+        .title("Open")
+        .modal(true)
+        .filters(&filters)
+        .default_filter(&csv)
+        .build();
+    let (app, parent) = (app.clone(), app.active_window());
+    glib::spawn_future_local(async move {
+        match dialog.open_future(parent.as_ref()).await {
+            Ok(file) => match file.path() {
+                Some(path) => open_window(&app, &path, parent.as_ref()),
+                None => alert(
+                    parent.as_ref(),
+                    &format!("Cannot open {}", file.uri()),
+                    "Only local files can be opened.",
+                ),
+            },
+            Err(e) if e.matches(gtk::DialogError::Dismissed) => {}
+            Err(e) => alert(
+                parent.as_ref(),
+                "Cannot show the file dialog",
+                &e.to_string(),
+            ),
+        }
+    });
+}
+
+/// Show `path` in a window: its existing one, or a new one. The start window closes once
+/// a file is open.
+fn open_window(app: &gtk::Application, path: &Path, parent: Option<&gtk::Window>) {
+    if let Some(window) = window_for(path) {
+        window.present();
+        return;
+    }
+    match open_session(path) {
+        Ok((session, table)) => {
+            build_window(app, &session, table, None);
+            for w in app.windows() {
+                if w.widget_name() == START_WINDOW {
+                    w.close();
+                }
+            }
+        }
+        Err(e) => alert(
+            parent,
+            &format!("Cannot open {}", path.display()),
+            &e.to_string(),
+        ),
+    }
+}
+
+fn alert(parent: Option<&gtk::Window>, message: &str, detail: &str) {
+    gtk::AlertDialog::builder()
+        .message(message)
+        .detail(detail)
+        .modal(true)
+        .build()
+        .show(parent);
 }
 
 /// The open file: where it is, how its delimiter is chosen, and the index build in flight.
@@ -189,7 +346,12 @@ fn delimiter_dropdown(session: &Rc<Session>, grid: &GridView) -> gtk::DropDown {
     dropdown
 }
 
-fn build_window(app: &gtk::Application, args: &Args, session: &Rc<Session>, table: CsvTable) {
+fn build_window(
+    app: &gtk::Application,
+    session: &Rc<Session>,
+    table: CsvTable,
+    bench: Option<Bench>,
+) {
     let vadj = gtk::Adjustment::new(0.0, 0.0, 0.0, ROW_H, 0.0, 0.0);
     let hadj = gtk::Adjustment::new(0.0, 0.0, 0.0, 30.0, 0.0, 0.0);
     let grid = GridView::new(table, &vadj, &hadj);
@@ -211,8 +373,9 @@ fn build_window(app: &gtk::Application, args: &Args, session: &Rc<Session>, tabl
         1,
     );
 
-    let name = args.file.file_name().map_or_else(
-        || args.file.display().to_string(),
+    let path = &session.path;
+    let name = path.file_name().map_or_else(
+        || path.display().to_string(),
         |n| n.to_string_lossy().into(),
     );
     let window = gtk::ApplicationWindow::builder()
@@ -222,8 +385,13 @@ fn build_window(app: &gtk::Application, args: &Args, session: &Rc<Session>, tabl
         .default_height(900)
         .child(&layout)
         .build();
+    OPEN_WINDOWS.with_borrow_mut(|open| open.push((canonical(path), window.downgrade())));
     let delimiter = delimiter_dropdown(session, &grid);
+    let open = gtk::Button::from_icon_name("document-open-symbolic");
+    open.set_tooltip_text(Some("Open… (Ctrl+O)"));
+    open.set_action_name(Some("app.open"));
     let header = gtk::HeaderBar::new();
+    header.pack_start(&open);
     header.pack_end(&delimiter);
     window.set_titlebar(Some(&header));
 
@@ -305,7 +473,7 @@ fn build_window(app: &gtk::Application, args: &Args, session: &Rc<Session>, tabl
 
     window.present();
     grid.grab_focus();
-    match args.bench {
+    match bench {
         Some(Bench::Scroll { frames }) => bench_scroll(app, &grid, &vadj, frames),
         Some(Bench::Jump { row, jumps }) => bench_jump(app, &grid, &vadj, row, jumps),
         Some(Bench::Open) => bench_open(app, &grid),

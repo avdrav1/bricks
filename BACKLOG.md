@@ -42,7 +42,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | GRID-3 | M1 | P0 | done | GRID-1 | Keyboard navigation: arrows, Tab, Enter, Shift variants, Ctrl+Home/End, PgUp/PgDn | Matches LibreOffice on the side-by-side checklist |
 | GRID-4 | M1 | P0 | done | GRID-1 | Cell, range, row, and column selection | Click, Shift+click, drag, header click all work |
 | GRID-5 | M1 | P0 | done | GRID-1 | Resize columns and rows; double-click autofits column | Autofit samples visible rows only |
-| APP-1 | M1 | P0 | todo | DEC-1 | Open via native file dialog (xdg-desktop-portal) | Works under Hyprland, GNOME, KDE |
+| APP-1 | M1 | P0 | done | DEC-1 | Open via native file dialog (xdg-desktop-portal) | Works under Hyprland, GNOME, KDE |
 | APP-2 | M1 | P0 | todo | ENG-1 | Status bar: row count, encoding, delimiter, save state | Row count updates while indexing streams |
 | APP-3 | M1 | P0 | todo | ENG-1, DEC-5 | Show first rows before indexing finishes | First rows of 1 GB visible in under 500 ms |
 | CMD-1 | M2 | P0 | todo | EDIT-1 | Command pattern for all mutations | Every edit is a reversible command object |
@@ -80,6 +80,18 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-07 APP-1:** open through the desktop's file dialog.
+  - `gtk::FileDialog`, no new dependencies. GTK 4.22 uses `org.freedesktop.portal.FileChooser` whenever a portal with FileChooser version ≥ 3 is on the session bus, and falls back to its own chooser otherwise (`gdk_display_should_use_portal`). So each desktop shows its own dialog: GNOME's, KDE's, or xdg-desktop-portal-gtk on Hyprland, whose `hyprland-portals.conf` routes FileChooser to gtk.
+  - Start window when launched without a file; Ctrl+O (`app.open`) and a header-bar button everywhere. Each file opens in its own window (one `Session` each); choosing an already-open file (canonical path) brings its window forward instead of a second window saving over the first. Errors (e.g. permission denied) show an alert; cancelling does nothing. The command-line file path still opens before GTK starts, which BENCH-1's cold start measures.
+  - Smoke test on a private D-Bus session, with xdg-desktop-portal, xdg-desktop-portal-gtk on GTK 3 Broadway (:6), the app on GTK 4 Broadway (:5), and `dbus-monitor` running, all driven from a headless browser. The run showed:
+    - The app called `portal.FileChooser.OpenFile` with the "CSV and text files" and "All files" filters; the portal forwarded it to the gtk backend, which drew its dialog.
+    - Choosing `rows_100mb.csv` returned Response 0 and opened the file in a new window, and the start window closed.
+    - A file with mode 000 showed "Permission denied (os error 13)".
+    - A second file opened a second window.
+    - Re-opening either file, including through a `corpus/../corpus/` path, opened no new window.
+    - Escape returned Response 2 and nothing happened.
+  - Hyprland: the user checked it by hand on the real session (Open… showed the desktop's dialog attached to the window, the chosen CSV opened in a new window and the start window closed, and Ctrl+O on the same file opened no second window). GNOME and KDE are not installed here; per the user, they are a follow-up.
+  - Follow-up (before PKG-1 / first release): open a file through the dialog on GNOME and KDE (VMs), and confirm each desktop's own dialog appears.
 - **2026-10-07 GRID-5:** resizing and autofit.
   - Sizes are sparse: `grid::Sizes` stores only the resized rows and columns, with running offsets. Position and hit-test cost one map lookup, or O(resized) for hit-testing, at any row count (invariant 2). `Viewport`/`ColumnViewport` became one axis `grid::Viewport` over `Sizes`.
   - Autofit (double-click a column border) measures only the rows on screen (`GridCache::widest`; test `autofit_measures_only_the_visible_rows` puts a wider value in the cache's off-screen buffer). It is capped at the body width; an empty column gets the default width.

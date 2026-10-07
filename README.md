@@ -14,7 +14,10 @@ A fast, lightweight spreadsheet for Linux, written in Rust. V0.1 goal: open, bro
 
 ```sh
 cargo run --release -p spreadsheet -- path/to/file.csv
+cargo run --release -p spreadsheet                      # start window with an Open button
 ```
+
+Ctrl+O (or the folder button in the header bar) opens the desktop's file dialog through xdg-desktop-portal. Each file opens in its own window; opening a file that is already open brings its window forward.
 
 Move the cell cursor like LibreOffice Calc: arrows, Tab/Shift+Tab, Enter/Shift+Enter, Home/End, Ctrl+Home/End, Page Up/Down, and Shift with any of them to select (checklist: `docs/navigation-checklist.md`). Select with the mouse too: click a cell, Shift+click or drag for a range (dragging past an edge scrolls), click or drag row numbers and column letters for whole rows and columns, and the corner for everything. Shift+Space selects rows, Ctrl+Space columns, Shift+Ctrl+Space everything. The mouse wheel and scrollbars scroll. Double-click a cell to edit it (Enter applies, Esc cancels). Ctrl+S saves over the file atomically: untouched rows are written byte for byte, and a crash mid-save leaves the original intact. The title shows unsaved edits and save progress. The delimiter (comma, tab, semicolon, pipe) is detected on open; the dropdown in the header bar overrides it without a restart (save edits first). Encodings: UTF-8 (with or without BOM), UTF-16 LE/BE, and Windows-1252 ("Latin-1") are detected on open and kept on save, BOM included.
 
