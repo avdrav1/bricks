@@ -32,7 +32,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | ENG-3 | M0 | P0 | done | ENG-1 | RFC 4180 parsing incl. quoted fields with embedded newlines | Nasty corpus parses with no row misalignment |
 | GRID-1 | M0 | P0 | done | DEC-1, ENG-2 | Virtualized grid renders visible cells plus a buffer | Constant memory regardless of row count; 60 fps scrolling at 2M rows |
 | GRID-2 | M0 | P0 | done | GRID-1 | Scrollbar drag jumps to arbitrary positions | Jump to row 1.9M renders in under 100 ms |
-| EDIT-1 | M0 | P0 | todo | DEC-3, ENG-2 | Single-cell edit stored in overlay | Edit visible immediately; source file untouched |
+| EDIT-1 | M0 | P0 | done | DEC-3, ENG-2 | Single-cell edit stored in overlay | Edit visible immediately; source file untouched |
 | SAVE-1 | M0 | P0 | todo | EDIT-1 | Atomic save: temp file, verify, rename | kill -9 mid-save leaves original intact; output byte-identical except edited cells |
 | BENCH-1 | M0 | P0 | todo | INFRA-1, INFRA-2, ENG-1 | Benchmark harness over the corpus | `cargo bench` runs in CI and prints the docs/BENCHMARKS.md table |
 | ENG-4 | M1 | P0 | todo | ENG-3 | Auto-detect delimiter: comma, tab, semicolon, pipe | Correct on 95%+ of a 50-file real-world sample |
@@ -80,6 +80,12 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-06 EDIT-1:** decisions:
+  - `EditOverlay` is now keyed by `RowId` (ADR 0003) and grouped per row. `CellRef.row` is a `RowId`, and `CsvTable::row_id` is the identity map until EDIT-3 adds the row map.
+  - Edits run as `commands::SetCell` through an `UndoStack`, which keeps invariant 5. No undo keys are bound yet; that's CMD-1/CMD-2.
+  - The UI is a minimal stand-in: double-click opens a popover editor and Enter applies. The in-cell editor (F2/typing, Enter moves down) is EDIT-2.
+  - Editing a non-UTF-8 cell prefills the editor with U+FFFD replacements until ENG-6.
+  - Smoke tests can drive the app: on Hyprland, `hl.dsp.send_key_state({key="mouse:272", state="down"|"up"})` injects real clicks (`send_shortcut` with a mouse key does not reach GTK), and `wtype` types.
 - **2026-10-06 GRID-2:** no grid change was needed; GRID-1's cache already reloads on a jump. `--bench-jump` and `app/tests/jump_perf.rs` time each jump from setting the vertical adjustment (which is what a scrollbar drag does) to the end of the first frame that paints the target row. No real pointer drag is injected; this machine has no tool for that. A run where the window was hidden showed one 81.5 s "jump"; the test now fails with "keep the window visible" for any wait over 1 s. Related open item from DEC-1: a continuous drag on a near-4K window redraws every cell each frame, which ran at about 30 fps in the DEC-1 spike. Not covered by this story's criterion.
 - **2026-10-06 GRID-1:** `app/tests/scroll_perf.rs` opens a real window, so the window has to stay visible while it runs. On this shared desktop, one run stalled 33 s when the window was hidden, and Hyprland tiles the window at whatever size is free (1887×2086 or 1887×1029). Clean runs at 19.1M rows: 60.0 fps with 1–3 of 600 frames late, frame CPU p99 4.9–6.3 ms. One earlier run at 19.1M rows was slower (58.6 fps, CPU p99 15.9 ms) and didn't repeat; recheck on the reference box with BENCH-1. Mid-story choices: indexing runs on a plain `std::thread` until ENG-8 builds the shared job pool (ADR 0005); cell text shown in the grid is capped at 256 bytes (raw values untouched) so grid memory stays constant. The windows look slightly see-through on this machine because Omarchy sets 0.985/0.96 opacity on every window.
 - **2026-10-06 ENG-2:** `fetch_perf` checks the 5 ms target against the page-cache-warm case, which is the app's state right after open (indexing reads the whole file). There the worst window took 9.7 µs. With the file evicted before every window (memory pressure), p50 is 2.1–2.4 ms and p99 is 2.8–3.8 ms, but the worst case is 8.3–8.6 ms, over 5 ms. That is one NVMe read; revisit with BENCH-1 on the reference box if it matters there.

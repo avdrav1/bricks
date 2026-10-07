@@ -1,6 +1,7 @@
 //! The grid widget: draws the cells `grid::GridCache` holds with GSK + Pango (ADR 0001).
 
-use data_model::{CsvTable, TableSource};
+use commands::{SetCell, UndoStack};
+use data_model::{CellRef, CsvTable, TableSource};
 use grid::{ColumnViewport, GridCache, Viewport};
 use gtk::{gdk, glib, graphene, pango, prelude::*, subclass::prelude::*};
 use std::cell::{Cell, RefCell};
@@ -31,6 +32,13 @@ mod imp {
         pub row_header_w: Cell<f64>,
         /// Top row of the last frame drawn with its text loaded; `None` before then.
         pub painted_top: Cell<Option<u64>>,
+        /// Every edit goes through here as a command (invariant 5). Undo keys arrive with
+        /// CMD-1/CMD-2.
+        pub undo: RefCell<Option<UndoStack<CsvTable>>>,
+        /// Small editor shown over a cell on double-click (until the in-cell editor, EDIT-2).
+        pub editor: RefCell<Option<(gtk::Popover, gtk::Entry)>>,
+        /// Cell the editor is open on.
+        pub editing: Cell<Option<(u64, u32)>>,
     }
 
     #[glib::object_subclass]
@@ -40,7 +48,13 @@ mod imp {
         type ParentType = gtk::Widget;
     }
 
-    impl ObjectImpl for GridView {}
+    impl ObjectImpl for GridView {
+        fn dispose(&self) {
+            if let Some((popover, _)) = self.editor.take() {
+                popover.unparent();
+            }
+        }
+    }
 
     impl GridView {
         fn layout(&self, text: &str) -> pango::Layout {
@@ -77,6 +91,10 @@ mod imp {
         fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
             self.parent_size_allocate(width, height, baseline);
             self.obj().update_adjustments();
+            // GTK4: a widget that parents a popover must position it on every allocation.
+            if let Some((popover, _)) = self.editor.borrow().as_ref() {
+                popover.present();
+            }
         }
 
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
@@ -190,6 +208,17 @@ impl GridView {
         imp.vadj.replace(Some(vadj.clone()));
         imp.hadj.replace(Some(hadj.clone()));
         imp.row_header_w.set(64.0);
+        imp.undo.replace(Some(UndoStack::new(1_000)));
+        let double_click = gtk::GestureClick::new();
+        double_click.connect_pressed({
+            let g = g.downgrade();
+            move |_, n_press, x, y| {
+                if let (2, Some(g)) = (n_press, g.upgrade()) {
+                    g.begin_edit(x, y);
+                }
+            }
+        });
+        g.add_controller(double_click);
         g.set_hexpand(true);
         g.set_vexpand(true);
         g.set_focusable(true);
@@ -207,6 +236,113 @@ impl GridView {
             });
         }
         g
+    }
+
+    /// Open the cell editor on the cell under widget point (`x`, `y`), prefilled with the
+    /// cell's full value.
+    fn begin_edit(&self, x: f64, y: f64) {
+        let imp = self.imp();
+        let (Some(vadj), Some(hadj)) = (imp.vadj.borrow().clone(), imp.hadj.borrow().clone())
+        else {
+            return;
+        };
+        let (body_w, body_h) = imp.body_size();
+        let rh_w = imp.row_header_w.get();
+        let rows = Viewport {
+            scroll_y: vadj.value(),
+            height: body_h,
+            row_height: ROW_H,
+            total_rows: self.row_count(),
+        };
+        let cols = ColumnViewport {
+            scroll_x: hadj.value(),
+            width: body_w,
+            col_width: COL_W,
+            total_cols: imp.cache.borrow().col_count(),
+        };
+        let (Some(row), Some(col)) = (rows.row_at(y - HEADER_H), cols.col_at(x - rh_w)) else {
+            return;
+        };
+        let value = imp
+            .table
+            .borrow()
+            .as_ref()
+            .and_then(|t| t.cell_value(row, col).map(|v| v.into_owned()));
+
+        let (popover, entry) = imp
+            .editor
+            .borrow_mut()
+            .get_or_insert_with(|| self.build_editor())
+            .clone();
+        let cell = gdk::Rectangle::new(
+            (rh_w + cols.col_x(col)) as i32,
+            (HEADER_H + rows.row_y(row)) as i32,
+            COL_W as i32,
+            ROW_H as i32,
+        );
+        imp.editing.set(Some((row, col)));
+        popover.set_pointing_to(Some(&cell));
+        entry.set_text(value.as_deref().unwrap_or(""));
+        popover.popup();
+        entry.grab_focus();
+    }
+
+    fn build_editor(&self) -> (gtk::Popover, gtk::Entry) {
+        let entry = gtk::Entry::builder().width_chars(30).build();
+        let popover = gtk::Popover::builder()
+            .child(&entry)
+            .position(gtk::PositionType::Bottom)
+            .build();
+        popover.set_parent(self);
+        entry.connect_activate({
+            let g = self.downgrade();
+            move |entry| {
+                if let Some(g) = g.upgrade() {
+                    g.commit_edit(&entry.text());
+                }
+            }
+        });
+        popover.connect_closed({
+            let g = self.downgrade();
+            move |_| {
+                if let Some(g) = g.upgrade() {
+                    g.imp().editing.set(None);
+                    g.grab_focus();
+                }
+            }
+        });
+        (popover, entry)
+    }
+
+    /// Apply the editor's text to its cell as an undoable command, then close the editor.
+    fn commit_edit(&self, text: &str) {
+        let imp = self.imp();
+        if let Some((row, col)) = imp.editing.get() {
+            let mut table = imp.table.borrow_mut();
+            if let (Some(table), Some(undo)) = (table.as_mut(), imp.undo.borrow_mut().as_mut()) {
+                if table.cell_value(row, col).as_deref() != Some(text) {
+                    let at = CellRef {
+                        row: table.row_id(row),
+                        col,
+                    };
+                    undo.execute(Box::new(SetCell::new(at, text)), table);
+                    imp.cache.borrow_mut().invalidate();
+                    self.queue_draw();
+                }
+            }
+        }
+        if let Some((popover, _)) = imp.editor.borrow().as_ref() {
+            popover.popdown();
+        }
+    }
+
+    /// Cells edited since open.
+    pub fn edit_count(&self) -> usize {
+        self.imp()
+            .table
+            .borrow()
+            .as_ref()
+            .map_or(0, |t| t.overlay().len())
     }
 
     pub fn row_count(&self) -> u64 {

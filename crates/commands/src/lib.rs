@@ -1,6 +1,10 @@
 //! Every mutation is a reversible command (CMD-1). The undo stack stores
 //! commands, never dataset snapshots (spec section 10).
 
+mod edit;
+
+pub use edit::SetCell;
+
 /// A reversible change to some target, usually the data model.
 pub trait Command<T> {
     fn apply(&mut self, target: &mut T);

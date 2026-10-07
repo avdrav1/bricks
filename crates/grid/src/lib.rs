@@ -31,6 +31,15 @@ impl Viewport {
     pub fn row_y(&self, row: u64) -> f64 {
         row as f64 * self.row_height - self.scroll_y
     }
+
+    /// Row under body-relative `y`, if there is one.
+    pub fn row_at(&self, y: f64) -> Option<u64> {
+        if y < 0.0 || self.row_height <= 0.0 {
+            return None;
+        }
+        let row = ((self.scroll_y + y) / self.row_height).floor() as u64;
+        (row < self.total_rows).then_some(row)
+    }
 }
 
 /// Horizontal counterpart of [`Viewport`], for fixed-width columns.
@@ -54,6 +63,15 @@ impl ColumnViewport {
 
     pub fn col_x(&self, col: u32) -> f64 {
         col as f64 * self.col_width - self.scroll_x
+    }
+
+    /// Column under body-relative `x`, if there is one.
+    pub fn col_at(&self, x: f64) -> Option<u32> {
+        if x < 0.0 || self.col_width <= 0.0 {
+            return None;
+        }
+        let col = ((self.scroll_x + x) / self.col_width).floor() as u64;
+        (col < u64::from(self.total_cols)).then_some(col as u32)
     }
 }
 
@@ -98,6 +116,12 @@ impl GridCache {
 
     pub fn heap_bytes(&self) -> usize {
         self.block.heap_bytes()
+    }
+
+    /// Forget the held rows (keeping the memory) so the next `ensure` reloads them; call
+    /// after an edit changes what they show.
+    pub fn invalidate(&mut self) {
+        self.block.reset(0);
     }
 }
 
@@ -228,5 +252,51 @@ mod tests {
         src.rows = 100;
         assert!(cache.ensure(0..40, 5, &mut src));
         assert!(cache.cell(39, 0).is_some());
+    }
+
+    #[test]
+    fn invalidate_makes_the_next_ensure_reload() {
+        let mut src = Synthetic {
+            rows: 1_000,
+            reads: 0,
+        };
+        let mut cache = GridCache::default();
+        cache.ensure(0..40, 5, &mut src);
+        assert!(!cache.ensure(0..40, 5, &mut src));
+        cache.invalidate();
+        assert!(cache.ensure(0..40, 5, &mut src));
+        assert_eq!(src.reads, 2);
+    }
+
+    #[test]
+    fn hit_testing_maps_points_to_cells() {
+        let v = Viewport {
+            scroll_y: 22.0 * 1_000_000.0 + 5.0,
+            height: 500.0,
+            row_height: 22.0,
+            total_rows: 2_000_000,
+        };
+        assert_eq!(v.row_at(0.0), Some(1_000_000));
+        assert_eq!(v.row_at(16.9), Some(1_000_000));
+        assert_eq!(v.row_at(17.0), Some(1_000_001));
+        assert_eq!(v.row_at(-1.0), None);
+        let end = Viewport {
+            scroll_y: 0.0,
+            height: 500.0,
+            row_height: 22.0,
+            total_rows: 3,
+        };
+        assert_eq!(end.row_at(70.0), None, "below the last row");
+
+        let c = ColumnViewport {
+            scroll_x: 250.0,
+            width: 400.0,
+            col_width: 100.0,
+            total_cols: 5,
+        };
+        assert_eq!(c.col_at(0.0), Some(2));
+        assert_eq!(c.col_at(49.9), Some(2));
+        assert_eq!(c.col_at(50.0), Some(3));
+        assert_eq!(c.col_at(300.0), None, "right of the last column");
     }
 }

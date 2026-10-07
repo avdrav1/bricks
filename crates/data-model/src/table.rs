@@ -1,7 +1,9 @@
 //! What the grid reads: display text for blocks of rows, behind [`TableSource`] so the grid
 //! never touches the file (layers: source -> overlay -> view -> grid).
 
+use crate::{CellRef, Col, EditOverlay, Row, RowId};
 use csv_engine::{split_fields, Dialect, Field, RowIndex, SparseRowIndex};
+use std::borrow::Cow;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -101,10 +103,12 @@ pub trait TableSource {
     fn read_rows(&mut self, rows: Range<u64>, out: &mut RowBlock);
 }
 
-/// A CSV file read through its row index (ADR 0002).
+/// A CSV file read through its row index (ADR 0002), with cell edits in an overlay on top
+/// (ADR 0003). Edits never touch the file; they reach disk only through save (SAVE-1).
 pub struct CsvTable {
     index: Arc<SparseRowIndex>,
     dialect: Dialect,
+    overlay: EditOverlay,
     spans: Vec<Range<u64>>,
     fields: Vec<Field>,
 }
@@ -114,6 +118,7 @@ impl CsvTable {
         Self {
             index,
             dialect,
+            overlay: EditOverlay::default(),
             spans: Vec::new(),
             fields: Vec::new(),
         }
@@ -122,6 +127,44 @@ impl CsvTable {
     /// True once a read found the file truncated or replaced in place underneath us.
     pub fn file_changed(&self) -> bool {
         self.index.source().changed()
+    }
+
+    /// Identity of the row shown at `row`. Rows are in file order until the row map
+    /// (EDIT-3) puts inserts, deletes, and sorting in front.
+    pub fn row_id(&self, row: Row) -> RowId {
+        RowId::source(row)
+    }
+
+    /// Set a cell's raw value. Returns the previous edit, if any (for undo).
+    pub fn set_cell(&mut self, at: CellRef, raw: impl Into<Box<str>>) -> Option<Box<str>> {
+        self.overlay.set(at, raw)
+    }
+
+    /// Drop a cell's edit so the source value shows again. Returns the removed edit.
+    pub fn clear_cell(&mut self, at: CellRef) -> Option<Box<str>> {
+        self.overlay.clear(at)
+    }
+
+    pub fn overlay(&self) -> &EditOverlay {
+        &self.overlay
+    }
+
+    /// Full text of one cell: the edit if there is one, else the source field. `None` when
+    /// the row or the column does not exist. Invalid UTF-8 in the source shows as U+FFFD.
+    pub fn cell_value(&self, row: Row, col: Col) -> Option<Cow<'_, str>> {
+        if let Some(v) = self.overlay.get(CellRef {
+            row: self.row_id(row),
+            col,
+        }) {
+            return Some(Cow::Borrowed(v));
+        }
+        let mut fields = Vec::new();
+        let bytes = self.index.row_fields(row, &mut fields)?;
+        let value = fields.get(col as usize)?.value(bytes, self.dialect.quote);
+        Some(match value {
+            Cow::Borrowed(b) => String::from_utf8_lossy(b),
+            Cow::Owned(v) => Cow::Owned(String::from_utf8_lossy(&v).into_owned()),
+        })
     }
 }
 
@@ -136,19 +179,33 @@ impl TableSource for CsvTable {
 
     fn read_rows(&mut self, rows: Range<u64>, out: &mut RowBlock) {
         out.reset(rows.start);
-        if self.index.row_spans(rows, &mut self.spans).is_err() {
+        if self.index.row_spans(rows.clone(), &mut self.spans).is_err() {
             return;
         }
         let bytes = self.index.source().bytes();
-        for span in &self.spans {
-            let mut row = &bytes[span.start as usize..span.end as usize];
+        let quote = self.dialect.quote;
+        for (row, span) in (rows.start..).zip(&self.spans) {
+            let mut line = &bytes[span.start as usize..span.end as usize];
             if span.start == 0 {
-                row = row.strip_prefix(UTF8_BOM).unwrap_or(row);
+                line = line.strip_prefix(UTF8_BOM).unwrap_or(line);
             }
-            split_fields(row, &self.dialect, &mut self.fields);
-            for f in &self.fields {
+            split_fields(line, &self.dialect, &mut self.fields);
+            match self.overlay.row(RowId::source(row)) {
                 // `value` borrows unless the field has `""` escapes to undo.
-                out.push_cell(&f.value(row, self.dialect.quote));
+                None => self
+                    .fields
+                    .iter()
+                    .for_each(|f| out.push_cell(&f.value(line, quote))),
+                Some(edits) => {
+                    let last_edit = edits.keys().next_back().map_or(0, |&c| c as usize + 1);
+                    for c in 0..self.fields.len().max(last_edit) {
+                        match (edits.get(&(c as Col)), self.fields.get(c)) {
+                            (Some(v), _) => out.push_cell(v.as_bytes()),
+                            (None, Some(f)) => out.push_cell(&f.value(line, quote)),
+                            (None, None) => out.push_cell(b""),
+                        }
+                    }
+                }
             }
             out.end_row();
         }
@@ -180,5 +237,81 @@ mod tests {
         assert_eq!(b.cell(11, 2), Some("\u{FFFD}"));
         assert_eq!(b.cell(9, 0), None);
         assert_eq!(b.cell(12, 0), None);
+    }
+
+    fn open(content: &[u8]) -> (std::path::PathBuf, CsvTable) {
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        static N: AtomicU64 = AtomicU64::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "data-model-test-{}-{}.csv",
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::write(&path, content).unwrap();
+        let source = Arc::new(csv_engine::Source::open(&path).unwrap());
+        let index = SparseRowIndex::new(source, &Dialect::default());
+        index.build(&AtomicBool::new(false)).unwrap();
+        (path, CsvTable::new(index, Dialect::default()))
+    }
+
+    fn row_text(table: &mut CsvTable, row: u64) -> Vec<String> {
+        let mut b = RowBlock::default();
+        table.read_rows(row..row + 1, &mut b);
+        (0..b.cells_in_row(row))
+            .map(|c| b.cell(row, c).unwrap().to_owned())
+            .collect()
+    }
+
+    /// EDIT-1 acceptance: an edit shows on the next read and never touches the file.
+    #[test]
+    fn edit_is_visible_immediately_and_source_file_is_untouched() {
+        let content = b"id,name,code\n1,\"Smith, J\",00123\n2,Lee,7\n";
+        let (path, mut table) = open(content);
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        assert_eq!(row_text(&mut table, 1), ["1", "Smith, J", "00123"]);
+
+        let at = CellRef {
+            row: table.row_id(1),
+            col: 1,
+        };
+        assert_eq!(table.set_cell(at, "Smith, \"Jo\""), None);
+        assert_eq!(row_text(&mut table, 1), ["1", "Smith, \"Jo\"", "00123"]);
+        assert_eq!(table.cell_value(1, 1).as_deref(), Some("Smith, \"Jo\""));
+        assert_eq!(
+            table.cell_value(1, 2).as_deref(),
+            Some("00123"),
+            "untouched cells read from the source"
+        );
+        assert_eq!(
+            row_text(&mut table, 2),
+            ["2", "Lee", "7"],
+            "other rows unaffected"
+        );
+
+        // Past the end of a short row: the row grows; the gap is empty.
+        table.set_cell(
+            CellRef {
+                row: table.row_id(2),
+                col: 4,
+            },
+            "new",
+        );
+        assert_eq!(row_text(&mut table, 2), ["2", "Lee", "7", "", "new"]);
+
+        // Clearing the edit restores the source value.
+        assert_eq!(table.clear_cell(at).as_deref(), Some("Smith, \"Jo\""));
+        assert_eq!(row_text(&mut table, 1), ["1", "Smith, J", "00123"]);
+
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            content,
+            "source bytes unchanged"
+        );
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            modified,
+            "source never written"
+        );
+        std::fs::remove_file(path).unwrap();
     }
 }

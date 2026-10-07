@@ -11,3 +11,6 @@ data-model.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+csv-engine.workspace = true
