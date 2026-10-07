@@ -86,7 +86,7 @@ struct Block {
 }
 
 /// Every clear still in effect, oldest first, and their flattened segments.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct Cleared {
     blocks: Vec<Block>,
     segments: Arc<Vec<Segment>>,

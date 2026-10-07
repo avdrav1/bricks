@@ -5,11 +5,13 @@
 
 mod cleared;
 mod colmap;
+mod copy;
 mod rowmap;
 mod save;
 mod table;
 
 pub use cleared::ColSet;
+pub use copy::{Copied, HTML_MAX_CELLS};
 pub use rowmap::Run;
 pub use save::{SaveJob, SaveJobError, SaveStats};
 pub use table::{CsvTable, DelimiterChoice, RereadError, RowBlock, TableSource, MAX_DISPLAY_BYTES};
@@ -169,14 +171,13 @@ pub enum InferredType {
 /// Sparse cell edits layered over the source file (spec section 17, ADR 0003). Values are
 /// raw text exactly as entered. Grouped by row so reading a row costs one lookup, and
 /// rows without edits cost nothing.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct EditOverlay {
     rows: HashMap<RowId, BTreeMap<ColId, Box<str>>>,
     cells: usize,
 }
 
 impl EditOverlay {
-    /// Store an edit. Returns the previous overlay value, if any, for undo.
     pub fn set(&mut self, at: CellRef, raw: impl Into<Box<str>>) -> Option<Box<str>> {
         let prev = self
             .rows

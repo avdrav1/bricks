@@ -1,6 +1,7 @@
 //! The grid widget: draws the cells `grid::GridCache` holds with GSK + Pango (ADR 0001).
 
-use crate::editor::{self, Action, Mode, ShapeCommand, Start};
+use crate::editor::{self, Action, ClipCommand, Mode, ShapeCommand, Start};
+use crate::status::CopyView;
 
 use commands::{ClearCells, Reshape, SetCell, UndoStack};
 use data_model::{
@@ -12,6 +13,9 @@ use gtk::{gdk, gio, glib, graphene, pango, prelude::*, subclass::prelude::*};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::fmt::Write as _;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 /// Default row height and column width; GRID-5 lets the user resize each one.
 pub const ROW_H: f64 = 22.0;
@@ -23,6 +27,25 @@ const PAD: f64 = 4.0;
 /// Smallest sizes a drag can give a column or row.
 const MIN_COL_W: f64 = 16.0;
 const MIN_ROW_H: f64 = 8.0;
+/// How long the status bar says what was copied.
+const COPIED_NOTE: Duration = Duration::from_secs(4);
+
+/// The last copy (CLIP-1): running on a worker, or done.
+#[derive(Default)]
+pub enum CopyState {
+    #[default]
+    Idle,
+    Copying {
+        cancel: Arc<AtomicBool>,
+        done: Arc<AtomicU64>,
+        rows: u64,
+    },
+    Copied {
+        cells: u64,
+        text_only: bool,
+        at: Instant,
+    },
+}
 
 /// Row heights and column widths, all default until resized (GRID-5). Kept for the life
 /// of the window: a save keeps them, a delimiter change resets the widths.
@@ -85,6 +108,8 @@ mod imp {
         /// from these by position (`refit_sizes`).
         pub row_heights: RefCell<HashMap<RowId, f64>>,
         pub col_widths: RefCell<HashMap<ColId, f64>>,
+        /// The last copy, for the status bar; a new one cancels a running one.
+        pub copy: RefCell<CopyState>,
     }
 
     #[glib::object_subclass]
@@ -438,6 +463,8 @@ impl GridView {
                 }
                 if let Some((key, mods)) = nav_key(key, state) {
                     g.press(key, mods);
+                } else if let Some(cmd) = editor::clip_command(key, state) {
+                    g.copy_selection(cmd == ClipCommand::Cut);
                 } else if let Some(cmd) = editor::shape_command(key, state) {
                     let columns = g.imp().selection.get().whole_columns().is_some();
                     match (cmd, columns) {
@@ -1228,6 +1255,106 @@ impl GridView {
         imp.cache.borrow_mut().invalidate();
         imp.titles.take();
         self.queue_draw();
+    }
+
+    /// Ctrl+C / Ctrl+X (CLIP-1): put the selection on the clipboard as TSV and an HTML
+    /// table. The text is made on a worker from a snapshot of the table, so a big copy
+    /// doesn't stop the window and later edits don't change it; the status bar shows its
+    /// progress, and a new copy cancels it. A cut then empties the cells at once, as
+    /// Calc does, as one undoable step. Whole columns wait for indexing to finish.
+    pub fn copy_selection(&self, cut: bool) {
+        let imp = self.imp();
+        if imp.editing.get().is_some() || (cut && imp.saving.get()) {
+            return;
+        }
+        let sel = imp.selection.get();
+        let (tl, br) = sel.range();
+        let (mut snapshot, rows) = {
+            let table = imp.table.borrow();
+            let Some(table) = table.as_ref() else { return };
+            let rows = match sel.whole_columns() {
+                Some(_) if !table.is_complete() => return,
+                Some(_) => tl.row..table.row_count(),
+                None => tl.row..(br.row + 1).min(table.row_count()),
+            };
+            if rows.is_empty() {
+                return;
+            }
+            (table.snapshot(), rows)
+        };
+        let (cancel, done) = (
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicU64::new(0)),
+        );
+        let running = imp.copy.replace(CopyState::Copying {
+            cancel: cancel.clone(),
+            done: done.clone(),
+            rows: rows.end - rows.start,
+        });
+        if let CopyState::Copying { cancel, .. } = running {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        let whole_rows = sel.is_whole_rows();
+        let job = {
+            let cancel = cancel.clone();
+            gio::spawn_blocking(move || {
+                if whole_rows {
+                    snapshot.copy_range(rows, tl.col.., &cancel, &done)
+                } else {
+                    snapshot.copy_range(rows, tl.col..br.col + 1, &cancel, &done)
+                }
+            })
+        };
+        let g = self.downgrade();
+        glib::spawn_future_local(async move {
+            let copied = job.await.ok().flatten();
+            let Some(g) = g.upgrade() else { return };
+            let imp = g.imp();
+            // Only the latest copy reaches the clipboard.
+            let current = matches!(&*imp.copy.borrow(),
+                CopyState::Copying { cancel: c, .. } if Arc::ptr_eq(c, &cancel));
+            let Some(copied) = copied.filter(|_| current) else {
+                return;
+            };
+            let mut flavors = Vec::new();
+            let text_only = copied.html.is_none();
+            if let Some(html) = copied.html {
+                let bytes = glib::Bytes::from_owned(html.into_bytes());
+                flavors.push(gdk::ContentProvider::for_bytes("text/html", &bytes));
+            }
+            flavors.push(gdk::ContentProvider::for_value(&copied.tsv.to_value()));
+            let provider = gdk::ContentProvider::new_union(&flavors);
+            if g.clipboard().set_content(Some(&provider)).is_ok() {
+                imp.copy.replace(CopyState::Copied {
+                    cells: copied.cells,
+                    text_only,
+                    at: Instant::now(),
+                });
+            } else {
+                imp.copy.replace(CopyState::Idle);
+            }
+        });
+        if cut {
+            self.clear_selected();
+        }
+    }
+
+    /// The last copy, as the status bar shows it.
+    pub fn copy_view(&self) -> CopyView {
+        match &*self.imp().copy.borrow() {
+            CopyState::Copying { done, rows, .. } => {
+                CopyView::Copying(done.load(Ordering::Relaxed) as f64 / (*rows).max(1) as f64)
+            }
+            CopyState::Copied {
+                cells,
+                text_only,
+                at,
+            } if at.elapsed() < COPIED_NOTE => CopyView::Copied {
+                cells: *cells,
+                text_only: *text_only,
+            },
+            _ => CopyView::Idle,
+        }
     }
 
     /// Open the row and column menu at widget point (`x`, `y`), selecting the cell

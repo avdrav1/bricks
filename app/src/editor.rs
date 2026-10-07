@@ -110,6 +110,30 @@ pub fn clears(key: gdk::Key, state: ModifierType) -> bool {
     matches!(key, K::Delete | K::KP_Delete) && !state.intersects(held)
 }
 
+/// Copy and cut from the keyboard (CLIP-1): Ctrl+C and Ctrl+X, and the older Ctrl+Insert
+/// and Shift+Delete.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClipCommand {
+    Copy,
+    /// Copy, then empty the cells (as in Calc; undoable like Delete).
+    Cut,
+}
+
+pub fn clip_command(key: gdk::Key, state: ModifierType) -> Option<ClipCommand> {
+    let ctrl = state.contains(ModifierType::CONTROL_MASK);
+    let shift = state.contains(ModifierType::SHIFT_MASK);
+    if state.intersects(ModifierType::ALT_MASK | ModifierType::SUPER_MASK) {
+        return None;
+    }
+    match (key, ctrl, shift) {
+        (K::c | K::C | K::Insert | K::KP_Insert, true, false) => Some(ClipCommand::Copy),
+        (K::x | K::X, true, false) | (K::Delete | K::KP_Delete, false, true) => {
+            Some(ClipCommand::Cut)
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,5 +241,22 @@ mod tests {
         assert!(!clears(K::Delete, SHIFT), "Shift+Delete is cut");
         assert!(!clears(K::Delete, ModifierType::CONTROL_MASK));
         assert!(!clears(K::BackSpace, NONE));
+    }
+
+    #[test]
+    fn ctrl_c_copies_ctrl_x_cuts() {
+        let ctrl = ModifierType::CONTROL_MASK;
+        assert_eq!(clip_command(K::c, ctrl), Some(ClipCommand::Copy));
+        assert_eq!(
+            clip_command(K::C, ctrl | ModifierType::LOCK_MASK),
+            Some(ClipCommand::Copy),
+            "with Caps Lock on"
+        );
+        assert_eq!(clip_command(K::Insert, ctrl), Some(ClipCommand::Copy));
+        assert_eq!(clip_command(K::x, ctrl), Some(ClipCommand::Cut));
+        assert_eq!(clip_command(K::Delete, SHIFT), Some(ClipCommand::Cut));
+        assert_eq!(clip_command(K::c, NONE), None, "a plain c is typing");
+        assert_eq!(clip_command(K::C, ctrl | SHIFT), None);
+        assert_eq!(clip_command(K::Delete, NONE), None, "Delete clears");
     }
 }

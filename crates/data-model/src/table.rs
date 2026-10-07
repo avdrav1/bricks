@@ -62,9 +62,19 @@ pub struct RowBlock {
     cell_ends: Vec<u32>,
     /// End index in `cell_ends` of each row.
     row_ends: Vec<u32>,
+    /// Keep whole cells, past [`MAX_DISPLAY_BYTES`] (copying, not display).
+    full: bool,
 }
 
 impl RowBlock {
+    /// A block that keeps every cell's whole text, for copying.
+    pub fn full_text() -> Self {
+        Self {
+            full: true,
+            ..Self::default()
+        }
+    }
+
     /// Empty the block, keeping its allocations, ready to receive rows from `first_row`.
     pub fn reset(&mut self, first_row: u64) {
         self.first_row = first_row;
@@ -79,11 +89,15 @@ impl RowBlock {
     }
 
     /// Append one cell to the row being built; finish the row with [`Self::end_row`].
-    /// Invalid UTF-8 shows as U+FFFD; text past [`MAX_DISPLAY_BYTES`] is cut at a character
-    /// boundary.
+    /// Invalid UTF-8 shows as U+FFFD; unless the block is [`Self::full_text`], text past
+    /// [`MAX_DISPLAY_BYTES`] is cut at a character boundary.
     pub fn push_cell(&mut self, cell: &[u8]) {
         let s = String::from_utf8_lossy(cell);
-        let mut end = s.len().min(MAX_DISPLAY_BYTES);
+        let mut end = if self.full {
+            s.len()
+        } else {
+            s.len().min(MAX_DISPLAY_BYTES)
+        };
         while !s.is_char_boundary(end) {
             end -= 1;
         }
@@ -185,6 +199,25 @@ impl CsvTable {
             cols: None,
             next_inserted_col: 0,
             cleared: Cleared::default(),
+            spans: Vec::new(),
+            fields: Vec::new(),
+        }
+    }
+
+    /// The table as it is now, for a worker thread (CLIP-1 copies a selection from it
+    /// while editing goes on): shares the file and its index, and copies the edits, the
+    /// row and column order, and the clears. Costs what the edits hold, not the file.
+    pub fn snapshot(&self) -> Self {
+        Self {
+            index: self.index.clone(),
+            dialect: self.dialect,
+            encoding: self.encoding,
+            overlay: self.overlay.clone(),
+            rows: self.rows.clone(),
+            next_inserted: self.next_inserted,
+            cols: self.cols.clone(),
+            next_inserted_col: self.next_inserted_col,
+            cleared: self.cleared.clone(),
             spans: Vec::new(),
             fields: Vec::new(),
         }

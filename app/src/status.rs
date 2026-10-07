@@ -14,6 +14,19 @@ pub enum SaveView<'a> {
     Failed(&'a str),
 }
 
+/// Where the last copy stands (CLIP-1).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CopyView {
+    Idle,
+    /// Share of the rows copied so far (0..=1).
+    Copying(f64),
+    /// Just copied: cells, and whether it was too big for the HTML (spreadsheet) form.
+    Copied {
+        cells: u64,
+        text_only: bool,
+    },
+}
+
 /// Everything the status bar shows.
 #[derive(Debug, Clone, Copy)]
 pub struct Facts<'a> {
@@ -27,6 +40,7 @@ pub struct Facts<'a> {
     pub edits: usize,
     pub save: SaveView<'a>,
     pub file_changed: bool,
+    pub copy: CopyView,
 }
 
 /// The three parts of the status bar, left to right.
@@ -52,6 +66,19 @@ pub fn status(f: &Facts) -> Status {
     }
 
     let mut save = Vec::new();
+    match f.copy {
+        CopyView::Idle => {}
+        CopyView::Copying(done) => {
+            let pct = (done.clamp(0.0, 1.0) * 100.0).floor();
+            save.push(format!("Copying {pct:.0}%"));
+        }
+        CopyView::Copied { cells, text_only } => save.push(format!(
+            "Copied {} cell{}{}",
+            group_digits(cells),
+            if cells == 1 { "" } else { "s" },
+            if text_only { " as plain text" } else { "" }
+        )),
+    }
     let edits = || {
         format!(
             "{} unsaved edit{}",
@@ -137,6 +164,7 @@ mod tests {
             edits: 0,
             save: SaveView::Idle,
             file_changed: false,
+            copy: CopyView::Idle,
         }
     }
 
@@ -178,6 +206,25 @@ mod tests {
         assert_eq!(status(&f).save, "Saved in 0.9 s");
         f.file_changed = true;
         assert_eq!(status(&f).save, "Saved in 0.9 s · File changed on disk");
+    }
+
+    #[test]
+    fn copy_progress_and_result_come_first() {
+        let mut f = facts();
+        f.edits = 2;
+        f.copy = CopyView::Copying(0.456);
+        assert_eq!(status(&f).save, "Copying 45% · 2 unsaved edits");
+        f.copy = CopyView::Copied {
+            cells: 1,
+            text_only: false,
+        };
+        assert_eq!(status(&f).save, "Copied 1 cell · 2 unsaved edits");
+        f.copy = CopyView::Copied {
+            cells: 19_094_579,
+            text_only: true,
+        };
+        f.edits = 0;
+        assert_eq!(status(&f).save, "Copied 19,094,579 cells as plain text");
     }
 
     #[test]

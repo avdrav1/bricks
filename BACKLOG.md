@@ -51,7 +51,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | EDIT-3 | M2 | P0 | done | CMD-1 | Insert and delete rows | Insert at row 1M in under 50 ms |
 | EDIT-4 | M2 | P0 | done | CMD-1 | Insert and delete columns | Works on 1 GB without a full rewrite before save |
 | EDIT-5 | M2 | P0 | done | CMD-1, GRID-4 | Delete key clears selected cells | Undoable as one step |
-| CLIP-1 | M2 | P0 | todo | GRID-4 | Copy/cut range as TSV plus text/html | Pastes cleanly into LibreOffice, Excel web, a text editor |
+| CLIP-1 | M2 | P0 | done | GRID-4 | Copy/cut range as TSV plus text/html | Pastes cleanly into LibreOffice, Excel web, a text editor |
 | CLIP-2 | M2 | P0 | todo | CLIP-1, CMD-1 | Paste TSV into a range, expanding as needed | 10k rows from LibreOffice paste in under 1 s |
 | SAVE-2 | M2 | P0 | todo | SAVE-1, ENG-6 | Save, Save As, New | Save As can change delimiter and encoding |
 | SAVE-3 | M2 | P0 | todo | SAVE-1, DEC-5 | Background save with progress and cancel | UI responsive during 1 GB save; save under 15 s |
@@ -80,6 +80,22 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-07 CLIP-1:** copy and cut a range as TSV plus text/html.
+  - `data_model::copy`: `CsvTable::copy_range(rows, cols: impl RangeBounds<Col>, cancel, done) -> Option<Copied { tsv, html, cells }>` reads rows in 4,096-row chunks through the normal read path (edits, row and column order, clears), into a new `RowBlock::full_text()` that doesn't cut cells at the 256-byte display limit. A bounded range pads short rows, so the copy is a rectangle; whole rows (`col..`) take each row's own cells.
+  - TSV: a cell is quoted (`""` escapes) only when it holds a tab, a line break, or a leading quote; there is no trailing newline.
+  - HTML: `<meta charset="utf-8">` and a plain `<table>`. Three kinds of value get `sdnum="1033;0;@"` (LibreOffice's text format) plus `mso-number-format:'\@'` (Excel's): digit strings with a leading zero, digit strings longer than 15 digits, and anything starting with `=`. A headless Calc check showed what goes wrong without the mark: `00692` became 692, a 19-digit ID became 1.23E+18, and `=1+1` became a formula. Spaces HTML would collapse are `&nbsp;` (Calc reads them back as plain spaces), tabs are `&#9;`, and line breaks are `<br>`. Past `HTML_MAX_CELLS` (2^20) the copy is plain text only, since spreadsheets don't take more rows and the HTML would triple the memory.
+  - App: `CsvTable::snapshot()` (shares the index, clones the edits) runs on `gio::spawn_blocking`. The result goes onto the clipboard as a `ContentProvider` union of `text/html` bytes and a string value, which GTK offers as `text/plain;charset=utf-8` and `text/plain`. The status bar shows "Copying N%" and then "Copied N cells" for 4 s. A new copy cancels a running one, and only the latest reaches the clipboard. A cut copies from the snapshot, then clears through EDIT-5's `clear_selected`, and is refused during a save. Whole columns wait for indexing. Keys: Ctrl+C, Ctrl+Insert, Ctrl+X, Shift+Delete; when the cell editor is open, these keys go to the editor's own text.
+  - Acceptance:
+    - **LibreOffice:** `data-model/tests/paste_libreoffice.rs` (ignored, needs LibreOffice). It copies a range with leading zeros, a 19-digit ID, `=1+1`, a quoted comma, a line break, a tab, runs of spaces, `& < > "`, non-ASCII text, an empty cell, a date, and a boolean. It puts both flavors on a headless Calc's clipboard through UNO (`scripts/lo_paste.py`) and pastes. Every cell comes back with the file's text; numbers come back as numbers and the marked values as text.
+    - **Plain text, headless:** with only the TSV offered, Calc pastes nothing, because it wants its Text Import dialog. That is why the HTML matters.
+    - **Text editor:** gets the TSV (unit tests for its quoting).
+    - **Excel web:** not tested here. It reads the same `text/html` table, and `mso-number-format` is Excel's own attribute [INFERENCE]. A desktop check (Wayland: Calc, a text editor, Excel web in a browser) is owed.
+  - Measured (release, this machine): copying 10k rows × 8 takes 6 ms; 1M cells takes 0.23 s (6 MB TSV, 24 MB HTML); the 1 GB file's whole column C (19,094,579 cells) takes 3.9 s (132 MB, text only).
+  - Smoke test via Broadway, reading the clipboard back with temporary code that was removed afterwards:
+    - Ctrl+C on B1:H3 offered `text/html`, `text/plain;charset=utf-8`, and `text/plain`, with the expected TSV and HTML (`00692` marked as text); the status read "Copied 21 cells".
+    - Ctrl+X on C2:C3 copied "Denver" twice and emptied the cells; Ctrl+Z restored them.
+    - A whole column of the 10 MB file copied 193,311 cells.
+    - On a /tmp copy of the 1 GB file, the status bar showed "Copying 28%", then 38%. PageDown kept working during the copy, and it ended with "Copied 19,094,579 cells as plain text".
 - **2026-10-07 EDIT-5:** Delete clears the selection as one undoable step, kept as blocks rather than an edit per cell (user's choice over capping per-cell edits).
   - `data_model::cleared`: a clear is a block of file rows (sorted, merged ranges) × columns by identity (`ColSet`: ids, plus with `rest` every file column from there on, for whole rows). Blocks are flattened into sorted, non-overlapping row segments with the union of their columns, so a lookup is one binary search however many blocks there are. Segments are rebuilt on each clear and undo (O(total ranges)).
   - Edits win over blocks. `Edit::ClearCells { rows: Vec<Run>, cols: ColSet }` takes out the cell edits it covers (inserted rows and columns included) and pushes the block. Its inverse `UnclearCells` holds those edits, takes the block back, and restores them. Typing into a cleared cell is a normal edit; undoing it shows the cleared cell again. Only existing fields are blanked, so short rows stay short. Rows and columns are stored by identity, so later inserts, deletes, and header flips don't move a clear.
