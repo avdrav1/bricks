@@ -49,7 +49,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | CMD-2 | M2 | P0 | done | CMD-1 | Undo/redo stores operations, not snapshots | 1,000-step history under 50 MB on a 1 GB file |
 | EDIT-2 | M2 | P0 | done | GRID-4, CMD-1 | In-cell editor; F2 or typing starts edit | Enter commits and moves down; Esc cancels |
 | EDIT-3 | M2 | P0 | done | CMD-1 | Insert and delete rows | Insert at row 1M in under 50 ms |
-| EDIT-4 | M2 | P0 | todo | CMD-1 | Insert and delete columns | Works on 1 GB without a full rewrite before save |
+| EDIT-4 | M2 | P0 | done | CMD-1 | Insert and delete columns | Works on 1 GB without a full rewrite before save |
 | EDIT-5 | M2 | P0 | todo | CMD-1, GRID-4 | Delete key clears selected cells | Undoable as one step |
 | CLIP-1 | M2 | P0 | todo | GRID-4 | Copy/cut range as TSV plus text/html | Pastes cleanly into LibreOffice, Excel web, a text editor |
 | CLIP-2 | M2 | P0 | todo | CLIP-1, CMD-1 | Paste TSV into a range, expanding as needed | 10k rows from LibreOffice paste in under 1 s |
@@ -80,6 +80,22 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-07 EDIT-4:** insert and delete columns, on a column map in front of the overlay (ADR 0003).
+  - `ColId` gives columns a stable identity, like `RowId`: a file column index, or the high bit for inserted columns. `CellRef.col` is now a `ColId` (the type change made the compiler find every call site), and the overlay keys on it, so edits stay with their columns. Positions map through `CsvTable::col_id`/`col_of`.
+  - `data_model::colmap::ColMap` holds explicit ids for the first positions, then file columns in order from `tail`. Rows are ragged and the widest isn't known up front, so a plain list can't work. An inserted column reads as `""` in every row, so header titles continue past it. `Edit::InsertCols`/`DeleteCols` with inverses; undo restores deleted columns with their edits.
+  - `commands::ChangeRows` became `commands::Reshape` (rows and columns). Its focus is the first restored row or column, at the cursor's other coordinate.
+  - Save: with columns changed, every source row is re-assembled. File fields are copied as their raw bytes (quotes intact), edits are encoded, and each row keeps its own line ending; short rows stay short. Spans are fetched 4,096 rows at a time with `row_spans`. Fetching them per row scans from a checkpoint for each one, and took 10.5 s on 1 GB; chunked, it is 3.5 s. File order still copies byte ranges.
+  - Acceptance: `commands/tests/columns_1gb.rs` (ignored, corpus, release). On the 1 GB file, insert a column, edit it, and delete another: 0.004 ms and +0 KiB of anonymous memory; the last row reads with its columns moved. A save to /tmp re-assembles all 19,094,580 rows in 3.5 s, with the expected header and last line.
+  - Model test: column inserts and deletes with a quoted field, a short row, and an inserted row save to exact bytes; undoing everything returns the original file.
+  - App:
+    - Ctrl++/− act on columns when whole columns are selected; the right-click menu has row and column sections.
+    - User sizes are kept by `RowId`/`ColId` and laid out by position after every change (`refit_sizes`), so widths and heights follow their columns and rows through inserts, deletes, undo, header flips, and the reopen after a save (re-keyed by position).
+    - The cache resets after reshapes, because a column delete can narrow the widest row.
+  - Smoke test via Broadway on a /tmp copy of the 10 MB file:
+    - Narrowed city, then inserted a column before it; city kept its width.
+    - Typed into the new column, deleted score with Ctrl+-, and used Insert Columns Right from the menu.
+    - Four undos back to the original, with city still narrow; four redos and a save.
+    - The file reads `id,,name,,city,revenue,date,active,code`, with "hi" in place and score gone from every row.
 - **2026-10-07 EDIT-3:** insert and delete rows on the ADR 0003 row map.
   - `data_model::rowmap::RowMap` is an order-statistic treap of `RowId` runs, adapted from the DEC-3 spike, with freed nodes reused (the spike leaked them). `CsvTable` holds `Option<RowMap>`: `None` means file order, which is unchanged and zero-cost; the map is made on the first insert or delete. Inserted rows get ids with the high bit set.
   - `Edit::InsertRows`/`DeleteRows` take positions among all rows, header included, so a header flip between an edit and its undo can't shift it. They are built by `CsvTable::insert_rows`/`delete_rows`, which return `None` until indexing completes; `apply` asserts that, because a map frozen early would drop the rest of the file on save. A delete's inverse holds the removed runs, so undo brings the rows back with their cell edits (the edits stay keyed by `RowId`). `commands::ChangeRows` wraps them; its focus is the first row put back in.

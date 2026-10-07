@@ -4,8 +4,8 @@
 //! Needs the corpus (`python3 scripts/gen_corpus.py`); indexing 1 GB wants an optimized
 //! build: `cargo test --release -p commands --test insert_1gb -- --ignored --nocapture`
 
-use commands::{ChangeRows, UndoStack};
-use data_model::{CsvTable, DelimiterChoice, RowBlock, TableSource};
+use commands::{Reshape, UndoStack};
+use data_model::{CellRef, CsvTable, DelimiterChoice, RowBlock, TableSource};
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
@@ -39,10 +39,14 @@ fn insert_at_row_1m_in_under_50ms() {
     let rows = table.row_count();
     let before = screen(&mut table);
     let mut undo = UndoStack::default();
+    let cursor = CellRef {
+        row: table.row_id(ROW),
+        col: table.col_id(0),
+    };
 
     let t = Instant::now();
     let edit = table.insert_rows(ROW, 1).expect("indexed");
-    undo.execute(Box::new(ChangeRows::new(edit, 0)), &mut table);
+    undo.execute(Box::new(Reshape::new(edit, cursor)), &mut table);
     let after = screen(&mut table);
     let insert_ms = t.elapsed().as_secs_f64() * 1e3;
 
@@ -61,7 +65,7 @@ fn insert_at_row_1m_in_under_50ms() {
 
     let t = Instant::now();
     let edit = table.delete_rows(ROW, 1).unwrap();
-    undo.execute(Box::new(ChangeRows::new(edit, 0)), &mut table);
+    undo.execute(Box::new(Reshape::new(edit, cursor)), &mut table);
     let delete_ms = t.elapsed().as_secs_f64() * 1e3;
     let t = Instant::now();
     assert!(undo.undo(&mut table).is_some());

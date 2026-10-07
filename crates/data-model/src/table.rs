@@ -1,8 +1,9 @@
 //! What the grid reads: display text for blocks of rows, behind [`TableSource`] so the grid
 //! never touches the file (layers: source -> overlay -> view -> grid).
 
+use crate::colmap::ColMap;
 use crate::rowmap::{RowMap, Run};
-use crate::{CellRef, Col, Edit, EditOverlay, Row, RowId};
+use crate::{CellRef, Col, ColId, Edit, EditOverlay, Row, RowId};
 use csv_engine::{
     detect_dialect, detect_header, open_text, split_fields, Dialect, Encoding, Field, RowIndex,
     Source, SparseRowIndex, DETECT_SAMPLE_BYTES,
@@ -154,6 +155,11 @@ pub struct CsvTable {
     pub(crate) rows: Option<RowMap>,
     /// Inserted rows so far: the next inserted row's number.
     next_inserted: u64,
+    /// Column order once columns were inserted or deleted (EDIT-4); `None` while it is
+    /// still file order.
+    pub(crate) cols: Option<ColMap>,
+    /// Inserted columns so far: the next inserted column's number.
+    next_inserted_col: u32,
     spans: Vec<Range<u64>>,
     fields: Vec<Field>,
 }
@@ -173,6 +179,8 @@ impl CsvTable {
             overlay: EditOverlay::default(),
             rows: None,
             next_inserted: 0,
+            cols: None,
+            next_inserted_col: 0,
             spans: Vec::new(),
             fields: Vec::new(),
         }
@@ -248,10 +256,45 @@ impl CsvTable {
         self.rows.as_ref().map_or(RowId::source(k), |m| m.get(k))
     }
 
+    /// Id of the column shown at position `col`.
+    pub fn col_id(&self, col: Col) -> ColId {
+        self.cols
+            .as_ref()
+            .map_or(ColId::source(col), |m| m.get(col))
+    }
+
+    /// Where column `id` is shown; `None` while it is deleted.
+    pub fn col_of(&self, id: ColId) -> Option<Col> {
+        match &self.cols {
+            Some(m) => m.position(id),
+            None => (!id.is_inserted()).then_some(id.0),
+        }
+    }
+
+    /// An edit inserting `count` empty columns before column `col`.
+    pub fn insert_cols(&mut self, col: Col, count: Col) -> Option<Edit> {
+        if count == 0 {
+            return None;
+        }
+        let first = self.next_inserted_col;
+        self.next_inserted_col += count;
+        Some(Edit::InsertCols {
+            at: col,
+            cols: (first..first + count).map(ColId::inserted).collect(),
+        })
+    }
+
+    /// An edit deleting `count` columns from column `col` on. Columns past a row's end
+    /// delete nothing in that row.
+    pub fn delete_cols(&self, col: Col, count: Col) -> Option<Edit> {
+        col.checked_add(count)?;
+        (count > 0).then_some(Edit::DeleteCols { at: col, count })
+    }
+
     /// Title of column `col` when the first row is a header (with any edit to it).
     pub fn header_cell(&self, col: Col) -> Option<Cow<'_, str>> {
         if self.has_header() && self.total_rows() > 0 {
-            self.cell_of(self.id_at(0), col)
+            self.cell_of(self.id_at(0), self.col_id(col))
         } else {
             None
         }
@@ -280,7 +323,8 @@ impl CsvTable {
             });
             inserted + self.index.row_count().saturating_sub(kept)
         });
-        self.overlay.len() + rows as usize
+        let cols = self.cols.as_ref().map_or(0, ColMap::changes);
+        self.overlay.len() + rows as usize + cols
     }
 
     /// An edit inserting `count` empty rows before table row `row` (at the end when
@@ -347,6 +391,20 @@ impl CsvTable {
                 at,
                 rows: self.row_map().remove(at, count),
             },
+            Edit::InsertCols { at, cols } => {
+                let count = cols.len() as Col;
+                self.cols
+                    .get_or_insert_with(ColMap::default)
+                    .insert(at, &cols);
+                Edit::DeleteCols { at, count }
+            }
+            Edit::DeleteCols { at, count } => Edit::InsertCols {
+                at,
+                cols: self
+                    .cols
+                    .get_or_insert_with(ColMap::default)
+                    .remove(at, count),
+            },
         }
     }
 
@@ -388,19 +446,23 @@ impl CsvTable {
         if k >= self.total_rows() {
             return None;
         }
-        self.cell_of(self.id_at(k), col)
+        self.cell_of(self.id_at(k), self.col_id(col))
     }
 
-    fn cell_of(&self, id: RowId, col: Col) -> Option<Cow<'_, str>> {
-        if let Some(v) = self.overlay.get(CellRef { row: id, col }) {
+    fn cell_of(&self, row: RowId, col: ColId) -> Option<Cow<'_, str>> {
+        if let Some(v) = self.overlay.get(CellRef { row, col }) {
             return Some(Cow::Borrowed(v));
         }
-        if id.is_inserted() {
+        if col.is_inserted() {
+            // An inserted column is in every row, empty until edited.
+            return Some(Cow::Borrowed(""));
+        }
+        if row.is_inserted() {
             return None;
         }
         let mut fields = Vec::new();
-        let bytes = self.index.row_fields(id.0, &mut fields)?;
-        let value = fields.get(col as usize)?.value(bytes, self.dialect.quote);
+        let bytes = self.index.row_fields(row.0, &mut fields)?;
+        let value = fields.get(col.0 as usize)?.value(bytes, self.dialect.quote);
         Some(match value {
             Cow::Borrowed(b) => String::from_utf8_lossy(b),
             Cow::Owned(v) => Cow::Owned(String::from_utf8_lossy(&v).into_owned()),
@@ -408,7 +470,7 @@ impl CsvTable {
     }
 
     /// Append source rows `file_rows` (with their edits) to `out`.
-    fn read_source(&mut self, file_rows: Range<u64>, out: &mut RowBlock) {
+    fn read_source(&mut self, file_rows: Range<u64>, out: &mut RowBlock, cols: Option<&ColMap>) {
         if self
             .index
             .row_spans(file_rows.clone(), &mut self.spans)
@@ -424,16 +486,35 @@ impl CsvTable {
                 line = line.strip_prefix(UTF8_BOM).unwrap_or(line);
             }
             split_fields(line, &self.dialect, &mut self.fields);
-            match self.overlay.row(RowId::source(file_row)) {
+            let edits = self.overlay.row(RowId::source(file_row));
+            match (cols, edits) {
                 // `value` borrows unless the field has `""` escapes to undo.
-                None => self
+                (None, None) => self
                     .fields
                     .iter()
                     .for_each(|f| out.push_cell(&f.value(line, quote))),
-                Some(edits) => {
-                    let last_edit = edits.keys().next_back().map_or(0, |&c| c as usize + 1);
+                (None, Some(edits)) => {
+                    let last_edit = edits.keys().next_back().map_or(0, |c| c.0 as usize + 1);
                     for c in 0..self.fields.len().max(last_edit) {
-                        match (edits.get(&(c as Col)), self.fields.get(c)) {
+                        match (edits.get(&ColId::source(c as Col)), self.fields.get(c)) {
+                            (Some(v), _) => out.push_cell(v.as_bytes()),
+                            (None, Some(f)) => out.push_cell(&f.value(line, quote)),
+                            (None, None) => out.push_cell(b""),
+                        }
+                    }
+                }
+                (Some(map), edits) => {
+                    let nf = self.fields.len() as Col;
+                    let width = match edits {
+                        Some(e) => map.width_with(nf, e.keys().copied()),
+                        None => map.width(nf, |_| false),
+                    };
+                    for pos in 0..width {
+                        let id = map.get(pos);
+                        let field = (!id.is_inserted())
+                            .then(|| self.fields.get(id.0 as usize))
+                            .flatten();
+                        match (edits.and_then(|e| e.get(&id)), field) {
                             (Some(v), _) => out.push_cell(v.as_bytes()),
                             (None, Some(f)) => out.push_cell(&f.value(line, quote)),
                             (None, None) => out.push_cell(b""),
@@ -446,12 +527,23 @@ impl CsvTable {
     }
 
     /// Append inserted rows (only their edits; the rest is empty) to `out`.
-    fn read_inserted(&self, run: Run, out: &mut RowBlock) {
+    fn read_inserted(&self, run: Run, out: &mut RowBlock, cols: Option<&ColMap>) {
         for id in run.first.0..run.first.0 + run.len {
             if let Some(edits) = self.overlay.row(RowId(id)) {
-                let width = edits.keys().next_back().map_or(0, |&c| c + 1);
-                for c in 0..width {
-                    out.push_cell(edits.get(&c).map_or(&b""[..], |v| v.as_bytes()));
+                match cols {
+                    None => {
+                        let width = edits.keys().next_back().map_or(0, |c| c.0 + 1);
+                        for c in 0..width {
+                            let v = edits.get(&ColId::source(c));
+                            out.push_cell(v.map_or(&b""[..], |v| v.as_bytes()));
+                        }
+                    }
+                    Some(map) => {
+                        for pos in 0..map.width_with(0, edits.keys().copied()) {
+                            let v = edits.get(&map.get(pos));
+                            out.push_cell(v.map_or(&b""[..], |v| v.as_bytes()));
+                        }
+                    }
                 }
             }
             out.end_row();
@@ -472,18 +564,26 @@ impl TableSource for CsvTable {
         out.reset(rows.start);
         let first = self.first_row();
         let positions = rows.start + first..rows.end.saturating_add(first);
-        let Some(map) = &self.rows else {
+        // Out of `self` while reading, so the read paths can use the field buffer.
+        let cols = self.cols.take();
+        match self.rows.as_ref().map(|m| {
+            let end = positions.end.min(m.len());
+            m.runs_in(positions.start..end)
+        }) {
             // File order: positions are file rows.
-            return self.read_source(positions, out);
-        };
-        let end = positions.end.min(map.len());
-        for run in map.runs_in(positions.start..end) {
-            if run.first.is_inserted() {
-                self.read_inserted(run, out);
-            } else {
-                self.read_source(run.first.0..run.first.0 + run.len, out);
+            None => self.read_source(positions, out, cols.as_ref()),
+            Some(runs) => {
+                for run in runs {
+                    if run.first.is_inserted() {
+                        self.read_inserted(run, out, cols.as_ref());
+                    } else {
+                        let file_rows = run.first.0..run.first.0 + run.len;
+                        self.read_source(file_rows, out, cols.as_ref());
+                    }
+                }
             }
         }
+        self.cols = cols;
     }
 }
 
@@ -547,7 +647,7 @@ mod tests {
 
         let at = CellRef {
             row: table.row_id(1),
-            col: 1,
+            col: ColId::source(1),
         };
         assert_eq!(
             table.apply(Edit::set(at, "Smith, \"Jo\"")),
@@ -571,7 +671,7 @@ mod tests {
         table.apply(Edit::set(
             CellRef {
                 row: table.row_id(2),
-                col: 4,
+                col: ColId::source(4),
             },
             "new",
         ));
@@ -644,7 +744,7 @@ mod tests {
         table.apply(Edit::set(
             CellRef {
                 row: table.row_id(1),
-                col: 0,
+                col: ColId::source(0),
             },
             "x",
         ));
@@ -681,7 +781,7 @@ mod tests {
         t.apply(Edit::set(
             CellRef {
                 row: t.row_id(0),
-                col: 1,
+                col: ColId::source(1),
             },
             "Ana",
         ));
@@ -699,7 +799,7 @@ mod tests {
         t.apply(Edit::set(
             CellRef {
                 row: t.row_id(0),
-                col: 1,
+                col: ColId::source(1),
             },
             "who",
         ));
@@ -748,8 +848,20 @@ mod tests {
         undo.push(t.apply(insert));
         let new = t.row_id(0);
         assert!(new.is_inserted());
-        undo.push(t.apply(Edit::set(CellRef { row: new, col: 0 }, "0")));
-        undo.push(t.apply(Edit::set(CellRef { row: new, col: 1 }, "Zoë, \"q\"")));
+        undo.push(t.apply(Edit::set(
+            CellRef {
+                row: new,
+                col: ColId::source(0),
+            },
+            "0",
+        )));
+        undo.push(t.apply(Edit::set(
+            CellRef {
+                row: new,
+                col: ColId::source(1),
+            },
+            "Zoë, \"q\"",
+        )));
         let at_end = t.insert_rows(t.row_count(), 1).unwrap();
         undo.push(t.apply(at_end));
         let ann = t.delete_rows(1, 1).unwrap();
@@ -794,7 +906,7 @@ mod tests {
         let (path, mut t) = opened("delete", b"id,v\n1,a\n2,b\n3,c\n");
         let b = CellRef {
             row: t.row_id(1),
-            col: 1,
+            col: ColId::source(1),
         };
         t.apply(Edit::set(b, "B"));
         let delete = t.delete_rows(1, 2).unwrap();
@@ -817,6 +929,58 @@ mod tests {
         let mut t = CsvTable::open(&path, DelimiterChoice::Auto).unwrap();
         assert!(t.insert_rows(0, 1).is_none());
         assert!(t.delete_rows(0, 1).is_none());
+        std::fs::remove_file(path).unwrap();
+    }
+
+    /// EDIT-4: inserted columns show and save empty (or with their edits), deleted ones
+    /// are left out of every row, other fields keep their raw bytes (quotes included),
+    /// short rows stay short; undoing everything gives back the file byte for byte.
+    #[test]
+    fn column_inserts_and_deletes_reassemble_rows_on_save() {
+        let content = b"id,name,city\n1,\"Ann, A\",Paris\n2,Bo\n";
+        let (path, mut t) = opened("cols", content);
+        let mut undo = Vec::new();
+        let insert = t.insert_cols(1, 1).unwrap();
+        undo.push(t.apply(insert));
+        let new = t.col_id(1);
+        assert!(new.is_inserted());
+        let at = CellRef {
+            row: t.row_id(0),
+            col: new,
+        };
+        undo.push(t.apply(Edit::set(at, "x")));
+        let city = t.delete_cols(3, 1).unwrap();
+        undo.push(t.apply(city));
+        let row = t.insert_rows(t.row_count(), 1).unwrap();
+        undo.push(t.apply(row));
+        let last = CellRef {
+            row: t.row_id(2),
+            col: new,
+        };
+        undo.push(t.apply(Edit::set(last, "y")));
+
+        assert_eq!(row_text(&mut t, 0), ["1", "x", "Ann, A"]);
+        assert_eq!(row_text(&mut t, 1), ["2", "", "Bo"]);
+        assert_eq!(
+            t.header_cell(1).as_deref(),
+            Some(""),
+            "a title for the new column"
+        );
+        assert_eq!(t.header_cell(2).as_deref(), Some("name"));
+        assert_eq!(t.col_of(ColId::source(2)), None, "city is gone");
+        assert_eq!(t.col_of(ColId::source(1)), Some(2));
+        assert_eq!(
+            t.changes(),
+            2 + 1 + 1 + 1,
+            "cells, column in, column out, row in"
+        );
+        assert_eq!(saved(&t), b"id,,name\n1,x,\"Ann, A\"\n2,,Bo\n,y,\n");
+
+        while let Some(inverse) = undo.pop() {
+            t.apply(inverse);
+        }
+        assert_eq!(t.changes(), 0);
+        assert_eq!(saved(&t), content, "back to the original bytes");
         std::fs::remove_file(path).unwrap();
     }
 }

@@ -6,10 +6,10 @@
 //! it holds, and the oldest steps go first when either limit is passed.
 
 mod edit;
-mod rows;
+mod reshape;
 
 pub use edit::SetCell;
-pub use rows::ChangeRows;
+pub use reshape::Reshape;
 
 use data_model::CellRef;
 use std::collections::VecDeque;

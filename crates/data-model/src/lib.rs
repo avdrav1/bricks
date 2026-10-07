@@ -3,6 +3,7 @@
 //! Layers (spec section 16), each kept separate:
 //! source (csv-engine) -> overlay (edits) -> view (sort/filter) -> grid.
 
+mod colmap;
 mod rowmap;
 mod save;
 mod table;
@@ -40,11 +41,35 @@ impl RowId {
     }
 }
 
-/// A cell address by row identity, not screen position.
+/// Stable identity of a column (EDIT-4, ADR 0003): its position in the file, or for an
+/// inserted column a number with the high bit set. Edits key on it, so they stay with
+/// their column when columns are inserted or deleted in front of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ColId(pub u32);
+
+impl ColId {
+    const INSERTED: u32 = 1 << 31;
+
+    pub const fn source(col: Col) -> Self {
+        Self(col)
+    }
+
+    /// The `n`th column inserted in this session.
+    pub const fn inserted(n: u32) -> Self {
+        Self(Self::INSERTED | n)
+    }
+
+    /// A column the user added: no field in the file, only edits.
+    pub const fn is_inserted(self) -> bool {
+        self.0 & Self::INSERTED != 0
+    }
+}
+
+/// A cell address by row and column identity, not screen position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CellRef {
     pub row: RowId,
-    pub col: Col,
+    pub col: ColId,
 }
 
 /// A change to the table's data, as an operation (invariant 5). [`CsvTable::apply`] is the
@@ -52,7 +77,8 @@ pub struct CellRef {
 ///
 /// Row positions here count every row in file order, the header row included, so an
 /// edit means the same rows whether or not the first row is shown as a header. Build
-/// row edits with [`CsvTable::insert_rows`] and [`CsvTable::delete_rows`].
+/// row and column edits with [`CsvTable::insert_rows`], [`CsvTable::delete_rows`],
+/// [`CsvTable::insert_cols`], and [`CsvTable::delete_cols`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Edit {
     /// Give a cell this raw value, or with `None` drop its edit so the source shows again.
@@ -65,6 +91,10 @@ pub enum Edit {
     /// Take `count` rows out from position `at`. Their ids, and so their edits, are kept
     /// in the inverse, so undo brings them back as they were.
     DeleteRows { at: u64, count: u64 },
+    /// Show these columns, in order, from column `at` on; later columns move right.
+    InsertCols { at: Col, cols: Vec<ColId> },
+    /// Take `count` columns out from column `at`; the inverse keeps their ids.
+    DeleteCols { at: Col, count: Col },
 }
 
 impl Edit {
@@ -88,7 +118,7 @@ impl Edit {
     pub fn cell(&self) -> Option<CellRef> {
         match self {
             Self::Cell { at, .. } => Some(*at),
-            Self::InsertRows { .. } | Self::DeleteRows { .. } => None,
+            _ => None,
         }
     }
 
@@ -97,7 +127,8 @@ impl Edit {
         match self {
             Self::Cell { value, .. } => value.as_ref().map_or(0, |v| v.len()),
             Self::InsertRows { rows, .. } => rows.capacity() * std::mem::size_of::<Run>(),
-            Self::DeleteRows { .. } => 0,
+            Self::InsertCols { cols, .. } => cols.capacity() * std::mem::size_of::<ColId>(),
+            Self::DeleteRows { .. } | Self::DeleteCols { .. } => 0,
         }
     }
 }
@@ -118,7 +149,7 @@ pub enum InferredType {
 /// rows without edits cost nothing.
 #[derive(Debug, Default)]
 pub struct EditOverlay {
-    rows: HashMap<RowId, BTreeMap<Col, Box<str>>>,
+    rows: HashMap<RowId, BTreeMap<ColId, Box<str>>>,
     cells: usize,
 }
 
@@ -149,13 +180,13 @@ impl EditOverlay {
         Some(prev)
     }
 
-    /// Edits in one row, by column.
-    pub fn row(&self, row: RowId) -> Option<&BTreeMap<Col, Box<str>>> {
+    /// Edits in one row, by column id.
+    pub fn row(&self, row: RowId) -> Option<&BTreeMap<ColId, Box<str>>> {
         self.rows.get(&row)
     }
 
     /// Every edited row with its edits, in no particular order.
-    pub fn iter_rows(&self) -> impl Iterator<Item = (&RowId, &BTreeMap<Col, Box<str>>)> {
+    pub fn iter_rows(&self) -> impl Iterator<Item = (&RowId, &BTreeMap<ColId, Box<str>>)> {
         self.rows.iter()
     }
 
@@ -178,7 +209,7 @@ mod tests {
         let mut o = EditOverlay::default();
         let at = CellRef {
             row: RowId::source(1_532_817),
-            col: 3,
+            col: ColId::source(3),
         };
         assert!(o.set(at, "00123").is_none());
         assert_eq!(o.get(at), Some("00123"));
@@ -190,23 +221,45 @@ mod tests {
     fn overlay_groups_edits_by_row_in_column_order() {
         let mut o = EditOverlay::default();
         let r = RowId::source(7);
-        o.set(CellRef { row: r, col: 5 }, "f");
-        o.set(CellRef { row: r, col: 1 }, "b");
+        o.set(
+            CellRef {
+                row: r,
+                col: ColId::source(5),
+            },
+            "f",
+        );
+        o.set(
+            CellRef {
+                row: r,
+                col: ColId::source(1),
+            },
+            "b",
+        );
         o.set(
             CellRef {
                 row: RowId::source(8),
-                col: 0,
+                col: ColId::source(0),
             },
             "other row",
         );
-        let cols: Vec<(Col, &str)> = o.row(r).unwrap().iter().map(|(c, v)| (*c, &**v)).collect();
-        assert_eq!(cols, [(1, "b"), (5, "f")]);
+        let cols: Vec<(ColId, &str)> = o.row(r).unwrap().iter().map(|(c, v)| (*c, &**v)).collect();
+        assert_eq!(cols, [(ColId(1), "b"), (ColId(5), "f")]);
         assert_eq!(o.len(), 3);
 
-        assert_eq!(o.clear(CellRef { row: r, col: 1 }).as_deref(), Some("b"));
-        assert_eq!(o.clear(CellRef { row: r, col: 5 }).as_deref(), Some("f"));
+        let (b, f) = (
+            CellRef {
+                row: r,
+                col: ColId(1),
+            },
+            CellRef {
+                row: r,
+                col: ColId(5),
+            },
+        );
+        assert_eq!(o.clear(b).as_deref(), Some("b"));
+        assert_eq!(o.clear(f).as_deref(), Some("f"));
         assert!(o.row(r).is_none(), "a row with no edits left is forgotten");
-        assert_eq!(o.clear(CellRef { row: r, col: 5 }), None);
+        assert_eq!(o.clear(f), None);
         assert_eq!(o.len(), 1);
     }
 }

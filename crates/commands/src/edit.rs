@@ -56,6 +56,7 @@ mod tests {
     use super::*;
     use crate::UndoStack;
     use csv_engine::{Dialect, Source, SparseRowIndex};
+    use data_model::ColId;
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
 
@@ -90,7 +91,7 @@ mod tests {
             x ^= x << 17;
             let at = CellRef {
                 row: table.row_id(x % rows),
-                col: ((x >> 8) % u64::from(cols)) as u32,
+                col: ColId::source(((x >> 8) % u64::from(cols)) as u32),
             };
             let cmd = if (x >> 16) % 4 == 0 {
                 SetCell::clear(at)

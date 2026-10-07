@@ -25,7 +25,7 @@ fn save(table: &CsvTable) -> Vec<u8> {
 fn set(t: &mut CsvTable, row: u64, col: u32, v: &str) {
     let at = CellRef {
         row: t.row_id(row),
-        col,
+        col: t.col_id(col),
     };
     t.apply(Edit::set(at, v));
 }

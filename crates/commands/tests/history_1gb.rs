@@ -5,7 +5,7 @@
 //! build: `cargo test --release -p commands --test history_1gb -- --ignored --nocapture`
 
 use commands::{SetCell, UndoStack, HISTORY_BYTES};
-use data_model::{CellRef, CsvTable, DelimiterChoice, TableSource};
+use data_model::{CellRef, ColId, CsvTable, DelimiterChoice, TableSource};
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 
@@ -43,7 +43,7 @@ fn thousand_step_history_on_1gb_stays_under_50mb() {
         let k = if i % 10 == 9 { i - 9 } else { i };
         let at = CellRef {
             row: table.row_id(k * 19_001 % rows),
-            col: (k % 8) as u32,
+            col: ColId::source((k % 8) as u32),
         };
         cells.insert(at);
         let value = format!("edit {i}: {}", "x".repeat(100));

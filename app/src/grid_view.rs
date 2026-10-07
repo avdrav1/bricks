@@ -1,10 +1,11 @@
 //! The grid widget: draws the cells `grid::GridCache` holds with GSK + Pango (ADR 0001).
 
-use crate::editor::{self, Action, Mode, RowCommand, Start};
+use crate::editor::{self, Action, Mode, ShapeCommand, Start};
 
-use commands::{ChangeRows, SetCell, UndoStack};
+use commands::{Reshape, SetCell, UndoStack};
 use data_model::{
-    CellRef, CsvTable, DelimiterChoice, Edit, RereadError, SaveJob, SaveJobError, TableSource,
+    CellRef, ColId, CsvTable, DelimiterChoice, Edit, RereadError, RowId, SaveJob, SaveJobError,
+    TableSource,
 };
 use grid::{Bounds, GridCache, Key, Mods, Selection, Sizes, Viewport};
 use gtk::{gdk, gio, glib, graphene, pango, prelude::*, subclass::prelude::*};
@@ -77,8 +78,13 @@ mod imp {
         /// Column titles from the header row (ENG-7), read once rather than every frame;
         /// `None` until read, and again after anything that could change them.
         pub titles: RefCell<Option<Vec<String>>>,
-        /// Right-click menu: insert and delete rows (EDIT-3), made on first use.
+        /// Right-click menu: insert and delete rows and columns (EDIT-3/4).
         pub menu: RefCell<Option<gtk::PopoverMenu>>,
+        /// Sizes the user set, by row and column identity, so they follow their rows and
+        /// columns through inserts, deletes, undo, and header flips. `sizing` is laid out
+        /// from these by position (`refit_sizes`).
+        pub row_heights: RefCell<HashMap<RowId, f64>>,
+        pub col_widths: RefCell<HashMap<ColId, f64>>,
     }
 
     #[glib::object_subclass]
@@ -364,6 +370,9 @@ impl GridView {
             ("insert-above", Self::insert_rows_above as fn(&Self)),
             ("insert-below", Self::insert_rows_below),
             ("delete-rows", Self::delete_rows),
+            ("insert-left", Self::insert_cols_left),
+            ("insert-right", Self::insert_cols_right),
+            ("delete-cols", Self::delete_cols),
         ] {
             let action = gio::SimpleAction::new(name, None);
             action.connect_activate({
@@ -429,10 +438,13 @@ impl GridView {
                 }
                 if let Some((key, mods)) = nav_key(key, state) {
                     g.press(key, mods);
-                } else if let Some(cmd) = editor::row_command(key, state) {
-                    match cmd {
-                        RowCommand::InsertAbove => g.insert_rows_above(),
-                        RowCommand::Delete => g.delete_rows(),
+                } else if let Some(cmd) = editor::shape_command(key, state) {
+                    let columns = g.imp().selection.get().whole_columns().is_some();
+                    match (cmd, columns) {
+                        (ShapeCommand::Insert, false) => g.insert_rows_above(),
+                        (ShapeCommand::Delete, false) => g.delete_rows(),
+                        (ShapeCommand::Insert, true) => g.insert_cols_left(),
+                        (ShapeCommand::Delete, true) => g.delete_cols(),
                     }
                 } else if let Some(start) = editor::start(key, state) {
                     g.start_edit(start);
@@ -557,7 +569,7 @@ impl GridView {
                 self.update_adjustments();
             }
             Some(Edge::Row(r)) => {
-                self.imp().sizing.borrow_mut().rows.set(r, ROW_H);
+                self.set_row_height(r, ROW_H);
                 self.update_adjustments();
             }
             None => self.begin_edit(x, y),
@@ -598,23 +610,67 @@ impl GridView {
                 (w + 2.0 * PAD + 2.0).min(body_w.max(COL_W))
             }
         };
-        imp.sizing.borrow_mut().cols.set(u64::from(c), width);
+        self.set_col_width(c, width);
     }
 
     /// A resize drag moved to widget point (`x`, `y`).
     fn resize_to(&self, edge: Edge, from: f64, start: f64, x: f64, y: f64) {
-        let mut sizing = self.imp().sizing.borrow_mut();
         match edge {
             Edge::Col(c) => {
                 let width = (from + x - start).max(MIN_COL_W);
                 for c in self.columns_with(c) {
-                    sizing.cols.set(u64::from(c), width);
+                    self.set_col_width(c, width);
                 }
             }
-            Edge::Row(r) => sizing.rows.set(r, (from + y - start).max(MIN_ROW_H)),
+            Edge::Row(r) => self.set_row_height(r, (from + y - start).max(MIN_ROW_H)),
         }
-        drop(sizing);
         self.update_adjustments();
+    }
+
+    /// Give column `col` a width, remembered by its identity.
+    fn set_col_width(&self, col: u32, width: f64) {
+        let imp = self.imp();
+        let id = imp.table.borrow().as_ref().map(|t| t.col_id(col));
+        if let Some(id) = id {
+            imp.col_widths.borrow_mut().insert(id, width);
+        }
+        imp.sizing.borrow_mut().cols.set(u64::from(col), width);
+    }
+
+    /// Give row `row` a height, remembered by its identity.
+    fn set_row_height(&self, row: u64, height: f64) {
+        let imp = self.imp();
+        let id = imp
+            .table
+            .borrow()
+            .as_ref()
+            .filter(|t| row < t.row_count())
+            .map(|t| t.row_id(row));
+        if let Some(id) = id {
+            imp.row_heights.borrow_mut().insert(id, height);
+        }
+        imp.sizing.borrow_mut().rows.set(row, height);
+    }
+
+    /// Lay the remembered sizes out by where their rows and columns are now; those not
+    /// shown (deleted) are kept for an undo.
+    fn refit_sizes(&self) {
+        let imp = self.imp();
+        let table = imp.table.borrow();
+        let Some(table) = table.as_ref() else { return };
+        let mut sizing = imp.sizing.borrow_mut();
+        sizing.rows.clear();
+        sizing.cols.clear();
+        for (&id, &h) in imp.row_heights.borrow().iter() {
+            if let Some(r) = table.row_of(id) {
+                sizing.rows.set(r, h);
+            }
+        }
+        for (&id, &w) in imp.col_widths.borrow().iter() {
+            if let Some(c) = table.col_of(id) {
+                sizing.cols.set(u64::from(c), w);
+            }
+        }
     }
 
     /// A click (GRID-4): a cell, a row or column header, or the corner (everything).
@@ -933,7 +989,7 @@ impl GridView {
                 if table.cell_value(row, col).as_deref() != Some(text.as_str()) {
                     let at = CellRef {
                         row: table.row_id(row),
-                        col,
+                        col: table.col_id(col),
                     };
                     undo.execute(Box::new(SetCell::new(at, text)), table);
                     imp.cache.borrow_mut().invalidate();
@@ -987,25 +1043,23 @@ impl GridView {
             let Some(cmd) = cmd else { return false };
             cmd.focus().and_then(|at| {
                 let row = table.row_of(at.row)?;
-                Some(grid::Cell { row, col: at.col })
+                let col = table.col_of(at.col)?;
+                Some(grid::Cell { row, col })
             })
         };
         self.after_change(focus);
         true
     }
 
-    /// Redraw after the data changed: cached rows and titles reload, the scroll range
-    /// follows the row count, and the cursor goes to `focus` if given (else stays,
-    /// clamped to the rows left). Row heights belong to positions, so they reset when
-    /// rows were added or removed.
+    /// Redraw after the data changed: cached rows and titles reload (from scratch: a
+    /// column delete can narrow the widest row), the remembered sizes follow their rows
+    /// and columns, the scroll range follows the row count, and the cursor goes to
+    /// `focus` if given (else stays, clamped to the rows left).
     fn after_change(&self, focus: Option<grid::Cell>) {
         let imp = self.imp();
-        imp.cache.borrow_mut().invalidate();
+        imp.cache.borrow_mut().reset();
         imp.titles.take();
-        let rows = self.row_count();
-        if imp.bounds_seen.get().is_some_and(|b| b.rows != rows) {
-            imp.sizing.borrow_mut().rows.clear();
-        }
+        self.refit_sizes();
         self.update_adjustments();
         let b = self.bounds();
         let cursor = focus.unwrap_or_else(|| imp.selection.get().cursor());
@@ -1030,7 +1084,7 @@ impl GridView {
     }
 
     fn insert_rows(&self, below: bool) {
-        let Some((first, count, col)) = self.selected_rows() else {
+        let Some((first, count)) = self.selected_rows() else {
             return;
         };
         let at = if below { first + count } else { first };
@@ -1040,12 +1094,12 @@ impl GridView {
             .borrow_mut()
             .as_mut()
             .and_then(|t| t.insert_rows(at.min(t.row_count()), count));
-        self.change_rows(edit, col);
+        self.reshape(edit);
     }
 
     /// Ctrl+- (EDIT-3): delete the rows the selection spans.
     pub fn delete_rows(&self) {
-        let Some((first, count, col)) = self.selected_rows() else {
+        let Some((first, count)) = self.selected_rows() else {
             return;
         };
         let edit = self
@@ -1054,23 +1108,64 @@ impl GridView {
             .borrow()
             .as_ref()
             .and_then(|t| t.delete_rows(first, count));
-        self.change_rows(edit, col);
+        self.reshape(edit);
     }
 
-    /// The rows the selection spans (first, count) and the cursor's column. `None` for
-    /// whole columns: Ctrl+- on columns deletes columns, which is EDIT-4.
-    fn selected_rows(&self) -> Option<(u64, u64, u32)> {
+    /// The rows the selection spans (first, count). `None` for whole columns: Ctrl+-
+    /// there deletes the columns.
+    fn selected_rows(&self) -> Option<(u64, u64)> {
         let sel = self.imp().selection.get();
         if sel.whole_columns().is_some() {
             return None;
         }
         let (tl, br) = sel.range();
-        Some((tl.row, br.row - tl.row + 1, sel.cursor().col))
+        Some((tl.row, br.row - tl.row + 1))
     }
 
-    /// Run a row insert or delete as an undoable command. `None` (still indexing, or no
-    /// such rows) and a running save or open edit leave everything as it is.
-    fn change_rows(&self, edit: Option<Edit>, col: u32) {
+    /// Ctrl++ on whole columns (EDIT-4): as many empty columns as are selected, left of
+    /// them.
+    pub fn insert_cols_left(&self) {
+        self.insert_cols(false);
+    }
+
+    pub fn insert_cols_right(&self) {
+        self.insert_cols(true);
+    }
+
+    fn insert_cols(&self, right: bool) {
+        let (first, count) = self.selected_cols();
+        let at = if right { first + count } else { first };
+        let edit = self
+            .imp()
+            .table
+            .borrow_mut()
+            .as_mut()
+            .and_then(|t| t.insert_cols(at, count));
+        self.reshape(edit);
+    }
+
+    /// Ctrl+- on whole columns (EDIT-4): delete the selected columns.
+    pub fn delete_cols(&self) {
+        let (first, count) = self.selected_cols();
+        let edit = self
+            .imp()
+            .table
+            .borrow()
+            .as_ref()
+            .and_then(|t| t.delete_cols(first, count));
+        self.reshape(edit);
+    }
+
+    /// The columns the selection spans (first, count).
+    fn selected_cols(&self) -> (u32, u32) {
+        let (tl, br) = self.imp().selection.get().range();
+        (tl.col, br.col - tl.col + 1)
+    }
+
+    /// Run a row or column insert or delete as an undoable command. `None` (still
+    /// indexing, or no such rows) and a running save or open edit leave everything as
+    /// it is.
+    fn reshape(&self, edit: Option<Edit>) {
         let imp = self.imp();
         let Some(edit) = edit else { return };
         if imp.saving.get() || imp.editing.get().is_some() {
@@ -1081,20 +1176,30 @@ impl GridView {
             let (Some(table), Some(undo)) = (table.as_mut(), undo.as_mut()) else {
                 return;
             };
-            undo.execute(Box::new(ChangeRows::new(edit, col)), table);
+            let cur = imp.selection.get().cursor();
+            let cursor = CellRef {
+                row: if cur.row < table.row_count() {
+                    table.row_id(cur.row)
+                } else {
+                    RowId::source(0)
+                },
+                col: table.col_id(cur.col),
+            };
+            undo.execute(Box::new(Reshape::new(edit, cursor)), table);
         }
         self.after_change(None);
     }
 
-    /// Open the row menu at widget point (`x`, `y`), selecting the cell there first
-    /// unless it is already in the selection.
+    /// Open the row and column menu at widget point (`x`, `y`), selecting the cell
+    /// there first unless it is already in the selection.
     fn row_menu(&self, x: f64, y: f64) {
         let imp = self.imp();
         let b = self.bounds();
-        if b.rows > 0 && b.cols > 0 && y >= HEADER_H {
+        if b.rows > 0 && b.cols > 0 {
             let (cell, _) = self.cell_near(x, y);
             let (tl, br) = imp.selection.get().range();
-            let inside = (tl.row..=br.row).contains(&cell.row);
+            let inside =
+                (tl.row..=br.row).contains(&cell.row) && (tl.col..=br.col).contains(&cell.col);
             if !inside {
                 self.mouse_down(x, y, false);
                 imp.drag.set(None);
@@ -1104,10 +1209,17 @@ impl GridView {
             .menu
             .borrow_mut()
             .get_or_insert_with(|| {
+                let rows = gio::Menu::new();
+                rows.append(Some("Insert Rows Above"), Some("grid.insert-above"));
+                rows.append(Some("Insert Rows Below"), Some("grid.insert-below"));
+                rows.append(Some("Delete Rows"), Some("grid.delete-rows"));
+                let cols = gio::Menu::new();
+                cols.append(Some("Insert Columns Left"), Some("grid.insert-left"));
+                cols.append(Some("Insert Columns Right"), Some("grid.insert-right"));
+                cols.append(Some("Delete Columns"), Some("grid.delete-cols"));
                 let model = gio::Menu::new();
-                model.append(Some("Insert Rows Above"), Some("grid.insert-above"));
-                model.append(Some("Insert Rows Below"), Some("grid.insert-below"));
-                model.append(Some("Delete Rows"), Some("grid.delete-rows"));
+                model.append_section(None, &rows);
+                model.append_section(None, &cols);
                 let menu = gtk::PopoverMenu::from_model(Some(&model));
                 menu.set_has_arrow(false);
                 menu.set_halign(gtk::Align::Start);
@@ -1141,8 +1253,8 @@ impl GridView {
             .is_some_and(|t| t.has_header())
     }
 
-    /// Flip "first row is header". Rows shift by one, so cached rows and row heights (which
-    /// belong to the rows they were set on) start over; edits stay with their rows.
+    /// Flip "first row is header". Rows shift by one: cached rows reload, and row
+    /// heights follow their rows; edits stay with their rows.
     pub fn set_header(&self, on: bool) {
         let imp = self.imp();
         if let Some(t) = imp.table.borrow_mut().as_mut() {
@@ -1150,23 +1262,56 @@ impl GridView {
         }
         imp.cache.borrow_mut().invalidate();
         imp.titles.take();
-        imp.sizing.borrow_mut().rows.clear();
+        self.refit_sizes();
         self.update_adjustments();
     }
 
     /// Every column back to the default width.
     pub fn reset_column_widths(&self) {
-        self.imp().sizing.borrow_mut().cols.clear();
+        let imp = self.imp();
+        imp.col_widths.borrow_mut().clear();
+        imp.sizing.borrow_mut().cols.clear();
     }
 
     /// Show a freshly opened table (the file just saved). Its edits are on disk now, so the
-    /// undo history, which refers to the old overlay, starts over.
+    /// undo history, which refers to the old overlay, starts over. Rows and columns get
+    /// new identities in the new file, so the remembered sizes move over by position.
     pub fn replace_table(&self, table: CsvTable) {
         let imp = self.imp();
+        let (heights, widths) = {
+            let sizing = imp.sizing.borrow();
+            let old = imp.table.borrow();
+            let heights: Vec<(u64, f64)> = (imp.row_heights.borrow().keys())
+                .filter_map(|&id| old.as_ref()?.row_of(id))
+                .map(|r| (r, sizing.rows.size(r)))
+                .collect();
+            let widths: Vec<(u32, f64)> = (imp.col_widths.borrow().keys())
+                .filter_map(|&id| old.as_ref()?.col_of(id))
+                .map(|c| (c, sizing.cols.size(u64::from(c))))
+                .collect();
+            (heights, widths)
+        };
         imp.table.replace(Some(table));
         imp.undo.replace(Some(UndoStack::default()));
         imp.cache.borrow_mut().reset();
         imp.titles.take();
+        imp.row_heights.borrow_mut().clear();
+        imp.col_widths.borrow_mut().clear();
+        // Rows of the new file appear as indexing reaches them; heights past what is
+        // indexed now land on their positions' source ids all the same.
+        for (r, h) in heights {
+            let id = imp.table.borrow().as_ref().map(|t| {
+                let first = u64::from(t.has_header());
+                RowId::source(r + first)
+            });
+            if let Some(id) = id {
+                imp.row_heights.borrow_mut().insert(id, h);
+            }
+        }
+        for (c, w) in widths {
+            imp.col_widths.borrow_mut().insert(ColId::source(c), w);
+        }
+        self.refit_sizes();
         self.update_adjustments();
     }
 

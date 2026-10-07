@@ -7,7 +7,7 @@
 //! child runs to completion to show the same save does replace the file.
 
 use csv_engine::{Dialect, Source, SparseRowIndex};
-use data_model::{CellRef, CsvTable, Edit};
+use data_model::{CellRef, ColId, CsvTable, Edit};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
@@ -48,7 +48,7 @@ fn child_saver() {
     table.apply(Edit::set(
         CellRef {
             row: table.row_id(1),
-            col: 1,
+            col: ColId::source(1),
         },
         "EDITED",
     ));

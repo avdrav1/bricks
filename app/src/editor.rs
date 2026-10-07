@@ -79,22 +79,23 @@ pub fn while_editing(key: gdk::Key, state: ModifierType, mode: Mode) -> Action {
     }
 }
 
-/// Row inserts and deletes from the keyboard (EDIT-3), as in Calc.
+/// Row and column inserts and deletes from the keyboard (EDIT-3, EDIT-4), as in Calc:
+/// whole selected columns get columns, anything else rows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RowCommand {
-    /// Ctrl++: as many empty rows as the selection spans, above it.
-    InsertAbove,
-    /// Ctrl+-: the rows the selection spans.
+pub enum ShapeCommand {
+    /// Ctrl++: as many empty rows (columns) as the selection spans, above (left of) it.
+    Insert,
+    /// Ctrl+-: the rows (columns) the selection spans.
     Delete,
 }
 
-pub fn row_command(key: gdk::Key, state: ModifierType) -> Option<RowCommand> {
+pub fn shape_command(key: gdk::Key, state: ModifierType) -> Option<ShapeCommand> {
     if !state.contains(ModifierType::CONTROL_MASK) {
         return None;
     }
     match key {
-        K::plus | K::KP_Add => Some(RowCommand::InsertAbove),
-        K::minus | K::KP_Subtract => Some(RowCommand::Delete),
+        K::plus | K::KP_Add => Some(ShapeCommand::Insert),
+        K::minus | K::KP_Subtract => Some(ShapeCommand::Delete),
         _ => None,
     }
 }
@@ -180,12 +181,19 @@ mod tests {
         let ctrl = ModifierType::CONTROL_MASK;
         // Ctrl++ is Ctrl+Shift+= on most layouts: the key arrives as `plus`.
         assert_eq!(
-            row_command(K::plus, ctrl | SHIFT),
-            Some(RowCommand::InsertAbove)
+            shape_command(K::plus, ctrl | SHIFT),
+            Some(ShapeCommand::Insert)
         );
-        assert_eq!(row_command(K::KP_Add, ctrl), Some(RowCommand::InsertAbove));
-        assert_eq!(row_command(K::minus, ctrl), Some(RowCommand::Delete));
-        assert_eq!(row_command(K::KP_Subtract, ctrl), Some(RowCommand::Delete));
-        assert_eq!(row_command(K::minus, NONE), None, "a plain minus is typing");
+        assert_eq!(shape_command(K::KP_Add, ctrl), Some(ShapeCommand::Insert));
+        assert_eq!(shape_command(K::minus, ctrl), Some(ShapeCommand::Delete));
+        assert_eq!(
+            shape_command(K::KP_Subtract, ctrl),
+            Some(ShapeCommand::Delete)
+        );
+        assert_eq!(
+            shape_command(K::minus, NONE),
+            None,
+            "a plain minus is typing"
+        );
     }
 }

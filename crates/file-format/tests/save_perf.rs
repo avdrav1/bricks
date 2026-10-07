@@ -39,7 +39,7 @@ fn save_1gb_with_1000_edits() {
         table.apply(Edit::set(
             CellRef {
                 row: table.row_id(row),
-                col,
+                col: table.col_id(col),
             },
             value.as_str(),
         ));

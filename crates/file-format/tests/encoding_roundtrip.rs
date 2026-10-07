@@ -6,7 +6,7 @@
 //! BOM, byte for byte; an unedited save must reproduce the original exactly.
 
 use csv_engine::{Charset, Encoding};
-use data_model::{CellRef, CsvTable, DelimiterChoice, Edit};
+use data_model::{CellRef, ColId, CsvTable, DelimiterChoice, Edit};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 
@@ -126,7 +126,7 @@ fn encoding_and_bom_round_trip_on_save() {
         table.apply(Edit::set(
             CellRef {
                 row: table.row_id(1),
-                col: 1,
+                col: ColId::source(1),
             },
             "Ångström, Å",
         ));
@@ -156,7 +156,7 @@ fn text_the_encoding_cannot_hold_fails_the_save_and_keeps_the_file() {
     table.apply(Edit::set(
         CellRef {
             row: table.row_id(0),
-            col: 1,
+            col: ColId::source(1),
         },
         "東京",
     ));
