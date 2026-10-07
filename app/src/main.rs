@@ -456,6 +456,11 @@ fn title(name: &str, grid: &GridView, choice: DelimiterChoice, save: &SaveState)
     if choice == DelimiterChoice::Auto {
         t.push_str(" (detected)");
     }
+    let encoding = grid.encoding();
+    if encoding != csv_engine::Encoding::UTF8 {
+        t.push_str(", ");
+        t.push_str(encoding.name());
+    }
     if !grid.is_complete() {
         t.push_str(" (indexing…)");
     }

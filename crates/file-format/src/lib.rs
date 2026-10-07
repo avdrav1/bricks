@@ -3,7 +3,7 @@
 //! directory. A crash or `kill -9` at any point leaves either the old file or the new one,
 //! never a mix. The rename also keeps the app's open mapping of the old file valid (ADR 0002).
 
-use csv_engine::{RowIndex, Source, SparseRowIndex};
+use csv_engine::{open_text_as, Charset, EncodeWriter, RowIndex, SparseRowIndex};
 use data_model::{SaveJob, SaveStats};
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Write};
@@ -92,19 +92,28 @@ where
     Ok(())
 }
 
-/// Save a table to `dest` (usually the file it was opened from). Verification re-indexes the
-/// written file and checks its size and row count against what was written.
+/// Save a table to `dest` (usually the file it was opened from), in the file's own encoding
+/// and BOM (ENG-6). Verification decodes the written file the same way, re-indexes it, and
+/// checks its size and row count against what was written.
 pub fn save_csv(dest: &Path, job: &SaveJob) -> Result<SaveStats, SaveError> {
+    let encoding = job.encoding();
     let stats = std::cell::Cell::new(None);
     save_atomic(
         dest,
         |w| {
-            stats.set(Some(job.write_to(w)?));
+            // UTF-8 BOMs are part of the source bytes and copy through with row 0.
+            if encoding.charset == Charset::Utf8 {
+                stats.set(Some(job.write_to(w)?));
+            } else {
+                let mut encoded = EncodeWriter::new(w, encoding);
+                stats.set(Some(job.write_to(&mut encoded)?));
+                encoded.finish()?;
+            }
             Ok(())
         },
         |tmp| {
             let written = stats.get().expect("write ran before verify");
-            let source = Source::open(tmp).map_err(|e| e.to_string())?;
+            let source = open_text_as(tmp, encoding).map_err(|e| e.to_string())?;
             if source.bytes().len() as u64 != written.bytes {
                 return Err(format!(
                     "{} bytes on disk, {} written",

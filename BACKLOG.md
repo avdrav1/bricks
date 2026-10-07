@@ -37,7 +37,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | BENCH-1 | M0 | P0 | done | INFRA-1, INFRA-2, ENG-1 | Benchmark harness over the corpus | `cargo bench` runs in CI and prints the docs/BENCHMARKS.md table |
 | ENG-4 | M1 | P0 | done | ENG-3 | Auto-detect delimiter: comma, tab, semicolon, pipe | Correct on 95%+ of a 50-file real-world sample |
 | ENG-5 | M1 | P0 | done | ENG-4, DEC-5 | Manual delimiter override, re-index in background | Override applies without restart |
-| ENG-6 | M1 | P0 | todo | ENG-3 | Encoding detection: UTF-8, UTF-8 BOM, UTF-16, Latin-1 | Encoding and BOM round-trip on save |
+| ENG-6 | M1 | P0 | done | ENG-3 | Encoding detection: UTF-8, UTF-8 BOM, UTF-16, Latin-1 | Encoding and BOM round-trip on save |
 | ENG-7 | M1 | P1 | todo | ENG-4 | Header row detection with toggle | User can flip "first row is header" |
 | GRID-3 | M1 | P0 | todo | GRID-1 | Keyboard navigation: arrows, Tab, Enter, Shift variants, Ctrl+Home/End, PgUp/PgDn | Matches LibreOffice on the side-by-side checklist |
 | GRID-4 | M1 | P0 | todo | GRID-1 | Cell, range, row, and column selection | Click, Shift+click, drag, header click all work |
@@ -80,6 +80,17 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-06 ENG-6:** decisions:
+  - "Latin-1" is handled as Windows-1252. Real "Latin-1" files usually are; it shows €/“”/– in 0x80–0x9F, and all 256 byte values round-trip (tested).
+  - Non-UTF-8 files are decoded at open into a UTF-8 copy in `~/.cache/bricks/` (SP-4's lean). The copy is mapped and then unlinked, so nothing is left behind even after a crash. Measured: 200 MB of UTF-16 opens in 184 ms and indexes by 199 ms; saving it with 1,000 edits takes 427 ms.
+  - The save re-encodes on the way out (`csv_engine::EncodeWriter`), keeping the BOM. Verification decodes the result the same way. A character the encoding can't hold (e.g. 東 in Windows-1252) fails the save with a message naming it, and the original is untouched.
+  - New dependency: `encoding_rs` in csv-engine (and as a dev dependency in file-format). UTF-16 is encoded by hand, because `encoding_rs` only decodes it.
+  - Limits:
+    - UTF-16 without a BOM is detected by the pattern of zero bytes.
+    - Malformed UTF-16 (lone surrogates) shows and saves as U+FFFD.
+    - For decoded files, "file changed on disk" can't detect changes to the original, because the app reads the cached copy.
+    - A Windows-1252 file whose first 64 KiB is plain ASCII is read as UTF-8. That's harmless while later bytes aren't edited, since untouched rows copy through as raw bytes, but such bytes display as U+FFFD.
+  - The ENG-3 nasty-corpus test now opens files the same way as the app, and covers all 13 files, including `utf16le.csv`.
 - **2026-10-06 ENG-5:** decisions:
   - The override is a header-bar dropdown: Auto, Comma, Tab, Semicolon, Pipe. Switching reuses the open file mapping with a new index (23 µs on the UI thread) and re-indexes on a worker thread (19.1M rows in 131 ms with the file cached), cancelling any index build still running. The choice persists across saves.
   - Switching is refused while edits are unsaved, and the dropdown is disabled with a tooltip, because edits are tied to the columns the old delimiter produced.

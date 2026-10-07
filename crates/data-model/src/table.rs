@@ -3,8 +3,8 @@
 
 use crate::{CellRef, Col, EditOverlay, Row, RowId};
 use csv_engine::{
-    detect_dialect, split_fields, Dialect, Field, RowIndex, Source, SparseRowIndex,
-    DETECT_SAMPLE_BYTES,
+    detect_dialect, open_text, split_fields, Dialect, Encoding, Field, RowIndex, Source,
+    SparseRowIndex, DETECT_SAMPLE_BYTES,
 };
 use std::borrow::Cow;
 use std::ops::Range;
@@ -135,33 +135,43 @@ pub trait TableSource {
 
 /// A CSV file read through its row index (ADR 0002), with cell edits in an overlay on top
 /// (ADR 0003). Edits never touch the file; they reach disk only through save (SAVE-1).
+/// Text is always UTF-8 here; files in other encodings are decoded at open (ENG-6).
 pub struct CsvTable {
     pub(crate) index: Arc<SparseRowIndex>,
     pub(crate) dialect: Dialect,
+    pub(crate) encoding: Encoding,
     pub(crate) overlay: EditOverlay,
     spans: Vec<Range<u64>>,
     fields: Vec<Field>,
 }
 
 impl CsvTable {
+    /// A table over an index of UTF-8 text.
     pub fn new(index: Arc<SparseRowIndex>, dialect: Dialect) -> Self {
+        Self::with_encoding(index, dialect, Encoding::UTF8)
+    }
+
+    /// A table whose source was decoded from `encoding`; saves encode back to it.
+    pub fn with_encoding(index: Arc<SparseRowIndex>, dialect: Dialect, encoding: Encoding) -> Self {
         Self {
             index,
             dialect,
+            encoding,
             overlay: EditOverlay::default(),
             spans: Vec::new(),
             fields: Vec::new(),
         }
     }
 
-    /// Map `path` and pick its dialect. Rows appear as the caller builds the index
-    /// (`index().build`, normally on a worker thread).
+    /// Map `path`, detect its encoding (decoding to UTF-8 if needed), and pick its dialect.
+    /// Rows appear as the caller builds the index (`index().build`, normally on a worker).
     pub fn open(path: &Path, choice: DelimiterChoice) -> std::io::Result<Self> {
-        let source = Source::open(path)?;
+        let (source, encoding) = open_text(path)?;
         let dialect = dialect_for(&source, choice);
-        Ok(Self::new(
+        Ok(Self::with_encoding(
             SparseRowIndex::new(Arc::new(source), &dialect),
             dialect,
+            encoding,
         ))
     }
 
@@ -173,7 +183,16 @@ impl CsvTable {
         }
         let source = self.index.source().clone();
         let dialect = dialect_for(&source, choice);
-        Ok(Self::new(SparseRowIndex::new(source, &dialect), dialect))
+        Ok(Self::with_encoding(
+            SparseRowIndex::new(source, &dialect),
+            dialect,
+            self.encoding,
+        ))
+    }
+
+    /// The file's encoding on disk.
+    pub fn encoding(&self) -> Encoding {
+        self.encoding
     }
 
     pub fn index(&self) -> &Arc<SparseRowIndex> {

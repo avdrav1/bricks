@@ -4,6 +4,7 @@
 //! `data-model` treats as the authoritative raw value.
 
 mod detect;
+mod encoding;
 mod fields;
 mod index;
 mod source;
@@ -11,6 +12,7 @@ mod source;
 mod testutil;
 
 pub use detect::{detect_dialect, DETECT_SAMPLE_BYTES};
+pub use encoding::{detect_encoding, open_text, open_text_as, Charset, EncodeWriter, Encoding};
 pub use fields::{encode_field, split_fields, Field};
 pub use index::{IndexError, SparseRowIndex, STRIDE};
 pub use source::Source;
@@ -43,15 +45,6 @@ pub enum LineEnding {
 
 /// Delimiters V0.1 must detect (spec section 6).
 pub const CANDIDATE_DELIMITERS: [u8; 4] = *b",\t;|";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Encoding {
-    Utf8,
-    Utf8Bom,
-    Utf16Le,
-    Utf16Be,
-    Latin1,
-}
 
 /// Maps physical row numbers (file order) to byte ranges in the source file.
 ///

@@ -1,20 +1,17 @@
 //! ENG-3 acceptance: the nasty corpus parses with no row misalignment.
 //!
 //! Generates the corpus with the real generator (`scripts/gen_corpus.py --max-mb 0`), so this
-//! runs in CI without `corpus/`. For every file: the row spans tile the file exactly (no byte
-//! lost, duplicated, or split across rows), and every row's field values match.
-//!
-//! `utf16le.csv` is excluded: it is not ASCII-compatible, and per SP-4 ENG-6 transcodes
-//! such files before indexing. Any other new nasty file must be added here.
+//! runs in CI without `corpus/`. Each file is opened the way the app opens it (`open_text`:
+//! encoding detected, non-UTF-8 decoded, ENG-6). For every file: the row spans tile the text
+//! exactly (no byte lost, duplicated, or split across rows), and every row's field values
+//! match. Every nasty file must be listed here.
 
-use csv_engine::{Dialect, RowIndex, Source, SparseRowIndex};
+use csv_engine::{open_text, Dialect, RowIndex, SparseRowIndex};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-
-const EXCLUDED: &[&str] = &["utf16le.csv"];
 
 struct Dir(PathBuf);
 
@@ -42,9 +39,10 @@ fn generate() -> Dir {
 }
 
 fn parse(path: &Path, delimiter: u8) -> Vec<Vec<Vec<u8>>> {
-    let bytes = std::fs::read(path).unwrap();
+    let (source, _) = open_text(path).unwrap();
+    let len = source.bytes().len() as u64;
     let index = SparseRowIndex::new(
-        Arc::new(Source::open(path).unwrap()),
+        Arc::new(source),
         &Dialect {
             delimiter,
             ..Dialect::default()
@@ -65,12 +63,7 @@ fn parse(path: &Path, delimiter: u8) -> Vec<Vec<Vec<u8>>> {
         );
         pos = s.end;
     }
-    assert_eq!(
-        pos,
-        bytes.len() as u64,
-        "{}: rows do not reach the end",
-        path.display()
-    );
+    assert_eq!(pos, len, "{}: rows do not reach the end", path.display());
 
     let mut fields = Vec::new();
     (0..index.row_count())
@@ -101,7 +94,7 @@ fn nasty_corpus_parses_with_no_row_misalignment() {
         (
             "latin1.csv",
             b',',
-            &[&[b"name"], &[b"Jos\xe9"], &[b"M\xfcller"]],
+            &[&[b"name"], &[b"Jos\xc3\xa9"], &[b"M\xc3\xbcller"]], // decoded from Windows-1252
         ),
         (
             "leading_zeros.csv",
@@ -144,6 +137,7 @@ fn nasty_corpus_parses_with_no_row_misalignment() {
             &[&[b"a", b"b", b"c"], &[b"1,5", b"2", b"3"]],
         ),
         ("tab.tsv", b'\t', &[&[b"a", b"b"], &[b"1", b"2"]]),
+        ("utf16le.csv", b',', &[&[b"a", b"b"], &[b"1", b"2"]]),
     ];
     for (name, delimiter, want) in cases {
         let got = parse(&nasty.join(name), *delimiter);
@@ -158,14 +152,6 @@ fn nasty_corpus_parses_with_no_row_misalignment() {
         .unwrap()
         .map(|e| e.unwrap().file_name().into_string().unwrap())
         .collect();
-    let covered: BTreeSet<String> = cases
-        .iter()
-        .map(|c| c.0)
-        .chain(EXCLUDED.iter().copied())
-        .map(str::to_owned)
-        .collect();
-    assert_eq!(
-        on_disk, covered,
-        "every nasty file is checked or explicitly excluded"
-    );
+    let covered: BTreeSet<String> = cases.iter().map(|c| c.0.to_owned()).collect();
+    assert_eq!(on_disk, covered, "every nasty file is checked");
 }

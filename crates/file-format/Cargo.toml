@@ -16,3 +16,6 @@ workspace = true
 [lib]
 # `cargo bench` runs only app/benches/corpus.rs (BENCH-1).
 bench = false
+
+[dev-dependencies]
+encoding_rs = "0.8.35"

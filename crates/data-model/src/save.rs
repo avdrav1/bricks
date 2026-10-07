@@ -4,7 +4,7 @@
 //! line ending.
 
 use crate::{Col, CsvTable, RowId};
-use csv_engine::{encode_field, split_fields, Dialect, Field, RowIndex, SparseRowIndex};
+use csv_engine::{encode_field, split_fields, Dialect, Encoding, Field, RowIndex, SparseRowIndex};
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::sync::Arc;
@@ -16,6 +16,7 @@ const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
 pub struct SaveJob {
     index: Arc<SparseRowIndex>,
     dialect: Dialect,
+    encoding: Encoding,
     /// Edited rows in file order.
     edits: Vec<(u64, BTreeMap<Col, Box<str>>)>,
 }
@@ -47,6 +48,7 @@ impl CsvTable {
         Ok(SaveJob {
             index: self.index.clone(),
             dialect: self.dialect,
+            encoding: self.encoding,
             edits,
         })
     }
@@ -73,6 +75,12 @@ impl SaveJob {
     /// The dialect the file was read with; the save writes the same one.
     pub fn dialect(&self) -> &Dialect {
         &self.dialect
+    }
+
+    /// The file's encoding on disk. [`SaveJob::write_to`] writes UTF-8; the caller encodes
+    /// (`csv_engine::EncodeWriter`) when this is anything else.
+    pub fn encoding(&self) -> Encoding {
+        self.encoding
     }
 
     /// Rows the saved file will have.

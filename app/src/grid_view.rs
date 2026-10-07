@@ -375,6 +375,14 @@ impl GridView {
             .reread(choice)
     }
 
+    pub fn encoding(&self) -> csv_engine::Encoding {
+        self.imp()
+            .table
+            .borrow()
+            .as_ref()
+            .map_or(csv_engine::Encoding::UTF8, |t| t.encoding())
+    }
+
     pub fn delimiter(&self) -> u8 {
         self.imp()
             .table
