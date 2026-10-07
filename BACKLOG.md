@@ -35,7 +35,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | EDIT-1 | M0 | P0 | done | DEC-3, ENG-2 | Single-cell edit stored in overlay | Edit visible immediately; source file untouched |
 | SAVE-1 | M0 | P0 | done | EDIT-1 | Atomic save: temp file, verify, rename | kill -9 mid-save leaves original intact; output byte-identical except edited cells |
 | BENCH-1 | M0 | P0 | done | INFRA-1, INFRA-2, ENG-1 | Benchmark harness over the corpus | `cargo bench` runs in CI and prints the docs/BENCHMARKS.md table |
-| ENG-4 | M1 | P0 | todo | ENG-3 | Auto-detect delimiter: comma, tab, semicolon, pipe | Correct on 95%+ of a 50-file real-world sample |
+| ENG-4 | M1 | P0 | done | ENG-3 | Auto-detect delimiter: comma, tab, semicolon, pipe | Correct on 95%+ of a 50-file real-world sample |
 | ENG-5 | M1 | P0 | todo | ENG-4, DEC-5 | Manual delimiter override, re-index in background | Override applies without restart |
 | ENG-6 | M1 | P0 | todo | ENG-3 | Encoding detection: UTF-8, UTF-8 BOM, UTF-16, Latin-1 | Encoding and BOM round-trip on save |
 | ENG-7 | M1 | P1 | todo | ENG-4 | Header row detection with toggle | User can flip "first row is header" |
@@ -80,6 +80,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-06 ENG-4:** the 50-file sample is listed in `scripts/delimiter_sample.tsv`: 18 comma, 14 semicolon, 12 tab, 6 pipe, all from public portals. `scripts/fetch_delimiter_sample.py` downloads the first 256 KiB of each into `corpus/realworld/` (gitignored; no third-party data is committed). I set each label by reading the file; the fetch script cross-checks it with Python's `csv` module, and all 50 agree. A few sources are live feeds, so their content changes; their format doesn't. The detector got 50/50 correct on the first run, with no tuning against the sample. The real-world test is `#[ignore]` because it needs network access to fetch the sample, so CI runs only the unit tests. Detection reads the first 64 KiB, scores up to 200 rows, and skips `#` comment lines while scoring. The delimiter override (ENG-5) is the fallback when detection is wrong.
 - **2026-10-06 BENCH-1:** the harness is `app/benches/corpus.rs` (`harness = false`), so it can launch the real app binary for the rows that need a window. It reads rows and targets from `docs/BENCHMARKS.md`; a new row prints "no measurement for this row yet" until code for it is added. CI has a separate `bench` job that generates the 1 GB corpus. On the runner (4 threads, 16 GiB, no display) it measured index 2.61 s and save 6.63 s, and printed the four window rows as skipped. Library and binary targets set `bench = false`, so `cargo bench` prints only the table. Not done: storing results per commit (the old plan's M0-03 wording; not in this criterion).
 - **2026-10-06 SAVE-1:** decisions:
   - The save writes untouched rows as raw byte ranges. In an edited row, untouched fields keep their exact bytes (quoting included) and so does the row's line ending; only edited cells are encoded, with minimal quoting.

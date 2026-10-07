@@ -70,6 +70,11 @@ impl Write for Counting<'_> {
 }
 
 impl SaveJob {
+    /// The dialect the file was read with; the save writes the same one.
+    pub fn dialect(&self) -> &Dialect {
+        &self.dialect
+    }
+
     /// Rows the saved file will have.
     pub fn row_count(&self) -> u64 {
         self.index.row_count()

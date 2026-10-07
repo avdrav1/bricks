@@ -39,6 +39,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo test --release --workspace -- --ignored  # perf acceptance tests (timing asserted in release only)
 python3 scripts/gen_corpus.py            # builds corpus/ (gitignored)
+python3 scripts/fetch_delimiter_sample.py  # 50 real-world files into corpus/realworld/ (ENG-4 test)
 python3 -m unittest discover -s scripts  # script tests (corpus generator)
 cargo bench                              # prints the docs/BENCHMARKS.md table (needs corpus/)
 python3 scripts/backlog.py next|status   # backlog helper

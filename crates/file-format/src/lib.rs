@@ -3,7 +3,7 @@
 //! directory. A crash or `kill -9` at any point leaves either the old file or the new one,
 //! never a mix. The rename also keeps the app's open mapping of the old file valid (ADR 0002).
 
-use csv_engine::{Dialect, RowIndex, Source, SparseRowIndex};
+use csv_engine::{RowIndex, Source, SparseRowIndex};
 use data_model::{SaveJob, SaveStats};
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Write};
@@ -94,7 +94,7 @@ where
 
 /// Save a table to `dest` (usually the file it was opened from). Verification re-indexes the
 /// written file and checks its size and row count against what was written.
-pub fn save_csv(dest: &Path, job: &SaveJob, dialect: &Dialect) -> Result<SaveStats, SaveError> {
+pub fn save_csv(dest: &Path, job: &SaveJob) -> Result<SaveStats, SaveError> {
     let stats = std::cell::Cell::new(None);
     save_atomic(
         dest,
@@ -112,7 +112,7 @@ pub fn save_csv(dest: &Path, job: &SaveJob, dialect: &Dialect) -> Result<SaveSta
                     written.bytes
                 ));
             }
-            let index = SparseRowIndex::new(Arc::new(source), dialect);
+            let index = SparseRowIndex::new(Arc::new(source), job.dialect());
             index
                 .build(&AtomicBool::new(false))
                 .map_err(|e| e.to_string())?;

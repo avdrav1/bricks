@@ -170,7 +170,7 @@ fn measure_all(corpus: &Path) -> HashMap<&'static str, Measured> {
         table.set_cell(at, format!("edit {k}"));
     }
     let t = Instant::now();
-    file_format::save_csv(&copy, &table.save_job().unwrap(), &Dialect::default()).unwrap();
+    file_format::save_csv(&copy, &table.save_job().unwrap()).unwrap();
     let s = t.elapsed().as_secs_f64();
     drop(table);
     std::fs::remove_file(&copy).unwrap();

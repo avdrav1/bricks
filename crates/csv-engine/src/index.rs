@@ -105,6 +105,24 @@ impl Scanner {
     }
 }
 
+/// The rows of `bytes`, terminators included, split with the index's quote rules. The last
+/// row may lack a terminator. Used where a whole index is not needed (dialect detection).
+pub(crate) fn rows<'a>(bytes: &'a [u8], dialect: &Dialect) -> impl Iterator<Item = &'a [u8]> + 'a {
+    let mut scanner = Scanner::new(dialect);
+    let mut pos = 0;
+    std::iter::from_fn(move || {
+        if pos >= bytes.len() {
+            return None;
+        }
+        let start = pos;
+        let end = scanner
+            .next_row_end(bytes, &mut pos, bytes.len())
+            .map_or(bytes.len(), |nl| nl + 1);
+        pos = end;
+        Some(&bytes[start..end])
+    })
+}
+
 /// Row index that fills in while [`SparseRowIndex::build`] runs on a worker thread.
 /// Readers on other threads see every row counted by [`RowIndex::row_count`].
 pub struct SparseRowIndex {

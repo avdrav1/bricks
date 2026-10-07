@@ -10,7 +10,7 @@
 
 mod grid_view;
 
-use csv_engine::{Dialect, Source, SparseRowIndex};
+use csv_engine::{detect_dialect, Source, SparseRowIndex, DETECT_SAMPLE_BYTES};
 use data_model::{CsvTable, SaveStats};
 use grid_view::{GridView, ROW_H};
 use gtk::{glib, prelude::*};
@@ -80,9 +80,7 @@ fn main() -> glib::ExitCode {
             return glib::ExitCode::from(2);
         }
     };
-    // Comma until delimiter detection (ENG-4).
-    let dialect = Dialect::default();
-    let table = match open_table(&args.file, dialect) {
+    let table = match open_table(&args.file) {
         Ok(t) => t,
         Err(e) => {
             eprintln!("spreadsheet: cannot open {}: {e}", args.file.display());
@@ -98,16 +96,20 @@ fn main() -> glib::ExitCode {
     let table = RefCell::new(Some(table));
     app.connect_activate(move |app| {
         if let Some(table) = table.take() {
-            build_window(app, &args, table, dialect);
+            build_window(app, &args, table);
         }
     });
     app.run_with_args::<&str>(&[])
 }
 
-/// Map `path` and start indexing it off the UI thread; rows become readable as it goes.
-/// Indexing moves onto the shared job pool when ENG-8 builds it (ADR 0005).
-fn open_table(path: &Path, dialect: Dialect) -> std::io::Result<CsvTable> {
-    let index = SparseRowIndex::new(Arc::new(Source::open(path)?), &dialect);
+/// Map `path`, detect its delimiter from the first bytes (ENG-4), and start indexing off the
+/// UI thread; rows become readable as it goes. Indexing moves onto the shared job pool when
+/// ENG-8 builds it (ADR 0005).
+fn open_table(path: &Path) -> std::io::Result<CsvTable> {
+    let source = Source::open(path)?;
+    let bytes = source.bytes();
+    let dialect = detect_dialect(&bytes[..bytes.len().min(DETECT_SAMPLE_BYTES)]);
+    let index = SparseRowIndex::new(Arc::new(source), &dialect);
     std::thread::Builder::new().name("index".into()).spawn({
         let index = index.clone();
         move || index.build(&AtomicBool::new(false))
@@ -115,7 +117,7 @@ fn open_table(path: &Path, dialect: Dialect) -> std::io::Result<CsvTable> {
     Ok(CsvTable::new(index, dialect))
 }
 
-fn build_window(app: &gtk::Application, args: &Args, table: CsvTable, dialect: Dialect) {
+fn build_window(app: &gtk::Application, args: &Args, table: CsvTable) {
     let vadj = gtk::Adjustment::new(0.0, 0.0, 0.0, ROW_H, 0.0, 0.0);
     let hadj = gtk::Adjustment::new(0.0, 0.0, 0.0, 30.0, 0.0, 0.0);
     let grid = GridView::new(table, &vadj, &hadj);
@@ -180,7 +182,7 @@ fn build_window(app: &gtk::Application, args: &Args, table: CsvTable, dialect: D
             use gtk::gdk::{Key, ModifierType};
             if mods.contains(ModifierType::CONTROL_MASK) && matches!(key, Key::s | Key::S) {
                 if let Some(grid) = grid.upgrade() {
-                    start_save(&grid, &path, dialect, &save);
+                    start_save(&grid, &path, &save);
                 }
                 return glib::Propagation::Stop;
             }
@@ -222,7 +224,7 @@ fn build_window(app: &gtk::Application, args: &Args, table: CsvTable, dialect: D
                 );
             }
             was_complete = complete;
-            finish_save(&grid, &path, dialect, &save);
+            finish_save(&grid, &path, &save);
             window.set_title(Some(&title(&name, &grid, &save.borrow())));
             glib::ControlFlow::Continue
         }
@@ -280,7 +282,7 @@ enum SaveState {
 
 /// Ctrl+S: write the table to its own file on a worker thread (save is atomic, SAVE-1).
 /// Editing is paused until it finishes, so no edit can be lost between snapshot and reopen.
-fn start_save(grid: &GridView, path: &Path, dialect: Dialect, save: &RefCell<SaveState>) {
+fn start_save(grid: &GridView, path: &Path, save: &RefCell<SaveState>) {
     if matches!(*save.borrow(), SaveState::Saving(_)) || grid.edit_count() == 0 {
         return;
     }
@@ -298,7 +300,7 @@ fn start_save(grid: &GridView, path: &Path, dialect: Dialect, save: &RefCell<Sav
         .name("save".into())
         .spawn(move || {
             let t = Instant::now();
-            let r = file_format::save_csv(&path, &job, &dialect).map_err(|e| e.to_string());
+            let r = file_format::save_csv(&path, &job).map_err(|e| e.to_string());
             let _ = tx.send(r.map(|s| (s, t.elapsed())));
         });
     *save.borrow_mut() = match spawned {
@@ -312,7 +314,7 @@ fn start_save(grid: &GridView, path: &Path, dialect: Dialect, save: &RefCell<Sav
 
 /// When a save has finished: reopen the saved file (its edits are now on disk) or report
 /// the error with the edits still in memory.
-fn finish_save(grid: &GridView, path: &Path, dialect: Dialect, save: &RefCell<SaveState>) {
+fn finish_save(grid: &GridView, path: &Path, save: &RefCell<SaveState>) {
     let result = match &*save.borrow() {
         SaveState::Saving(rx) => match rx.try_recv() {
             Ok(r) => r,
@@ -323,7 +325,7 @@ fn finish_save(grid: &GridView, path: &Path, dialect: Dialect, save: &RefCell<Sa
     };
     grid.set_saving(false);
     let next = match result.and_then(|done| {
-        open_table(path, dialect)
+        open_table(path)
             .map(|t| (done, t))
             .map_err(|e| e.to_string())
     }) {

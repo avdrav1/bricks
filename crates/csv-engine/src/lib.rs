@@ -3,12 +3,14 @@
 //! Invariant: the engine never rewrites a field's bytes. What it reads is what
 //! `data-model` treats as the authoritative raw value.
 
+mod detect;
 mod fields;
 mod index;
 mod source;
 #[cfg(test)]
 mod testutil;
 
+pub use detect::{detect_dialect, DETECT_SAMPLE_BYTES};
 pub use fields::{encode_field, split_fields, Field};
 pub use index::{IndexError, SparseRowIndex, STRIDE};
 pub use source::Source;
@@ -70,12 +72,6 @@ pub trait RowIndex: Send + Sync {
         rows: std::ops::Range<u64>,
         out: &mut Vec<std::ops::Range<u64>>,
     ) -> Result<usize, IndexError>;
-}
-
-/// Guess the dialect from a sample of the file's first bytes. ENG-4.
-pub fn detect_dialect(_sample: &[u8]) -> Dialect {
-    // TODO(ENG-4): score CANDIDATE_DELIMITERS by column-count consistency.
-    Dialect::default()
 }
 
 #[cfg(test)]
