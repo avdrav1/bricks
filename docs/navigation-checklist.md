@@ -1,6 +1,6 @@
-# Keyboard navigation checklist (GRID-3)
+# Keyboard navigation and selection checklist (GRID-3, GRID-4)
 
-Each row is LibreOffice Calc 26.8.0.3's behavior, recorded by `scripts/lo_navigation.py` on a 200-row, 6-column sheet full of data with default settings. `cargo test -p grid --test lo_parity` replays every row through the grid's navigation and requires the same cursor cell and selection. Page Up/Down replay with LibreOffice's page height (the rows one Page Down moved from A1), since the two apps show different numbers of rows per screen.
+Each row is LibreOffice Calc 26.8.0.3's behavior, recorded by `scripts/lo_navigation.py` on a 200-row, 6-column sheet full of data with default settings. `cargo test -p grid --test lo_parity` replays every row through the grid's navigation and requires the same cursor cell and selection. Page Up/Down replay with LibreOffice's page height (the rows one Page Down moved from A1), since the two apps show different numbers of rows per screen. Whole-row and whole-column selections run to the sheet's edge in Calc (column XFD, row 1048576); the replay compares them within the data, where this grid's sheet ends.
 
 | Check | Start | Keys | LibreOffice cursor | LibreOffice selection |
 | --- | --- | --- | --- | --- |
@@ -43,5 +43,15 @@ Each row is LibreOffice Calc 26.8.0.3's behavior, recorded by `scripts/lo_naviga
 | Shift+Ctrl+End selects to the last data cell | C3 | SHIFT+CTRL+END | C3 | C3:F200 |
 | Shift+Page Down extends one screen | C3 | SHIFT+PAGEDOWN | C3 | C3:C25 |
 | Shift+Page Up extends one screen up | C80 | SHIFT+PAGEUP | C80 | C58:C80 |
+| Shift+Space selects the cursor's row | C3 | SHIFT+SPACE | C3 | A3:XFD3 |
+| Ctrl+Space selects the cursor's column | C3 | CTRL+SPACE | C3 | C1:C1048576 |
+| Shift+Ctrl+Space selects everything | C3 | SHIFT+CTRL+SPACE | C3 | A1:F200 |
+| Shift+Down after selecting a row adds rows | C3 | SHIFT+SPACE, SHIFT+DOWN | C3 | A3:XFD4 |
+| Shift+Right after selecting a column adds columns | C3 | CTRL+SPACE, SHIFT+RIGHT | C3 | C1:D1048576 |
+| An arrow key after selecting a row collapses it | C3 | SHIFT+SPACE, DOWN | C4 | C4:C4 |
+| Shift+Left after selecting a row | C3 | SHIFT+SPACE, SHIFT+LEFT | C3 | A3:XFC3 |
+| Shift+Down after selecting a column | C3 | CTRL+SPACE, SHIFT+DOWN | C3 | C1:C1048576 |
+| Shift+Up after selecting a column | C3 | CTRL+SPACE, SHIFT+UP | C3 | C1:C1048575 |
+| Tab with everything selected moves within it | C3 | SHIFT+CTRL+SPACE, TAB | D3 | A1:F200 |
 
-Out of scope here: Ctrl+arrow (jump to data edges), Alt+Page Up/Down (screen left/right), and moving past the last row or column of data (Calc has empty cells there; this grid shows only the file's rows and columns).
+Out of scope here: Ctrl+arrow (jump to data edges), Alt+Page Up/Down (screen left/right), and moving past the last row or column of data (Calc has empty cells there; this grid shows only the file's rows and columns). Mouse selection (click, Shift+click, drag, header clicks; GRID-4) cannot be driven through LibreOffice's UI-test API; it follows the same model and is covered by unit tests in `crates/grid/src/nav.rs`.

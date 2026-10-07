@@ -64,6 +64,16 @@ SCENARIOS = [
     ("shift-ctrl-end", "Shift+Ctrl+End selects to the last data cell", "C3", "SHIFT+CTRL+END"),
     ("shift-page-down", "Shift+Page Down extends one screen", "C3", "SHIFT+PAGEDOWN"),
     ("shift-page-up", "Shift+Page Up extends one screen up", "C80", "SHIFT+PAGEUP"),
+    ("shift-space", "Shift+Space selects the cursor's row", "C3", "SHIFT+SPACE"),
+    ("ctrl-space", "Ctrl+Space selects the cursor's column", "C3", "CTRL+SPACE"),
+    ("shift-ctrl-space", "Shift+Ctrl+Space selects everything", "C3", "SHIFT+CTRL+SPACE"),
+    ("rows-extend", "Shift+Down after selecting a row adds rows", "C3", "SHIFT+SPACE SHIFT+DOWN"),
+    ("cols-extend", "Shift+Right after selecting a column adds columns", "C3", "CTRL+SPACE SHIFT+RIGHT"),
+    ("row-then-arrow", "An arrow key after selecting a row collapses it", "C3", "SHIFT+SPACE DOWN"),
+    ("row-shift-left", "Shift+Left after selecting a row", "C3", "SHIFT+SPACE SHIFT+LEFT"),
+    ("col-shift-down", "Shift+Down after selecting a column", "C3", "CTRL+SPACE SHIFT+DOWN"),
+    ("col-shift-up", "Shift+Up after selecting a column", "C3", "CTRL+SPACE SHIFT+UP"),
+    ("all-then-tab", "Tab with everything selected moves within it", "C3", "SHIFT+CTRL+SPACE TAB"),
 ]
 
 
@@ -164,19 +174,23 @@ def main():
 
     doc_path = ROOT / "docs/navigation-checklist.md"
     with doc_path.open("w") as f:
-        f.write("# Keyboard navigation checklist (GRID-3)\n\n")
+        f.write("# Keyboard navigation and selection checklist (GRID-3, GRID-4)\n\n")
         f.write(f"Each row is LibreOffice Calc {version}'s behavior, recorded by `scripts/lo_navigation.py` "
                 f"on a {ROWS}-row, {COLS}-column sheet full of data with default settings. "
                 "`cargo test -p grid --test lo_parity` replays every row through the grid's navigation and "
                 "requires the same cursor cell and selection. Page Up/Down replay with LibreOffice's "
                 "page height (the rows one Page Down moved from A1), since the two apps show different "
-                "numbers of rows per screen.\n\n")
+                "numbers of rows per screen. Whole-row and whole-column selections run to the sheet's "
+                "edge in Calc (column XFD, row 1048576); the replay compares them within the data, where "
+                "this grid's sheet ends.\n\n")
         f.write("| Check | Start | Keys | LibreOffice cursor | LibreOffice selection |\n| --- | --- | --- | --- | --- |\n")
         for _, what, start, keys, cur, rng in rows:
             f.write(f"| {what} | {start} | {keys.replace(' ', ', ')} | {cur} | {rng} |\n")
         f.write("\nOut of scope here: Ctrl+arrow (jump to data edges), Alt+Page Up/Down (screen left/right), "
                 "and moving past the last row or column of data (Calc has empty cells there; this grid shows "
-                "only the file's rows and columns).\n")
+                "only the file's rows and columns). Mouse selection (click, Shift+click, drag, header "
+                "clicks; GRID-4) cannot be driven through LibreOffice's UI-test API; it follows the same "
+                "model and is covered by unit tests in `crates/grid/src/nav.rs`.\n")
     print(f"wrote {data.relative_to(ROOT)} and {doc_path.relative_to(ROOT)}")
 
 

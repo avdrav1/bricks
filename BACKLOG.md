@@ -40,7 +40,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | ENG-6 | M1 | P0 | done | ENG-3 | Encoding detection: UTF-8, UTF-8 BOM, UTF-16, Latin-1 | Encoding and BOM round-trip on save |
 | ENG-7 | M1 | P1 | todo | ENG-4 | Header row detection with toggle | User can flip "first row is header" |
 | GRID-3 | M1 | P0 | done | GRID-1 | Keyboard navigation: arrows, Tab, Enter, Shift variants, Ctrl+Home/End, PgUp/PgDn | Matches LibreOffice on the side-by-side checklist |
-| GRID-4 | M1 | P0 | todo | GRID-1 | Cell, range, row, and column selection | Click, Shift+click, drag, header click all work |
+| GRID-4 | M1 | P0 | done | GRID-1 | Cell, range, row, and column selection | Click, Shift+click, drag, header click all work |
 | GRID-5 | M1 | P0 | todo | GRID-1 | Resize columns and rows; double-click autofits column | Autofit samples visible rows only |
 | APP-1 | M1 | P0 | todo | DEC-1 | Open via native file dialog (xdg-desktop-portal) | Works under Hyprland, GNOME, KDE |
 | APP-2 | M1 | P0 | todo | ENG-1 | Status bar: row count, encoding, delimiter, save state | Row count updates while indexing streams |
@@ -80,6 +80,13 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-07 GRID-4:** mouse selection and whole rows/columns on GRID-3's model.
+  - The LibreOffice recording grew to 49 scenarios with Shift/Ctrl+Space (49/49 match). Calc runs whole rows and columns to the sheet edge (XFD, row 1048576); the replay maps cells near that edge onto the data edge. Shift+Ctrl+Space gives Calc's data area, which here is the whole table.
+  - Mouse clicks can't be driven through Calc's UITest API. Their behavior follows the same model (Shift+click and drag move only the far corner) and has unit tests. A header click puts the cursor in the first visible cell of that row or column [inferred from Calc, not recorded].
+  - Whole rows and columns are flagged in `Selection`, and `Selection::grow` keeps them reaching the edge while indexing finds more rows, or after a save reopens the file.
+  - The view never jumps along an axis the selection spans entirely (`Selection::reveal`). Without this, Ctrl+Space scrolled to the last row.
+  - Dragging past the body's edge autoscrolls every 40 ms, faster the further out the pointer is.
+  - Smoke test via Broadway in a headless browser on the 1 GB file (19.1M rows): click, Shift+click, drag, row-header Shift+click, column-header drag, corner, Ctrl/Shift+Space, autoscroll from row 57 to row 1, and double-click edit. Broadway doesn't report the pointer outside its window, so autoscroll was checked with the pointer over the column-header strip.
 - **2026-10-06 GRID-3:** the side-by-side checklist is recorded, not written by hand.
   - `scripts/lo_navigation.py` drives headless LibreOffice Calc 26.8 through UNO and its built-in UITest service: it sends 39 key sequences and reads back the cursor and selection. It writes `crates/grid/tests/data/lo_navigation.tsv` and `docs/navigation-checklist.md`.
   - `grid/tests/lo_parity.rs` replays every sequence through `grid::Selection` and must match LibreOffice: 39/39 do.

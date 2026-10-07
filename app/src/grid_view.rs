@@ -43,8 +43,14 @@ mod imp {
         pub editing: Cell<Option<(u64, u32)>>,
         /// A save is running; edits wait so none can be lost between snapshot and reopen.
         pub saving: Cell<bool>,
-        /// The cell cursor and selected range (GRID-3).
+        /// The cell cursor and selected range (GRID-3, GRID-4).
         pub selection: Cell<Selection>,
+        /// Table size the selection last saw, to grow whole rows/columns with indexing.
+        pub bounds_seen: Cell<Option<Bounds>>,
+        /// What the current mouse drag selects, and where the pointer is.
+        pub drag: Cell<Option<(Drag, f64, f64)>>,
+        /// Repeats the drag while the pointer is outside the body, scrolling toward it.
+        pub autoscroll: RefCell<Option<glib::SourceId>>,
     }
 
     #[glib::object_subclass]
@@ -105,6 +111,7 @@ mod imp {
 
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
             let obj = self.obj();
+            obj.bounds(); // grow whole rows/columns to what indexing found
             let (Some(vadj), Some(hadj)) = (self.vadj.borrow().clone(), self.hadj.borrow().clone())
             else {
                 return;
@@ -206,6 +213,12 @@ mod imp {
 
             // Row numbers.
             snapshot.append_color(&header_bg, &rect(0.0, HEADER_H, rh_w, body_h));
+            let mark = gdk::RGBA::new(accent.red(), accent.green(), accent.blue(), 0.25);
+            let (y0, y1) = (
+                clamp_y(HEADER_H + rows.row_y(tl.row)),
+                clamp_y(HEADER_H + rows.row_y(br.row) + ROW_H),
+            );
+            snapshot.append_color(&mark, &rect(0.0, y0, rh_w, y1 - y0));
             snapshot.push_clip(&rect(0.0, HEADER_H, rh_w, body_h));
             for r in visible {
                 buf.clear();
@@ -216,6 +229,11 @@ mod imp {
 
             // Column letters.
             snapshot.append_color(&header_bg, &rect(0.0, 0.0, w, HEADER_H));
+            let (x0, x1) = (
+                clamp_x(rh_w + cols.col_x(tl.col)),
+                clamp_x(rh_w + cols.col_x(br.col) + COL_W),
+            );
+            snapshot.append_color(&mark, &rect(x0, 0.0, x1 - x0, HEADER_H));
             snapshot.append_color(&line, &rect(0.0, HEADER_H - 1.0, w, 1.0));
             snapshot.append_color(&line, &rect(rh_w - 1.0, 0.0, 1.0, h));
             snapshot.push_clip(&rect(rh_w, 0.0, body_w, HEADER_H));
@@ -250,15 +268,42 @@ impl GridView {
         let click = gtk::GestureClick::new();
         click.connect_pressed({
             let g = g.downgrade();
-            move |_, n_press, x, y| {
+            move |gesture, n_press, x, y| {
                 let Some(g) = g.upgrade() else { return };
                 g.grab_focus();
                 if n_press == 2 {
                     g.begin_edit(x, y);
+                } else {
+                    let shift = gesture
+                        .current_event_state()
+                        .contains(gdk::ModifierType::SHIFT_MASK);
+                    g.mouse_down(x, y, shift);
                 }
             }
         });
         g.add_controller(click);
+        let drag = gtk::GestureDrag::new();
+        drag.connect_drag_update({
+            let g = g.downgrade();
+            move |gesture, dx, dy| {
+                let (Some(g), Some((x, y))) = (g.upgrade(), gesture.start_point()) else {
+                    return;
+                };
+                g.drag_to(x + dx, y + dy);
+            }
+        });
+        drag.connect_drag_end({
+            let g = g.downgrade();
+            move |_, _, _| {
+                if let Some(g) = g.upgrade() {
+                    g.imp().drag.set(None);
+                    if let Some(id) = g.imp().autoscroll.take() {
+                        id.remove();
+                    }
+                }
+            }
+        });
+        g.add_controller(drag);
         let keys = gtk::EventControllerKey::new();
         keys.connect_key_pressed({
             let g = g.downgrade();
@@ -291,17 +336,152 @@ impl GridView {
     }
 
     /// What navigation moves within: the rows indexed so far, the widest row seen, and one
-    /// screen of whole rows.
+    /// screen of whole rows. Whole-row and whole-column selections follow it as it grows.
     fn bounds(&self) -> Bounds {
-        let (_, body_h) = self.imp().body_size();
-        Bounds {
+        let imp = self.imp();
+        let (_, body_h) = imp.body_size();
+        let b = Bounds {
             rows: self.row_count(),
-            cols: self.imp().cache.borrow().col_count(),
+            cols: imp.cache.borrow().col_count(),
             page_rows: ((body_h / ROW_H).floor() as u64).max(1),
+        };
+        if let Some(old) = imp.bounds_seen.replace(Some(b)) {
+            if (old.rows, old.cols) != (b.rows, b.cols) {
+                let mut sel = imp.selection.get();
+                sel.grow(old, b);
+                imp.selection.set(sel);
+            }
+        }
+        b
+    }
+
+    /// The cell under widget point (`x`, `y`), clamped into the body and the table, and
+    /// the top-left visible cell.
+    fn cell_near(&self, x: f64, y: f64, b: Bounds) -> (grid::Cell, grid::Cell) {
+        let imp = self.imp();
+        let (body_w, body_h) = imp.body_size();
+        let (sx, sy) = (
+            imp.hadj.borrow().as_ref().map_or(0.0, |a| a.value()),
+            imp.vadj.borrow().as_ref().map_or(0.0, |a| a.value()),
+        );
+        let row = |y: f64| ((sy + y) / ROW_H).floor().max(0.0) as u64;
+        let col = |x: f64| ((sx + x) / COL_W).floor().max(0.0) as u32;
+        let at = |r: u64, c: u32| grid::Cell {
+            row: r.min(b.rows.saturating_sub(1)),
+            col: c.min(b.cols.saturating_sub(1)),
+        };
+        let x = (x - imp.row_header_w.get()).clamp(0.0, (body_w - 1.0).max(0.0));
+        let y = (y - HEADER_H).clamp(0.0, (body_h - 1.0).max(0.0));
+        (at(row(y), col(x)), at(row(0.0), col(0.0)))
+    }
+
+    /// A click (GRID-4): a cell, a row or column header, or the corner (everything).
+    /// Shift extends the selection; the cursor stays.
+    fn mouse_down(&self, x: f64, y: f64, shift: bool) {
+        let imp = self.imp();
+        let b = self.bounds();
+        if b.rows == 0 || b.cols == 0 {
+            return;
+        }
+        let (cell, top_left) = self.cell_near(x, y, b);
+        let mut sel = imp.selection.get();
+        let kind = match (x < imp.row_header_w.get(), y < HEADER_H) {
+            (true, true) => {
+                sel.select_all(b);
+                None
+            }
+            (true, false) => {
+                sel.click_row(cell.row, shift, top_left.col, b);
+                Some(Drag::Rows)
+            }
+            (false, true) => {
+                sel.click_col(cell.col, shift, top_left.row, b);
+                Some(Drag::Cols)
+            }
+            (false, false) if shift => {
+                sel.extend_to(cell);
+                Some(Drag::Cells)
+            }
+            (false, false) => {
+                sel = Selection::at(cell);
+                Some(Drag::Cells)
+            }
+        };
+        imp.selection.set(sel);
+        imp.drag.set(kind.map(|k| (k, x, y)));
+        self.queue_draw();
+    }
+
+    /// The pointer moved during a drag: stretch the selection to it, and keep scrolling
+    /// toward it while it is outside the body.
+    fn drag_to(&self, x: f64, y: f64) {
+        let imp = self.imp();
+        let Some((kind, _, _)) = imp.drag.get() else {
+            return;
+        };
+        imp.drag.set(Some((kind, x, y)));
+        self.drag_step();
+        if imp.autoscroll.borrow().is_none() {
+            let id = glib::timeout_add_local(std::time::Duration::from_millis(40), {
+                let g = self.downgrade();
+                move || match g.upgrade() {
+                    Some(g) if g.imp().drag.get().is_some() => {
+                        g.drag_step();
+                        glib::ControlFlow::Continue
+                    }
+                    Some(g) => {
+                        g.imp().autoscroll.take();
+                        glib::ControlFlow::Break
+                    }
+                    None => glib::ControlFlow::Break,
+                }
+            });
+            imp.autoscroll.replace(Some(id));
         }
     }
 
-    /// Apply a navigation key (GRID-3) and keep the moved cell in view.
+    fn drag_step(&self) {
+        let imp = self.imp();
+        let Some((kind, x, y)) = imp.drag.get() else {
+            return;
+        };
+        let (body_w, body_h) = imp.body_size();
+        let rh_w = imp.row_header_w.get();
+        // Past an edge: scroll that way, faster the further out the pointer is.
+        let push = |adj: &gtk::Adjustment, before: f64, after: f64| {
+            let over = if before < 0.0 { before } else { after.max(0.0) };
+            if over != 0.0 {
+                adj.set_value(adj.value() + over.signum() * (8.0 + over.abs().min(400.0)));
+            }
+        };
+        if kind != Drag::Cols {
+            if let Some(v) = imp.vadj.borrow().as_ref() {
+                push(v, y - HEADER_H, y - HEADER_H - body_h);
+            }
+        }
+        if kind != Drag::Rows {
+            if let Some(hz) = imp.hadj.borrow().as_ref() {
+                push(hz, x - rh_w, x - rh_w - body_w);
+            }
+        }
+        let b = self.bounds();
+        if b.rows == 0 || b.cols == 0 {
+            return;
+        }
+        let (cell, _) = self.cell_near(x, y, b);
+        let mut sel = imp.selection.get();
+        match kind {
+            Drag::Cells => sel.extend_to(cell),
+            Drag::Rows => sel.click_row(cell.row, true, 0, b),
+            Drag::Cols => sel.click_col(cell.col, true, 0, b),
+        }
+        if sel != imp.selection.get() {
+            imp.selection.set(sel);
+            self.queue_draw();
+        }
+    }
+
+    /// Apply a navigation key (GRID-3/GRID-4) and keep the moved cell in view.
     pub fn press(&self, key: Key, mods: Mods) {
         let imp = self.imp();
         let bounds = self.bounds();
@@ -313,12 +493,12 @@ impl GridView {
             let step = bounds.page_rows as f64 * ROW_H;
             vadj.set_value(vadj.value() + if key == Key::PageDown { step } else { -step });
         }
-        self.scroll_to(sel.moving_end());
+        self.scroll_to(sel.reveal());
         self.queue_draw();
     }
 
-    /// Scroll the least amount that shows `cell` whole.
-    fn scroll_to(&self, cell: grid::Cell) {
+    /// Scroll the least amount that shows the given row and column whole.
+    fn scroll_to(&self, (row, col): (Option<u64>, Option<u32>)) {
         let imp = self.imp();
         let (body_w, body_h) = imp.body_size();
         let reveal = |adj: &gtk::Adjustment, start: f64, size: f64, view: f64| {
@@ -328,16 +508,12 @@ impl GridView {
                 adj.set_value(start + size - view);
             }
         };
-        if let Some(v) = imp.vadj.borrow().as_ref() {
-            reveal(v, cell.row as f64 * ROW_H, ROW_H, body_h);
+        if let (Some(v), Some(row)) = (imp.vadj.borrow().as_ref(), row) {
+            reveal(v, row as f64 * ROW_H, ROW_H, body_h);
         }
-        if let Some(hz) = imp.hadj.borrow().as_ref() {
-            reveal(hz, f64::from(cell.col) * COL_W, COL_W, body_w);
+        if let (Some(hz), Some(col)) = (imp.hadj.borrow().as_ref(), col) {
+            reveal(hz, f64::from(col) * COL_W, COL_W, body_w);
         }
-    }
-
-    pub fn selection(&self) -> Selection {
-        self.imp().selection.get()
     }
 
     /// Open the cell editor on the cell under widget point (`x`, `y`), prefilled with the
@@ -556,8 +732,17 @@ impl GridView {
     }
 }
 
-/// Map a GDK key press to a navigation key (GRID-3). `None` lets it through (Ctrl+S, and
-/// Ctrl+arrows, which are not built yet).
+/// What a mouse drag stretches the selection over (GRID-4): cells, or whole rows/columns
+/// when it started on a header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Drag {
+    Cells,
+    Rows,
+    Cols,
+}
+
+/// Map a GDK key press to a navigation key (GRID-3/GRID-4). `None` lets it through (Ctrl+S,
+/// plain Space, and Ctrl+arrows, which are not built yet).
 fn nav_key(key: gdk::Key, state: gdk::ModifierType) -> Option<(Key, Mods)> {
     use gdk::Key as K;
     let mut mods = Mods {
@@ -579,9 +764,10 @@ fn nav_key(key: gdk::Key, state: gdk::ModifierType) -> Option<(Key, Mods)> {
         K::End | K::KP_End => Key::End,
         K::Page_Up | K::KP_Page_Up => Key::PageUp,
         K::Page_Down | K::KP_Page_Down => Key::PageDown,
+        K::space | K::KP_Space if mods.shift || mods.ctrl => Key::Space,
         _ => return None,
     };
-    if mods.ctrl && !matches!(nav, Key::Home | Key::End) {
+    if mods.ctrl && !matches!(nav, Key::Home | Key::End | Key::Space) {
         return None;
     }
     Some((nav, mods))
