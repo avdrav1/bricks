@@ -1,7 +1,7 @@
 //! What the grid reads: display text for blocks of rows, behind [`TableSource`] so the grid
 //! never touches the file (layers: source -> overlay -> view -> grid).
 
-use crate::{CellRef, Col, EditOverlay, Row, RowId};
+use crate::{CellRef, Col, Edit, EditOverlay, Row, RowId};
 use csv_engine::{
     detect_dialect, detect_header, open_text, split_fields, Dialect, Encoding, Field, RowIndex,
     Source, SparseRowIndex, DETECT_SAMPLE_BYTES,
@@ -247,14 +247,39 @@ impl CsvTable {
         RowId::source(row + self.first_row())
     }
 
-    /// Set a cell's raw value. Returns the previous edit, if any (for undo).
-    pub fn set_cell(&mut self, at: CellRef, raw: impl Into<Box<str>>) -> Option<Box<str>> {
-        self.overlay.set(at, raw)
+    /// Change the data (invariant 5): the one mutating entry point, so every change is an
+    /// operation that can be undone. Returns the inverse edit.
+    ///
+    /// ```
+    /// # fn f(t: &mut data_model::CsvTable, at: data_model::CellRef) {
+    /// let inverse = t.apply(data_model::Edit::set(at, "x"));
+    /// t.apply(inverse); // back as it was
+    /// # }
+    /// ```
+    ///
+    /// There is no other way in: the table has no public setters.
+    ///
+    /// ```compile_fail
+    /// # fn f(t: &mut data_model::CsvTable, at: data_model::CellRef) {
+    /// t.set_cell(at, "bypasses undo");
+    /// # }
+    /// ```
+    pub fn apply(&mut self, edit: Edit) -> Edit {
+        match edit {
+            Edit::Cell { at, value } => {
+                let before = match value {
+                    Some(v) => self.overlay.set(at, v),
+                    None => self.overlay.clear(at),
+                };
+                Edit::Cell { at, value: before }
+            }
+        }
     }
 
-    /// Drop a cell's edit so the source value shows again. Returns the removed edit.
-    pub fn clear_cell(&mut self, at: CellRef) -> Option<Box<str>> {
-        self.overlay.clear(at)
+    /// Where row `id` is shown, if it is one of the table's rows (the header row is not).
+    pub fn row_of(&self, id: RowId) -> Option<Row> {
+        let row = id.0.checked_sub(self.first_row())?;
+        (row < self.row_count()).then_some(row)
     }
 
     pub fn overlay(&self) -> &EditOverlay {
@@ -396,7 +421,11 @@ mod tests {
             row: table.row_id(1),
             col: 1,
         };
-        assert_eq!(table.set_cell(at, "Smith, \"Jo\""), None);
+        assert_eq!(
+            table.apply(Edit::set(at, "Smith, \"Jo\"")),
+            Edit::clear(at),
+            "the inverse of a first edit drops it"
+        );
         assert_eq!(row_text(&mut table, 1), ["1", "Smith, \"Jo\"", "00123"]);
         assert_eq!(table.cell_value(1, 1).as_deref(), Some("Smith, \"Jo\""));
         assert_eq!(
@@ -411,17 +440,21 @@ mod tests {
         );
 
         // Past the end of a short row: the row grows; the gap is empty.
-        table.set_cell(
+        table.apply(Edit::set(
             CellRef {
                 row: table.row_id(2),
                 col: 4,
             },
             "new",
-        );
+        ));
         assert_eq!(row_text(&mut table, 2), ["2", "Lee", "7", "", "new"]);
 
         // Clearing the edit restores the source value.
-        assert_eq!(table.clear_cell(at).as_deref(), Some("Smith, \"Jo\""));
+        assert_eq!(
+            table.apply(Edit::clear(at)),
+            Edit::set(at, "Smith, \"Jo\""),
+            "the inverse of a clear restores the edit"
+        );
         assert_eq!(row_text(&mut table, 1), ["1", "Smith, J", "00123"]);
 
         assert_eq!(
@@ -480,13 +513,13 @@ mod tests {
     #[test]
     fn override_waits_for_unsaved_edits() {
         let (path, mut table) = open(b"a,b\n1,2\n");
-        table.set_cell(
+        table.apply(Edit::set(
             CellRef {
                 row: table.row_id(1),
                 col: 0,
             },
             "x",
-        );
+        ));
         assert!(matches!(
             table.reread(DelimiterChoice::Fixed(b';')),
             Err(RereadError::UnsavedEdits(1))
@@ -517,13 +550,13 @@ mod tests {
         assert_eq!(row_text(&mut t, 0), ["1", "Ann"]);
         assert_eq!(t.cell_value(1, 1).as_deref(), Some("Bo"));
         // An edit to table row 0 lands on file row 1.
-        t.set_cell(
+        t.apply(Edit::set(
             CellRef {
                 row: t.row_id(0),
                 col: 1,
             },
             "Ana",
-        );
+        ));
 
         t.set_header(false);
         assert_eq!(t.row_count(), 3);
@@ -535,13 +568,13 @@ mod tests {
             "the edit stayed on its row"
         );
         // Renaming a column: edit the first row while it is data, then flip back.
-        t.set_cell(
+        t.apply(Edit::set(
             CellRef {
                 row: t.row_id(0),
                 col: 1,
             },
             "who",
-        );
+        ));
 
         t.set_header(true);
         assert_eq!(t.header_cell(1).as_deref(), Some("who"));

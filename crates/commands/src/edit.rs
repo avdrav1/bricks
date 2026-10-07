@@ -1,29 +1,33 @@
 //! Cell edits as reversible commands (invariant 5). The command stores the operation, not a
-//! snapshot: the cell, and the value to swap in.
+//! snapshot: one [`Edit`], swapped for its inverse each time it runs.
 
 use crate::Command;
-use data_model::{CellRef, CsvTable};
+use data_model::{CellRef, CsvTable, Edit};
 
-/// Set one cell's raw value, or with `None` clear its edit so the source value shows again.
-/// Applying and reverting are the same swap: each stores the value it replaced.
+/// Set one cell's raw value, or clear its edit so the source value shows again.
+/// Applying and reverting are the same swap: [`CsvTable::apply`] returns the inverse.
 pub struct SetCell {
-    at: CellRef,
-    value: Option<Box<str>>,
+    edit: Edit,
 }
 
 impl SetCell {
     pub fn new(at: CellRef, value: impl Into<Box<str>>) -> Self {
         Self {
-            at,
-            value: Some(value.into()),
+            edit: Edit::set(at, value),
+        }
+    }
+
+    pub fn clear(at: CellRef) -> Self {
+        Self {
+            edit: Edit::clear(at),
         }
     }
 
     fn swap(&mut self, table: &mut CsvTable) {
-        self.value = match self.value.take() {
-            Some(v) => table.set_cell(self.at, v),
-            None => table.clear_cell(self.at),
-        };
+        // The placeholder is never applied; it only stands in while `apply` runs.
+        let at = self.edit.cell();
+        let edit = std::mem::replace(&mut self.edit, Edit::clear(at));
+        self.edit = table.apply(edit);
     }
 }
 
@@ -39,6 +43,10 @@ impl Command<CsvTable> for SetCell {
     fn label(&self) -> &str {
         "Edit cell"
     }
+
+    fn focus(&self) -> Option<CellRef> {
+        Some(self.edit.cell())
+    }
 }
 
 #[cfg(test)]
@@ -49,35 +57,58 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
 
+    /// Every cell's value, row by row: what a user could see.
+    fn snapshot(table: &CsvTable, rows: u64, cols: u32) -> Vec<Option<String>> {
+        (0..rows)
+            .flat_map(|r| (0..cols).map(move |c| (r, c)))
+            .map(|(r, c)| table.cell_value(r, c).map(|v| v.into_owned()))
+            .collect()
+    }
+
+    /// CMD-1 acceptance: every edit is a reversible command object. A random run of sets
+    /// and clears, some on the same cells, some past the end of short rows, goes through
+    /// the undo stack; undoing any number of steps gives back exactly the table as it was
+    /// before them, and redoing all of them gives back the end state.
     #[test]
-    fn undo_and_redo_swap_values_through_edit_layers() {
-        let path = std::env::temp_dir().join(format!("commands-test-{}.csv", std::process::id()));
-        std::fs::write(&path, "a,b\n1,2\n").unwrap();
+    fn every_edit_reverts_exactly() {
+        let path = std::env::temp_dir().join(format!("commands-cmd1-{}.csv", std::process::id()));
+        std::fs::write(&path, "a,b,c\n1,2,3\n4,5\n6\n7,8,9\n").unwrap();
         let index =
             SparseRowIndex::new(Arc::new(Source::open(&path).unwrap()), &Dialect::default());
         index.build(&AtomicBool::new(false)).unwrap();
         let mut table = CsvTable::new(index, Dialect::default());
-        let at = CellRef {
-            row: table.row_id(1),
-            col: 0,
-        };
-        let mut undo = UndoStack::new(100);
+        let (rows, cols) = (5, 5);
+        let mut undo = UndoStack::new(1_000);
 
-        undo.execute(Box::new(SetCell::new(at, "x")), &mut table);
-        undo.execute(Box::new(SetCell::new(at, "y")), &mut table);
-        assert_eq!(table.cell_value(1, 0).as_deref(), Some("y"));
-        assert!(undo.undo(&mut table));
-        assert_eq!(table.cell_value(1, 0).as_deref(), Some("x"));
-        assert!(undo.undo(&mut table));
-        assert_eq!(
-            table.cell_value(1, 0).as_deref(),
-            Some("1"),
-            "back to the source value"
-        );
-        assert_eq!(table.overlay().len(), 0);
-        assert!(undo.redo(&mut table));
-        assert!(undo.redo(&mut table));
-        assert_eq!(table.cell_value(1, 0).as_deref(), Some("y"));
+        let (mut states, mut cells) = (vec![snapshot(&table, rows, cols)], Vec::new());
+        let mut x = 0x2545_f491_4f6c_dd1du64; // xorshift: the same run every time
+        for step in 0..300 {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            let at = CellRef {
+                row: table.row_id(x % rows),
+                col: ((x >> 8) % u64::from(cols)) as u32,
+            };
+            let cmd = if (x >> 16) % 4 == 0 {
+                SetCell::clear(at)
+            } else {
+                SetCell::new(at, format!("v{step}"))
+            };
+            undo.execute(Box::new(cmd), &mut table);
+            states.push(snapshot(&table, rows, cols));
+            cells.push(at);
+        }
+
+        for (before, at) in states.iter().rev().skip(1).zip(cells.iter().rev()) {
+            let undone = undo.undo(&mut table).expect("one undo per edit");
+            assert_eq!(undone.focus(), Some(*at), "undo shows the cell it changed");
+            assert_eq!(&snapshot(&table, rows, cols), before);
+        }
+        assert!(undo.undo(&mut table).is_none(), "nothing left to undo");
+        assert_eq!(table.overlay().len(), 0, "no edit left behind");
+        while undo.redo(&mut table).is_some() {}
+        assert_eq!(&snapshot(&table, rows, cols), states.last().unwrap());
         std::fs::remove_file(path).unwrap();
     }
 }

@@ -793,6 +793,48 @@ impl GridView {
         }
     }
 
+    /// Ctrl+Z (CMD-1): revert the last command and show the cell it changed. Refused while
+    /// a save runs, like edits, so nothing changes between the save's snapshot and reopen.
+    pub fn undo(&self) -> bool {
+        self.step_history(true)
+    }
+
+    /// Ctrl+Shift+Z / Ctrl+Y: apply the last undone command again.
+    pub fn redo(&self) -> bool {
+        self.step_history(false)
+    }
+
+    fn step_history(&self, back: bool) -> bool {
+        let imp = self.imp();
+        if imp.saving.get() {
+            return false;
+        }
+        let focus = {
+            let (mut table, mut undo) = (imp.table.borrow_mut(), imp.undo.borrow_mut());
+            let (Some(table), Some(undo)) = (table.as_mut(), undo.as_mut()) else {
+                return false;
+            };
+            let cmd = if back {
+                undo.undo(table)
+            } else {
+                undo.redo(table)
+            };
+            let Some(cmd) = cmd else { return false };
+            cmd.focus().and_then(|at| {
+                let row = table.row_of(at.row)?;
+                Some(grid::Cell { row, col: at.col })
+            })
+        };
+        imp.cache.borrow_mut().invalidate();
+        imp.titles.take();
+        if let Some(cell) = focus {
+            imp.selection.set(Selection::at(cell));
+            self.scroll_to((Some(cell.row), Some(cell.col)));
+        }
+        self.queue_draw();
+        true
+    }
+
     /// Snapshot for a background save (SAVE-1).
     pub fn save_job(&self) -> Result<SaveJob, SaveJobError> {
         self.imp()

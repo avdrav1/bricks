@@ -6,7 +6,7 @@
 //! BOM, byte for byte; an unedited save must reproduce the original exactly.
 
 use csv_engine::{Charset, Encoding};
-use data_model::{CellRef, CsvTable, DelimiterChoice};
+use data_model::{CellRef, CsvTable, DelimiterChoice, Edit};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 
@@ -123,13 +123,13 @@ fn encoding_and_bom_round_trip_on_save() {
 
         // One edit: only that cell changes, everything else byte for byte.
         let mut table = open(&path);
-        table.set_cell(
+        table.apply(Edit::set(
             CellRef {
                 row: table.row_id(1),
                 col: 1,
             },
             "Ångström, Å",
-        );
+        ));
         file_format::save_csv(&path, &table.save_job().unwrap()).unwrap();
         assert_eq!(
             std::fs::read(&path).unwrap(),
@@ -153,13 +153,13 @@ fn text_the_encoding_cannot_hold_fails_the_save_and_keeps_the_file() {
     let original = encode(TEXT, CASES[5].1);
     let path = temp("cp1252-unmappable", &original);
     let mut table = open(&path);
-    table.set_cell(
+    table.apply(Edit::set(
         CellRef {
             row: table.row_id(0),
             col: 1,
         },
         "東京",
-    );
+    ));
     let err = file_format::save_csv(&path, &table.save_job().unwrap())
         .unwrap_err()
         .to_string();

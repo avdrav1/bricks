@@ -6,7 +6,7 @@
 //! `cargo test --release -p file-format --test save_perf -- --ignored --nocapture`
 
 use csv_engine::{Dialect, RowIndex, Source, SparseRowIndex};
-use data_model::{CellRef, CsvTable};
+use data_model::{CellRef, CsvTable, Edit};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
@@ -36,13 +36,13 @@ fn save_1gb_with_1000_edits() {
             .wrapping_add(1_442_695_040_888_963_407);
         let (row, col) = (1 + (x >> 33) % (rows - 1), ((x >> 13) % 8) as u32);
         let value = format!("edit {}, \"{row}\"", edits.len());
-        table.set_cell(
+        table.apply(Edit::set(
             CellRef {
                 row: table.row_id(row),
                 col,
             },
             value.as_str(),
-        );
+        ));
         edits.insert((row, col), value);
     }
 

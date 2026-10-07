@@ -3,7 +3,7 @@
 //! exact bytes (quotes, escapes) and only edited cells are re-encoded.
 
 use csv_engine::{Dialect, RowIndex, Source, SparseRowIndex};
-use data_model::{CellRef, CsvTable};
+use data_model::{CellRef, CsvTable, Edit};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
@@ -27,7 +27,7 @@ fn set(t: &mut CsvTable, row: u64, col: u32, v: &str) {
         row: t.row_id(row),
         col,
     };
-    t.set_cell(at, v);
+    t.apply(Edit::set(at, v));
 }
 
 #[test]

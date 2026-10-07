@@ -1,9 +1,12 @@
 //! Every mutation is a reversible command (CMD-1). The undo stack stores
-//! commands, never dataset snapshots (spec section 10).
+//! commands, never dataset snapshots (spec section 10). Commands change the table only
+//! through `CsvTable::apply`, the one mutating entry point, which returns the inverse.
 
 mod edit;
 
 pub use edit::SetCell;
+
+use data_model::CellRef;
 
 /// A reversible change to some target, usually the data model.
 pub trait Command<T> {
@@ -11,6 +14,10 @@ pub trait Command<T> {
     fn revert(&mut self, target: &mut T);
     /// Short label for menus, e.g. "Sort column B".
     fn label(&self) -> &str;
+    /// The cell to show after this command runs or is undone, if it changes one.
+    fn focus(&self) -> Option<CellRef> {
+        None
+    }
 }
 
 pub struct UndoStack<T> {
@@ -37,26 +44,20 @@ impl<T> UndoStack<T> {
         }
     }
 
-    pub fn undo(&mut self, target: &mut T) -> bool {
-        match self.done.pop() {
-            Some(mut cmd) => {
-                cmd.revert(target);
-                self.undone.push(cmd);
-                true
-            }
-            None => false,
-        }
+    /// Revert the last command; returns it, or `None` when there is nothing to undo.
+    pub fn undo(&mut self, target: &mut T) -> Option<&dyn Command<T>> {
+        let mut cmd = self.done.pop()?;
+        cmd.revert(target);
+        self.undone.push(cmd);
+        self.undone.last().map(|c| &**c)
     }
 
-    pub fn redo(&mut self, target: &mut T) -> bool {
-        match self.undone.pop() {
-            Some(mut cmd) => {
-                cmd.apply(target);
-                self.done.push(cmd);
-                true
-            }
-            None => false,
-        }
+    /// Apply the last undone command again; returns it, or `None` when there is none.
+    pub fn redo(&mut self, target: &mut T) -> Option<&dyn Command<T>> {
+        let mut cmd = self.undone.pop()?;
+        cmd.apply(target);
+        self.done.push(cmd);
+        self.done.last().map(|c| &**c)
     }
 }
 
@@ -83,9 +84,9 @@ mod tests {
         let mut s = UndoStack::new(100);
         s.execute(Box::new(Add(5)), &mut v);
         s.execute(Box::new(Add(2)), &mut v);
-        assert!(s.undo(&mut v));
+        assert!(s.undo(&mut v).is_some());
         assert_eq!(v, 5);
-        assert!(s.redo(&mut v));
+        assert!(s.redo(&mut v).is_some());
         assert_eq!(v, 7);
     }
 }

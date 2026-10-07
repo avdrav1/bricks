@@ -7,7 +7,7 @@
 //! child runs to completion to show the same save does replace the file.
 
 use csv_engine::{Dialect, Source, SparseRowIndex};
-use data_model::{CellRef, CsvTable};
+use data_model::{CellRef, CsvTable, Edit};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
@@ -45,13 +45,13 @@ fn child_saver() {
     let index = SparseRowIndex::new(Arc::new(Source::open(&path).unwrap()), &Dialect::default());
     index.build(&AtomicBool::new(false)).unwrap();
     let mut table = CsvTable::new(index, Dialect::default());
-    table.set_cell(
+    table.apply(Edit::set(
         CellRef {
             row: table.row_id(1),
             col: 1,
         },
         "EDITED",
-    );
+    ));
     let job = table.save_job().unwrap();
     file_format::save_atomic(
         &path,

@@ -33,6 +33,37 @@ pub struct CellRef {
     pub col: Col,
 }
 
+/// A change to the table's data, as an operation (invariant 5). [`CsvTable::apply`] is the
+/// only way to change data, and it returns the inverse: applying that undoes the change.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Edit {
+    /// Give a cell this raw value, or with `None` drop its edit so the source shows again.
+    Cell {
+        at: CellRef,
+        value: Option<Box<str>>,
+    },
+}
+
+impl Edit {
+    pub fn set(at: CellRef, value: impl Into<Box<str>>) -> Self {
+        Self::Cell {
+            at,
+            value: Some(value.into()),
+        }
+    }
+
+    pub fn clear(at: CellRef) -> Self {
+        Self::Cell { at, value: None }
+    }
+
+    /// The cell the edit changes.
+    pub fn cell(&self) -> CellRef {
+        match self {
+            Self::Cell { at, .. } => *at,
+        }
+    }
+}
+
 /// Semantic type inferred for a column. Never changes the raw value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InferredType {

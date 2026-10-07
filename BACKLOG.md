@@ -45,7 +45,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | APP-1 | M1 | P0 | done | DEC-1 | Open via native file dialog (xdg-desktop-portal) | Works under Hyprland, GNOME, KDE |
 | APP-2 | M1 | P0 | done | ENG-1 | Status bar: row count, encoding, delimiter, save state | Row count updates while indexing streams |
 | APP-3 | M1 | P0 | done | ENG-1, DEC-5 | Show first rows before indexing finishes | First rows of 1 GB visible in under 500 ms |
-| CMD-1 | M2 | P0 | todo | EDIT-1 | Command pattern for all mutations | Every edit is a reversible command object |
+| CMD-1 | M2 | P0 | done | EDIT-1 | Command pattern for all mutations | Every edit is a reversible command object |
 | CMD-2 | M2 | P0 | todo | CMD-1 | Undo/redo stores operations, not snapshots | 1,000-step history under 50 MB on a 1 GB file |
 | EDIT-2 | M2 | P0 | todo | GRID-4, CMD-1 | In-cell editor; F2 or typing starts edit | Enter commits and moves down; Esc cancels |
 | EDIT-3 | M2 | P0 | todo | CMD-1 | Insert and delete rows | Insert at row 1M in under 50 ms |
@@ -80,6 +80,14 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-07 CMD-1:** every edit is a reversible command.
+  - Data changes only through `CsvTable::apply(Edit) -> Edit`, which returns the inverse. The raw setters are gone from the public API: a `compile_fail` doc test on `apply` guards that, next to a compiling example with the same paths. `Edit::Cell` (set or clear) is the only operation so far; EDIT-3/4 and CLIP-2 add theirs to the enum.
+  - `commands::SetCell` holds one `Edit` and swaps it for its inverse on each apply and revert (`SetCell::new`, `SetCell::clear`). `Command::focus` names the cell a command changes, and `UndoStack::undo`/`redo` return the command they ran.
+  - Acceptance: `every_edit_reverts_exactly` runs 300 seeded random sets and clears through the stack, including repeats and cells past short rows. Every undo restores exactly the previous state (all cell values compared) and reports the cell it changed; after undoing everything no edit is left; redoing everything restores the final state. The old two-step test was a subset and is removed.
+  - App: Ctrl+Z, and Ctrl+Shift+Z or Ctrl+Y, in the window key handler next to Ctrl+S. Undo is refused during a save, like edits; it jumps the cursor to the changed cell (`CsvTable::row_of`) and refreshes cached rows and titles. The cell editor's entry keeps its own text undo, since it handles the key first.
+  - Smoke test via Broadway on a /tmp copy of the 10 MB file: two edits, two undos (each reverted one cell and moved the cursor there; the edit count went 2 → 1 → 0, the • cleared, the delimiter dropdown came back), then redo via Ctrl+Shift+Z and Ctrl+Y. The copy's sha256 was unchanged.
+  - Not built yet: compound commands (one undo step for many cells) arrive with their first user (EDIT-5, CLIP-2, SRCH-3). The 50 MB memory bound is CMD-2.
+- **2026-10-07 decision:** a news/sports plugin is out, permanently (user decision). Plugins are a V0.1 non-goal (CLAUDE.md invariant 8), and this one won't come back later either. Don't propose it again.
 - **2026-10-07 M1 gate:** approved by the user on this machine's numbers.
   - Checklist: `lo_parity` replays all 49 LibreOffice-recorded scenarios, and all pass.
   - First rows of 1 GB with a cold cache: 259 ms (BENCH-1) and 281 ms (GRID-5) on the desktop, and 176–186 ms via Broadway after ENG-7. Indexing was still running at that frame in every run.

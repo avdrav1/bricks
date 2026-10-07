@@ -8,7 +8,7 @@
 //! Numbers count toward gates only on the reference box named in the doc.
 
 use csv_engine::{Dialect, RowIndex, Source, SparseRowIndex};
-use data_model::{CellRef, CsvTable};
+use data_model::{CellRef, CsvTable, Edit};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::os::fd::AsRawFd;
@@ -167,7 +167,7 @@ fn measure_all(corpus: &Path) -> HashMap<&'static str, Measured> {
             row: table.row_id(1 + (x >> 33) % (rows - 1)),
             col: ((x >> 13) % 8) as u32,
         };
-        table.set_cell(at, format!("edit {k}"));
+        table.apply(Edit::set(at, format!("edit {k}")));
     }
     let t = Instant::now();
     file_format::save_csv(&copy, &table.save_job().unwrap()).unwrap();

@@ -454,20 +454,32 @@ fn build_window(
     });
     grid.add_controller(scroll);
 
-    // Ctrl+S saves. Navigation keys belong to the grid (GRID-3).
+    // Ctrl+S saves; Ctrl+Z undoes, Ctrl+Shift+Z and Ctrl+Y redo (CMD-1). Navigation keys
+    // belong to the grid (GRID-3); the cell editor's entry keeps its own text undo.
     let save = Rc::new(RefCell::new(SaveState::Idle));
     let keys = gtk::EventControllerKey::new();
     keys.connect_key_pressed({
         let (grid, save, session) = (grid.downgrade(), save.clone(), session.clone());
         move |_, key, _, mods| {
             use gtk::gdk::{Key, ModifierType};
-            if mods.contains(ModifierType::CONTROL_MASK) && matches!(key, Key::s | Key::S) {
-                if let Some(grid) = grid.upgrade() {
-                    start_save(&grid, &session.path, &save);
-                }
-                return glib::Propagation::Stop;
+            let Some(grid) = grid.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
+            if !mods.contains(ModifierType::CONTROL_MASK) {
+                return glib::Propagation::Proceed;
             }
-            glib::Propagation::Proceed
+            let shift = mods.contains(ModifierType::SHIFT_MASK);
+            match key {
+                Key::s | Key::S => start_save(&grid, &session.path, &save),
+                Key::z if !shift => {
+                    grid.undo();
+                }
+                Key::Z | Key::z | Key::y | Key::Y => {
+                    grid.redo();
+                }
+                _ => return glib::Propagation::Proceed,
+            }
+            glib::Propagation::Stop
         }
     });
     window.add_controller(keys);
