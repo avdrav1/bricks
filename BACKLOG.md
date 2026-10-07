@@ -46,7 +46,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | APP-2 | M1 | P0 | done | ENG-1 | Status bar: row count, encoding, delimiter, save state | Row count updates while indexing streams |
 | APP-3 | M1 | P0 | done | ENG-1, DEC-5 | Show first rows before indexing finishes | First rows of 1 GB visible in under 500 ms |
 | CMD-1 | M2 | P0 | done | EDIT-1 | Command pattern for all mutations | Every edit is a reversible command object |
-| CMD-2 | M2 | P0 | todo | CMD-1 | Undo/redo stores operations, not snapshots | 1,000-step history under 50 MB on a 1 GB file |
+| CMD-2 | M2 | P0 | done | CMD-1 | Undo/redo stores operations, not snapshots | 1,000-step history under 50 MB on a 1 GB file |
 | EDIT-2 | M2 | P0 | todo | GRID-4, CMD-1 | In-cell editor; F2 or typing starts edit | Enter commits and moves down; Esc cancels |
 | EDIT-3 | M2 | P0 | todo | CMD-1 | Insert and delete rows | Insert at row 1M in under 50 ms |
 | EDIT-4 | M2 | P0 | todo | CMD-1 | Insert and delete columns | Works on 1 GB without a full rewrite before save |
@@ -80,6 +80,11 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-07 CMD-2:** history capped by steps and bytes (spec SP-6).
+  - `Command::heap_bytes` is required, so every command reports what it holds. `UndoStack` keeps a running total over both undo and redo history, re-measured around each apply and revert, since an edit holds whichever value it would swap back in. Defaults: `HISTORY_STEPS` 1,000 and `HISTORY_BYTES` 50 MB (`UndoStack::default()`, used by the app).
+  - Over a limit, the oldest steps go first: the far end of the undo history, then the far end of the redo history. The step just run or just undone always stays, so the last action can be undone even if it alone is over budget; the next action drops it. The stack moved from `Vec::remove(0)` to `VecDeque`.
+  - Unit tests: 1,000 commands of 1 MB each (about 1 GB in total) stay at or under 50 MB, keeping the newest 49 steps; a 60 MB step survives as the only one; the step limit still applies.
+  - Acceptance: `commands/tests/history_1gb.rs` (ignored, needs the corpus, release). 1,000 edits spread over the 1 GB file's 19.1M rows (100-byte values; every tenth re-edits the cell from nine steps earlier, so its inverse holds a value) keep all 1,000 steps. The history counts 41 KiB by its own count, and process anonymous memory grew 456 KiB, edit values included. Everything undoes and redoes.
 - **2026-10-07 CMD-1:** every edit is a reversible command.
   - Data changes only through `CsvTable::apply(Edit) -> Edit`, which returns the inverse. The raw setters are gone from the public API: a `compile_fail` doc test on `apply` guards that, next to a compiling example with the same paths. `Edit::Cell` (set or clear) is the only operation so far; EDIT-3/4 and CLIP-2 add theirs to the enum.
   - `commands::SetCell` holds one `Edit` and swaps it for its inverse on each apply and revert (`SetCell::new`, `SetCell::clear`). `Command::focus` names the cell a command changes, and `UndoStack::undo`/`redo` return the command they ran.

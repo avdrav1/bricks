@@ -62,6 +62,13 @@ impl Edit {
             Self::Cell { at, .. } => *at,
         }
     }
+
+    /// Heap the edit holds beyond its own size: the text of the value it carries.
+    pub fn heap_bytes(&self) -> usize {
+        match self {
+            Self::Cell { value, .. } => value.as_ref().map_or(0, |v| v.len()),
+        }
+    }
 }
 
 /// Semantic type inferred for a column. Never changes the raw value.

@@ -314,7 +314,7 @@ impl GridView {
         imp.vadj.replace(Some(vadj.clone()));
         imp.hadj.replace(Some(hadj.clone()));
         imp.row_header_w.set(64.0);
-        imp.undo.replace(Some(UndoStack::new(1_000)));
+        imp.undo.replace(Some(UndoStack::default()));
         let click = gtk::GestureClick::new();
         click.connect_pressed({
             let g = g.downgrade();
@@ -880,7 +880,7 @@ impl GridView {
     pub fn replace_table(&self, table: CsvTable) {
         let imp = self.imp();
         imp.table.replace(Some(table));
-        imp.undo.replace(Some(UndoStack::new(1_000)));
+        imp.undo.replace(Some(UndoStack::default()));
         imp.cache.borrow_mut().reset();
         imp.titles.take();
         self.update_adjustments();

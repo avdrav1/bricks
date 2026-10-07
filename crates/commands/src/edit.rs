@@ -47,6 +47,10 @@ impl Command<CsvTable> for SetCell {
     fn focus(&self) -> Option<CellRef> {
         Some(self.edit.cell())
     }
+
+    fn heap_bytes(&self) -> usize {
+        std::mem::size_of::<Self>() + self.edit.heap_bytes()
+    }
 }
 
 #[cfg(test)]
@@ -78,7 +82,7 @@ mod tests {
         index.build(&AtomicBool::new(false)).unwrap();
         let mut table = CsvTable::new(index, Dialect::default());
         let (rows, cols) = (5, 5);
-        let mut undo = UndoStack::new(1_000);
+        let mut undo = UndoStack::default();
 
         let (mut states, mut cells) = (vec![snapshot(&table, rows, cols)], Vec::new());
         let mut x = 0x2545_f491_4f6c_dd1du64; // xorshift: the same run every time
