@@ -172,6 +172,8 @@ fn delimiter_dropdown(session: &Rc<Session>, grid: &GridView) -> gtk::DropDown {
                         return;
                     }
                     session.choice.set(choice);
+                    // Other columns now: the old widths don't belong to them.
+                    grid.reset_column_widths();
                     grid.replace_table(table);
                 }
                 Err(RereadError::UnsavedEdits(_)) => {

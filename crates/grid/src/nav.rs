@@ -107,6 +107,12 @@ impl Selection {
         )
     }
 
+    /// The selected columns when the selection is whole columns (every row of them).
+    pub fn whole_columns(&self) -> Option<std::ops::Range<u32>> {
+        let (tl, br) = self.range();
+        self.full_height.then(|| tl.col..br.col + 1)
+    }
+
     fn is_range(&self) -> bool {
         self.anchor != self.extent
     }

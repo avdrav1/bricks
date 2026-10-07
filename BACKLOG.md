@@ -41,7 +41,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | ENG-7 | M1 | P1 | todo | ENG-4 | Header row detection with toggle | User can flip "first row is header" |
 | GRID-3 | M1 | P0 | done | GRID-1 | Keyboard navigation: arrows, Tab, Enter, Shift variants, Ctrl+Home/End, PgUp/PgDn | Matches LibreOffice on the side-by-side checklist |
 | GRID-4 | M1 | P0 | done | GRID-1 | Cell, range, row, and column selection | Click, Shift+click, drag, header click all work |
-| GRID-5 | M1 | P0 | todo | GRID-1 | Resize columns and rows; double-click autofits column | Autofit samples visible rows only |
+| GRID-5 | M1 | P0 | done | GRID-1 | Resize columns and rows; double-click autofits column | Autofit samples visible rows only |
 | APP-1 | M1 | P0 | todo | DEC-1 | Open via native file dialog (xdg-desktop-portal) | Works under Hyprland, GNOME, KDE |
 | APP-2 | M1 | P0 | todo | ENG-1 | Status bar: row count, encoding, delimiter, save state | Row count updates while indexing streams |
 | APP-3 | M1 | P0 | todo | ENG-1, DEC-5 | Show first rows before indexing finishes | First rows of 1 GB visible in under 500 ms |
@@ -80,6 +80,15 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-07 GRID-5:** resizing and autofit.
+  - Sizes are sparse: `grid::Sizes` stores only the resized rows and columns, with running offsets. Position and hit-test cost one map lookup, or O(resized) for hit-testing, at any row count (invariant 2). `Viewport`/`ColumnViewport` became one axis `grid::Viewport` over `Sizes`.
+  - Autofit (double-click a column border) measures only the rows on screen (`GridCache::widest`; test `autofit_measures_only_the_visible_rows` puts a wider value in the cache's off-screen buffer). It is capped at the body width; an empty column gets the default width.
+  - Double-clicking a row border restores the default height: rows hold one line, so that is their optimal height.
+  - Selected whole columns resize and autofit together, as in Calc. Rows resize one at a time: a whole-row selection can be millions of rows, which the sparse map would have to store one by one. Follow-up if wanted: range entries in `Sizes`.
+  - Sizes are view state, not undoable commands: they don't change the data and aren't saved (CSV has no place for them). A save keeps them; a delimiter change resets the widths.
+  - Perf: `cargo bench` all ✓ (scroll p99 2.2 ms frame CPU, was 1.8 ms; first rows 281 ms; index 0.64 s; save 1.05 s).
+  - The jump test (`jump_perf`) failed its visibility guard on the desktop because the window was hidden while the user worked. Rerun on Broadway in a headless browser, it gives a first jump of 119.4 ms and p50 29.5 ms, against 122.5 ms and 29.5 ms for `main` under the same conditions. That's no regression; Broadway adds about 25 ms per frame, and the test still needs a visible desktop window to check the 100 ms target.
+  - Smoke test via Broadway on the 1 GB file: narrowed column A by drag, autofit column C, made row 3 taller by drag and reset it with a double-click, clicked a cell after resizing (C5 hit correctly), and dragged one of D:F to resize all three.
 - **2026-10-07 GRID-4:** mouse selection and whole rows/columns on GRID-3's model.
   - The LibreOffice recording grew to 49 scenarios with Shift/Ctrl+Space (49/49 match). Calc runs whole rows and columns to the sheet edge (XFD, row 1048576); the replay maps cells near that edge onto the data edge. Shift+Ctrl+Space gives Calc's data area, which here is the whole table.
   - Mouse clicks can't be driven through Calc's UITest API. Their behavior follows the same model (Shift+click and drag move only the far corner) and has unit tests. A header click puts the cursor in the first visible cell of that row or column [inferred from Calc, not recorded].

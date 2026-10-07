@@ -3,81 +3,13 @@
 //! viewport, never on the row count.
 
 mod nav;
+mod sizes;
 
 pub use nav::{Bounds, Cell, Key, Mods, Selection};
+pub use sizes::{Sizes, Viewport, MIN_SIZE};
 
 use data_model::{RowBlock, TableSource};
 use std::ops::Range;
-
-#[derive(Debug, Clone, Copy)]
-pub struct Viewport {
-    pub scroll_y: f64,
-    pub height: f64,
-    pub row_height: f64,
-    pub total_rows: u64,
-}
-
-impl Viewport {
-    /// Rows to render, including `buffer` extra rows above and below.
-    pub fn visible_rows(&self, buffer: u64) -> Range<u64> {
-        if self.total_rows == 0 || self.row_height <= 0.0 {
-            return 0..0;
-        }
-        let first = (self.scroll_y / self.row_height).floor().max(0.0) as u64;
-        let count = (self.height / self.row_height).ceil() as u64 + 1;
-        let start = first.saturating_sub(buffer);
-        let end = (first + count + buffer).min(self.total_rows);
-        start.min(end)..end
-    }
-
-    /// Y of `row`'s top edge relative to the top of the body (negative when scrolled past).
-    /// Exact at any row count: f64 holds row offsets far beyond 2^53 px / row height.
-    pub fn row_y(&self, row: u64) -> f64 {
-        row as f64 * self.row_height - self.scroll_y
-    }
-
-    /// Row under body-relative `y`, if there is one.
-    pub fn row_at(&self, y: f64) -> Option<u64> {
-        if y < 0.0 || self.row_height <= 0.0 {
-            return None;
-        }
-        let row = ((self.scroll_y + y) / self.row_height).floor() as u64;
-        (row < self.total_rows).then_some(row)
-    }
-}
-
-/// Horizontal counterpart of [`Viewport`], for fixed-width columns.
-#[derive(Debug, Clone, Copy)]
-pub struct ColumnViewport {
-    pub scroll_x: f64,
-    pub width: f64,
-    pub col_width: f64,
-    pub total_cols: u32,
-}
-
-impl ColumnViewport {
-    pub fn visible_cols(&self) -> Range<u32> {
-        if self.total_cols == 0 || self.col_width <= 0.0 {
-            return 0..0;
-        }
-        let first = (self.scroll_x / self.col_width).floor().max(0.0) as u32;
-        let count = (self.width / self.col_width).ceil() as u32 + 1;
-        first.min(self.total_cols)..first.saturating_add(count).min(self.total_cols)
-    }
-
-    pub fn col_x(&self, col: u32) -> f64 {
-        col as f64 * self.col_width - self.scroll_x
-    }
-
-    /// Column under body-relative `x`, if there is one.
-    pub fn col_at(&self, x: f64) -> Option<u32> {
-        if x < 0.0 || self.col_width <= 0.0 {
-            return None;
-        }
-        let col = ((self.scroll_x + x) / self.col_width).floor() as u64;
-        (col < u64::from(self.total_cols)).then_some(col as u32)
-    }
-}
 
 /// The rows the grid currently holds as display text: the visible window plus a buffer.
 #[derive(Default)]
@@ -118,6 +50,21 @@ impl GridCache {
         self.cols
     }
 
+    /// The widest text in column `col` over `rows`, by `measure` (pixels). Autofit
+    /// (GRID-5) passes only the visible rows, so its cost doesn't depend on the row count.
+    /// `None` when those rows hold no text in the column.
+    pub fn widest(
+        &self,
+        col: u32,
+        rows: Range<u64>,
+        mut measure: impl FnMut(&str) -> f64,
+    ) -> Option<f64> {
+        rows.filter_map(|r| self.cell(r, col))
+            .filter(|t| !t.is_empty())
+            .map(&mut measure)
+            .reduce(f64::max)
+    }
+
     pub fn heap_bytes(&self) -> usize {
         self.block.heap_bytes()
     }
@@ -142,27 +89,70 @@ mod tests {
 
     #[test]
     fn renders_a_window_not_the_whole_file() {
+        let sizes = Sizes::new(24.0);
         let v = Viewport {
-            scroll_y: 2_400_000.0,
-            height: 800.0,
-            row_height: 24.0,
-            total_rows: 2_103_814,
+            scroll: 2_400_000.0,
+            extent: 800.0,
+            sizes: &sizes,
+            count: 2_103_814,
         };
-        let r = v.visible_rows(10);
+        let r = v.visible(10);
         assert_eq!(r.start, 99_990);
         assert!(r.end - r.start < 100);
     }
 
     #[test]
     fn visible_columns_clip_to_the_table() {
-        let c = ColumnViewport {
-            scroll_x: 250.0,
-            width: 400.0,
-            col_width: 100.0,
-            total_cols: 5,
+        let sizes = Sizes::new(100.0);
+        let c = Viewport {
+            scroll: 250.0,
+            extent: 400.0,
+            sizes: &sizes,
+            count: 5,
         };
-        assert_eq!(c.visible_cols(), 2..5);
-        assert_eq!(c.col_x(2), -50.0);
+        assert_eq!(c.visible(0), 2..5);
+        assert_eq!(c.pos(2), -50.0);
+    }
+
+    /// One column of the given values.
+    struct Column(Vec<&'static str>);
+
+    impl TableSource for Column {
+        fn row_count(&self) -> u64 {
+            self.0.len() as u64
+        }
+        fn is_complete(&self) -> bool {
+            true
+        }
+        fn read_rows(&mut self, rows: Range<u64>, out: &mut RowBlock) {
+            out.reset(rows.start);
+            for r in rows.start..rows.end.min(self.row_count()) {
+                out.push_cell(self.0[r as usize].as_bytes());
+                out.end_row();
+            }
+        }
+    }
+
+    #[test]
+    fn autofit_measures_only_the_visible_rows() {
+        // Row 30 is held in the cache's buffer but is off screen, so it doesn't count.
+        let mut values = vec!["abc"; 200];
+        values[5] = "abcdefgh";
+        values[7] = "";
+        values[30] = "a value far wider than anything on screen";
+        let mut src = Column(values);
+        let mut cache = GridCache::default();
+        let visible = 0..20;
+        cache.ensure(visible.clone(), 50, &mut src);
+        assert!(cache.cell(30, 0).is_some(), "the wide value is cached");
+        let mut measured = 0;
+        let width = cache.widest(0, visible, |t| {
+            measured += 1;
+            t.len() as f64 * 7.0
+        });
+        assert_eq!(width, Some(56.0));
+        assert_eq!(measured, 19, "each non-empty visible cell, once");
+        assert_eq!(cache.widest(1, 0..20, |_| 1.0), None, "no such column");
     }
 
     /// Fake table of any size: every row has 8 cells of fixed-width text.
@@ -198,19 +188,20 @@ mod tests {
         };
         let mut cache = GridCache::default();
         let mut peak = 0;
+        let sizes = Sizes::new(22.0);
         let mut v = Viewport {
-            scroll_y: 0.0,
-            height: 1000.0,
-            row_height: 22.0,
-            total_rows,
+            scroll: 0.0,
+            extent: 1000.0,
+            sizes: &sizes,
+            count: total_rows,
         };
         for step in 0..2_000u64 {
-            v.scroll_y = if step % 50 == 0 {
-                (step * 7_919 % total_rows) as f64 * v.row_height // a scrollbar jump
+            v.scroll = if step % 50 == 0 {
+                (step * 7_919 % total_rows) as f64 * 22.0 // a scrollbar jump
             } else {
-                v.scroll_y + 37.0
+                v.scroll + 37.0
             };
-            let visible = v.visible_rows(0);
+            let visible = v.visible(0);
             cache.ensure(visible.clone(), 50, &mut src);
             for r in visible {
                 assert_eq!(cache.cell(r, 3).unwrap(), format!("{:012}", r * 8 + 3));
@@ -238,15 +229,16 @@ mod tests {
             reads: 0,
         };
         let mut cache = GridCache::default();
+        let sizes = Sizes::new(22.0);
         let mut v = Viewport {
-            scroll_y: 22_000.0,
-            height: 1000.0,
-            row_height: 22.0,
-            total_rows: 1_000_000,
+            scroll: 22_000.0,
+            extent: 1000.0,
+            sizes: &sizes,
+            count: 1_000_000,
         };
         for _ in 0..60 {
-            cache.ensure(v.visible_rows(0), 50, &mut src);
-            v.scroll_y += 11.0; // 30 rows in total
+            cache.ensure(v.visible(0), 50, &mut src);
+            v.scroll += 11.0; // 30 rows in total
         }
         assert_eq!(src.reads, 1);
         assert_eq!(cache.col_count(), 8);
@@ -281,34 +273,35 @@ mod tests {
 
     #[test]
     fn hit_testing_maps_points_to_cells() {
+        let rows = Sizes::new(22.0);
         let v = Viewport {
-            scroll_y: 22.0 * 1_000_000.0 + 5.0,
-            height: 500.0,
-            row_height: 22.0,
-            total_rows: 2_000_000,
+            scroll: 22.0 * 1_000_000.0 + 5.0,
+            extent: 500.0,
+            sizes: &rows,
+            count: 2_000_000,
         };
-        assert_eq!(v.row_at(0.0), Some(1_000_000));
-        assert_eq!(v.row_at(16.9), Some(1_000_000));
-        assert_eq!(v.row_at(17.0), Some(1_000_001));
-        assert_eq!(v.row_at(-1.0), None);
+        assert_eq!(v.at(0.0), Some(1_000_000));
+        assert_eq!(v.at(16.9), Some(1_000_000));
+        assert_eq!(v.at(17.0), Some(1_000_001));
+        assert_eq!(v.at(-1.0), None);
         let end = Viewport {
-            scroll_y: 0.0,
-            height: 500.0,
-            row_height: 22.0,
-            total_rows: 3,
+            scroll: 0.0,
+            count: 3,
+            ..v
         };
-        assert_eq!(end.row_at(70.0), None, "below the last row");
+        assert_eq!(end.at(70.0), None, "below the last row");
 
-        let c = ColumnViewport {
-            scroll_x: 250.0,
-            width: 400.0,
-            col_width: 100.0,
-            total_cols: 5,
+        let cols = Sizes::new(100.0);
+        let c = Viewport {
+            scroll: 250.0,
+            extent: 400.0,
+            sizes: &cols,
+            count: 5,
         };
-        assert_eq!(c.col_at(0.0), Some(2));
-        assert_eq!(c.col_at(49.9), Some(2));
-        assert_eq!(c.col_at(50.0), Some(3));
-        assert_eq!(c.col_at(300.0), None, "right of the last column");
+        assert_eq!(c.at(0.0), Some(2));
+        assert_eq!(c.at(49.9), Some(2));
+        assert_eq!(c.at(50.0), Some(3));
+        assert_eq!(c.at(300.0), None, "right of the last column");
     }
 
     #[test]

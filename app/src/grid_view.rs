@@ -4,18 +4,38 @@ use commands::{SetCell, UndoStack};
 use data_model::{
     CellRef, CsvTable, DelimiterChoice, RereadError, SaveJob, SaveJobError, TableSource,
 };
-use grid::{Bounds, ColumnViewport, GridCache, Key, Mods, Selection, Viewport};
+use grid::{Bounds, GridCache, Key, Mods, Selection, Sizes, Viewport};
 use gtk::{gdk, glib, graphene, pango, prelude::*, subclass::prelude::*};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
+/// Default row height and column width; GRID-5 lets the user resize each one.
 pub const ROW_H: f64 = 22.0;
 pub const COL_W: f64 = 120.0;
 pub const HEADER_H: f64 = 24.0;
 /// Rows loaded above and below the visible ones.
 const BUFFER_ROWS: u64 = 100;
 const PAD: f64 = 4.0;
+/// Smallest sizes a drag can give a column or row.
+const MIN_COL_W: f64 = 16.0;
+const MIN_ROW_H: f64 = 8.0;
+
+/// Row heights and column widths, all default until resized (GRID-5). Kept for the life
+/// of the window: a save keeps them, a delimiter change resets the widths.
+pub struct Sizing {
+    pub rows: Sizes,
+    pub cols: Sizes,
+}
+
+impl Default for Sizing {
+    fn default() -> Self {
+        Self {
+            rows: Sizes::new(ROW_H),
+            cols: Sizes::new(COL_W),
+        }
+    }
+}
 
 mod imp {
     use super::*;
@@ -51,6 +71,8 @@ mod imp {
         pub drag: Cell<Option<(Drag, f64, f64)>>,
         /// Repeats the drag while the pointer is outside the body, scrolling toward it.
         pub autoscroll: RefCell<Option<glib::SourceId>>,
+        /// Row heights and column widths (GRID-5).
+        pub sizing: RefCell<Sizing>,
     }
 
     #[glib::object_subclass]
@@ -69,7 +91,7 @@ mod imp {
     }
 
     impl GridView {
-        fn layout(&self, text: &str) -> pango::Layout {
+        pub fn layout(&self, text: &str) -> pango::Layout {
             if let Some(l) = self.layouts.borrow().get(text) {
                 return l.clone();
             }
@@ -123,23 +145,24 @@ mod imp {
             let rh_w = self.row_header_w.get();
             let (body_w, body_h) = self.body_size();
 
+            let sizing = self.sizing.borrow();
             let rows = Viewport {
-                scroll_y: vadj.value(),
-                height: body_h,
-                row_height: ROW_H,
-                total_rows: table.row_count(),
+                scroll: vadj.value(),
+                extent: body_h,
+                sizes: &sizing.rows,
+                count: table.row_count(),
             };
-            let visible = rows.visible_rows(0);
+            let visible = rows.visible(0);
             cache.ensure(visible.clone(), BUFFER_ROWS, table);
             self.painted_top
                 .set(cache.cell(visible.start, 0).map(|_| visible.start));
-            let cols = ColumnViewport {
-                scroll_x: hadj.value(),
-                width: body_w,
-                col_width: COL_W,
-                total_cols: cache.col_count(),
+            let cols = Viewport {
+                scroll: hadj.value(),
+                extent: body_w,
+                sizes: &sizing.cols,
+                count: u64::from(cache.col_count()),
             };
-            let visible_cols = cols.visible_cols();
+            let visible_cols = cols.visible(0);
 
             let rect = |x: f64, y: f64, w: f64, h: f64| {
                 graphene::Rect::new(x as f32, y as f32, w as f32, h as f32)
@@ -160,19 +183,19 @@ mod imp {
             // Body: stripes, grid lines, cells.
             snapshot.push_clip(&rect(rh_w, HEADER_H, body_w, body_h));
             for r in visible.clone() {
-                let y = HEADER_H + rows.row_y(r);
+                let (y, rh) = (HEADER_H + rows.pos(r), rows.size(r));
                 if r % 2 == 1 {
-                    snapshot.append_color(&stripe, &rect(rh_w, y, body_w, ROW_H));
+                    snapshot.append_color(&stripe, &rect(rh_w, y, body_w, rh));
                 }
-                snapshot.append_color(&line, &rect(rh_w, y + ROW_H - 1.0, body_w, 1.0));
+                snapshot.append_color(&line, &rect(rh_w, y + rh - 1.0, body_w, 1.0));
             }
             for c in visible_cols.clone() {
-                let x = rh_w + cols.col_x(c);
-                snapshot.append_color(&line, &rect(x + COL_W - 1.0, HEADER_H, 1.0, body_h));
-                snapshot.push_clip(&rect(x, HEADER_H, COL_W - 1.0, body_h));
+                let (x, cw) = (rh_w + cols.pos(c), cols.size(c));
+                snapshot.append_color(&line, &rect(x + cw - 1.0, HEADER_H, 1.0, body_h));
+                snapshot.push_clip(&rect(x, HEADER_H, cw - 1.0, body_h));
                 for r in visible.clone() {
-                    if let Some(text) = cache.cell(r, c).filter(|t| !t.is_empty()) {
-                        text_at(text, x + PAD, HEADER_H + rows.row_y(r) + 3.0);
+                    if let Some(text) = cache.cell(r, c as u32).filter(|t| !t.is_empty()) {
+                        text_at(text, x + PAD, HEADER_H + rows.pos(r) + 3.0);
                     }
                 }
                 snapshot.pop();
@@ -182,29 +205,34 @@ mod imp {
             // before narrowing to f32, so far-away edges stay exact.
             let sel = self.selection.get();
             let (tl, br) = sel.range();
+            let (tl_col, br_col) = (u64::from(tl.col), u64::from(br.col));
             let clamp_x = |x: f64| x.clamp(rh_w - 4.0, w + 4.0);
             let clamp_y = |y: f64| y.clamp(HEADER_H - 4.0, h + 4.0);
+            let (x0, x1) = (
+                clamp_x(rh_w + cols.pos(tl_col)),
+                clamp_x(rh_w + cols.pos(br_col) + cols.size(br_col)),
+            );
+            let (y0, y1) = (
+                clamp_y(HEADER_H + rows.pos(tl.row)),
+                clamp_y(HEADER_H + rows.pos(br.row) + rows.size(br.row)),
+            );
             let accent = gdk::RGBA::new(0.21, 0.52, 0.89, 1.0);
             if tl != br {
-                let (x0, y0) = (
-                    clamp_x(rh_w + cols.col_x(tl.col)),
-                    clamp_y(HEADER_H + rows.row_y(tl.row)),
-                );
-                let (x1, y1) = (
-                    clamp_x(rh_w + cols.col_x(br.col) + COL_W),
-                    clamp_y(HEADER_H + rows.row_y(br.row) + ROW_H),
-                );
                 let fill = gdk::RGBA::new(accent.red(), accent.green(), accent.blue(), 0.18);
                 snapshot.append_color(&fill, &rect(x0, y0, x1 - x0, y1 - y0));
             }
             let cur = sel.cursor();
-            let (cx, cy) = (rh_w + cols.col_x(cur.col), HEADER_H + rows.row_y(cur.row));
-            if cy > HEADER_H - ROW_H && cy < h && cx > rh_w - COL_W && cx < w {
+            let (cx, cy) = (
+                rh_w + cols.pos(u64::from(cur.col)),
+                HEADER_H + rows.pos(cur.row),
+            );
+            let (cw, ch) = (cols.size(u64::from(cur.col)), rows.size(cur.row));
+            if cy > HEADER_H - ch && cy < h && cx > rh_w - cw && cx < w {
                 for (x, y, bw, bh) in [
-                    (cx, cy, COL_W, 2.0),
-                    (cx, cy + ROW_H - 2.0, COL_W, 2.0),
-                    (cx, cy, 2.0, ROW_H),
-                    (cx + COL_W - 2.0, cy, 2.0, ROW_H),
+                    (cx, cy, cw, 2.0),
+                    (cx, cy + ch - 2.0, cw, 2.0),
+                    (cx, cy, 2.0, ch),
+                    (cx + cw - 2.0, cy, 2.0, ch),
                 ] {
                     snapshot.append_color(&accent, &rect(x, y, bw, bh));
                 }
@@ -214,32 +242,27 @@ mod imp {
             // Row numbers.
             snapshot.append_color(&header_bg, &rect(0.0, HEADER_H, rh_w, body_h));
             let mark = gdk::RGBA::new(accent.red(), accent.green(), accent.blue(), 0.25);
-            let (y0, y1) = (
-                clamp_y(HEADER_H + rows.row_y(tl.row)),
-                clamp_y(HEADER_H + rows.row_y(br.row) + ROW_H),
-            );
             snapshot.append_color(&mark, &rect(0.0, y0, rh_w, y1 - y0));
             snapshot.push_clip(&rect(0.0, HEADER_H, rh_w, body_h));
             for r in visible {
+                let y = HEADER_H + rows.pos(r);
+                snapshot.append_color(&line, &rect(0.0, y + rows.size(r) - 1.0, rh_w, 1.0));
                 buf.clear();
                 let _ = write!(buf, "{}", r + 1);
-                text_at(&buf, PAD + 2.0, HEADER_H + rows.row_y(r) + 3.0);
+                text_at(&buf, PAD + 2.0, y + 3.0);
             }
             snapshot.pop();
 
             // Column letters.
             snapshot.append_color(&header_bg, &rect(0.0, 0.0, w, HEADER_H));
-            let (x0, x1) = (
-                clamp_x(rh_w + cols.col_x(tl.col)),
-                clamp_x(rh_w + cols.col_x(br.col) + COL_W),
-            );
             snapshot.append_color(&mark, &rect(x0, 0.0, x1 - x0, HEADER_H));
             snapshot.append_color(&line, &rect(0.0, HEADER_H - 1.0, w, 1.0));
             snapshot.append_color(&line, &rect(rh_w - 1.0, 0.0, 1.0, h));
             snapshot.push_clip(&rect(rh_w, 0.0, body_w, HEADER_H));
             for c in visible_cols {
-                let x = rh_w + cols.col_x(c);
-                column_name(c, &mut buf);
+                let x = rh_w + cols.pos(c);
+                snapshot.append_color(&line, &rect(x + cols.size(c) - 1.0, 0.0, 1.0, HEADER_H));
+                column_name(c as u32, &mut buf);
                 text_at(&buf, x + PAD, 4.0);
             }
             snapshot.pop();
@@ -272,7 +295,7 @@ impl GridView {
                 let Some(g) = g.upgrade() else { return };
                 g.grab_focus();
                 if n_press == 2 {
-                    g.begin_edit(x, y);
+                    g.double_click(x, y);
                 } else {
                     let shift = gesture
                         .current_event_state()
@@ -304,6 +327,23 @@ impl GridView {
             }
         });
         g.add_controller(drag);
+        // The resize cursor over the borders in the row and column headers.
+        let motion = gtk::EventControllerMotion::new();
+        motion.connect_motion({
+            let g = g.downgrade();
+            move |_, x, y| {
+                let Some(g) = g.upgrade() else { return };
+                if matches!(g.imp().drag.get(), Some((Drag::Resize { .. }, ..))) {
+                    return;
+                }
+                g.set_cursor_from_name(match g.edge_at(x, y) {
+                    Some(Edge::Col(_)) => Some("col-resize"),
+                    Some(Edge::Row(_)) => Some("row-resize"),
+                    None => None,
+                });
+            }
+        });
+        g.add_controller(motion);
         let keys = gtk::EventControllerKey::new();
         keys.connect_key_pressed({
             let g = g.downgrade();
@@ -355,35 +395,134 @@ impl GridView {
         b
     }
 
-    /// The cell under widget point (`x`, `y`), clamped into the body and the table, and
-    /// the top-left visible cell.
-    fn cell_near(&self, x: f64, y: f64, b: Bounds) -> (grid::Cell, grid::Cell) {
+    /// Both axes of the body as they are scrolled and sized now: rows, then columns.
+    fn with_viewports<R>(&self, f: impl FnOnce(Viewport<'_>, Viewport<'_>) -> R) -> R {
         let imp = self.imp();
         let (body_w, body_h) = imp.body_size();
-        let (sx, sy) = (
-            imp.hadj.borrow().as_ref().map_or(0.0, |a| a.value()),
-            imp.vadj.borrow().as_ref().map_or(0.0, |a| a.value()),
-        );
-        let row = |y: f64| ((sy + y) / ROW_H).floor().max(0.0) as u64;
-        let col = |x: f64| ((sx + x) / COL_W).floor().max(0.0) as u32;
-        let at = |r: u64, c: u32| grid::Cell {
-            row: r.min(b.rows.saturating_sub(1)),
-            col: c.min(b.cols.saturating_sub(1)),
+        let value = |adj: &RefCell<Option<gtk::Adjustment>>| {
+            adj.borrow().as_ref().map_or(0.0, |a| a.value())
         };
-        let x = (x - imp.row_header_w.get()).clamp(0.0, (body_w - 1.0).max(0.0));
-        let y = (y - HEADER_H).clamp(0.0, (body_h - 1.0).max(0.0));
-        (at(row(y), col(x)), at(row(0.0), col(0.0)))
+        let (row_count, col_count) = (self.row_count(), imp.cache.borrow().col_count());
+        let sizing = imp.sizing.borrow();
+        f(
+            Viewport {
+                scroll: value(&imp.vadj),
+                extent: body_h,
+                sizes: &sizing.rows,
+                count: row_count,
+            },
+            Viewport {
+                scroll: value(&imp.hadj),
+                extent: body_w,
+                sizes: &sizing.cols,
+                count: u64::from(col_count),
+            },
+        )
+    }
+
+    /// The cell under widget point (`x`, `y`), clamped into the body and the table, and
+    /// the top-left visible cell. Call only with a non-empty table.
+    fn cell_near(&self, x: f64, y: f64) -> (grid::Cell, grid::Cell) {
+        let (x, y) = (x - self.imp().row_header_w.get(), y - HEADER_H);
+        self.with_viewports(|rows, cols| {
+            let at = |r: Option<u64>, c: Option<u64>| grid::Cell {
+                row: r.unwrap_or(0),
+                col: c.unwrap_or(0) as u32,
+            };
+            (
+                at(rows.nearest(y), cols.nearest(x)),
+                at(rows.nearest(0.0), cols.nearest(0.0)),
+            )
+        })
+    }
+
+    /// The row or column border under widget point (`x`, `y`) in the headers, where a
+    /// drag resizes (GRID-5).
+    fn edge_at(&self, x: f64, y: f64) -> Option<Edge> {
+        let rh_w = self.imp().row_header_w.get();
+        self.with_viewports(|rows, cols| match (x < rh_w, y < HEADER_H) {
+            (false, true) => cols.edge_at(x - rh_w, 4.0).map(|c| Edge::Col(c as u32)),
+            (true, false) => rows.edge_at(y - HEADER_H, 3.0).map(Edge::Row),
+            _ => None,
+        })
+    }
+
+    /// Double-click: on a column border, autofit it; on a row border, back to the default
+    /// height (rows hold one line); on a cell, edit it.
+    fn double_click(&self, x: f64, y: f64) {
+        match self.edge_at(x, y) {
+            Some(Edge::Col(c)) => {
+                for c in self.columns_with(c) {
+                    self.autofit(c);
+                }
+                self.update_adjustments();
+            }
+            Some(Edge::Row(r)) => {
+                self.imp().sizing.borrow_mut().rows.set(r, ROW_H);
+                self.update_adjustments();
+            }
+            None => self.begin_edit(x, y),
+        }
+    }
+
+    /// Column `c`, or every selected column when `c` is one of several selected whole
+    /// columns: resizing one of them resizes them all, as in Calc.
+    fn columns_with(&self, c: u32) -> std::ops::Range<u32> {
+        match self.imp().selection.get().whole_columns() {
+            Some(cols) if cols.contains(&c) => cols,
+            _ => c..c + 1,
+        }
+    }
+
+    /// Fit column `c` to the widest text in the rows on screen. Only those are measured,
+    /// so this costs the same at any row count; an empty column gets the default width.
+    fn autofit(&self, c: u32) {
+        let imp = self.imp();
+        let (body_w, _) = imp.body_size();
+        let widest = self.with_viewports(|rows, _| {
+            imp.cache.borrow().widest(c, rows.visible(0), |text| {
+                f64::from(imp.layout(text).pixel_size().0)
+            })
+        });
+        let width = widest.map_or(COL_W, |w| (w + 2.0 * PAD + 2.0).min(body_w.max(COL_W)));
+        imp.sizing.borrow_mut().cols.set(u64::from(c), width);
+    }
+
+    /// A resize drag moved to widget point (`x`, `y`).
+    fn resize_to(&self, edge: Edge, from: f64, start: f64, x: f64, y: f64) {
+        let mut sizing = self.imp().sizing.borrow_mut();
+        match edge {
+            Edge::Col(c) => {
+                let width = (from + x - start).max(MIN_COL_W);
+                for c in self.columns_with(c) {
+                    sizing.cols.set(u64::from(c), width);
+                }
+            }
+            Edge::Row(r) => sizing.rows.set(r, (from + y - start).max(MIN_ROW_H)),
+        }
+        drop(sizing);
+        self.update_adjustments();
     }
 
     /// A click (GRID-4): a cell, a row or column header, or the corner (everything).
     /// Shift extends the selection; the cursor stays.
     fn mouse_down(&self, x: f64, y: f64, shift: bool) {
         let imp = self.imp();
+        if let Some(edge) = self.edge_at(x, y) {
+            let sizing = imp.sizing.borrow();
+            let (from, start) = match edge {
+                Edge::Col(c) => (sizing.cols.size(u64::from(c)), x),
+                Edge::Row(r) => (sizing.rows.size(r), y),
+            };
+            imp.drag
+                .set(Some((Drag::Resize { edge, from, start }, x, y)));
+            return;
+        }
         let b = self.bounds();
         if b.rows == 0 || b.cols == 0 {
             return;
         }
-        let (cell, top_left) = self.cell_near(x, y, b);
+        let (cell, top_left) = self.cell_near(x, y);
         let mut sel = imp.selection.get();
         let kind = match (x < imp.row_header_w.get(), y < HEADER_H) {
             (true, true) => {
@@ -420,6 +559,10 @@ impl GridView {
             return;
         };
         imp.drag.set(Some((kind, x, y)));
+        if let Drag::Resize { edge, from, start } = kind {
+            self.resize_to(edge, from, start, x, y);
+            return;
+        }
         self.drag_step();
         if imp.autoscroll.borrow().is_none() {
             let id = glib::timeout_add_local(std::time::Duration::from_millis(40), {
@@ -468,12 +611,13 @@ impl GridView {
         if b.rows == 0 || b.cols == 0 {
             return;
         }
-        let (cell, _) = self.cell_near(x, y, b);
+        let (cell, _) = self.cell_near(x, y);
         let mut sel = imp.selection.get();
         match kind {
             Drag::Cells => sel.extend_to(cell),
             Drag::Rows => sel.click_row(cell.row, true, 0, b),
             Drag::Cols => sel.click_col(cell.col, true, 0, b),
+            Drag::Resize { .. } => return,
         }
         if sel != imp.selection.get() {
             imp.selection.set(sel);
@@ -508,11 +652,13 @@ impl GridView {
                 adj.set_value(start + size - view);
             }
         };
+        let sizing = imp.sizing.borrow();
         if let (Some(v), Some(row)) = (imp.vadj.borrow().as_ref(), row) {
-            reveal(v, row as f64 * ROW_H, ROW_H, body_h);
+            reveal(v, sizing.rows.start(row), sizing.rows.size(row), body_h);
         }
         if let (Some(hz), Some(col)) = (imp.hadj.borrow().as_ref(), col) {
-            reveal(hz, f64::from(col) * COL_W, COL_W, body_w);
+            let col = u64::from(col);
+            reveal(hz, sizing.cols.start(col), sizing.cols.size(col), body_w);
         }
     }
 
@@ -523,25 +669,17 @@ impl GridView {
         if imp.saving.get() {
             return;
         }
-        let (Some(vadj), Some(hadj)) = (imp.vadj.borrow().clone(), imp.hadj.borrow().clone())
-        else {
-            return;
-        };
-        let (body_w, body_h) = imp.body_size();
         let rh_w = imp.row_header_w.get();
-        let rows = Viewport {
-            scroll_y: vadj.value(),
-            height: body_h,
-            row_height: ROW_H,
-            total_rows: self.row_count(),
-        };
-        let cols = ColumnViewport {
-            scroll_x: hadj.value(),
-            width: body_w,
-            col_width: COL_W,
-            total_cols: imp.cache.borrow().col_count(),
-        };
-        let (Some(row), Some(col)) = (rows.row_at(y - HEADER_H), cols.col_at(x - rh_w)) else {
+        let Some((row, col, cell)) = self.with_viewports(|rows, cols| {
+            let (row, col) = (rows.at(y - HEADER_H)?, cols.at(x - rh_w)?);
+            let cell = gdk::Rectangle::new(
+                (rh_w + cols.pos(col)) as i32,
+                (HEADER_H + rows.pos(row)) as i32,
+                cols.size(col) as i32,
+                rows.size(row) as i32,
+            );
+            Some((row, col as u32, cell))
+        }) else {
             return;
         };
         let value = imp
@@ -555,12 +693,6 @@ impl GridView {
             .borrow_mut()
             .get_or_insert_with(|| self.build_editor())
             .clone();
-        let cell = gdk::Rectangle::new(
-            (rh_w + cols.col_x(col)) as i32,
-            (HEADER_H + rows.row_y(row)) as i32,
-            COL_W as i32,
-            ROW_H as i32,
-        );
         imp.editing.set(Some((row, col)));
         imp.selection.set(Selection::at(grid::Cell { row, col }));
         self.queue_draw();
@@ -630,6 +762,11 @@ impl GridView {
 
     pub fn set_saving(&self, saving: bool) {
         self.imp().saving.set(saving);
+    }
+
+    /// Every column back to the default width.
+    pub fn reset_column_widths(&self) {
+        self.imp().sizing.borrow_mut().cols.clear();
     }
 
     /// Show a freshly opened table (the file just saved). Its edits are on disk now, so the
@@ -720,25 +857,37 @@ impl GridView {
             .set(f64::from(digits * digit_w) + 3.0 * PAD);
         let (body_w, body_h) = imp.body_size();
         // GTK requires upper >= page size; short or narrow tables just don't scroll.
+        let sizing = imp.sizing.borrow();
         if let Some(v) = imp.vadj.borrow().as_ref() {
-            let upper = (rows as f64 * ROW_H).max(body_h);
+            let upper = sizing.rows.start(rows).max(body_h);
             v.configure(v.value(), 0.0, upper, ROW_H, body_h * 0.9, body_h);
         }
         if let Some(hz) = imp.hadj.borrow().as_ref() {
-            let upper = (imp.cache.borrow().col_count().max(1) as f64 * COL_W).max(body_w);
+            let cols = u64::from(imp.cache.borrow().col_count().max(1));
+            let upper = sizing.cols.start(cols).max(body_w);
             hz.configure(hz.value(), 0.0, upper, COL_W / 4.0, body_w * 0.9, body_w);
         }
+        drop(sizing);
         self.queue_draw();
     }
 }
 
 /// What a mouse drag stretches the selection over (GRID-4): cells, or whole rows/columns
-/// when it started on a header.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// when it started on a header; or a row or column border being dragged to resize it
+/// (GRID-5), from size `from` with the pointer at `start` along that axis.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Drag {
     Cells,
     Rows,
     Cols,
+    Resize { edge: Edge, from: f64, start: f64 },
+}
+
+/// The far border of a column (in the column header) or a row (in the row numbers).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Edge {
+    Col(u32),
+    Row(u64),
 }
 
 /// Map a GDK key press to a navigation key (GRID-3/GRID-4). `None` lets it through (Ctrl+S,
