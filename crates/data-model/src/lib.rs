@@ -7,7 +7,7 @@ mod save;
 mod table;
 
 pub use save::{SaveJob, SaveJobError, SaveStats};
-pub use table::{CsvTable, RowBlock, TableSource, MAX_DISPLAY_BYTES};
+pub use table::{CsvTable, DelimiterChoice, RereadError, RowBlock, TableSource, MAX_DISPLAY_BYTES};
 
 use std::collections::{BTreeMap, HashMap};
 

@@ -36,7 +36,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | SAVE-1 | M0 | P0 | done | EDIT-1 | Atomic save: temp file, verify, rename | kill -9 mid-save leaves original intact; output byte-identical except edited cells |
 | BENCH-1 | M0 | P0 | done | INFRA-1, INFRA-2, ENG-1 | Benchmark harness over the corpus | `cargo bench` runs in CI and prints the docs/BENCHMARKS.md table |
 | ENG-4 | M1 | P0 | done | ENG-3 | Auto-detect delimiter: comma, tab, semicolon, pipe | Correct on 95%+ of a 50-file real-world sample |
-| ENG-5 | M1 | P0 | todo | ENG-4, DEC-5 | Manual delimiter override, re-index in background | Override applies without restart |
+| ENG-5 | M1 | P0 | done | ENG-4, DEC-5 | Manual delimiter override, re-index in background | Override applies without restart |
 | ENG-6 | M1 | P0 | todo | ENG-3 | Encoding detection: UTF-8, UTF-8 BOM, UTF-16, Latin-1 | Encoding and BOM round-trip on save |
 | ENG-7 | M1 | P1 | todo | ENG-4 | Header row detection with toggle | User can flip "first row is header" |
 | GRID-3 | M1 | P0 | todo | GRID-1 | Keyboard navigation: arrows, Tab, Enter, Shift variants, Ctrl+Home/End, PgUp/PgDn | Matches LibreOffice on the side-by-side checklist |
@@ -80,6 +80,12 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-06 ENG-5:** decisions:
+  - The override is a header-bar dropdown: Auto, Comma, Tab, Semicolon, Pipe. Switching reuses the open file mapping with a new index (23 µs on the UI thread) and re-indexes on a worker thread (19.1M rows in 131 ms with the file cached), cancelling any index build still running. The choice persists across saves.
+  - Switching is refused while edits are unsaved, and the dropdown is disabled with a tooltip, because edits are tied to the columns the old delimiter produced.
+  - Smoke-tested in the real app by keyboard (focus the dropdown, Space, Home/Down, Enter). Injected pointer clicks focus the dropdown but don't open its list.
+  - Process issue: one smoke step sent `wtype` keys while another app had focus. The driver now checks the active window before typing.
+  - Follow-up: the delimiter choice isn't remembered between sessions (recent files, APP-4).
 - **2026-10-06 ENG-4:** the 50-file sample is listed in `scripts/delimiter_sample.tsv`: 18 comma, 14 semicolon, 12 tab, 6 pipe, all from public portals. `scripts/fetch_delimiter_sample.py` downloads the first 256 KiB of each into `corpus/realworld/` (gitignored; no third-party data is committed). I set each label by reading the file; the fetch script cross-checks it with Python's `csv` module, and all 50 agree. A few sources are live feeds, so their content changes; their format doesn't. The detector got 50/50 correct on the first run, with no tuning against the sample. The real-world test is `#[ignore]` because it needs network access to fetch the sample, so CI runs only the unit tests. Detection reads the first 64 KiB, scores up to 200 rows, and skips `#` comment lines while scoring. The delimiter override (ENG-5) is the fallback when detection is wrong.
 - **2026-10-06 BENCH-1:** the harness is `app/benches/corpus.rs` (`harness = false`), so it can launch the real app binary for the rows that need a window. It reads rows and targets from `docs/BENCHMARKS.md`; a new row prints "no measurement for this row yet" until code for it is added. CI has a separate `bench` job that generates the 1 GB corpus. On the runner (4 threads, 16 GiB, no display) it measured index 2.61 s and save 6.63 s, and printed the four window rows as skipped. Library and binary targets set `bench = false`, so `cargo bench` prints only the table. Not done: storing results per commit (the old plan's M0-03 wording; not in this criterion).
 - **2026-10-06 SAVE-1:** decisions:

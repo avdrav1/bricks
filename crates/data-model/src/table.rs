@@ -2,10 +2,40 @@
 //! never touches the file (layers: source -> overlay -> view -> grid).
 
 use crate::{CellRef, Col, EditOverlay, Row, RowId};
-use csv_engine::{split_fields, Dialect, Field, RowIndex, SparseRowIndex};
+use csv_engine::{
+    detect_dialect, split_fields, Dialect, Field, RowIndex, Source, SparseRowIndex,
+    DETECT_SAMPLE_BYTES,
+};
 use std::borrow::Cow;
 use std::ops::Range;
+use std::path::Path;
 use std::sync::Arc;
+
+/// How a file's delimiter is chosen: detected (ENG-4) or set by the user (ENG-5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DelimiterChoice {
+    Auto,
+    Fixed(u8),
+}
+
+#[derive(Debug)]
+pub enum RereadError {
+    /// Edits are tied to columns a new delimiter would reshuffle; save them first.
+    /// Holds the number of edited cells.
+    UnsavedEdits(usize),
+}
+
+fn dialect_for(source: &Source, choice: DelimiterChoice) -> Dialect {
+    let bytes = source.bytes();
+    let detected = detect_dialect(&bytes[..bytes.len().min(DETECT_SAMPLE_BYTES)]);
+    match choice {
+        DelimiterChoice::Auto => detected,
+        DelimiterChoice::Fixed(delimiter) => Dialect {
+            delimiter,
+            ..detected
+        },
+    }
+}
 
 /// Longest cell text kept for display. Raw values are untouched; this only bounds the
 /// grid's memory so it stays constant whatever the file holds.
@@ -122,6 +152,36 @@ impl CsvTable {
             spans: Vec::new(),
             fields: Vec::new(),
         }
+    }
+
+    /// Map `path` and pick its dialect. Rows appear as the caller builds the index
+    /// (`index().build`, normally on a worker thread).
+    pub fn open(path: &Path, choice: DelimiterChoice) -> std::io::Result<Self> {
+        let source = Source::open(path)?;
+        let dialect = dialect_for(&source, choice);
+        Ok(Self::new(
+            SparseRowIndex::new(Arc::new(source), &dialect),
+            dialect,
+        ))
+    }
+
+    /// The same open file read with another delimiter: a new, unbuilt index over the same
+    /// mapping. Refused while there are unsaved edits.
+    pub fn reread(&self, choice: DelimiterChoice) -> Result<Self, RereadError> {
+        if !self.overlay.is_empty() {
+            return Err(RereadError::UnsavedEdits(self.overlay.len()));
+        }
+        let source = self.index.source().clone();
+        let dialect = dialect_for(&source, choice);
+        Ok(Self::new(SparseRowIndex::new(source, &dialect), dialect))
+    }
+
+    pub fn index(&self) -> &Arc<SparseRowIndex> {
+        &self.index
+    }
+
+    pub fn dialect(&self) -> &Dialect {
+        &self.dialect
     }
 
     /// True once a read found the file truncated or replaced in place underneath us.
@@ -311,6 +371,68 @@ mod tests {
             std::fs::metadata(&path).unwrap().modified().unwrap(),
             modified,
             "source never written"
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+
+    fn build(table: &CsvTable) {
+        table
+            .index()
+            .build(&std::sync::atomic::AtomicBool::new(false))
+            .unwrap();
+    }
+
+    /// ENG-5: a delimiter override re-reads the same open file, no restart needed.
+    #[test]
+    fn override_rereads_the_open_file_with_another_delimiter() {
+        let content = b"id;city;coords\n1;Paris;48.86, 2.29\n2;Lyon;45.76, 4.83\n";
+        let path =
+            std::env::temp_dir().join(format!("data-model-override-{}.csv", std::process::id()));
+        std::fs::write(&path, content).unwrap();
+
+        let mut auto = CsvTable::open(&path, DelimiterChoice::Auto).unwrap();
+        build(&auto);
+        assert_eq!(auto.dialect().delimiter, b';', "detected on open");
+        assert_eq!(row_text(&mut auto, 1), ["1", "Paris", "48.86, 2.29"]);
+
+        let mut comma = auto.reread(DelimiterChoice::Fixed(b',')).unwrap();
+        assert_eq!(
+            comma.row_count(),
+            0,
+            "the new reading starts unindexed; the caller builds it"
+        );
+        build(&comma);
+        assert_eq!(comma.dialect().delimiter, b',');
+        assert_eq!(row_text(&mut comma, 1), ["1;Paris;48.86", " 2.29"]);
+        assert!(
+            Arc::ptr_eq(comma.index().source(), auto.index().source()),
+            "same mapping, no reopen"
+        );
+
+        let mut back = comma.reread(DelimiterChoice::Auto).unwrap();
+        build(&back);
+        assert_eq!(row_text(&mut back, 1), ["1", "Paris", "48.86, 2.29"]);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn override_waits_for_unsaved_edits() {
+        let (path, mut table) = open(b"a,b\n1,2\n");
+        table.set_cell(
+            CellRef {
+                row: table.row_id(1),
+                col: 0,
+            },
+            "x",
+        );
+        assert!(matches!(
+            table.reread(DelimiterChoice::Fixed(b';')),
+            Err(RereadError::UnsavedEdits(1))
+        ));
+        assert_eq!(
+            table.cell_value(1, 0).as_deref(),
+            Some("x"),
+            "the edit is still there"
         );
         std::fs::remove_file(path).unwrap();
     }

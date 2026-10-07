@@ -1,7 +1,9 @@
 //! The grid widget: draws the cells `grid::GridCache` holds with GSK + Pango (ADR 0001).
 
 use commands::{SetCell, UndoStack};
-use data_model::{CellRef, CsvTable, SaveJob, SaveJobError, TableSource};
+use data_model::{
+    CellRef, CsvTable, DelimiterChoice, RereadError, SaveJob, SaveJobError, TableSource,
+};
 use grid::{ColumnViewport, GridCache, Viewport};
 use gtk::{gdk, glib, graphene, pango, prelude::*, subclass::prelude::*};
 use std::cell::{Cell, RefCell};
@@ -360,8 +362,25 @@ impl GridView {
         let imp = self.imp();
         imp.table.replace(Some(table));
         imp.undo.replace(Some(UndoStack::new(1_000)));
-        imp.cache.borrow_mut().invalidate();
+        imp.cache.borrow_mut().reset();
         self.update_adjustments();
+    }
+
+    /// The open file read with another delimiter (ENG-5); refused with unsaved edits.
+    pub fn reread(&self, choice: DelimiterChoice) -> Result<CsvTable, RereadError> {
+        let table = self.imp().table.borrow();
+        table
+            .as_ref()
+            .expect("a GridView always holds a table after new()")
+            .reread(choice)
+    }
+
+    pub fn delimiter(&self) -> u8 {
+        self.imp()
+            .table
+            .borrow()
+            .as_ref()
+            .map_or(b',', |t| t.dialect().delimiter)
     }
 
     /// Cells edited since open.

@@ -10,14 +10,13 @@
 
 mod grid_view;
 
-use csv_engine::{detect_dialect, Source, SparseRowIndex, DETECT_SAMPLE_BYTES};
-use data_model::{CsvTable, SaveStats};
+use data_model::{CsvTable, DelimiterChoice, RereadError, SaveStats};
 use grid_view::{GridView, ROW_H};
 use gtk::{glib, prelude::*};
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
@@ -80,7 +79,12 @@ fn main() -> glib::ExitCode {
             return glib::ExitCode::from(2);
         }
     };
-    let table = match open_table(&args.file) {
+    let session = Rc::new(Session {
+        path: args.file.clone(),
+        choice: Cell::new(DelimiterChoice::Auto),
+        indexing: RefCell::new(Arc::new(AtomicBool::new(false))),
+    });
+    let table = match session.open() {
         Ok(t) => t,
         Err(e) => {
             eprintln!("spreadsheet: cannot open {}: {e}", args.file.display());
@@ -96,28 +100,94 @@ fn main() -> glib::ExitCode {
     let table = RefCell::new(Some(table));
     app.connect_activate(move |app| {
         if let Some(table) = table.take() {
-            build_window(app, &args, table);
+            build_window(app, &args, &session, table);
         }
     });
     app.run_with_args::<&str>(&[])
 }
 
-/// Map `path`, detect its delimiter from the first bytes (ENG-4), and start indexing off the
-/// UI thread; rows become readable as it goes. Indexing moves onto the shared job pool when
-/// ENG-8 builds it (ADR 0005).
-fn open_table(path: &Path) -> std::io::Result<CsvTable> {
-    let source = Source::open(path)?;
-    let bytes = source.bytes();
-    let dialect = detect_dialect(&bytes[..bytes.len().min(DETECT_SAMPLE_BYTES)]);
-    let index = SparseRowIndex::new(Arc::new(source), &dialect);
-    std::thread::Builder::new().name("index".into()).spawn({
-        let index = index.clone();
-        move || index.build(&AtomicBool::new(false))
-    })?;
-    Ok(CsvTable::new(index, dialect))
+/// The open file: where it is, how its delimiter is chosen, and the index build in flight.
+struct Session {
+    path: PathBuf,
+    choice: Cell<DelimiterChoice>,
+    /// Cancel flag of the running index build; set when a newer reading replaces it.
+    indexing: RefCell<Arc<AtomicBool>>,
 }
 
-fn build_window(app: &gtk::Application, args: &Args, table: CsvTable) {
+impl Session {
+    /// Map the file with the current delimiter choice (detected on Auto, ENG-4) and start
+    /// indexing it.
+    fn open(&self) -> std::io::Result<CsvTable> {
+        let table = CsvTable::open(&self.path, self.choice.get())?;
+        self.index(&table)?;
+        Ok(table)
+    }
+
+    /// Index `table` off the UI thread, cancelling any earlier build; rows become readable
+    /// as it goes. Moves onto the shared job pool when ENG-8 builds it (ADR 0005).
+    fn index(&self, table: &CsvTable) -> std::io::Result<()> {
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.indexing
+            .replace(cancel.clone())
+            .store(true, Ordering::Relaxed);
+        let index = table.index().clone();
+        std::thread::Builder::new()
+            .name("index".into())
+            .spawn(move || index.build(&cancel))?;
+        Ok(())
+    }
+}
+
+/// Delimiter menu entries, in dropdown order.
+const DELIMITERS: [(&str, DelimiterChoice); 5] = [
+    ("Auto", DelimiterChoice::Auto),
+    ("Comma", DelimiterChoice::Fixed(b',')),
+    ("Tab", DelimiterChoice::Fixed(b'\t')),
+    ("Semicolon", DelimiterChoice::Fixed(b';')),
+    ("Pipe", DelimiterChoice::Fixed(b'|')),
+];
+
+/// Delimiter dropdown (ENG-5): re-reads the open file with the chosen delimiter and
+/// re-indexes it in the background. Disabled while edits are unsaved, since edits are tied
+/// to the columns the old delimiter produced.
+fn delimiter_dropdown(session: &Rc<Session>, grid: &GridView) -> gtk::DropDown {
+    let names: Vec<&str> = DELIMITERS.iter().map(|(n, _)| *n).collect();
+    let dropdown = gtk::DropDown::from_strings(&names);
+    dropdown.set_tooltip_text(Some("Delimiter"));
+    dropdown.connect_selected_notify({
+        let (session, grid) = (session.clone(), grid.downgrade());
+        move |dd| {
+            let (Some(grid), Some(&(_, choice))) =
+                (grid.upgrade(), DELIMITERS.get(dd.selected() as usize))
+            else {
+                return;
+            };
+            if choice == session.choice.get() {
+                return;
+            }
+            match grid.reread(choice) {
+                Ok(table) => {
+                    if let Err(e) = session.index(&table) {
+                        eprintln!("spreadsheet: cannot index: {e}");
+                        return;
+                    }
+                    session.choice.set(choice);
+                    grid.replace_table(table);
+                }
+                Err(RereadError::UnsavedEdits(_)) => {
+                    let current = DELIMITERS
+                        .iter()
+                        .position(|(_, c)| *c == session.choice.get())
+                        .unwrap_or(0);
+                    dd.set_selected(current as u32);
+                }
+            }
+        }
+    });
+    dropdown
+}
+
+fn build_window(app: &gtk::Application, args: &Args, session: &Rc<Session>, table: CsvTable) {
     let vadj = gtk::Adjustment::new(0.0, 0.0, 0.0, ROW_H, 0.0, 0.0);
     let hadj = gtk::Adjustment::new(0.0, 0.0, 0.0, 30.0, 0.0, 0.0);
     let grid = GridView::new(table, &vadj, &hadj);
@@ -150,6 +220,10 @@ fn build_window(app: &gtk::Application, args: &Args, table: CsvTable) {
         .default_height(900)
         .child(&layout)
         .build();
+    let delimiter = delimiter_dropdown(session, &grid);
+    let header = gtk::HeaderBar::new();
+    header.pack_end(&delimiter);
+    window.set_titlebar(Some(&header));
 
     // Mouse wheel and touchpad.
     let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::BOTH_AXES);
@@ -172,17 +246,17 @@ fn build_window(app: &gtk::Application, args: &Args, table: CsvTable) {
     let save = Rc::new(RefCell::new(SaveState::Idle));
     let keys = gtk::EventControllerKey::new();
     keys.connect_key_pressed({
-        let (vadj, grid, save, path) = (
+        let (vadj, grid, save, session) = (
             vadj.clone(),
             grid.downgrade(),
             save.clone(),
-            args.file.clone(),
+            session.clone(),
         );
         move |_, key, _, mods| {
             use gtk::gdk::{Key, ModifierType};
             if mods.contains(ModifierType::CONTROL_MASK) && matches!(key, Key::s | Key::S) {
                 if let Some(grid) = grid.upgrade() {
-                    start_save(&grid, &path, &save);
+                    start_save(&grid, &session.path, &save);
                 }
                 return glib::Propagation::Stop;
             }
@@ -206,7 +280,7 @@ fn build_window(app: &gtk::Application, args: &Args, table: CsvTable) {
     let started = Instant::now();
     let mut was_complete = false;
     glib::timeout_add_local(Duration::from_millis(100), {
-        let (grid, window, path) = (grid.downgrade(), window.downgrade(), args.file.clone());
+        let (grid, window, session) = (grid.downgrade(), window.downgrade(), session.clone());
         move || {
             let (Some(grid), Some(window)) = (grid.upgrade(), window.upgrade()) else {
                 return glib::ControlFlow::Break;
@@ -224,8 +298,21 @@ fn build_window(app: &gtk::Application, args: &Args, table: CsvTable) {
                 );
             }
             was_complete = complete;
-            finish_save(&grid, &path, &save);
-            window.set_title(Some(&title(&name, &grid, &save.borrow())));
+            finish_save(&grid, &session, &save);
+            let can_switch =
+                grid.edit_count() == 0 && !matches!(*save.borrow(), SaveState::Saving(_));
+            delimiter.set_sensitive(can_switch);
+            delimiter.set_tooltip_text(Some(if can_switch {
+                "Delimiter"
+            } else {
+                "Delimiter (save your edits before changing it)"
+            }));
+            window.set_title(Some(&title(
+                &name,
+                &grid,
+                session.choice.get(),
+                &save.borrow(),
+            )));
             glib::ControlFlow::Continue
         }
     });
@@ -314,7 +401,7 @@ fn start_save(grid: &GridView, path: &Path, save: &RefCell<SaveState>) {
 
 /// When a save has finished: reopen the saved file (its edits are now on disk) or report
 /// the error with the edits still in memory.
-fn finish_save(grid: &GridView, path: &Path, save: &RefCell<SaveState>) {
+fn finish_save(grid: &GridView, session: &Session, save: &RefCell<SaveState>) {
     let result = match &*save.borrow() {
         SaveState::Saving(rx) => match rx.try_recv() {
             Ok(r) => r,
@@ -324,11 +411,9 @@ fn finish_save(grid: &GridView, path: &Path, save: &RefCell<SaveState>) {
         _ => return,
     };
     grid.set_saving(false);
-    let next = match result.and_then(|done| {
-        open_table(path)
-            .map(|t| (done, t))
-            .map_err(|e| e.to_string())
-    }) {
+    let next = match result
+        .and_then(|done| session.open().map(|t| (done, t)).map_err(|e| e.to_string()))
+    {
         Ok(((stats, took), table)) => {
             grid.replace_table(table);
             if std::env::var_os("BRICKS_TIMINGS").is_some() {
@@ -347,7 +432,17 @@ fn finish_save(grid: &GridView, path: &Path, save: &RefCell<SaveState>) {
     *save.borrow_mut() = next;
 }
 
-fn title(name: &str, grid: &GridView, save: &SaveState) -> String {
+fn delimiter_name(d: u8) -> &'static str {
+    match d {
+        b',' => "comma",
+        b'\t' => "tab",
+        b';' => "semicolon",
+        b'|' => "pipe",
+        _ => "other",
+    }
+}
+
+fn title(name: &str, grid: &GridView, choice: DelimiterChoice, save: &SaveState) -> String {
     let edits = grid.edit_count();
     let mut t = String::new();
     if edits > 0 {
@@ -356,7 +451,11 @@ fn title(name: &str, grid: &GridView, save: &SaveState) -> String {
     t.push_str(name);
     t.push_str(" — ");
     t.push_str(&group_digits(grid.row_count()));
-    t.push_str(" rows");
+    t.push_str(" rows, ");
+    t.push_str(delimiter_name(grid.delimiter()));
+    if choice == DelimiterChoice::Auto {
+        t.push_str(" (detected)");
+    }
     if !grid.is_complete() {
         t.push_str(" (indexing…)");
     }

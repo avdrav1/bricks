@@ -123,6 +123,13 @@ impl GridCache {
     pub fn invalidate(&mut self) {
         self.block.reset(0);
     }
+
+    /// Forget everything about the old table (rows and column count); call when the grid
+    /// switches to a different table, e.g. the same file read with another delimiter.
+    pub fn reset(&mut self) {
+        self.block.reset(0);
+        self.cols = 0;
+    }
 }
 
 #[cfg(test)]
@@ -298,5 +305,21 @@ mod tests {
         assert_eq!(c.col_at(49.9), Some(2));
         assert_eq!(c.col_at(50.0), Some(3));
         assert_eq!(c.col_at(300.0), None, "right of the last column");
+    }
+
+    #[test]
+    fn reset_forgets_the_column_count_of_the_old_table() {
+        let mut wide = Synthetic {
+            rows: 100,
+            reads: 0,
+        }; // 8 columns
+        let mut cache = GridCache::default();
+        cache.ensure(0..10, 5, &mut wide);
+        assert_eq!(cache.col_count(), 8);
+        cache.invalidate();
+        assert_eq!(cache.col_count(), 8, "an edit keeps the width seen so far");
+        cache.reset();
+        assert_eq!(cache.col_count(), 0, "a different table starts over");
+        assert!(cache.ensure(0..10, 5, &mut wide));
     }
 }
