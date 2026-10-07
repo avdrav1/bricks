@@ -14,3 +14,7 @@ workspace = true
 
 [dev-dependencies]
 csv-engine.workspace = true
+
+[lib]
+# `cargo bench` runs only app/benches/corpus.rs (BENCH-1).
+bench = false

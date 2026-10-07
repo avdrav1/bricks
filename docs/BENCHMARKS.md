@@ -2,16 +2,18 @@
 
 Reference box: 16 GB RAM, 8-core x86_64, NVMe SSD, Arch Linux on Wayland. Numbers from other machines are reported but do not pass or fail a gate.
 
-Corpus: `python3 scripts/gen_corpus.py` (1 GB file is about 10M rows).
+Corpus: `python3 scripts/gen_corpus.py` (the 1 GB file is 19.1M rows).
+
+Run `cargo bench` to measure every row and print this table with Latest filled in (`app/benches/corpus.rs`). Rows that open a window need a graphical session; CI prints them as skipped. Latest below: `cargo bench` on 2026-10-06, Ryzen 9 5900 (24 threads), 126 GiB RAM, NVMe btrfs, Hyprland. This is not the reference box.
 
 | Benchmark (1 GB unless noted) | Target | Latest | LibreOffice |
 | --- | --- | --- | --- |
-| Cold start to empty window | < 300 ms | | |
-| Open to first rows visible | < 500 ms | | |
-| Full index complete | < 10 s | 0.70 s cold, single thread (ENG-1; Ryzen 5900, not the reference box) | |
-| Scroll frame time p99 | < 16 ms | 4.9 ms frame CPU p99; 60.0 fps with 3 of 600 frames late, 19.1M rows (GRID-1; Ryzen 5900, not the reference box) | |
-| Peak RAM after open | < 1.5x file size | | |
-| Find first match | < 1 s | | |
-| Sort numeric column | < 10 s (< 3 s at 2M rows) | | |
-| Two-column filter | < 3 s | | |
-| Save with 1,000 edits | < 15 s | 1.03 s incl. fsync and verify re-index (SAVE-1; Ryzen 5900, NVMe btrfs, not the reference box) | |
+| Cold start to empty window | < 300 ms | 245 ms (median of 3) | |
+| Open to first rows visible | < 500 ms | 259 ms, cold cache (median of 3) | |
+| Full index complete | < 10 s | 0.62 s cold, single thread | |
+| Scroll frame time p99 | < 16 ms | 1.8 ms frame CPU p99; 60.0 fps, 0 of 600 frames late; 1906×1048 px grid | |
+| Peak RAM after open | < 1.5x file size | 1.13x (1158 MiB peak RSS incl. mapped file pages; 28 MiB anonymous) | |
+| Find first match | < 1 s | not built yet (SRCH-1) | |
+| Sort numeric column | < 10 s (< 3 s at 2M rows) | not built yet (SORT-1) | |
+| Two-column filter | < 3 s | not built yet (FILT-2) | |
+| Save with 1,000 edits | < 15 s | 0.91 s incl. fsync and verify | |

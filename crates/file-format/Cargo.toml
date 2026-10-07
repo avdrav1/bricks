@@ -12,3 +12,7 @@ data-model.workspace = true
 
 [lints]
 workspace = true
+
+[lib]
+# `cargo bench` runs only app/benches/corpus.rs (BENCH-1).
+bench = false

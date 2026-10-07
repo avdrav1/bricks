@@ -9,6 +9,7 @@ rust-version.workspace = true
 [[bin]]
 name = "spreadsheet"
 path = "src/main.rs"
+bench = false
 
 [dependencies]
 csv-engine.workspace = true
@@ -21,3 +22,10 @@ gtk = { package = "gtk4", version = "0.11", features = ["v4_14"] }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+libc = "0.2.190"
+
+[[bench]]
+name = "corpus"
+harness = false

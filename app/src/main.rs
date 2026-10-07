@@ -26,6 +26,7 @@ const APP_ID: &str = "dev.bricks.Spreadsheet";
 enum Bench {
     Scroll { frames: u32 },
     Jump { row: u64, jumps: u32 },
+    Open,
 }
 
 struct Args {
@@ -57,6 +58,7 @@ fn parse_args() -> Result<Args, String> {
                 })
             }
             "--jumps" => jumps = number(&a, &mut it)?.max(1) as u32,
+            "--bench-open" => bench = Some(Bench::Open),
             _ if file.is_none() && !a.starts_with("--") => file = Some(PathBuf::from(a)),
             _ => return Err(format!("unexpected argument {a:?}")),
         }
@@ -231,8 +233,42 @@ fn build_window(app: &gtk::Application, args: &Args, table: CsvTable, dialect: D
     match args.bench {
         Some(Bench::Scroll { frames }) => bench_scroll(app, &grid, &vadj, frames),
         Some(Bench::Jump { row, jumps }) => bench_jump(app, &grid, &vadj, row, jumps),
+        Some(Bench::Open) => bench_open(app, &grid),
         None => {}
     }
+}
+
+/// Open benchmark (BENCH-1). Prints `FIRST_FRAME` at the end of the first frame that shows
+/// rows (or, for a file with none, the first frame at all), then, once indexing is done,
+/// `OPENED {json}` with memory use, and quits. The caller times from spawn to each line.
+fn bench_open(app: &gtk::Application, grid: &GridView) {
+    let Some(clock) = grid.frame_clock() else {
+        return;
+    };
+    let (app, first) = (app.clone(), Cell::new(false));
+    clock.connect_after_paint({
+        let grid = grid.downgrade();
+        move |_| {
+            let Some(grid) = grid.upgrade() else { return };
+            let empty = grid.is_complete() && grid.row_count() == 0;
+            if !first.get() && (grid.painted_top_row().is_some() || empty) {
+                first.set(true);
+                println!("FIRST_FRAME");
+            }
+            if first.get() && grid.is_complete() {
+                println!(
+                    r#"OPENED {{"rows":{},"rss_anon_kib":{},"rss_file_kib":{},"vm_hwm_kib":{}}}"#,
+                    grid.row_count(),
+                    proc_status_kib("RssAnon:"),
+                    proc_status_kib("RssFile:"),
+                    proc_status_kib("VmHWM:"),
+                );
+                app.quit();
+            }
+        }
+    });
+    // Keep frames coming until indexing finishes.
+    grid.add_tick_callback(|_, _| glib::ControlFlow::Continue);
 }
 
 enum SaveState {
@@ -551,17 +587,18 @@ fn print_report(
         intervals.len(),
         summary(&mut intervals),
         summary(&mut cpu),
-        rss_anon_kib(),
+        proc_status_kib("RssAnon:"),
         (vadj.value() / ROW_H) as u64,
     );
 }
 
-fn rss_anon_kib() -> u64 {
+/// A `kB` field of /proc/self/status, e.g. `RssAnon:` or `VmHWM:`.
+fn proc_status_kib(key: &str) -> u64 {
     std::fs::read_to_string("/proc/self/status")
         .ok()
         .and_then(|s| {
             s.lines()
-                .find(|l| l.starts_with("RssAnon:"))?
+                .find(|l| l.starts_with(key))?
                 .split_whitespace()
                 .nth(1)?
                 .parse()

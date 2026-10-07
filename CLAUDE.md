@@ -40,7 +40,7 @@ cargo test --workspace
 cargo test --release --workspace -- --ignored  # perf acceptance tests (timing asserted in release only)
 python3 scripts/gen_corpus.py            # builds corpus/ (gitignored)
 python3 -m unittest discover -s scripts  # script tests (corpus generator)
-cargo bench                              # after BENCH-1
+cargo bench                              # prints the docs/BENCHMARKS.md table (needs corpus/)
 python3 scripts/backlog.py next|status   # backlog helper
 ```
 

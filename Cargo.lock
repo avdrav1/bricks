@@ -643,6 +643,7 @@ dependencies = [
  "file-format",
  "grid",
  "gtk4",
+ "libc",
 ]
 
 [[package]]

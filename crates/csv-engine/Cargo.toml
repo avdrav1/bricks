@@ -15,3 +15,7 @@ parking_lot = "0.12.5"
 
 [lints]
 workspace = true
+
+[lib]
+# `cargo bench` runs only app/benches/corpus.rs (BENCH-1).
+bench = false
