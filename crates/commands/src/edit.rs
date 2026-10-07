@@ -24,9 +24,7 @@ impl SetCell {
     }
 
     fn swap(&mut self, table: &mut CsvTable) {
-        // The placeholder is never applied; it only stands in while `apply` runs.
-        let at = self.edit.cell();
-        let edit = std::mem::replace(&mut self.edit, Edit::clear(at));
+        let edit = std::mem::replace(&mut self.edit, Edit::none());
         self.edit = table.apply(edit);
     }
 }
@@ -45,7 +43,7 @@ impl Command<CsvTable> for SetCell {
     }
 
     fn focus(&self) -> Option<CellRef> {
-        Some(self.edit.cell())
+        self.edit.cell()
     }
 
     fn heap_bytes(&self) -> usize {

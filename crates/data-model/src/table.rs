@@ -1,6 +1,7 @@
 //! What the grid reads: display text for blocks of rows, behind [`TableSource`] so the grid
 //! never touches the file (layers: source -> overlay -> view -> grid).
 
+use crate::rowmap::{RowMap, Run};
 use crate::{CellRef, Col, Edit, EditOverlay, Row, RowId};
 use csv_engine::{
     detect_dialect, detect_header, open_text, split_fields, Dialect, Encoding, Field, RowIndex,
@@ -148,6 +149,11 @@ pub struct CsvTable {
     pub(crate) dialect: Dialect,
     pub(crate) encoding: Encoding,
     pub(crate) overlay: EditOverlay,
+    /// Row order once rows were inserted or deleted (EDIT-3, ADR 0003); `None` while it
+    /// is still file order.
+    pub(crate) rows: Option<RowMap>,
+    /// Inserted rows so far: the next inserted row's number.
+    next_inserted: u64,
     spans: Vec<Range<u64>>,
     fields: Vec<Field>,
 }
@@ -165,6 +171,8 @@ impl CsvTable {
             dialect,
             encoding,
             overlay: EditOverlay::default(),
+            rows: None,
+            next_inserted: 0,
             spans: Vec::new(),
             fields: Vec::new(),
         }
@@ -185,8 +193,9 @@ impl CsvTable {
     /// The same open file read with another delimiter: a new, unbuilt index over the same
     /// mapping. Refused while there are unsaved edits.
     pub fn reread(&self, choice: DelimiterChoice) -> Result<Self, RereadError> {
-        if !self.overlay.is_empty() {
-            return Err(RereadError::UnsavedEdits(self.overlay.len()));
+        let changes = self.changes();
+        if changes > 0 {
+            return Err(RereadError::UnsavedEdits(changes));
         }
         let source = self.index.source().clone();
         let dialect = dialect_for(&source, choice);
@@ -222,15 +231,27 @@ impl CsvTable {
         self.dialect.has_header = on;
     }
 
-    /// File row of table row 0.
+    /// Position of table row 0 among all rows: past the header row, if there is one.
     fn first_row(&self) -> u64 {
         u64::from(self.dialect.has_header)
     }
 
+    /// Rows in file order plus inserts minus deletes, the header row included.
+    fn total_rows(&self) -> u64 {
+        self.rows
+            .as_ref()
+            .map_or_else(|| self.index.row_count(), RowMap::len)
+    }
+
+    /// Id of the row at position `k` among all rows (< `total_rows()`).
+    fn id_at(&self, k: u64) -> RowId {
+        self.rows.as_ref().map_or(RowId::source(k), |m| m.get(k))
+    }
+
     /// Title of column `col` when the first row is a header (with any edit to it).
     pub fn header_cell(&self, col: Col) -> Option<Cow<'_, str>> {
-        if self.has_header() {
-            self.cell_in_file_row(0, col)
+        if self.has_header() && self.total_rows() > 0 {
+            self.cell_of(self.id_at(0), col)
         } else {
             None
         }
@@ -241,10 +262,53 @@ impl CsvTable {
         self.index.source().changed()
     }
 
-    /// Identity of the row shown at `row`. Rows are in file order, after the header row if
-    /// there is one, until the row map (EDIT-3) puts inserts, deletes, and sorting in front.
+    /// Identity of the row shown at `row` (< `row_count()`).
     pub fn row_id(&self, row: Row) -> RowId {
-        RowId::source(row + self.first_row())
+        self.id_at(row + self.first_row())
+    }
+
+    /// Unsaved changes: edited cells, plus rows inserted and source rows deleted.
+    pub fn changes(&self) -> usize {
+        let rows = self.rows.as_ref().map_or(0, |m| {
+            let (mut inserted, mut kept) = (0, 0);
+            m.for_each(|run| {
+                if run.first.is_inserted() {
+                    inserted += run.len;
+                } else {
+                    kept += run.len;
+                }
+            });
+            inserted + self.index.row_count().saturating_sub(kept)
+        });
+        self.overlay.len() + rows as usize
+    }
+
+    /// An edit inserting `count` empty rows before table row `row` (at the end when
+    /// `row == row_count()`). `None` until the whole file is indexed: the row order is
+    /// fixed only then.
+    pub fn insert_rows(&mut self, row: Row, count: u64) -> Option<Edit> {
+        if !self.index.is_complete() || count == 0 || row > self.row_count() {
+            return None;
+        }
+        let first = RowId::inserted(self.next_inserted);
+        self.next_inserted += count;
+        Some(Edit::InsertRows {
+            at: row + self.first_row(),
+            rows: vec![Run { first, len: count }],
+        })
+    }
+
+    /// An edit deleting `count` table rows from `row` on. `None` until the whole file is
+    /// indexed, or when the rows don't exist.
+    pub fn delete_rows(&self, row: Row, count: u64) -> Option<Edit> {
+        let end = row.checked_add(count)?;
+        if !self.index.is_complete() || count == 0 || end > self.row_count() {
+            return None;
+        }
+        Some(Edit::DeleteRows {
+            at: row + self.first_row(),
+            count,
+        })
     }
 
     /// Change the data (invariant 5): the one mutating entry point, so every change is an
@@ -273,12 +337,43 @@ impl CsvTable {
                 };
                 Edit::Cell { at, value: before }
             }
+            Edit::InsertRows { at, rows } => {
+                let count = rows.iter().map(|r| r.len).sum();
+                self.row_map().insert(at, &rows);
+                Edit::DeleteRows { at, count }
+            }
+            Edit::DeleteRows { at, count: 0 } => Edit::DeleteRows { at, count: 0 },
+            Edit::DeleteRows { at, count } => Edit::InsertRows {
+                at,
+                rows: self.row_map().remove(at, count),
+            },
         }
+    }
+
+    /// The row map, made from file order on the first insert or delete.
+    fn row_map(&mut self) -> &mut RowMap {
+        // A map made before indexing ends would freeze the row count and drop the rest
+        // of the file on save; `insert_rows`/`delete_rows` return `None` until then.
+        assert!(
+            self.rows.is_some() || self.index.is_complete(),
+            "row inserts and deletes need the whole file indexed"
+        );
+        let rows = self.index.row_count();
+        self.rows.get_or_insert_with(|| {
+            RowMap::new(Run {
+                first: RowId::source(0),
+                len: rows,
+            })
+        })
     }
 
     /// Where row `id` is shown, if it is one of the table's rows (the header row is not).
     pub fn row_of(&self, id: RowId) -> Option<Row> {
-        let row = id.0.checked_sub(self.first_row())?;
+        let k = match &self.rows {
+            Some(m) => m.position(id)?,
+            None => id.0,
+        };
+        let row = k.checked_sub(self.first_row())?;
         (row < self.row_count()).then_some(row)
     }
 
@@ -289,39 +384,31 @@ impl CsvTable {
     /// Full text of one cell: the edit if there is one, else the source field. `None` when
     /// the row or the column does not exist. Invalid UTF-8 in the source shows as U+FFFD.
     pub fn cell_value(&self, row: Row, col: Col) -> Option<Cow<'_, str>> {
-        self.cell_in_file_row(row + self.first_row(), col)
+        let k = row + self.first_row();
+        if k >= self.total_rows() {
+            return None;
+        }
+        self.cell_of(self.id_at(k), col)
     }
 
-    fn cell_in_file_row(&self, file_row: u64, col: Col) -> Option<Cow<'_, str>> {
-        if let Some(v) = self.overlay.get(CellRef {
-            row: RowId::source(file_row),
-            col,
-        }) {
+    fn cell_of(&self, id: RowId, col: Col) -> Option<Cow<'_, str>> {
+        if let Some(v) = self.overlay.get(CellRef { row: id, col }) {
             return Some(Cow::Borrowed(v));
         }
+        if id.is_inserted() {
+            return None;
+        }
         let mut fields = Vec::new();
-        let bytes = self.index.row_fields(file_row, &mut fields)?;
+        let bytes = self.index.row_fields(id.0, &mut fields)?;
         let value = fields.get(col as usize)?.value(bytes, self.dialect.quote);
         Some(match value {
             Cow::Borrowed(b) => String::from_utf8_lossy(b),
             Cow::Owned(v) => Cow::Owned(String::from_utf8_lossy(&v).into_owned()),
         })
     }
-}
 
-impl TableSource for CsvTable {
-    fn row_count(&self) -> u64 {
-        self.index.row_count().saturating_sub(self.first_row())
-    }
-
-    fn is_complete(&self) -> bool {
-        self.index.is_complete()
-    }
-
-    fn read_rows(&mut self, rows: Range<u64>, out: &mut RowBlock) {
-        out.reset(rows.start);
-        let first = self.first_row();
-        let file_rows = rows.start + first..rows.end.saturating_add(first);
+    /// Append source rows `file_rows` (with their edits) to `out`.
+    fn read_source(&mut self, file_rows: Range<u64>, out: &mut RowBlock) {
         if self
             .index
             .row_spans(file_rows.clone(), &mut self.spans)
@@ -355,6 +442,47 @@ impl TableSource for CsvTable {
                 }
             }
             out.end_row();
+        }
+    }
+
+    /// Append inserted rows (only their edits; the rest is empty) to `out`.
+    fn read_inserted(&self, run: Run, out: &mut RowBlock) {
+        for id in run.first.0..run.first.0 + run.len {
+            if let Some(edits) = self.overlay.row(RowId(id)) {
+                let width = edits.keys().next_back().map_or(0, |&c| c + 1);
+                for c in 0..width {
+                    out.push_cell(edits.get(&c).map_or(&b""[..], |v| v.as_bytes()));
+                }
+            }
+            out.end_row();
+        }
+    }
+}
+
+impl TableSource for CsvTable {
+    fn row_count(&self) -> u64 {
+        self.total_rows().saturating_sub(self.first_row())
+    }
+
+    fn is_complete(&self) -> bool {
+        self.index.is_complete()
+    }
+
+    fn read_rows(&mut self, rows: Range<u64>, out: &mut RowBlock) {
+        out.reset(rows.start);
+        let first = self.first_row();
+        let positions = rows.start + first..rows.end.saturating_add(first);
+        let Some(map) = &self.rows else {
+            // File order: positions are file rows.
+            return self.read_source(positions, out);
+        };
+        let end = positions.end.min(map.len());
+        for run in map.runs_in(positions.start..end) {
+            if run.first.is_inserted() {
+                self.read_inserted(run, out);
+            } else {
+                self.read_source(run.first.0..run.first.0 + run.len, out);
+            }
         }
     }
 }
@@ -587,6 +715,108 @@ mod tests {
             "the header row is saved as a row"
         );
         assert_eq!(std::fs::read(&path).unwrap(), content, "file untouched");
+        std::fs::remove_file(path).unwrap();
+    }
+
+    fn opened(name: &str, content: &[u8]) -> (std::path::PathBuf, CsvTable) {
+        let path =
+            std::env::temp_dir().join(format!("data-model-{name}-{}.csv", std::process::id()));
+        std::fs::write(&path, content).unwrap();
+        let t = CsvTable::open(&path, DelimiterChoice::Auto).unwrap();
+        build(&t);
+        (path, t)
+    }
+
+    fn saved(t: &CsvTable) -> Vec<u8> {
+        let mut out = Vec::new();
+        let stats = t.save_job().unwrap().write_to(&mut out).unwrap();
+        assert_eq!(stats.rows, t.row_count() + u64::from(t.has_header()));
+        out
+    }
+
+    /// EDIT-3: inserted rows are written where they are shown, deleted rows are left out,
+    /// every other row keeps its bytes; the BOM stays first and a last row that had no
+    /// line ending gets one when rows follow it. Undoing everything gives back the file.
+    #[test]
+    fn inserts_and_deletes_save_in_place_and_undo_to_the_original_bytes() {
+        let content = "\u{feff}id,name\r\n1,Ann\r\n2,Bo".as_bytes();
+        let (path, mut t) = opened("rows", content);
+        assert!(t.has_header());
+        let mut undo = Vec::new();
+
+        let insert = t.insert_rows(0, 1).unwrap(); // above the first data row
+        undo.push(t.apply(insert));
+        let new = t.row_id(0);
+        assert!(new.is_inserted());
+        undo.push(t.apply(Edit::set(CellRef { row: new, col: 0 }, "0")));
+        undo.push(t.apply(Edit::set(CellRef { row: new, col: 1 }, "Zoë, \"q\"")));
+        let at_end = t.insert_rows(t.row_count(), 1).unwrap();
+        undo.push(t.apply(at_end));
+        let ann = t.delete_rows(1, 1).unwrap();
+        undo.push(t.apply(ann));
+
+        assert_eq!(t.row_count(), 3);
+        assert_eq!(row_text(&mut t, 0), ["0", "Zoë, \"q\""]);
+        assert_eq!(row_text(&mut t, 1), ["2", "Bo"]);
+        assert_eq!(
+            row_text(&mut t, 2),
+            Vec::<String>::new(),
+            "empty inserted row"
+        );
+        assert_eq!(t.cell_value(0, 1).as_deref(), Some("Zoë, \"q\""));
+        assert_eq!(t.cell_value(2, 0), None);
+        assert_eq!(t.row_of(new), Some(0));
+        assert_eq!(
+            t.changes(),
+            2 + 2 + 1,
+            "two cells, two rows in, one row out"
+        );
+        assert_eq!(
+            saved(&t),
+            "\u{feff}id,name\r\n0,\"Zoë, \"\"q\"\"\"\r\n2,Bo\r\n,\r\n".as_bytes()
+        );
+
+        // The header flips over the same rows: positions in edits count it.
+        t.set_header(false);
+        assert_eq!(row_text(&mut t, 1), ["0", "Zoë, \"q\""]);
+        t.set_header(true);
+
+        while let Some(inverse) = undo.pop() {
+            t.apply(inverse);
+        }
+        assert_eq!(t.changes(), 0);
+        assert_eq!(saved(&t), content, "back to the original bytes");
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn a_deleted_row_comes_back_with_its_edits() {
+        let (path, mut t) = opened("delete", b"id,v\n1,a\n2,b\n3,c\n");
+        let b = CellRef {
+            row: t.row_id(1),
+            col: 1,
+        };
+        t.apply(Edit::set(b, "B"));
+        let delete = t.delete_rows(1, 2).unwrap();
+        let restore = t.apply(delete);
+        assert_eq!(t.row_count(), 1);
+        assert_eq!(saved(&t), b"id,v\n1,a\n");
+        assert_eq!(t.row_of(b.row), None, "not shown while deleted");
+        t.apply(restore);
+        assert_eq!(row_text(&mut t, 1), ["2", "B"]);
+        assert_eq!(row_text(&mut t, 2), ["3", "c"]);
+        assert!(t.delete_rows(2, 2).is_none(), "past the end");
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn row_edits_wait_for_the_whole_file_to_be_indexed() {
+        let path =
+            std::env::temp_dir().join(format!("data-model-unbuilt-{}.csv", std::process::id()));
+        std::fs::write(&path, "a\n1\n").unwrap();
+        let mut t = CsvTable::open(&path, DelimiterChoice::Auto).unwrap();
+        assert!(t.insert_rows(0, 1).is_none());
+        assert!(t.delete_rows(0, 1).is_none());
         std::fs::remove_file(path).unwrap();
     }
 }

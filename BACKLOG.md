@@ -48,7 +48,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | CMD-1 | M2 | P0 | done | EDIT-1 | Command pattern for all mutations | Every edit is a reversible command object |
 | CMD-2 | M2 | P0 | done | CMD-1 | Undo/redo stores operations, not snapshots | 1,000-step history under 50 MB on a 1 GB file |
 | EDIT-2 | M2 | P0 | done | GRID-4, CMD-1 | In-cell editor; F2 or typing starts edit | Enter commits and moves down; Esc cancels |
-| EDIT-3 | M2 | P0 | todo | CMD-1 | Insert and delete rows | Insert at row 1M in under 50 ms |
+| EDIT-3 | M2 | P0 | done | CMD-1 | Insert and delete rows | Insert at row 1M in under 50 ms |
 | EDIT-4 | M2 | P0 | todo | CMD-1 | Insert and delete columns | Works on 1 GB without a full rewrite before save |
 | EDIT-5 | M2 | P0 | todo | CMD-1, GRID-4 | Delete key clears selected cells | Undoable as one step |
 | CLIP-1 | M2 | P0 | todo | GRID-4 | Copy/cut range as TSV plus text/html | Pastes cleanly into LibreOffice, Excel web, a text editor |
@@ -80,6 +80,22 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-07 EDIT-3:** insert and delete rows on the ADR 0003 row map.
+  - `data_model::rowmap::RowMap` is an order-statistic treap of `RowId` runs, adapted from the DEC-3 spike, with freed nodes reused (the spike leaked them). `CsvTable` holds `Option<RowMap>`: `None` means file order, which is unchanged and zero-cost; the map is made on the first insert or delete. Inserted rows get ids with the high bit set.
+  - `Edit::InsertRows`/`DeleteRows` take positions among all rows, header included, so a header flip between an edit and its undo can't shift it. They are built by `CsvTable::insert_rows`/`delete_rows`, which return `None` until indexing completes; `apply` asserts that, because a map frozen early would drop the rest of the file on save. A delete's inverse holds the removed runs, so undo brings the rows back with their cell edits (the edits stay keyed by `RowId`). `commands::ChangeRows` wraps them; its focus is the first row put back in.
+  - Save walks the runs:
+    - Source runs copy as byte ranges, with edited rows re-encoded as before.
+    - Inserted rows are encoded from their edits, at least as wide as the first row, so an empty one is `,,,` and not a blank line that pandas and others skip.
+    - The BOM is written once, first, and a final source row without a line ending gets one when rows follow it.
+  - "Unsaved edits" is now `CsvTable::changes()`: cells, plus rows inserted and source rows deleted. Delimiter re-reads wait for it too.
+  - App: Ctrl++ inserts as many rows as the selection spans, above it; Ctrl+- deletes them; a right-click menu offers Insert Rows Above/Below and Delete Rows. Whole-column selections are left to EDIT-4. Row heights reset when the row count changes, since they belong to positions.
+  - Acceptance: `commands/tests/insert_1gb.rs` (ignored, corpus, release). Inserting at row 1,000,000 of the 1 GB file plus reading back the 60-row screen took 0.027 ms (target 50 ms). The new row is empty and row 1M moved down one; delete and the two undos take about 1 µs.
+  - Model tests:
+    - A save round trip with BOM, CRLF, no final newline, inserts at top and end, a delete, and a quoted value. Undoing everything gives the original bytes.
+    - A deleted row comes back with its edits.
+    - Row edits are refused before indexing.
+    - The row map matches a flat vector through 2,000 random inserts and removes.
+  - Smoke test via Broadway on a /tmp copy of the 10 MB file: Ctrl++ at row 3, typing into it, Ctrl+- on rows 5–6, the right-click menu's Insert Rows Below, four undos back to the original (the deleted rows returned), four redos, and a save. The saved file has `,new,,,,,,`, the deleted rows gone, `,,,,,,,` for the empty row, the same line count, and everything after the edited area byte-identical.
 - **2026-10-07 EDIT-2:** in-cell editor.
   - A `gtk::Entry` child of the grid is laid over its cell in `size_allocate`, follows scrolling, and is clipped to the body. It replaces the popover, and a small CSS class lets it fit a 22 px row.
   - Key rules live in `app/src/editor.rs`, as pure functions with unit tests:

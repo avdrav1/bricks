@@ -23,6 +23,8 @@ Move the cell cursor like LibreOffice Calc: arrows, Tab/Shift+Tab, Enter/Shift+E
 
 Edit in the cell, as in Calc: start typing to replace a cell's content, or press F2 (or double-click) to change it. Enter commits and moves down, Shift+Enter up, Tab and Shift+Tab across (Enter after a run of Tabs returns to the column you started in); Esc cancels. After typing, arrow keys also commit and move; after F2 they move the text cursor. Clicking elsewhere keeps what you typed, and Ctrl+S saves it.
 
+Insert and delete rows with Ctrl++ (as many empty rows as the selection spans, above it) and Ctrl+- (the selected rows), or right-click a cell or row number for Insert Rows Above / Below and Delete Rows. Nothing is rewritten until you save; then untouched rows are still copied byte for byte. Rows can be inserted and deleted once the file is fully indexed (under a second for 1 GB).
+
 Ctrl+Z undoes the last edit and moves the cursor to the cell it changed; Ctrl+Shift+Z or Ctrl+Y redoes it. History keeps the last 1,000 steps within 50 MB, whatever the file size, dropping the oldest first. Undo waits while a save runs, and the history starts over after a save.
 
 Resize a column or row by dragging its border in the column letters or row numbers; selected whole columns resize together. Double-click a column border to fit the text on screen, or a row border to restore its height. Sizes last while the window is open (CSV has nowhere to store them).

@@ -6,8 +6,10 @@
 //! it holds, and the oldest steps go first when either limit is passed.
 
 mod edit;
+mod rows;
 
 pub use edit::SetCell;
+pub use rows::ChangeRows;
 
 use data_model::CellRef;
 use std::collections::VecDeque;

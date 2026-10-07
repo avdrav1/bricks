@@ -1,13 +1,13 @@
 //! The grid widget: draws the cells `grid::GridCache` holds with GSK + Pango (ADR 0001).
 
-use crate::editor::{self, Action, Mode, Start};
+use crate::editor::{self, Action, Mode, RowCommand, Start};
 
-use commands::{SetCell, UndoStack};
+use commands::{ChangeRows, SetCell, UndoStack};
 use data_model::{
-    CellRef, CsvTable, DelimiterChoice, RereadError, SaveJob, SaveJobError, TableSource,
+    CellRef, CsvTable, DelimiterChoice, Edit, RereadError, SaveJob, SaveJobError, TableSource,
 };
 use grid::{Bounds, GridCache, Key, Mods, Selection, Sizes, Viewport};
-use gtk::{gdk, glib, graphene, pango, prelude::*, subclass::prelude::*};
+use gtk::{gdk, gio, glib, graphene, pango, prelude::*, subclass::prelude::*};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -77,6 +77,8 @@ mod imp {
         /// Column titles from the header row (ENG-7), read once rather than every frame;
         /// `None` until read, and again after anything that could change them.
         pub titles: RefCell<Option<Vec<String>>>,
+        /// Right-click menu: insert and delete rows (EDIT-3), made on first use.
+        pub menu: RefCell<Option<gtk::PopoverMenu>>,
     }
 
     #[glib::object_subclass]
@@ -90,6 +92,9 @@ mod imp {
         fn dispose(&self) {
             if let Some(entry) = self.editor.take() {
                 entry.unparent();
+            }
+            if let Some(menu) = self.menu.take() {
+                menu.unparent();
             }
         }
     }
@@ -131,6 +136,10 @@ mod imp {
             let obj = self.obj();
             obj.update_adjustments();
             obj.place_editor();
+            // GTK4: a widget that parents a popover must position it on every allocation.
+            if let Some(menu) = self.menu.borrow().as_ref() {
+                menu.present();
+            }
         }
 
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
@@ -338,6 +347,36 @@ impl GridView {
             }
         });
         g.add_controller(click);
+        // Right-click: the row menu, on the clicked cell (selected first if it wasn't).
+        let context = gtk::GestureClick::builder().button(3).build();
+        context.connect_pressed({
+            let g = g.downgrade();
+            move |_, _, x, y| {
+                if let Some(g) = g.upgrade() {
+                    g.grab_focus();
+                    g.row_menu(x, y);
+                }
+            }
+        });
+        g.add_controller(context);
+        let actions = gio::SimpleActionGroup::new();
+        for (name, run) in [
+            ("insert-above", Self::insert_rows_above as fn(&Self)),
+            ("insert-below", Self::insert_rows_below),
+            ("delete-rows", Self::delete_rows),
+        ] {
+            let action = gio::SimpleAction::new(name, None);
+            action.connect_activate({
+                let g = g.downgrade();
+                move |_, _| {
+                    if let Some(g) = g.upgrade() {
+                        run(&g);
+                    }
+                }
+            });
+            actions.add_action(&action);
+        }
+        g.insert_action_group("grid", Some(&actions));
         let drag = gtk::GestureDrag::new();
         drag.connect_drag_update({
             let g = g.downgrade();
@@ -390,6 +429,11 @@ impl GridView {
                 }
                 if let Some((key, mods)) = nav_key(key, state) {
                     g.press(key, mods);
+                } else if let Some(cmd) = editor::row_command(key, state) {
+                    match cmd {
+                        RowCommand::InsertAbove => g.insert_rows_above(),
+                        RowCommand::Delete => g.delete_rows(),
+                    }
                 } else if let Some(start) = editor::start(key, state) {
                     g.start_edit(start);
                 } else {
@@ -946,14 +990,133 @@ impl GridView {
                 Some(grid::Cell { row, col: at.col })
             })
         };
+        self.after_change(focus);
+        true
+    }
+
+    /// Redraw after the data changed: cached rows and titles reload, the scroll range
+    /// follows the row count, and the cursor goes to `focus` if given (else stays,
+    /// clamped to the rows left). Row heights belong to positions, so they reset when
+    /// rows were added or removed.
+    fn after_change(&self, focus: Option<grid::Cell>) {
+        let imp = self.imp();
         imp.cache.borrow_mut().invalidate();
         imp.titles.take();
-        if let Some(cell) = focus {
+        let rows = self.row_count();
+        if imp.bounds_seen.get().is_some_and(|b| b.rows != rows) {
+            imp.sizing.borrow_mut().rows.clear();
+        }
+        self.update_adjustments();
+        let b = self.bounds();
+        let cursor = focus.unwrap_or_else(|| imp.selection.get().cursor());
+        if focus.is_some() || cursor.row >= b.rows {
+            let cell = grid::Cell {
+                row: cursor.row.min(b.rows.saturating_sub(1)),
+                col: cursor.col,
+            };
             imp.selection.set(Selection::at(cell));
             self.scroll_to((Some(cell.row), Some(cell.col)));
         }
         self.queue_draw();
-        true
+    }
+
+    /// Ctrl++ (EDIT-3): as many empty rows as the selection spans, above it.
+    pub fn insert_rows_above(&self) {
+        self.insert_rows(false);
+    }
+
+    pub fn insert_rows_below(&self) {
+        self.insert_rows(true);
+    }
+
+    fn insert_rows(&self, below: bool) {
+        let Some((first, count, col)) = self.selected_rows() else {
+            return;
+        };
+        let at = if below { first + count } else { first };
+        let edit = self
+            .imp()
+            .table
+            .borrow_mut()
+            .as_mut()
+            .and_then(|t| t.insert_rows(at.min(t.row_count()), count));
+        self.change_rows(edit, col);
+    }
+
+    /// Ctrl+- (EDIT-3): delete the rows the selection spans.
+    pub fn delete_rows(&self) {
+        let Some((first, count, col)) = self.selected_rows() else {
+            return;
+        };
+        let edit = self
+            .imp()
+            .table
+            .borrow()
+            .as_ref()
+            .and_then(|t| t.delete_rows(first, count));
+        self.change_rows(edit, col);
+    }
+
+    /// The rows the selection spans (first, count) and the cursor's column. `None` for
+    /// whole columns: Ctrl+- on columns deletes columns, which is EDIT-4.
+    fn selected_rows(&self) -> Option<(u64, u64, u32)> {
+        let sel = self.imp().selection.get();
+        if sel.whole_columns().is_some() {
+            return None;
+        }
+        let (tl, br) = sel.range();
+        Some((tl.row, br.row - tl.row + 1, sel.cursor().col))
+    }
+
+    /// Run a row insert or delete as an undoable command. `None` (still indexing, or no
+    /// such rows) and a running save or open edit leave everything as it is.
+    fn change_rows(&self, edit: Option<Edit>, col: u32) {
+        let imp = self.imp();
+        let Some(edit) = edit else { return };
+        if imp.saving.get() || imp.editing.get().is_some() {
+            return;
+        }
+        {
+            let (mut table, mut undo) = (imp.table.borrow_mut(), imp.undo.borrow_mut());
+            let (Some(table), Some(undo)) = (table.as_mut(), undo.as_mut()) else {
+                return;
+            };
+            undo.execute(Box::new(ChangeRows::new(edit, col)), table);
+        }
+        self.after_change(None);
+    }
+
+    /// Open the row menu at widget point (`x`, `y`), selecting the cell there first
+    /// unless it is already in the selection.
+    fn row_menu(&self, x: f64, y: f64) {
+        let imp = self.imp();
+        let b = self.bounds();
+        if b.rows > 0 && b.cols > 0 && y >= HEADER_H {
+            let (cell, _) = self.cell_near(x, y);
+            let (tl, br) = imp.selection.get().range();
+            let inside = (tl.row..=br.row).contains(&cell.row);
+            if !inside {
+                self.mouse_down(x, y, false);
+                imp.drag.set(None);
+            }
+        }
+        let menu = imp
+            .menu
+            .borrow_mut()
+            .get_or_insert_with(|| {
+                let model = gio::Menu::new();
+                model.append(Some("Insert Rows Above"), Some("grid.insert-above"));
+                model.append(Some("Insert Rows Below"), Some("grid.insert-below"));
+                model.append(Some("Delete Rows"), Some("grid.delete-rows"));
+                let menu = gtk::PopoverMenu::from_model(Some(&model));
+                menu.set_has_arrow(false);
+                menu.set_halign(gtk::Align::Start);
+                menu.set_parent(self);
+                menu
+            })
+            .clone();
+        menu.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+        menu.popup();
     }
 
     /// Snapshot for a background save (SAVE-1).
@@ -1032,13 +1195,13 @@ impl GridView {
             .map_or(b',', |t| t.dialect().delimiter)
     }
 
-    /// Cells edited since open.
+    /// Unsaved changes: cell edits, plus rows inserted and deleted (EDIT-3).
     pub fn edit_count(&self) -> usize {
         self.imp()
             .table
             .borrow()
             .as_ref()
-            .map_or(0, |t| t.overlay().len())
+            .map_or(0, |t| t.changes())
     }
 
     pub fn row_count(&self) -> u64 {

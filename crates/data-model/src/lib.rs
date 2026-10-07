@@ -3,9 +3,11 @@
 //! Layers (spec section 16), each kept separate:
 //! source (csv-engine) -> overlay (edits) -> view (sort/filter) -> grid.
 
+mod rowmap;
 mod save;
 mod table;
 
+pub use rowmap::Run;
 pub use save::{SaveJob, SaveJobError, SaveStats};
 pub use table::{CsvTable, DelimiterChoice, RereadError, RowBlock, TableSource, MAX_DISPLAY_BYTES};
 
@@ -16,13 +18,25 @@ pub type Col = u32;
 
 /// Stable identity of a row (ADR 0003). Sorting, filtering, and inserts change where a
 /// row shows, never its id, so edits stay attached to the right row. Source rows use their
-/// physical row number; inserted rows (EDIT-3) will set the high bit.
+/// physical row number; inserted rows (EDIT-3) have the high bit set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RowId(pub u64);
 
 impl RowId {
+    const INSERTED: u64 = 1 << 63;
+
     pub const fn source(row: Row) -> Self {
         Self(row)
+    }
+
+    /// The `n`th row inserted in this session.
+    pub const fn inserted(n: u64) -> Self {
+        Self(Self::INSERTED | n)
+    }
+
+    /// A row the user added: it has no bytes in the file, only edits.
+    pub const fn is_inserted(self) -> bool {
+        self.0 & Self::INSERTED != 0
     }
 }
 
@@ -35,6 +49,10 @@ pub struct CellRef {
 
 /// A change to the table's data, as an operation (invariant 5). [`CsvTable::apply`] is the
 /// only way to change data, and it returns the inverse: applying that undoes the change.
+///
+/// Row positions here count every row in file order, the header row included, so an
+/// edit means the same rows whether or not the first row is shown as a header. Build
+/// row edits with [`CsvTable::insert_rows`] and [`CsvTable::delete_rows`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Edit {
     /// Give a cell this raw value, or with `None` drop its edit so the source shows again.
@@ -42,6 +60,11 @@ pub enum Edit {
         at: CellRef,
         value: Option<Box<str>>,
     },
+    /// Show these rows, in order, from position `at` on; later rows move down.
+    InsertRows { at: u64, rows: Vec<Run> },
+    /// Take `count` rows out from position `at`. Their ids, and so their edits, are kept
+    /// in the inverse, so undo brings them back as they were.
+    DeleteRows { at: u64, count: u64 },
 }
 
 impl Edit {
@@ -56,17 +79,25 @@ impl Edit {
         Self::Cell { at, value: None }
     }
 
-    /// The cell the edit changes.
-    pub fn cell(&self) -> CellRef {
+    /// An edit that changes nothing; a placeholder while a command swaps its edit.
+    pub const fn none() -> Self {
+        Self::DeleteRows { at: 0, count: 0 }
+    }
+
+    /// The cell a cell edit changes.
+    pub fn cell(&self) -> Option<CellRef> {
         match self {
-            Self::Cell { at, .. } => *at,
+            Self::Cell { at, .. } => Some(*at),
+            Self::InsertRows { .. } | Self::DeleteRows { .. } => None,
         }
     }
 
-    /// Heap the edit holds beyond its own size: the text of the value it carries.
+    /// Heap the edit holds beyond its own size.
     pub fn heap_bytes(&self) -> usize {
         match self {
             Self::Cell { value, .. } => value.as_ref().map_or(0, |v| v.len()),
+            Self::InsertRows { rows, .. } => rows.capacity() * std::mem::size_of::<Run>(),
+            Self::DeleteRows { .. } => 0,
         }
     }
 }
