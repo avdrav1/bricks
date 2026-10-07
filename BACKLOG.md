@@ -47,7 +47,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | APP-3 | M1 | P0 | done | ENG-1, DEC-5 | Show first rows before indexing finishes | First rows of 1 GB visible in under 500 ms |
 | CMD-1 | M2 | P0 | done | EDIT-1 | Command pattern for all mutations | Every edit is a reversible command object |
 | CMD-2 | M2 | P0 | done | CMD-1 | Undo/redo stores operations, not snapshots | 1,000-step history under 50 MB on a 1 GB file |
-| EDIT-2 | M2 | P0 | todo | GRID-4, CMD-1 | In-cell editor; F2 or typing starts edit | Enter commits and moves down; Esc cancels |
+| EDIT-2 | M2 | P0 | done | GRID-4, CMD-1 | In-cell editor; F2 or typing starts edit | Enter commits and moves down; Esc cancels |
 | EDIT-3 | M2 | P0 | todo | CMD-1 | Insert and delete rows | Insert at row 1M in under 50 ms |
 | EDIT-4 | M2 | P0 | todo | CMD-1 | Insert and delete columns | Works on 1 GB without a full rewrite before save |
 | EDIT-5 | M2 | P0 | todo | CMD-1, GRID-4 | Delete key clears selected cells | Undoable as one step |
@@ -80,6 +80,22 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-07 EDIT-2:** in-cell editor.
+  - A `gtk::Entry` child of the grid is laid over its cell in `size_allocate`, follows scrolling, and is clipped to the body. It replaces the popover, and a small CSS class lets it fit a 22 px row.
+  - Key rules live in `app/src/editor.rs`, as pure functions with unit tests:
+    - F2 or a printable key starts an edit (typing replaces the content; Ctrl/Alt/Super never start one).
+    - Enter, Shift+Enter, Tab and Shift+Tab commit, then move through `Selection::press`, so a selected range and the Enter-after-Tabs return work as in Calc.
+    - Esc cancels.
+    - Arrows commit and move after typing, and move the text cursor after F2.
+  - The editor's key controller runs in capture phase on the entry. The grid's own controller ignores keys while editing, because they bubble up from the entry: Up/Down would otherwise move the cursor mid-edit.
+  - Clicking elsewhere commits (focus leave), and Ctrl+S commits first, then saves. Edits still go through `SetCell` and undo; the entry keeps its own text undo while open.
+  - Smoke test via Broadway on a /tmp copy of the 10 MB file:
+    - Typing then Enter committed and moved down; F2 then Esc left the cell unchanged.
+    - a Tab b Tab Enter wrote B6/C6 and landed on B7.
+    - Typing then Down committed and moved.
+    - Double-click, append, then a click elsewhere committed.
+    - Typing, then Ctrl+S, committed and saved ("Saved", • cleared); the saved file holds all five edits on the right lines.
+  - Not yet: IME preedit in the grid (typing starts from the key's character), and an editor that grows past its column for long text.
 - **2026-10-07 CMD-2:** history capped by steps and bytes (spec SP-6).
   - `Command::heap_bytes` is required, so every command reports what it holds. `UndoStack` keeps a running total over both undo and redo history, re-measured around each apply and revert, since an edit holds whichever value it would swap back in. Defaults: `HISTORY_STEPS` 1,000 and `HISTORY_BYTES` 50 MB (`UndoStack::default()`, used by the app).
   - Over a limit, the oldest steps go first: the far end of the undo history, then the far end of the redo history. The step just run or just undone always stays, so the last action can be undone even if it alone is over budget; the next action drops it. The stack moved from `Vec::remove(0)` to `VecDeque`.

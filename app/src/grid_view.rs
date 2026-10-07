@@ -1,5 +1,7 @@
 //! The grid widget: draws the cells `grid::GridCache` holds with GSK + Pango (ADR 0001).
 
+use crate::editor::{self, Action, Mode, Start};
+
 use commands::{SetCell, UndoStack};
 use data_model::{
     CellRef, CsvTable, DelimiterChoice, RereadError, SaveJob, SaveJobError, TableSource,
@@ -54,13 +56,12 @@ mod imp {
         pub row_header_w: Cell<f64>,
         /// Top row of the last frame drawn with its text loaded; `None` before then.
         pub painted_top: Cell<Option<u64>>,
-        /// Every edit goes through here as a command (invariant 5). Undo keys arrive with
-        /// CMD-1/CMD-2.
+        /// Every edit goes through here as a command (invariant 5).
         pub undo: RefCell<Option<UndoStack<CsvTable>>>,
-        /// Small editor shown over a cell on double-click (until the in-cell editor, EDIT-2).
-        pub editor: RefCell<Option<(gtk::Popover, gtk::Entry)>>,
-        /// Cell the editor is open on.
-        pub editing: Cell<Option<(u64, u32)>>,
+        /// The in-cell editor (EDIT-2): an entry laid over its cell, made on first use.
+        pub editor: RefCell<Option<gtk::Entry>>,
+        /// Cell the editor is open on, and how the edit started.
+        pub editing: Cell<Option<(u64, u32, Mode)>>,
         /// A save is running; edits wait so none can be lost between snapshot and reopen.
         pub saving: Cell<bool>,
         /// The cell cursor and selected range (GRID-3, GRID-4).
@@ -87,8 +88,8 @@ mod imp {
 
     impl ObjectImpl for GridView {
         fn dispose(&self) {
-            if let Some((popover, _)) = self.editor.take() {
-                popover.unparent();
+            if let Some(entry) = self.editor.take() {
+                entry.unparent();
             }
         }
     }
@@ -127,11 +128,9 @@ mod imp {
     impl WidgetImpl for GridView {
         fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
             self.parent_size_allocate(width, height, baseline);
-            self.obj().update_adjustments();
-            // GTK4: a widget that parents a popover must position it on every allocation.
-            if let Some((popover, _)) = self.editor.borrow().as_ref() {
-                popover.present();
-            }
+            let obj = self.obj();
+            obj.update_adjustments();
+            obj.place_editor();
         }
 
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
@@ -294,6 +293,13 @@ mod imp {
             }
             snapshot.pop();
 
+            // The in-cell editor (EDIT-2) sits over its cell, inside the body.
+            let editor = self.editor.borrow();
+            if let Some(entry) = editor.as_ref().filter(|e| WidgetExt::is_visible(*e)) {
+                snapshot.push_clip(&rect(rh_w, HEADER_H, body_w, body_h));
+                obj.snapshot_child(entry, snapshot);
+                snapshot.pop();
+            }
             drop(buf);
             self.end_frame();
         }
@@ -374,12 +380,22 @@ impl GridView {
         let keys = gtk::EventControllerKey::new();
         keys.connect_key_pressed({
             let g = g.downgrade();
-            move |_, key, _, state| match (g.upgrade(), nav_key(key, state)) {
-                (Some(g), Some((key, mods))) => {
-                    g.press(key, mods);
-                    glib::Propagation::Stop
+            move |_, key, _, state| {
+                let Some(g) = g.upgrade() else {
+                    return glib::Propagation::Proceed;
+                };
+                // Keys the open editor's entry didn't use bubble up here; they aren't ours.
+                if g.imp().editing.get().is_some() {
+                    return glib::Propagation::Proceed;
                 }
-                _ => glib::Propagation::Proceed,
+                if let Some((key, mods)) = nav_key(key, state) {
+                    g.press(key, mods);
+                } else if let Some(start) = editor::start(key, state) {
+                    g.start_edit(start);
+                } else {
+                    return glib::Propagation::Proceed;
+                }
+                glib::Propagation::Stop
             }
         });
         g.add_controller(keys);
@@ -394,11 +410,23 @@ impl GridView {
                 let g = g.downgrade();
                 move |_| {
                     if let Some(g) = g.upgrade() {
+                        if g.imp().editing.get().is_some() {
+                            g.queue_allocate(); // the editor moves with its cell
+                        }
                         g.queue_draw();
                     }
                 }
             });
         }
+        let css = gtk::CssProvider::new();
+        css.load_from_string(
+            "entry.cell-editor { min-height: 0; padding: 0 3px; margin: 0; border-radius: 0; }",
+        );
+        gtk::style_context_add_provider_for_display(
+            &WidgetExt::display(&g),
+            &css,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
         g
     }
 
@@ -703,80 +731,162 @@ impl GridView {
         }
     }
 
-    /// Open the cell editor on the cell under widget point (`x`, `y`), prefilled with the
-    /// cell's full value.
+    /// Double-click: edit the cell under widget point (`x`, `y`), keeping its value.
     fn begin_edit(&self, x: f64, y: f64) {
+        let rh_w = self.imp().row_header_w.get();
+        let Some(cell) = self.with_viewports(|rows, cols| {
+            let (row, col) = (rows.at(y - HEADER_H)?, cols.at(x - rh_w)?);
+            Some(grid::Cell {
+                row,
+                col: col as u32,
+            })
+        }) else {
+            return;
+        };
+        self.imp().selection.set(Selection::at(cell));
+        let value = self.cell_text(cell);
+        self.open_editor(cell, &value, Mode::Editing);
+    }
+
+    /// F2 or typing on the cursor cell (EDIT-2). The selection stays, so Enter and Tab
+    /// after the edit move within a selected range, as in Calc.
+    fn start_edit(&self, start: Start) {
+        let cell = self.imp().selection.get().cursor();
+        let b = self.bounds();
+        if cell.row >= b.rows || cell.col >= b.cols {
+            return;
+        }
+        match start {
+            Start::Keep => self.open_editor(cell, &self.cell_text(cell), Mode::Editing),
+            Start::Replace(c) => self.open_editor(cell, &c.to_string(), Mode::Typing),
+        }
+    }
+
+    fn cell_text(&self, cell: grid::Cell) -> String {
+        self.imp()
+            .table
+            .borrow()
+            .as_ref()
+            .and_then(|t| t.cell_value(cell.row, cell.col).map(|v| v.into_owned()))
+            .unwrap_or_default()
+    }
+
+    fn open_editor(&self, cell: grid::Cell, text: &str, mode: Mode) {
         let imp = self.imp();
         if imp.saving.get() {
             return;
         }
-        let rh_w = imp.row_header_w.get();
-        let Some((row, col, cell)) = self.with_viewports(|rows, cols| {
-            let (row, col) = (rows.at(y - HEADER_H)?, cols.at(x - rh_w)?);
-            let cell = gdk::Rectangle::new(
-                (rh_w + cols.pos(col)) as i32,
-                (HEADER_H + rows.pos(row)) as i32,
-                cols.size(col) as i32,
-                rows.size(row) as i32,
-            );
-            Some((row, col as u32, cell))
-        }) else {
-            return;
-        };
-        let value = imp
-            .table
-            .borrow()
-            .as_ref()
-            .and_then(|t| t.cell_value(row, col).map(|v| v.into_owned()));
-
-        let (popover, entry) = imp
+        let entry = imp
             .editor
             .borrow_mut()
             .get_or_insert_with(|| self.build_editor())
             .clone();
-        imp.editing.set(Some((row, col)));
-        imp.selection.set(Selection::at(grid::Cell { row, col }));
-        self.queue_draw();
-        popover.set_pointing_to(Some(&cell));
-        entry.set_text(value.as_deref().unwrap_or(""));
-        popover.popup();
+        imp.editing.set(Some((cell.row, cell.col, mode)));
+        self.scroll_to((Some(cell.row), Some(cell.col)));
+        entry.set_text(text);
+        entry.set_visible(true);
         entry.grab_focus();
+        entry.set_position(-1);
+        self.queue_allocate();
+        self.queue_draw();
     }
 
-    fn build_editor(&self) -> (gtk::Popover, gtk::Entry) {
-        let entry = gtk::Entry::builder().width_chars(30).build();
-        let popover = gtk::Popover::builder()
-            .child(&entry)
-            .position(gtk::PositionType::Bottom)
-            .build();
-        popover.set_parent(self);
-        entry.connect_activate({
+    /// Lay the editor over its cell (at least as big as the entry needs).
+    fn place_editor(&self) {
+        let imp = self.imp();
+        let (Some(entry), Some((row, col, _))) = (imp.editor.borrow().clone(), imp.editing.get())
+        else {
+            return;
+        };
+        let rh_w = imp.row_header_w.get();
+        let (x, y, w, h) = self.with_viewports(|rows, cols| {
+            let col = u64::from(col);
+            (
+                rh_w + cols.pos(col),
+                HEADER_H + rows.pos(row),
+                cols.size(col),
+                rows.size(row),
+            )
+        });
+        let (min_w, _, _, _) = entry.measure(gtk::Orientation::Horizontal, -1);
+        let (min_h, _, _, _) = entry.measure(gtk::Orientation::Vertical, -1);
+        // Off-screen cells park the editor just outside; the clip in `snapshot` hides it.
+        let clamp = |v: f64, lo: f64, hi: f64| v.clamp(lo, hi.max(lo)) as i32;
+        entry.size_allocate(
+            &gtk::Allocation::new(
+                clamp(x, -w - 10.0, f64::from(self.width()) + 10.0),
+                clamp(y, -h - 10.0, f64::from(self.height()) + 10.0),
+                (w as i32).max(min_w),
+                (h as i32).max(min_h),
+            ),
+            -1,
+        );
+    }
+
+    fn build_editor(&self) -> gtk::Entry {
+        let entry = gtk::Entry::new();
+        entry.add_css_class("cell-editor");
+        entry.set_visible(false);
+        entry.set_parent(self);
+        // Capture phase: Enter, Tab and Esc are ours before the entry acts on them.
+        let keys = gtk::EventControllerKey::new();
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        keys.connect_key_pressed({
             let g = self.downgrade();
-            move |entry| {
-                if let Some(g) = g.upgrade() {
-                    g.commit_edit(&entry.text());
+            move |_, key, _, state| {
+                let Some(g) = g.upgrade() else {
+                    return glib::Propagation::Proceed;
+                };
+                let Some((_, _, mode)) = g.imp().editing.get() else {
+                    return glib::Propagation::Proceed;
+                };
+                match editor::while_editing(key, state, mode) {
+                    Action::Commit(key, mods) => {
+                        g.commit_edit();
+                        g.press(key, mods);
+                    }
+                    Action::Cancel => g.close_editor(),
+                    Action::Pass => return glib::Propagation::Proceed,
                 }
+                glib::Propagation::Stop
             }
         });
-        popover.connect_closed({
+        entry.add_controller(keys);
+        // Clicking elsewhere (another cell, the header bar) keeps what was typed.
+        let focus = gtk::EventControllerFocus::new();
+        focus.connect_leave({
             let g = self.downgrade();
             move |_| {
                 if let Some(g) = g.upgrade() {
-                    g.imp().editing.set(None);
-                    g.grab_focus();
+                    g.commit_edit();
                 }
             }
         });
-        (popover, entry)
+        entry.add_controller(focus);
+        entry
+    }
+
+    /// Commit an open edit, if any; for Ctrl+S, which saves what was typed (as Calc does).
+    pub fn finish_editing(&self) {
+        self.commit_edit();
     }
 
     /// Apply the editor's text to its cell as an undoable command, then close the editor.
-    fn commit_edit(&self, text: &str) {
+    fn commit_edit(&self) {
         let imp = self.imp();
-        if let Some((row, col)) = imp.editing.get() {
+        let Some((row, col, _)) = imp.editing.get() else {
+            return;
+        };
+        let text = imp
+            .editor
+            .borrow()
+            .as_ref()
+            .map(|e| e.text().to_string())
+            .unwrap_or_default();
+        {
             let mut table = imp.table.borrow_mut();
             if let (Some(table), Some(undo)) = (table.as_mut(), imp.undo.borrow_mut().as_mut()) {
-                if table.cell_value(row, col).as_deref() != Some(text) {
+                if table.cell_value(row, col).as_deref() != Some(text.as_str()) {
                     let at = CellRef {
                         row: table.row_id(row),
                         col,
@@ -784,13 +894,24 @@ impl GridView {
                     undo.execute(Box::new(SetCell::new(at, text)), table);
                     imp.cache.borrow_mut().invalidate();
                     imp.titles.take();
-                    self.queue_draw();
                 }
             }
         }
-        if let Some((popover, _)) = imp.editor.borrow().as_ref() {
-            popover.popdown();
+        self.close_editor();
+    }
+
+    /// Close the editor without touching the cell (Esc), and give the grid the focus back.
+    fn close_editor(&self) {
+        let imp = self.imp();
+        // Cleared first: taking the focus away runs the entry's focus-leave commit.
+        if imp.editing.take().is_none() {
+            return;
         }
+        if let Some(entry) = imp.editor.borrow().as_ref() {
+            entry.set_visible(false);
+        }
+        self.grab_focus();
+        self.queue_draw();
     }
 
     /// Ctrl+Z (CMD-1): revert the last command and show the cell it changed. Refused while

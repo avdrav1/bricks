@@ -14,6 +14,7 @@
 //! - `--bench-status` (APP-2) prints the status bar's row text (`STATUS …`) on every status
 //!   update while the file indexes, and quits once indexing is complete.
 
+mod editor;
 mod grid_view;
 mod status;
 
@@ -470,7 +471,10 @@ fn build_window(
             }
             let shift = mods.contains(ModifierType::SHIFT_MASK);
             match key {
-                Key::s | Key::S => start_save(&grid, &session.path, &save),
+                Key::s | Key::S => {
+                    grid.finish_editing(); // save what was typed, as Calc does
+                    start_save(&grid, &session.path, &save);
+                }
                 Key::z if !shift => {
                     grid.undo();
                 }
