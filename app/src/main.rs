@@ -503,8 +503,9 @@ fn build_window(
     }
 }
 
-/// Open benchmark (BENCH-1). Prints `FIRST_FRAME` at the end of the first frame that shows
-/// rows (or, for a file with none, the first frame at all), then, once indexing is done,
+/// Open benchmark (BENCH-1, APP-3). Prints `FIRST_FRAME {json}` at the end of the first
+/// frame that shows rows (or, for a file with none, the first frame at all), with the rows
+/// indexed so far and whether indexing was complete; then, once indexing is done,
 /// `OPENED {json}` with memory use, and quits. The caller times from spawn to each line.
 fn bench_open(app: &gtk::Application, grid: &GridView) {
     let Some(clock) = grid.frame_clock() else {
@@ -518,7 +519,12 @@ fn bench_open(app: &gtk::Application, grid: &GridView) {
             let empty = grid.is_complete() && grid.row_count() == 0;
             if !first.get() && (grid.painted_top_row().is_some() || empty) {
                 first.set(true);
-                println!("FIRST_FRAME");
+                // How far indexing had got when rows first showed (APP-3).
+                println!(
+                    r#"FIRST_FRAME {{"rows_indexed":{},"complete":{}}}"#,
+                    grid.row_count(),
+                    grid.is_complete()
+                );
             }
             if first.get() && grid.is_complete() {
                 println!(

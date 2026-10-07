@@ -44,7 +44,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | GRID-5 | M1 | P0 | done | GRID-1 | Resize columns and rows; double-click autofits column | Autofit samples visible rows only |
 | APP-1 | M1 | P0 | done | DEC-1 | Open via native file dialog (xdg-desktop-portal) | Works under Hyprland, GNOME, KDE |
 | APP-2 | M1 | P0 | done | ENG-1 | Status bar: row count, encoding, delimiter, save state | Row count updates while indexing streams |
-| APP-3 | M1 | P0 | todo | ENG-1, DEC-5 | Show first rows before indexing finishes | First rows of 1 GB visible in under 500 ms |
+| APP-3 | M1 | P0 | done | ENG-1, DEC-5 | Show first rows before indexing finishes | First rows of 1 GB visible in under 500 ms |
 | CMD-1 | M2 | P0 | todo | EDIT-1 | Command pattern for all mutations | Every edit is a reversible command object |
 | CMD-2 | M2 | P0 | todo | CMD-1 | Undo/redo stores operations, not snapshots | 1,000-step history under 50 MB on a 1 GB file |
 | EDIT-2 | M2 | P0 | todo | GRID-4, CMD-1 | In-cell editor; F2 or typing starts edit | Enter commits and moves down; Esc cancels |
@@ -80,6 +80,10 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-07 APP-3:** first rows before indexing finishes. The behavior already existed: the index streams rows from ENG-1 on, and the grid paints whatever is indexed (GRID-1). This story adds the proof.
+  - `--bench-open` now prints `FIRST_FRAME {"rows_indexed":N,"complete":false}`: the rows indexed when rows were first painted. `cargo bench` matches on the prefix.
+  - Acceptance: `app/tests/first_rows.rs` (ignored, needs a display) evicts the 1 GB file from the page cache, times spawn to `FIRST_FRAME` (median of 3 under 500 ms, asserted in release builds), and requires indexing to have been incomplete then. Via Broadway: 152, 176 and 177 ms, with 3.5–3.6M of 19.1M rows indexed. The desktop `cargo bench` measured 281 ms for the same moment (GRID-5).
+  - `cargo bench` on Broadway, to check the parser without opening desktop windows: first rows 161 ms. Its scroll p99 of 43.9 ms at 7 fps comes from Broadway: each frame is serialized to a headless browser. That is not a grid regression (2.2 ms on the desktop in GRID-5), and those numbers are not reference-box numbers for docs/BENCHMARKS.md.
 - **2026-10-07 APP-2:** status bar.
   - The bar under the grid shows three parts. On the left, the row count with "indexing N%" while it grows; the percentage is bytes scanned over file size (`SparseRowIndex::bytes_indexed`). On the right, the save state: unsaved edits, Saving…, Saved in N s, Save failed, and File changed on disk. Next to it, the delimiter and encoding. The title now carries only the file name, with • for unsaved edits.
   - The text comes from `app/src/status.rs`, pure functions with unit tests for wording and precedence. A save result gives way to newer edits, and a failure keeps the edit count.

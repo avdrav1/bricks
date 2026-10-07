@@ -114,7 +114,7 @@ fn first_frame_ms(file: &Path, cold: bool) -> Result<(f64, String), String> {
         )?;
         let first = lines
             .iter()
-            .find(|(_, l)| l == "FIRST_FRAME")
+            .find(|(_, l)| l.starts_with("FIRST_FRAME"))
             .ok_or("no FIRST_FRAME")?;
         times.push(first.0);
         opened = lines
