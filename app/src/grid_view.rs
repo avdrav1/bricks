@@ -29,6 +29,8 @@ mod imp {
         pub layouts_prev: RefCell<HashMap<String, pango::Layout>>,
         pub buf: RefCell<String>,
         pub row_header_w: Cell<f64>,
+        /// Top row of the last frame drawn with its text loaded; `None` before then.
+        pub painted_top: Cell<Option<u64>>,
     }
 
     #[glib::object_subclass]
@@ -98,6 +100,8 @@ mod imp {
             };
             let visible = rows.visible_rows(0);
             cache.ensure(visible.clone(), BUFFER_ROWS, table);
+            self.painted_top
+                .set(cache.cell(visible.start, 0).map(|_| visible.start));
             let cols = ColumnViewport {
                 scroll_x: hadj.value(),
                 width: body_w,
@@ -231,6 +235,11 @@ impl GridView {
 
     pub fn cache_bytes(&self) -> usize {
         self.imp().cache.borrow().heap_bytes()
+    }
+
+    /// Top row of the last painted frame, once its cells were loaded and drawn.
+    pub fn painted_top_row(&self) -> Option<u64> {
+        self.imp().painted_top.get()
     }
 
     /// Resize scroll ranges to the rows indexed so far and the widest row seen.
