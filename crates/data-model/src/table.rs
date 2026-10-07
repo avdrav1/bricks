@@ -1,15 +1,16 @@
 //! What the grid reads: display text for blocks of rows, behind [`TableSource`] so the grid
 //! never touches the file (layers: source -> overlay -> view -> grid).
 
+use crate::cleared::Cleared;
 use crate::colmap::ColMap;
 use crate::rowmap::{RowMap, Run};
-use crate::{CellRef, Col, ColId, Edit, EditOverlay, Row, RowId};
+use crate::{CellRef, Col, ColId, ColSet, Edit, EditOverlay, Row, RowId};
 use csv_engine::{
     detect_dialect, detect_header, open_text, split_fields, Dialect, Encoding, Field, RowIndex,
     Source, SparseRowIndex, DETECT_SAMPLE_BYTES,
 };
 use std::borrow::Cow;
-use std::ops::Range;
+use std::ops::{Bound, Range, RangeBounds};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -160,6 +161,8 @@ pub struct CsvTable {
     pub(crate) cols: Option<ColMap>,
     /// Inserted columns so far: the next inserted column's number.
     next_inserted_col: u32,
+    /// Cells cleared in blocks (EDIT-5).
+    pub(crate) cleared: Cleared,
     spans: Vec<Range<u64>>,
     fields: Vec<Field>,
 }
@@ -181,6 +184,7 @@ impl CsvTable {
             next_inserted: 0,
             cols: None,
             next_inserted_col: 0,
+            cleared: Cleared::default(),
             spans: Vec::new(),
             fields: Vec::new(),
         }
@@ -291,6 +295,49 @@ impl CsvTable {
         (count > 0).then_some(Edit::DeleteCols { at: col, count })
     }
 
+    /// An edit emptying table rows `rows` in columns `cols` (EDIT-5). An open end (`2..`)
+    /// reaches every column, also those of wider rows further down. `None` when there are
+    /// no such rows or columns.
+    pub fn clear_cells(&self, rows: Range<Row>, cols: impl RangeBounds<Col>) -> Option<Edit> {
+        if rows.is_empty() || rows.end > self.row_count() {
+            return None;
+        }
+        let start = match cols.start_bound() {
+            Bound::Included(&c) => c,
+            Bound::Excluded(&c) => c.checked_add(1)?,
+            Bound::Unbounded => 0,
+        };
+        let cols = match cols.end_bound() {
+            Bound::Unbounded => match &self.cols {
+                None => ColSet::new(Vec::new(), Some(start)),
+                Some(map) => {
+                    let (ids, rest) = map.from(start);
+                    ColSet::new(ids, Some(rest))
+                }
+            },
+            end => {
+                let end = match end {
+                    Bound::Included(&c) => c.checked_add(1)?,
+                    Bound::Excluded(&c) => c,
+                    Bound::Unbounded => unreachable!(),
+                };
+                if start >= end {
+                    return None;
+                }
+                ColSet::new((start..end).map(|c| self.col_id(c)).collect(), None)
+            }
+        };
+        let positions = rows.start + self.first_row()..rows.end + self.first_row();
+        let rows = match &self.rows {
+            Some(map) => map.runs_in(positions),
+            None => vec![Run {
+                first: RowId::source(positions.start),
+                len: positions.end - positions.start,
+            }],
+        };
+        Some(Edit::ClearCells { rows, cols })
+    }
+
     /// Title of column `col` when the first row is a header (with any edit to it).
     pub fn header_cell(&self, col: Col) -> Option<Cow<'_, str>> {
         if self.has_header() && self.total_rows() > 0 {
@@ -324,7 +371,7 @@ impl CsvTable {
             inserted + self.index.row_count().saturating_sub(kept)
         });
         let cols = self.cols.as_ref().map_or(0, ColMap::changes);
-        self.overlay.len() + rows as usize + cols
+        self.overlay.len() + rows as usize + cols + self.cleared.len()
     }
 
     /// An edit inserting `count` empty rows before table row `row` (at the end when
@@ -405,6 +452,20 @@ impl CsvTable {
                     .get_or_insert_with(ColMap::default)
                     .remove(at, count),
             },
+            Edit::ClearCells { rows, cols } => {
+                let ids = id_ranges(&rows);
+                let edits = self.overlay.take_in(&ids, &cols);
+                self.cleared.push(file_rows(ids), cols.file_columns());
+                Edit::UnclearCells { rows, cols, edits }
+            }
+            Edit::UnclearCells { rows, cols, edits } => {
+                self.cleared
+                    .remove(file_rows(id_ranges(&rows)), cols.file_columns());
+                for (at, value) in edits {
+                    self.overlay.set(at, value);
+                }
+                Edit::ClearCells { rows, cols }
+            }
         }
     }
 
@@ -462,7 +523,11 @@ impl CsvTable {
         }
         let mut fields = Vec::new();
         let bytes = self.index.row_fields(row.0, &mut fields)?;
-        let value = fields.get(col.0 as usize)?.value(bytes, self.dialect.quote);
+        let field = fields.get(col.0 as usize)?;
+        if self.cleared.at(row.0).is_some_and(|c| c.contains(col)) {
+            return Some(Cow::Borrowed(""));
+        }
+        let value = field.value(bytes, self.dialect.quote);
         Some(match value {
             Cow::Borrowed(b) => String::from_utf8_lossy(b),
             Cow::Owned(v) => Cow::Owned(String::from_utf8_lossy(&v).into_owned()),
@@ -487,18 +552,26 @@ impl CsvTable {
             }
             split_fields(line, &self.dialect, &mut self.fields);
             let edits = self.overlay.row(RowId::source(file_row));
+            let cleared = self.cleared.at(file_row);
+            // `value` borrows unless the field has `""` escapes to undo.
+            let value = |id: ColId, f: &Field| match cleared {
+                Some(c) if c.contains(id) => Cow::Borrowed(&b""[..]),
+                _ => f.value(line, quote),
+            };
             match (cols, edits) {
-                // `value` borrows unless the field has `""` escapes to undo.
-                (None, None) => self
+                (None, None) if cleared.is_none() => self
                     .fields
                     .iter()
                     .for_each(|f| out.push_cell(&f.value(line, quote))),
-                (None, Some(edits)) => {
-                    let last_edit = edits.keys().next_back().map_or(0, |c| c.0 as usize + 1);
+                (None, edits) => {
+                    let last_edit = edits
+                        .and_then(|e| e.keys().next_back())
+                        .map_or(0, |c| c.0 as usize + 1);
                     for c in 0..self.fields.len().max(last_edit) {
-                        match (edits.get(&ColId::source(c as Col)), self.fields.get(c)) {
+                        let id = ColId::source(c as Col);
+                        match (edits.and_then(|e| e.get(&id)), self.fields.get(c)) {
                             (Some(v), _) => out.push_cell(v.as_bytes()),
-                            (None, Some(f)) => out.push_cell(&f.value(line, quote)),
+                            (None, Some(f)) => out.push_cell(&value(id, f)),
                             (None, None) => out.push_cell(b""),
                         }
                     }
@@ -516,7 +589,7 @@ impl CsvTable {
                             .flatten();
                         match (edits.and_then(|e| e.get(&id)), field) {
                             (Some(v), _) => out.push_cell(v.as_bytes()),
-                            (None, Some(f)) => out.push_cell(&f.value(line, quote)),
+                            (None, Some(f)) => out.push_cell(&value(id, f)),
                             (None, None) => out.push_cell(b""),
                         }
                     }
@@ -549,6 +622,26 @@ impl CsvTable {
             out.end_row();
         }
     }
+}
+
+/// The row ids of `runs` as sorted, merged ranges of id values.
+fn id_ranges(runs: &[Run]) -> Vec<Range<u64>> {
+    let mut ids: Vec<Range<u64>> = runs.iter().map(|r| r.first.0..r.first.0 + r.len).collect();
+    ids.sort_unstable_by_key(|r| r.start);
+    let mut merged: Vec<Range<u64>> = Vec::with_capacity(ids.len());
+    for r in ids {
+        match merged.last_mut() {
+            Some(last) if last.end >= r.start => last.end = last.end.max(r.end),
+            _ => merged.push(r),
+        }
+    }
+    merged
+}
+
+/// The file rows among merged id ranges (inserted rows have nothing in the file).
+fn file_rows(mut ids: Vec<Range<u64>>) -> Vec<Range<u64>> {
+    ids.retain(|r| !RowId(r.start).is_inserted());
+    ids
 }
 
 impl TableSource for CsvTable {
@@ -975,6 +1068,62 @@ mod tests {
             "cells, column in, column out, row in"
         );
         assert_eq!(saved(&t), b"id,,name\n1,x,\"Ann, A\"\n2,,Bo\n,y,\n");
+
+        while let Some(inverse) = undo.pop() {
+            t.apply(inverse);
+        }
+        assert_eq!(t.changes(), 0);
+        assert_eq!(saved(&t), content, "back to the original bytes");
+        std::fs::remove_file(path).unwrap();
+    }
+
+    /// EDIT-5: cleared cells read and save empty; other fields keep their raw bytes
+    /// (quotes included), short rows stay short, an open-ended clear reaches a wider
+    /// row's extra field, edits inside a clear go and come back with its undo, typing
+    /// into a cleared cell wins. Undoing everything gives back the file byte for byte.
+    #[test]
+    fn cleared_cells_read_and_save_empty_and_undo_exactly() {
+        let content =
+            b"id,name,city\n1,\"Ann, A\",Paris\n2,Bo\n3,x,y,extra\n4,\"q\",z\n5,keep,me\n";
+        let (path, mut t) = opened("clear", content);
+        let mut undo = Vec::new();
+        let at = |t: &CsvTable, r, c| CellRef {
+            row: t.row_id(r),
+            col: t.col_id(c),
+        };
+        undo.push(t.apply(Edit::set(at(&t, 3, 2), "covered")));
+        let rect = t.clear_cells(0..2, 1..3).unwrap();
+        undo.push(t.apply(rect));
+        let open = t.clear_cells(2..4, 2..).unwrap();
+        undo.push(t.apply(open));
+        let row = t.insert_rows(5, 1).unwrap();
+        undo.push(t.apply(row));
+        undo.push(t.apply(Edit::set(at(&t, 5, 0), "new")));
+        let inserted = t.clear_cells(5..6, 0..1).unwrap();
+        undo.push(t.apply(inserted));
+        undo.push(t.apply(Edit::set(at(&t, 0, 1), "typed")));
+
+        assert_eq!(row_text(&mut t, 0), ["1", "typed", ""]);
+        assert_eq!(row_text(&mut t, 1), ["2", ""]);
+        assert_eq!(row_text(&mut t, 2), ["3", "x", "", ""]);
+        assert_eq!(row_text(&mut t, 3), ["4", "q", ""]);
+        assert_eq!(row_text(&mut t, 5), Vec::<String>::new());
+        assert_eq!(t.cell_value(3, 2).as_deref(), Some(""));
+        assert_eq!(
+            t.cell_value(1, 2),
+            None,
+            "past a short row's end there is no cell"
+        );
+        assert_eq!(t.header_cell(1).as_deref(), Some("name"));
+        assert_eq!(
+            t.changes(),
+            2 + 1 + 1,
+            "two file clears, one cell, one row in"
+        );
+        assert_eq!(
+            saved(&t),
+            b"id,name,city\n1,typed,\n2,\n3,x,,\n4,\"q\",\n5,keep,me\n,,\n"
+        );
 
         while let Some(inverse) = undo.pop() {
             t.apply(inverse);

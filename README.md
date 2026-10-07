@@ -23,6 +23,8 @@ Move the cell cursor like LibreOffice Calc: arrows, Tab/Shift+Tab, Enter/Shift+E
 
 Edit in the cell, as in Calc: start typing to replace a cell's content, or press F2 (or double-click) to change it. Enter commits and moves down, Shift+Enter up, Tab and Shift+Tab across (Enter after a run of Tabs returns to the column you started in); Esc cancels. After typing, arrow keys also commit and move; after F2 they move the text cursor. Clicking elsewhere keeps what you typed, and Ctrl+S saves it.
 
+Delete empties the selected cells: a range, whole rows (every column, also those of wider rows further down), or whole columns (every row, once the file is indexed). It is one step for Ctrl+Z however many cells it covers, and a whole column of a 1 GB file clears instantly; the save writes those fields empty and every other field as it was.
+
 Insert and delete rows with Ctrl++ (as many empty rows as the selection spans, above it) and Ctrl+- (the selected rows); with whole columns selected (click the column letters), the same keys insert columns to the left and delete them. Right-click a cell or header for Insert Rows Above / Below, Delete Rows, Insert Columns Left / Right, and Delete Columns. Nothing is rewritten until you save: untouched rows are then still copied byte for byte, unless columns changed, in which case every row is re-assembled from its raw fields (3.5 s for 1 GB). Rows can be inserted and deleted once the file is fully indexed (under a second for 1 GB).
 
 Ctrl+Z undoes the last edit and moves the cursor to the cell it changed; Ctrl+Shift+Z or Ctrl+Y redoes it. History keeps the last 1,000 steps within 50 MB, whatever the file size, dropping the oldest first. Undo waits while a save runs, and the history starts over after a save.

@@ -113,6 +113,11 @@ impl Selection {
         self.full_height.then(|| tl.col..br.col + 1)
     }
 
+    /// The selection is whole rows (every column of them).
+    pub fn is_whole_rows(&self) -> bool {
+        self.full_width
+    }
+
     fn is_range(&self) -> bool {
         self.anchor != self.extent
     }

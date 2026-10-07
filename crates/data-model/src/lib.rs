@@ -3,16 +3,19 @@
 //! Layers (spec section 16), each kept separate:
 //! source (csv-engine) -> overlay (edits) -> view (sort/filter) -> grid.
 
+mod cleared;
 mod colmap;
 mod rowmap;
 mod save;
 mod table;
 
+pub use cleared::ColSet;
 pub use rowmap::Run;
 pub use save::{SaveJob, SaveJobError, SaveStats};
 pub use table::{CsvTable, DelimiterChoice, RereadError, RowBlock, TableSource, MAX_DISPLAY_BYTES};
 
 use std::collections::{BTreeMap, HashMap};
+use std::ops::Range;
 
 pub type Row = u64;
 pub type Col = u32;
@@ -95,6 +98,16 @@ pub enum Edit {
     InsertCols { at: Col, cols: Vec<ColId> },
     /// Take `count` columns out from column `at`; the inverse keeps their ids.
     DeleteCols { at: Col, count: Col },
+    /// Empty every cell of these rows and columns (EDIT-5): their edits go, and the
+    /// file's fields there read as empty. Kept as one block however many cells it spans.
+    /// Build it with [`CsvTable::clear_cells`].
+    ClearCells { rows: Vec<Run>, cols: ColSet },
+    /// Undo of a clear: take its block back and restore the edits it removed.
+    UnclearCells {
+        rows: Vec<Run>,
+        cols: ColSet,
+        edits: Vec<(CellRef, Box<str>)>,
+    },
 }
 
 impl Edit {
@@ -129,6 +142,15 @@ impl Edit {
             Self::InsertRows { rows, .. } => rows.capacity() * std::mem::size_of::<Run>(),
             Self::InsertCols { cols, .. } => cols.capacity() * std::mem::size_of::<ColId>(),
             Self::DeleteRows { .. } | Self::DeleteCols { .. } => 0,
+            Self::ClearCells { rows, cols } => {
+                rows.capacity() * std::mem::size_of::<Run>() + cols.heap_bytes()
+            }
+            Self::UnclearCells { rows, cols, edits } => {
+                rows.capacity() * std::mem::size_of::<Run>()
+                    + cols.heap_bytes()
+                    + edits.capacity() * std::mem::size_of::<(CellRef, Box<str>)>()
+                    + edits.iter().map(|(_, v)| v.len()).sum::<usize>()
+            }
         }
     }
 }
@@ -178,6 +200,50 @@ impl EditOverlay {
         }
         self.cells -= 1;
         Some(prev)
+    }
+
+    /// Take out every edit in rows `ids` (ranges of `RowId` values, sorted) and columns
+    /// `cols`; returns them. Visits whichever is fewer: the rows asked for, or the edited
+    /// rows.
+    pub(crate) fn take_in(
+        &mut self,
+        ids: &[Range<u64>],
+        cols: &ColSet,
+    ) -> Vec<(CellRef, Box<str>)> {
+        let asked: u64 = ids.iter().map(|r| r.end - r.start).sum();
+        let rows: Vec<RowId> = if asked <= self.rows.len() as u64 {
+            ids.iter()
+                .flat_map(|r| r.clone().map(RowId))
+                .filter(|id| self.rows.contains_key(id))
+                .collect()
+        } else {
+            let inside = |id: &RowId| {
+                let i = ids.partition_point(|r| r.end <= id.0);
+                ids.get(i).is_some_and(|r| r.start <= id.0)
+            };
+            self.rows.keys().copied().filter(inside).collect()
+        };
+        let mut out = Vec::new();
+        for row in rows {
+            let Some(edits) = self.rows.get_mut(&row) else {
+                continue;
+            };
+            let gone: Vec<ColId> = edits
+                .keys()
+                .copied()
+                .filter(|&c| cols.contains(c))
+                .collect();
+            for col in gone {
+                if let Some(v) = edits.remove(&col) {
+                    out.push((CellRef { row, col }, v));
+                }
+            }
+            if edits.is_empty() {
+                self.rows.remove(&row);
+            }
+        }
+        self.cells -= out.len();
+        out
     }
 
     /// Edits in one row, by column id.

@@ -24,7 +24,7 @@ impl Reshape {
             Edit::InsertRows { .. } => "Insert rows",
             Edit::DeleteRows { .. } => "Delete rows",
             Edit::InsertCols { .. } => "Insert columns",
-            Edit::DeleteCols { .. } | Edit::Cell { .. } => "Delete columns",
+            _ => "Delete columns",
         };
         Self {
             edit,

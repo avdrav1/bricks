@@ -2,7 +2,7 @@
 
 use crate::editor::{self, Action, Mode, ShapeCommand, Start};
 
-use commands::{Reshape, SetCell, UndoStack};
+use commands::{ClearCells, Reshape, SetCell, UndoStack};
 use data_model::{
     CellRef, ColId, CsvTable, DelimiterChoice, Edit, RereadError, RowId, SaveJob, SaveJobError,
     TableSource,
@@ -446,6 +446,8 @@ impl GridView {
                         (ShapeCommand::Insert, true) => g.insert_cols_left(),
                         (ShapeCommand::Delete, true) => g.delete_cols(),
                     }
+                } else if editor::clears(key, state) {
+                    g.clear_selected();
                 } else if let Some(start) = editor::start(key, state) {
                     g.start_edit(start);
                 } else {
@@ -1188,6 +1190,44 @@ impl GridView {
             undo.execute(Box::new(Reshape::new(edit, cursor)), table);
         }
         self.after_change(None);
+    }
+
+    /// Delete (EDIT-5): empty the selected cells as one undoable step, however many there
+    /// are. Whole rows reach every column, wider rows' included; whole columns wait for
+    /// indexing to finish so they reach every row.
+    pub fn clear_selected(&self) {
+        let imp = self.imp();
+        if imp.saving.get() || imp.editing.get().is_some() {
+            return;
+        }
+        let sel = imp.selection.get();
+        let (tl, br) = sel.range();
+        {
+            let (mut table, mut undo) = (imp.table.borrow_mut(), imp.undo.borrow_mut());
+            let (Some(table), Some(undo)) = (table.as_mut(), undo.as_mut()) else {
+                return;
+            };
+            let rows = match sel.whole_columns() {
+                Some(_) if !table.is_complete() => return,
+                Some(_) => tl.row..table.row_count(),
+                None => tl.row..br.row + 1,
+            };
+            let edit = if sel.is_whole_rows() {
+                table.clear_cells(rows, tl.col..)
+            } else {
+                table.clear_cells(rows, tl.col..br.col + 1)
+            };
+            let Some(edit) = edit else { return };
+            let cur = sel.cursor();
+            let cursor = CellRef {
+                row: table.row_id(cur.row),
+                col: table.col_id(cur.col),
+            };
+            undo.execute(Box::new(ClearCells::new(edit, cursor)), table);
+        }
+        imp.cache.borrow_mut().invalidate();
+        imp.titles.take();
+        self.queue_draw();
     }
 
     /// Open the row and column menu at widget point (`x`, `y`), selecting the cell

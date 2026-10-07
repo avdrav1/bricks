@@ -5,9 +5,11 @@
 //! History is capped by steps and by bytes (CMD-2, spec SP-6): each command reports what
 //! it holds, and the oldest steps go first when either limit is passed.
 
+mod clear;
 mod edit;
 mod reshape;
 
+pub use clear::ClearCells;
 pub use edit::SetCell;
 pub use reshape::Reshape;
 

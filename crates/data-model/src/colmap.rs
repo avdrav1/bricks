@@ -63,6 +63,17 @@ impl ColMap {
         }
     }
 
+    /// Every column from position `pos` on: the explicit ids there, and the file column
+    /// where the run of later file columns starts.
+    pub fn from(&self, pos: Col) -> (Vec<ColId>, Col) {
+        let len = self.explicit.len() as Col;
+        let ids = self
+            .explicit
+            .get(pos.min(len) as usize..)
+            .unwrap_or_default();
+        (ids.to_vec(), self.tail + pos.saturating_sub(len))
+    }
+
     /// Positions a row spans: one past the last that holds anything, given its number of
     /// file fields and whether a column id has an edit in the row.
     pub fn width(&self, fields: Col, edited: impl Fn(ColId) -> bool) -> Col {

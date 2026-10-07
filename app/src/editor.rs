@@ -100,6 +100,16 @@ pub fn shape_command(key: gdk::Key, state: ModifierType) -> Option<ShapeCommand>
     }
 }
 
+/// Delete (EDIT-5) empties the selected cells. Only on its own: Shift+Delete is cut and
+/// Ctrl+Delete deletes a word in GTK, so modified presses aren't ours.
+pub fn clears(key: gdk::Key, state: ModifierType) -> bool {
+    let held = ModifierType::SHIFT_MASK
+        | ModifierType::CONTROL_MASK
+        | ModifierType::ALT_MASK
+        | ModifierType::SUPER_MASK;
+    matches!(key, K::Delete | K::KP_Delete) && !state.intersects(held)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,7 +182,7 @@ mod tests {
             "Ctrl+S saves"
         );
         assert_eq!(start(K::Escape, NONE), None);
-        assert_eq!(start(K::Delete, NONE), None, "Delete is EDIT-5");
+        assert_eq!(start(K::Delete, NONE), None, "Delete clears instead");
         assert_eq!(start(K::Shift_L, SHIFT), None);
     }
 
@@ -195,5 +205,17 @@ mod tests {
             None,
             "a plain minus is typing"
         );
+    }
+
+    #[test]
+    fn delete_alone_clears() {
+        assert!(clears(K::Delete, NONE));
+        assert!(
+            clears(K::KP_Delete, ModifierType::LOCK_MASK),
+            "with Caps Lock on"
+        );
+        assert!(!clears(K::Delete, SHIFT), "Shift+Delete is cut");
+        assert!(!clears(K::Delete, ModifierType::CONTROL_MASK));
+        assert!(!clears(K::BackSpace, NONE));
     }
 }

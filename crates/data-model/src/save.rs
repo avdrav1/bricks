@@ -3,7 +3,9 @@
 //! edited cells are encoded; every other field keeps its exact bytes, and the row keeps its
 //! line ending. Rows are written in the table's order (EDIT-3): runs of source rows copy as
 //! ranges, inserted rows are encoded from their edits, and deleted rows are left out.
+//! Rows with cleared cells (EDIT-5) are re-assembled with those fields empty.
 
+use crate::cleared::{cleared_at, ColSet, Segment};
 use crate::colmap::ColMap;
 use crate::rowmap::Run;
 use crate::{Col, ColId, CsvTable, RowId};
@@ -32,6 +34,8 @@ pub struct SaveJob {
     cols: Option<ColMap>,
     /// Edited rows, sorted by id (source rows first, in file order).
     edits: Vec<(RowId, BTreeMap<ColId, Box<str>>)>,
+    /// Cleared cells by file row (EDIT-5).
+    cleared: Arc<Vec<Segment>>,
     /// Fields an inserted row has at least: the first row's, so an empty inserted row is
     /// written as delimiters, not as a blank line some readers skip.
     width: usize,
@@ -87,6 +91,7 @@ impl CsvTable {
             order,
             cols,
             edits,
+            cleared: self.cleared.segments().clone(),
             width: width.max(1),
         })
     }
@@ -183,8 +188,8 @@ impl SaveJob {
         Ok(())
     }
 
-    /// Source rows `rows`: copied as byte ranges between their edited rows, or every one
-    /// re-assembled when the columns changed.
+    /// Source rows `rows`: copied as byte ranges between the rows that need re-assembling
+    /// (edited, or with cleared cells), or every one re-assembled when the columns changed.
     fn write_source(
         &self,
         rows: std::ops::Range<u64>,
@@ -194,37 +199,64 @@ impl SaveJob {
     ) -> io::Result<()> {
         let lo = self.edits.partition_point(|(id, _)| id.0 < rows.start);
         let hi = self.edits.partition_point(|(id, _)| id.0 < rows.end);
-        let edits = &self.edits[lo..hi];
+        let mut edits = self.edits[lo..hi].iter().peekable();
         if self.cols.is_some() {
-            // Every row is re-assembled: fetch spans a chunk at a time (one index lookup
-            // and one forward scan per chunk, not per row).
-            let (mut edits, mut spans) = (edits.iter().peekable(), Vec::new());
-            let mut start = rows.start;
-            while start < rows.end {
-                let end = rows.end.min(start + SPAN_CHUNK);
-                let found = self.index.row_spans(start..end, &mut spans).ok();
-                if found != Some((end - start) as usize) {
-                    return Err(io::Error::other("the source file changed on disk"));
-                }
-                for (row, span) in (start..end).zip(&spans) {
-                    let cols = edits.next_if(|(id, _)| id.0 == row).map(|(_, c)| c);
-                    self.assemble(span.start as usize..span.end as usize, cols, fields, line);
-                    self.start_row(w)?;
-                    w.put(line)?;
-                }
-                start = end;
-            }
-            return Ok(());
+            return self.assemble_rows(rows, &mut edits, w, fields, line);
         }
+        let first = self.cleared.partition_point(|s| s.rows.end <= rows.start);
+        let mut cleared = self.cleared[first..]
+            .iter()
+            .take_while(|s| s.rows.start < rows.end)
+            .map(|s| s.rows.start.max(rows.start)..s.rows.end.min(rows.end))
+            .peekable();
         let mut next = rows.start;
-        for (id, cols) in edits {
-            self.copy_rows(next..id.0, w)?;
-            self.write_edited(id.0, Some(cols), fields, line)?;
-            self.start_row(w)?;
-            w.put(line)?;
-            next = id.0 + 1;
+        loop {
+            let edited = edits.peek().map(|(id, _)| id.0);
+            let dirty = match (edited, cleared.peek()) {
+                (None, None) => break,
+                (Some(e), Some(c)) if e < c.start => e..e + 1,
+                (Some(e), None) => e..e + 1,
+                (_, Some(_)) => cleared.next().unwrap_or_default(),
+            };
+            self.copy_rows(next..dirty.start, w)?;
+            next = dirty.end;
+            self.assemble_rows(dirty, &mut edits, w, fields, line)?;
         }
         self.copy_rows(next..rows.end, w)
+    }
+
+    /// Re-assemble source rows `rows`, taking their edits from the front of `edits`.
+    /// Spans are fetched a chunk at a time (one index lookup and one forward scan per
+    /// chunk, not per row).
+    fn assemble_rows<'e>(
+        &self,
+        rows: std::ops::Range<u64>,
+        edits: &mut std::iter::Peekable<
+            impl Iterator<Item = &'e (RowId, BTreeMap<ColId, Box<str>>)>,
+        >,
+        w: &mut Out,
+        fields: &mut Vec<Field>,
+        line: &mut Vec<u8>,
+    ) -> io::Result<()> {
+        let mut spans = Vec::new();
+        let mut start = rows.start;
+        while start < rows.end {
+            let end = rows.end.min(start + SPAN_CHUNK);
+            let found = self.index.row_spans(start..end, &mut spans).ok();
+            if found != Some((end - start) as usize) {
+                return Err(io::Error::other("the source file changed on disk"));
+            }
+            for (row, span) in (start..end).zip(&spans) {
+                let cols = edits.next_if(|(id, _)| id.0 == row).map(|(_, c)| c);
+                let cleared = cleared_at(&self.cleared, row);
+                let span = span.start as usize..span.end as usize;
+                self.assemble(span, cols, cleared, fields, line);
+                self.start_row(w)?;
+                w.put(line)?;
+            }
+            start = end;
+        }
+        Ok(())
     }
 
     /// The column shown at position `pos`.
@@ -268,25 +300,13 @@ impl SaveJob {
         w.put(&self.index.source().bytes()[start..end])
     }
 
-    /// Re-assemble one source row into `out`: edits encoded, every other field copied
-    /// as its raw bytes, the row's own line ending kept.
-    fn write_edited(
-        &self,
-        row: u64,
-        edits: Option<&BTreeMap<ColId, Box<str>>>,
-        fields: &mut Vec<Field>,
-        out: &mut Vec<u8>,
-    ) -> io::Result<()> {
-        let span = self.span(row)?;
-        self.assemble(span, edits, fields, out);
-        Ok(())
-    }
-
-    /// [`Self::write_edited`] for a row whose span is known.
+    /// Re-assemble one source row into `out`: edits encoded, cleared fields empty, every
+    /// other field copied as its raw bytes, the row's own line ending kept.
     fn assemble(
         &self,
         span: std::ops::Range<usize>,
         edits: Option<&BTreeMap<ColId, Box<str>>>,
+        cleared: Option<&ColSet>,
         fields: &mut Vec<Field>,
         out: &mut Vec<u8>,
     ) {
@@ -304,7 +324,8 @@ impl SaveJob {
             let id = self.col_at(pos);
             let field = (!id.is_inserted())
                 .then(|| fields.get(id.0 as usize))
-                .flatten();
+                .flatten()
+                .filter(|_| !cleared.is_some_and(|c| c.contains(id)));
             match (edits.and_then(|e| e.get(&id)), field) {
                 (Some(v), _) => encode_field(v.as_bytes(), &self.dialect, out),
                 (None, Some(f)) => out.extend_from_slice(f.raw(line)),
