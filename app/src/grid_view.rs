@@ -829,6 +829,15 @@ impl GridView {
             .is_some_and(|t| t.is_complete())
     }
 
+    /// Share of the file indexed so far (0..=1), or `None` once indexing is complete.
+    pub fn index_progress(&self) -> Option<f64> {
+        let table = self.imp().table.borrow();
+        let t = table.as_ref().filter(|t| !t.is_complete())?;
+        let index = t.index();
+        let total = index.source().bytes().len().max(1) as f64;
+        Some(index.bytes_indexed() as f64 / total)
+    }
+
     pub fn file_changed(&self) -> bool {
         self.imp()
             .table

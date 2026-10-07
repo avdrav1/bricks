@@ -11,8 +11,11 @@
 //!   37 px per frame (a fast flick) for FRAMES frames, and reports frame times and memory.
 //! - `--bench-jump` (GRID-2) moves the vertical adjustment the way a scrollbar drag does:
 //!   first to ROW, then to N-1 random rows, and reports how long each took to paint.
+//! - `--bench-status` (APP-2) prints the status bar's row text (`STATUS …`) on every status
+//!   update while the file indexes, and quits once indexing is complete.
 
 mod grid_view;
+mod status;
 
 use data_model::{CsvTable, DelimiterChoice, RereadError, SaveStats};
 use grid_view::{GridView, ROW_H};
@@ -31,6 +34,7 @@ enum Bench {
     Scroll { frames: u32 },
     Jump { row: u64, jumps: u32 },
     Open,
+    Status,
 }
 
 struct Args {
@@ -63,6 +67,7 @@ fn parse_args() -> Result<Args, String> {
             }
             "--jumps" => jumps = number(&a, &mut it)?.max(1) as u32,
             "--bench-open" => bench = Some(Bench::Open),
+            "--bench-status" => bench = Some(Bench::Status),
             _ if file.is_none() && !a.starts_with("--") => file = Some(PathBuf::from(a)),
             _ => return Err(format!("unexpected argument {a:?}")),
         }
@@ -372,6 +377,8 @@ fn build_window(
         1,
         1,
     );
+    let bar = StatusBar::new();
+    layout.attach(&bar.root, 0, 2, 2, 1);
 
     let path = &session.path;
     let name = path.file_name().map_or_else(
@@ -430,11 +437,18 @@ fn build_window(
     });
     window.add_controller(keys);
 
-    // Status: follow the indexer (grow the scroll range), finish saves, keep the title current.
+    // Status: follow the indexer (grow the scroll range), finish saves, keep the status bar
+    // and title current. Runs once now, so the bar is filled from the first frame, then
+    // every 100 ms.
     let started = Instant::now();
     let mut was_complete = false;
-    glib::timeout_add_local(Duration::from_millis(100), {
-        let (grid, window, session) = (grid.downgrade(), window.downgrade(), session.clone());
+    let mut tick = {
+        let (grid, window, session, app) = (
+            grid.downgrade(),
+            window.downgrade(),
+            session.clone(),
+            app.clone(),
+        );
         move || {
             let (Some(grid), Some(window)) = (grid.upgrade(), window.upgrade()) else {
                 return glib::ControlFlow::Break;
@@ -451,7 +465,6 @@ fn build_window(
                     started.elapsed()
                 );
             }
-            was_complete = complete;
             finish_save(&grid, &session, &save);
             let can_switch =
                 grid.edit_count() == 0 && !matches!(*save.borrow(), SaveState::Saving(_));
@@ -461,15 +474,24 @@ fn build_window(
             } else {
                 "Delimiter (save your edits before changing it)"
             }));
-            window.set_title(Some(&title(
-                &name,
-                &grid,
-                session.choice.get(),
-                &save.borrow(),
-            )));
+            let shown = bar.update(&grid, session.choice.get(), &save.borrow());
+            let title = status::title(&name, grid.edit_count());
+            if window.title().as_deref() != Some(title.as_str()) {
+                window.set_title(Some(&title));
+            }
+            if matches!(bench, Some(Bench::Status)) {
+                // The status acceptance test reads every update of the row count.
+                println!("STATUS {}", shown.rows);
+                if complete {
+                    app.quit();
+                }
+            }
+            was_complete = complete;
             glib::ControlFlow::Continue
         }
-    });
+    };
+    tick();
+    glib::timeout_add_local(Duration::from_millis(100), tick);
 
     window.present();
     grid.grab_focus();
@@ -477,7 +499,7 @@ fn build_window(
         Some(Bench::Scroll { frames }) => bench_scroll(app, &grid, &vadj, frames),
         Some(Bench::Jump { row, jumps }) => bench_jump(app, &grid, &vadj, row, jumps),
         Some(Bench::Open) => bench_open(app, &grid),
-        None => {}
+        Some(Bench::Status) | None => {}
     }
 }
 
@@ -586,68 +608,74 @@ fn finish_save(grid: &GridView, session: &Session, save: &RefCell<SaveState>) {
     *save.borrow_mut() = next;
 }
 
-fn delimiter_name(d: u8) -> &'static str {
-    match d {
-        b',' => "comma",
-        b'\t' => "tab",
-        b';' => "semicolon",
-        b'|' => "pipe",
-        _ => "other",
-    }
+/// The bar under the grid (APP-2): rows and indexing progress on the left, save state and
+/// the file's format on the right.
+struct StatusBar {
+    root: gtk::Box,
+    rows: gtk::Label,
+    save: gtk::Label,
+    format: gtk::Label,
 }
 
-fn title(name: &str, grid: &GridView, choice: DelimiterChoice, save: &SaveState) -> String {
-    let edits = grid.edit_count();
-    let mut t = String::new();
-    if edits > 0 {
-        t.push_str("• ");
-    }
-    t.push_str(name);
-    t.push_str(" — ");
-    t.push_str(&group_digits(grid.row_count()));
-    t.push_str(" rows, ");
-    t.push_str(delimiter_name(grid.delimiter()));
-    if choice == DelimiterChoice::Auto {
-        t.push_str(" (detected)");
-    }
-    let encoding = grid.encoding();
-    if encoding != csv_engine::Encoding::UTF8 {
-        t.push_str(", ");
-        t.push_str(encoding.name());
-    }
-    if !grid.is_complete() {
-        t.push_str(" (indexing…)");
-    }
-    if edits > 0 {
-        t.push_str(&format!(
-            " — {edits} unsaved edit{}",
-            if edits == 1 { "" } else { "s" }
-        ));
-    }
-    match save {
-        SaveState::Saving(_) => t.push_str(" — saving…"),
-        SaveState::Saved(took) if edits == 0 => {
-            t.push_str(&format!(" — saved in {:.1} s", took.as_secs_f64()))
+impl StatusBar {
+    fn new() -> Self {
+        let label = || {
+            let l = gtk::Label::new(None);
+            l.add_css_class("caption");
+            l
+        };
+        let (rows, save, format) = (label(), label(), label());
+        rows.set_hexpand(true);
+        rows.set_xalign(0.0);
+        save.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        format.add_css_class("dim-label");
+        let root = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .spacing(18)
+            .margin_start(10)
+            .margin_end(10)
+            .margin_top(3)
+            .margin_bottom(3)
+            .build();
+        root.append(&rows);
+        root.append(&save);
+        root.append(&format);
+        Self {
+            root,
+            rows,
+            save,
+            format,
         }
-        SaveState::Failed(e) => t.push_str(&format!(" — save failed: {e}")),
-        _ => {}
     }
-    if grid.file_changed() {
-        t.push_str(" — file changed on disk");
-    }
-    t
-}
 
-fn group_digits(n: u64) -> String {
-    let s = n.to_string();
-    let mut out = String::with_capacity(s.len() + s.len() / 3);
-    for (i, ch) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
-            out.push(',');
+    /// Show the grid's current state; returns what is shown.
+    fn update(&self, grid: &GridView, choice: DelimiterChoice, save: &SaveState) -> status::Status {
+        let shown = status::status(&status::Facts {
+            rows: grid.row_count(),
+            indexing: grid.index_progress(),
+            delimiter: grid.delimiter(),
+            detected: choice == DelimiterChoice::Auto,
+            encoding: grid.encoding(),
+            edits: grid.edit_count(),
+            save: match save {
+                SaveState::Idle => status::SaveView::Idle,
+                SaveState::Saving(_) => status::SaveView::Saving,
+                SaveState::Saved(took) => status::SaveView::Saved(*took),
+                SaveState::Failed(e) => status::SaveView::Failed(e),
+            },
+            file_changed: grid.file_changed(),
+        });
+        for (label, text) in [
+            (&self.rows, &shown.rows),
+            (&self.save, &shown.save),
+            (&self.format, &shown.format),
+        ] {
+            if label.text() != text.as_str() {
+                label.set_text(text);
+            }
         }
-        out.push(ch);
+        shown
     }
-    out
 }
 
 /// Scroll autopilot for the GRID-1 acceptance test. Measures the interval between finished

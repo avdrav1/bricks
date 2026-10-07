@@ -43,7 +43,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | GRID-4 | M1 | P0 | done | GRID-1 | Cell, range, row, and column selection | Click, Shift+click, drag, header click all work |
 | GRID-5 | M1 | P0 | done | GRID-1 | Resize columns and rows; double-click autofits column | Autofit samples visible rows only |
 | APP-1 | M1 | P0 | done | DEC-1 | Open via native file dialog (xdg-desktop-portal) | Works under Hyprland, GNOME, KDE |
-| APP-2 | M1 | P0 | todo | ENG-1 | Status bar: row count, encoding, delimiter, save state | Row count updates while indexing streams |
+| APP-2 | M1 | P0 | done | ENG-1 | Status bar: row count, encoding, delimiter, save state | Row count updates while indexing streams |
 | APP-3 | M1 | P0 | todo | ENG-1, DEC-5 | Show first rows before indexing finishes | First rows of 1 GB visible in under 500 ms |
 | CMD-1 | M2 | P0 | todo | EDIT-1 | Command pattern for all mutations | Every edit is a reversible command object |
 | CMD-2 | M2 | P0 | todo | CMD-1 | Undo/redo stores operations, not snapshots | 1,000-step history under 50 MB on a 1 GB file |
@@ -80,6 +80,13 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-07 APP-2:** status bar.
+  - The bar under the grid shows three parts. On the left, the row count with "indexing N%" while it grows; the percentage is bytes scanned over file size (`SparseRowIndex::bytes_indexed`). On the right, the save state: unsaved edits, Saving…, Saved in N s, Save failed, and File changed on disk. Next to it, the delimiter and encoding. The title now carries only the file name, with • for unsaved edits.
+  - The text comes from `app/src/status.rs`, pure functions with unit tests for wording and precedence. A save result gives way to newer edits, and a failure keeps the edit count.
+  - The status tick now also runs once as the window is built, so the bar is never empty and the earliest count shows. Before this change the 1 GB file showed only one intermediate value, because indexing takes about 0.4 s.
+  - Acceptance: `app/tests/status_stream.rs` (ignored, needs a display) runs `--bench-status` on the 1 GB file and requires at least two growing counts while indexing, then the exact total. Passed via Broadway: 2,574,913 (13%), then 12,155,103 (63%), then 19,094,580.
+  - Smoke test via Broadway on the 1 GB file: the row count, "1 unsaved edit" with a • in the title, the delimiter dropdown disabled, then after Ctrl+S "Saved in 1.1 s".
+  - The smoke test's save wrote an edit into `corpus/rows_1024mb.csv`. I reverted the cell and saved again; the file's sha256 matches a fresh `gen_corpus.py --max-mb 1024`.
 - **2026-10-07 APP-1:** open through the desktop's file dialog.
   - `gtk::FileDialog`, no new dependencies. GTK 4.22 uses `org.freedesktop.portal.FileChooser` whenever a portal with FileChooser version ≥ 3 is on the session bus, and falls back to its own chooser otherwise (`gdk_display_should_use_portal`). So each desktop shows its own dialog: GNOME's, KDE's, or xdg-desktop-portal-gtk on Hyprland, whose `hyprland-portals.conf` routes FileChooser to gtk.
   - Start window when launched without a file; Ctrl+O (`app.open`) and a header-bar button everywhere. Each file opens in its own window (one `Session` each); choosing an already-open file (canonical path) brings its window forward instead of a second window saving over the first. Errors (e.g. permission denied) show an alert; cancelling does nothing. The command-line file path still opens before GTK starts, which BENCH-1's cold start measures.
