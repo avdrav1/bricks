@@ -11,7 +11,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 - [x] S0: decision records DEC-1 to DEC-5 accepted; CI green on every PR
 - [x] M0: a 1 GB CSV opens, scrolls smoothly, takes one edit, and saves safely
-- [ ] M1: viewer passes the LibreOffice navigation checklist; first rows of 1 GB in under 500 ms
+- [x] M1: viewer passes the LibreOffice navigation checklist; first rows of 1 GB in under 500 ms
 - [ ] M2: editor round-trips edits, paste, inserts, and undo on 1 GB without full rewrites before save
 - [ ] M3: all V0.1 benchmarks in docs/BENCHMARKS.md pass on reference hardware (V0.1 release)
 - [ ] M4: AUR package installs on a clean Arch VM and opens CSVs by double-click
@@ -80,6 +80,10 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-07 M1 gate:** approved by the user on this machine's numbers.
+  - Checklist: `lo_parity` replays all 49 LibreOffice-recorded scenarios, and all pass.
+  - First rows of 1 GB with a cold cache: 259 ms (BENCH-1) and 281 ms (GRID-5) on the desktop, and 176–186 ms via Broadway after ENG-7. Indexing was still running at that frame in every run.
+  - These come from a 12-core Ryzen 9 5900 with 126 GiB, not the reference box (8 cores, 16 GB) in docs/BENCHMARKS.md. The user accepted them anyway. A reference-box run is still owed before the M3 gate, which requires it.
 - **2026-10-07 ENG-7:** header row detection with a toggle.
   - `csv_engine::detect_header` works in the spirit of Python's `csv.Sniffer.has_header`. Columns whose values below the first row are all numbers, or all the same length, vote on whether the first cell stands out (text above numbers, a different length). Free-text columns don't vote, and ties go to "header", because most CSVs have one. A file with no second row, or a `#` comment first, has none. `detect_dialect` sets `Dialect::has_header`; a fixed delimiter re-detects with that delimiter. `Dialect::default()` now has no header, so tables built in code keep every row as data.
   - Real-world check on the 50 files in `corpus/realworld/` (throwaway survey, deleted): 49 decided right. The miss is `tab-geonames-feature-codes.txt`, which is all free text with no header: a tie, so it's treated as having one.
