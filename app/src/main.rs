@@ -127,6 +127,7 @@ fn open_session(path: &Path) -> std::io::Result<(Rc<Session>, CsvTable)> {
     let session = Rc::new(Session {
         path: path.to_owned(),
         choice: Cell::new(DelimiterChoice::Auto),
+        header: Cell::new(None),
         indexing: RefCell::new(Arc::new(AtomicBool::new(false))),
     });
     let table = session.open()?;
@@ -272,6 +273,9 @@ fn alert(parent: Option<&gtk::Window>, message: &str, detail: &str) {
 struct Session {
     path: PathBuf,
     choice: Cell<DelimiterChoice>,
+    /// "First row is header" as the user set it (ENG-7); `None` while detection decides.
+    /// Re-applied whenever the file is read again (delimiter change, save).
+    header: Cell<Option<bool>>,
     /// Cancel flag of the running index build; set when a newer reading replaces it.
     indexing: RefCell<Arc<AtomicBool>>,
 }
@@ -280,9 +284,17 @@ impl Session {
     /// Map the file with the current delimiter choice (detected on Auto, ENG-4) and start
     /// indexing it.
     fn open(&self) -> std::io::Result<CsvTable> {
-        let table = CsvTable::open(&self.path, self.choice.get())?;
+        let mut table = CsvTable::open(&self.path, self.choice.get())?;
+        self.apply_header(&mut table);
         self.index(&table)?;
         Ok(table)
+    }
+
+    /// The user's header choice wins over detection on a fresh reading of the file.
+    fn apply_header(&self, table: &mut CsvTable) {
+        if let Some(on) = self.header.get() {
+            table.set_header(on);
+        }
     }
 
     /// Index `table` off the UI thread, cancelling any earlier build; rows become readable
@@ -328,7 +340,8 @@ fn delimiter_dropdown(session: &Rc<Session>, grid: &GridView) -> gtk::DropDown {
                 return;
             }
             match grid.reread(choice) {
-                Ok(table) => {
+                Ok(mut table) => {
+                    session.apply_header(&mut table);
                     if let Err(e) = session.index(&table) {
                         eprintln!("spreadsheet: cannot index: {e}");
                         return;
@@ -349,6 +362,26 @@ fn delimiter_dropdown(session: &Rc<Session>, grid: &GridView) -> gtk::DropDown {
         }
     });
     dropdown
+}
+
+/// "Header row" toggle (ENG-7): whether the first row is column titles or data. Starts as
+/// detected; flipping it is the user's choice for this file from then on.
+fn header_toggle(session: &Rc<Session>, grid: &GridView) -> gtk::ToggleButton {
+    let toggle = gtk::ToggleButton::with_label("Header row");
+    toggle.set_tooltip_text(Some("First row is header"));
+    toggle.set_active(grid.has_header());
+    toggle.connect_toggled({
+        let (session, grid) = (session.clone(), grid.downgrade());
+        move |t| {
+            let Some(grid) = grid.upgrade() else { return };
+            // The status tick also sets the toggle to match the grid; only a real flip counts.
+            if t.is_active() != grid.has_header() {
+                grid.set_header(t.is_active());
+                session.header.set(Some(t.is_active()));
+            }
+        }
+    });
+    toggle
 }
 
 fn build_window(
@@ -400,6 +433,8 @@ fn build_window(
     let header = gtk::HeaderBar::new();
     header.pack_start(&open);
     header.pack_end(&delimiter);
+    let header_row = header_toggle(session, &grid);
+    header.pack_end(&header_row);
     window.set_titlebar(Some(&header));
 
     // Mouse wheel and touchpad.
@@ -466,6 +501,10 @@ fn build_window(
                 );
             }
             finish_save(&grid, &session, &save);
+            // Detection runs again when the file is re-read (delimiter change, save).
+            if header_row.is_active() != grid.has_header() {
+                header_row.set_active(grid.has_header());
+            }
             let can_switch =
                 grid.edit_count() == 0 && !matches!(*save.borrow(), SaveState::Saving(_));
             delimiter.set_sensitive(can_switch);

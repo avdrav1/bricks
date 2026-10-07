@@ -3,8 +3,8 @@
 
 use crate::{CellRef, Col, EditOverlay, Row, RowId};
 use csv_engine::{
-    detect_dialect, open_text, split_fields, Dialect, Encoding, Field, RowIndex, Source,
-    SparseRowIndex, DETECT_SAMPLE_BYTES,
+    detect_dialect, detect_header, open_text, split_fields, Dialect, Encoding, Field, RowIndex,
+    Source, SparseRowIndex, DETECT_SAMPLE_BYTES,
 };
 use std::borrow::Cow;
 use std::ops::Range;
@@ -27,13 +27,20 @@ pub enum RereadError {
 
 fn dialect_for(source: &Source, choice: DelimiterChoice) -> Dialect {
     let bytes = source.bytes();
-    let detected = detect_dialect(&bytes[..bytes.len().min(DETECT_SAMPLE_BYTES)]);
+    let sample = &bytes[..bytes.len().min(DETECT_SAMPLE_BYTES)];
+    let detected = detect_dialect(sample);
     match choice {
         DelimiterChoice::Auto => detected,
-        DelimiterChoice::Fixed(delimiter) => Dialect {
-            delimiter,
-            ..detected
-        },
+        DelimiterChoice::Fixed(delimiter) => {
+            let dialect = Dialect {
+                delimiter,
+                ..detected
+            };
+            Dialect {
+                has_header: detect_header(sample, &dialect),
+                ..dialect
+            }
+        }
     }
 }
 
@@ -203,15 +210,41 @@ impl CsvTable {
         &self.dialect
     }
 
+    /// The first row of the file names the columns (ENG-7): it is not one of the table's
+    /// rows but their titles ([`Self::header_cell`]). Detected on open; the user can flip it.
+    pub fn has_header(&self) -> bool {
+        self.dialect.has_header
+    }
+
+    /// Treat the first row as column titles, or as data. Nothing in the file changes, and
+    /// edits stay with their file rows: only which row is shown where moves.
+    pub fn set_header(&mut self, on: bool) {
+        self.dialect.has_header = on;
+    }
+
+    /// File row of table row 0.
+    fn first_row(&self) -> u64 {
+        u64::from(self.dialect.has_header)
+    }
+
+    /// Title of column `col` when the first row is a header (with any edit to it).
+    pub fn header_cell(&self, col: Col) -> Option<Cow<'_, str>> {
+        if self.has_header() {
+            self.cell_in_file_row(0, col)
+        } else {
+            None
+        }
+    }
+
     /// True once a read found the file truncated or replaced in place underneath us.
     pub fn file_changed(&self) -> bool {
         self.index.source().changed()
     }
 
-    /// Identity of the row shown at `row`. Rows are in file order until the row map
-    /// (EDIT-3) puts inserts, deletes, and sorting in front.
+    /// Identity of the row shown at `row`. Rows are in file order, after the header row if
+    /// there is one, until the row map (EDIT-3) puts inserts, deletes, and sorting in front.
     pub fn row_id(&self, row: Row) -> RowId {
-        RowId::source(row)
+        RowId::source(row + self.first_row())
     }
 
     /// Set a cell's raw value. Returns the previous edit, if any (for undo).
@@ -231,14 +264,18 @@ impl CsvTable {
     /// Full text of one cell: the edit if there is one, else the source field. `None` when
     /// the row or the column does not exist. Invalid UTF-8 in the source shows as U+FFFD.
     pub fn cell_value(&self, row: Row, col: Col) -> Option<Cow<'_, str>> {
+        self.cell_in_file_row(row + self.first_row(), col)
+    }
+
+    fn cell_in_file_row(&self, file_row: u64, col: Col) -> Option<Cow<'_, str>> {
         if let Some(v) = self.overlay.get(CellRef {
-            row: self.row_id(row),
+            row: RowId::source(file_row),
             col,
         }) {
             return Some(Cow::Borrowed(v));
         }
         let mut fields = Vec::new();
-        let bytes = self.index.row_fields(row, &mut fields)?;
+        let bytes = self.index.row_fields(file_row, &mut fields)?;
         let value = fields.get(col as usize)?.value(bytes, self.dialect.quote);
         Some(match value {
             Cow::Borrowed(b) => String::from_utf8_lossy(b),
@@ -249,7 +286,7 @@ impl CsvTable {
 
 impl TableSource for CsvTable {
     fn row_count(&self) -> u64 {
-        self.index.row_count()
+        self.index.row_count().saturating_sub(self.first_row())
     }
 
     fn is_complete(&self) -> bool {
@@ -258,18 +295,24 @@ impl TableSource for CsvTable {
 
     fn read_rows(&mut self, rows: Range<u64>, out: &mut RowBlock) {
         out.reset(rows.start);
-        if self.index.row_spans(rows.clone(), &mut self.spans).is_err() {
+        let first = self.first_row();
+        let file_rows = rows.start + first..rows.end.saturating_add(first);
+        if self
+            .index
+            .row_spans(file_rows.clone(), &mut self.spans)
+            .is_err()
+        {
             return;
         }
         let bytes = self.index.source().bytes();
         let quote = self.dialect.quote;
-        for (row, span) in (rows.start..).zip(&self.spans) {
+        for (file_row, span) in file_rows.zip(&self.spans) {
             let mut line = &bytes[span.start as usize..span.end as usize];
             if span.start == 0 {
                 line = line.strip_prefix(UTF8_BOM).unwrap_or(line);
             }
             split_fields(line, &self.dialect, &mut self.fields);
-            match self.overlay.row(RowId::source(row)) {
+            match self.overlay.row(RowId::source(file_row)) {
                 // `value` borrows unless the field has `""` escapes to undo.
                 None => self
                     .fields
@@ -412,7 +455,7 @@ mod tests {
         let mut auto = CsvTable::open(&path, DelimiterChoice::Auto).unwrap();
         build(&auto);
         assert_eq!(auto.dialect().delimiter, b';', "detected on open");
-        assert_eq!(row_text(&mut auto, 1), ["1", "Paris", "48.86, 2.29"]);
+        assert_eq!(row_text(&mut auto, 0), ["1", "Paris", "48.86, 2.29"]);
 
         let mut comma = auto.reread(DelimiterChoice::Fixed(b',')).unwrap();
         assert_eq!(
@@ -422,7 +465,7 @@ mod tests {
         );
         build(&comma);
         assert_eq!(comma.dialect().delimiter, b',');
-        assert_eq!(row_text(&mut comma, 1), ["1;Paris;48.86", " 2.29"]);
+        assert_eq!(row_text(&mut comma, 0), ["1;Paris;48.86", " 2.29"]);
         assert!(
             Arc::ptr_eq(comma.index().source(), auto.index().source()),
             "same mapping, no reopen"
@@ -430,7 +473,7 @@ mod tests {
 
         let mut back = comma.reread(DelimiterChoice::Auto).unwrap();
         build(&back);
-        assert_eq!(row_text(&mut back, 1), ["1", "Paris", "48.86, 2.29"]);
+        assert_eq!(row_text(&mut back, 0), ["1", "Paris", "48.86, 2.29"]);
         std::fs::remove_file(path).unwrap();
     }
 
@@ -453,6 +496,64 @@ mod tests {
             Some("x"),
             "the edit is still there"
         );
+        std::fs::remove_file(path).unwrap();
+    }
+
+    /// ENG-7 acceptance: the user can flip "first row is header". Flipping moves the first
+    /// row between column titles and data; edits stay on their file rows; the file and a
+    /// save keep every row.
+    #[test]
+    fn flipping_first_row_is_header() {
+        let content = b"id,name\n1,Ann\n2,Bo\n";
+        let path =
+            std::env::temp_dir().join(format!("data-model-header-{}.csv", std::process::id()));
+        std::fs::write(&path, content).unwrap();
+        let mut t = CsvTable::open(&path, DelimiterChoice::Auto).unwrap();
+        build(&t);
+
+        assert!(t.has_header(), "detected: names over numbers");
+        assert_eq!(t.row_count(), 2);
+        assert_eq!(t.header_cell(1).as_deref(), Some("name"));
+        assert_eq!(row_text(&mut t, 0), ["1", "Ann"]);
+        assert_eq!(t.cell_value(1, 1).as_deref(), Some("Bo"));
+        // An edit to table row 0 lands on file row 1.
+        t.set_cell(
+            CellRef {
+                row: t.row_id(0),
+                col: 1,
+            },
+            "Ana",
+        );
+
+        t.set_header(false);
+        assert_eq!(t.row_count(), 3);
+        assert_eq!(t.header_cell(1), None);
+        assert_eq!(row_text(&mut t, 0), ["id", "name"]);
+        assert_eq!(
+            row_text(&mut t, 1),
+            ["1", "Ana"],
+            "the edit stayed on its row"
+        );
+        // Renaming a column: edit the first row while it is data, then flip back.
+        t.set_cell(
+            CellRef {
+                row: t.row_id(0),
+                col: 1,
+            },
+            "who",
+        );
+
+        t.set_header(true);
+        assert_eq!(t.header_cell(1).as_deref(), Some("who"));
+        assert_eq!(row_text(&mut t, 0), ["1", "Ana"]);
+        assert_eq!(t.row_count(), 2);
+        let mut saved = Vec::new();
+        t.save_job().unwrap().write_to(&mut saved).unwrap();
+        assert_eq!(
+            saved, b"id,who\n1,Ana\n2,Bo\n",
+            "the header row is saved as a row"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), content, "file untouched");
         std::fs::remove_file(path).unwrap();
     }
 }

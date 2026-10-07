@@ -23,6 +23,8 @@ Move the cell cursor like LibreOffice Calc: arrows, Tab/Shift+Tab, Enter/Shift+E
 
 Resize a column or row by dragging its border in the column letters or row numbers; selected whole columns resize together. Double-click a column border to fit the text on screen, or a row border to restore its height. Sizes last while the window is open (CSV has nowhere to store them).
 
+A header row is detected on open: when the first row names the columns, it becomes the column titles (next to the letters) and isn't counted as data. The **Header row** button in the header bar flips it; your choice holds when the delimiter changes or the file is saved. The file itself never changes: a save writes the first row as it is.
+
 ## Layout
 
 ```

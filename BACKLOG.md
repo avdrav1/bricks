@@ -38,7 +38,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | ENG-4 | M1 | P0 | done | ENG-3 | Auto-detect delimiter: comma, tab, semicolon, pipe | Correct on 95%+ of a 50-file real-world sample |
 | ENG-5 | M1 | P0 | done | ENG-4, DEC-5 | Manual delimiter override, re-index in background | Override applies without restart |
 | ENG-6 | M1 | P0 | done | ENG-3 | Encoding detection: UTF-8, UTF-8 BOM, UTF-16, Latin-1 | Encoding and BOM round-trip on save |
-| ENG-7 | M1 | P1 | todo | ENG-4 | Header row detection with toggle | User can flip "first row is header" |
+| ENG-7 | M1 | P1 | done | ENG-4 | Header row detection with toggle | User can flip "first row is header" |
 | GRID-3 | M1 | P0 | done | GRID-1 | Keyboard navigation: arrows, Tab, Enter, Shift variants, Ctrl+Home/End, PgUp/PgDn | Matches LibreOffice on the side-by-side checklist |
 | GRID-4 | M1 | P0 | done | GRID-1 | Cell, range, row, and column selection | Click, Shift+click, drag, header click all work |
 | GRID-5 | M1 | P0 | done | GRID-1 | Resize columns and rows; double-click autofits column | Autofit samples visible rows only |
@@ -80,6 +80,14 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-07 ENG-7:** header row detection with a toggle.
+  - `csv_engine::detect_header` works in the spirit of Python's `csv.Sniffer.has_header`. Columns whose values below the first row are all numbers, or all the same length, vote on whether the first cell stands out (text above numbers, a different length). Free-text columns don't vote, and ties go to "header", because most CSVs have one. A file with no second row, or a `#` comment first, has none. `detect_dialect` sets `Dialect::has_header`; a fixed delimiter re-detects with that delimiter. `Dialect::default()` now has no header, so tables built in code keep every row as data.
+  - Real-world check on the 50 files in `corpus/realworld/` (throwaway survey, deleted): 49 decided right. The miss is `tab-geonames-feature-codes.txt`, which is all free text with no header: a tie, so it's treated as having one.
+  - The model is `CsvTable::has_header`/`set_header`. With a header, table row r is file row r+1 (via `row_id`), `row_count` leaves the header out, and `header_cell` gives the titles. Edits stay on their file rows, and a save writes every file row, the header included. The acceptance test is `flipping_first_row_is_header` in data-model: flip off and on, edits stay put, a column renamed while the header is off becomes its title, and save output and the file are checked.
+  - In the app, column headers show the dimmed letter plus the title; titles are read once and refreshed on table changes, flips and edits, not every frame. Autofit includes the title. The **Header row** toggle is in the header bar. `Session::header` keeps the user's explicit choice across re-reads (delimiter change, save); the status tick syncs the button to the grid without recording a choice. Row heights reset on a flip, because rows shift by one.
+  - The 1 GB corpus file now shows 19,094,579 data rows (`status_stream` updated); the index still counts 19,094,580 lines.
+  - Smoke test via Broadway on the 1 GB file: the header was detected (titles "A id", "B name", …; 19,094,579 rows), flipped off (row 1 = "id, name, …"; 19,094,580) and back on. With the header off, a delimiter change to Comma kept it off.
+  - Perf on Broadway, sequential runs at the same viewport: `jump_perf` p50 was 46.0/46.5 ms against 43.0/45.5 ms for `main`. That's inside Broadway's run-to-run spread; first jumps overlap (`main` 60/83, branch 67/115). `first_rows` passes (176–186 ms). The 100 ms jump target still needs a desktop run, as noted under GRID-5.
 - **2026-10-07 APP-3:** first rows before indexing finishes. The behavior already existed: the index streams rows from ENG-1 on, and the grid paints whatever is indexed (GRID-1). This story adds the proof.
   - `--bench-open` now prints `FIRST_FRAME {"rows_indexed":N,"complete":false}`: the rows indexed when rows were first painted. `cargo bench` matches on the prefix.
   - Acceptance: `app/tests/first_rows.rs` (ignored, needs a display) evicts the 1 GB file from the page cache, times spawn to `FIRST_FRAME` (median of 3 under 500 ms, asserted in release builds), and requires indexing to have been incomplete then. Via Broadway: 152, 176 and 177 ms, with 3.5–3.6M of 19.1M rows indexed. The desktop `cargo bench` measured 281 ms for the same moment (GRID-5).

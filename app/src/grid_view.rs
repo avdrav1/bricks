@@ -73,6 +73,9 @@ mod imp {
         pub autoscroll: RefCell<Option<glib::SourceId>>,
         /// Row heights and column widths (GRID-5).
         pub sizing: RefCell<Sizing>,
+        /// Column titles from the header row (ENG-7), read once rather than every frame;
+        /// `None` until read, and again after anything that could change them.
+        pub titles: RefCell<Option<Vec<String>>>,
     }
 
     #[glib::object_subclass]
@@ -171,13 +174,19 @@ mod imp {
             let line = gdk::RGBA::new(fg.red(), fg.green(), fg.blue(), 0.15);
             let stripe = gdk::RGBA::new(fg.red(), fg.green(), fg.blue(), 0.035);
             let header_bg = gdk::RGBA::new(fg.red(), fg.green(), fg.blue(), 0.07);
-            let text_at = |text: &str, x: f64, y: f64| {
+            // Draws `text` at (`x`, `y`) in `color`; returns its width.
+            let text_in = |text: &str, x: f64, y: f64, color: &gdk::RGBA| {
                 let layout = self.layout(text);
                 snapshot.save();
                 snapshot.translate(&graphene::Point::new(x as f32, y as f32));
-                snapshot.append_layout(&layout, &fg);
+                snapshot.append_layout(&layout, color);
                 snapshot.restore();
+                f64::from(layout.pixel_size().0)
             };
+            let text_at = |text: &str, x: f64, y: f64| {
+                text_in(text, x, y, &fg);
+            };
+            let dim = gdk::RGBA::new(fg.red(), fg.green(), fg.blue(), 0.5);
             let mut buf = self.buf.borrow_mut();
 
             // Body: stripes, grid lines, cells.
@@ -253,17 +262,35 @@ mod imp {
             }
             snapshot.pop();
 
-            // Column letters.
+            // Column letters, and the column titles when the first row is a header (ENG-7).
             snapshot.append_color(&header_bg, &rect(0.0, 0.0, w, HEADER_H));
             snapshot.append_color(&mark, &rect(x0, 0.0, x1 - x0, HEADER_H));
             snapshot.append_color(&line, &rect(0.0, HEADER_H - 1.0, w, 1.0));
             snapshot.append_color(&line, &rect(rh_w - 1.0, 0.0, 1.0, h));
             snapshot.push_clip(&rect(rh_w, 0.0, body_w, HEADER_H));
+            // Row 0 is readable once any later row is, or indexing is done.
+            let row0_ready = table.row_count() > 0 || table.is_complete();
+            if self.titles.borrow().is_none() && row0_ready {
+                let titles = (0..)
+                    .map_while(|c| table.header_cell(c).map(|t| t.into_owned()))
+                    .collect();
+                self.titles.replace(Some(titles));
+            }
+            let titles = self.titles.borrow();
+            let titles = titles.as_deref().unwrap_or(&[]);
             for c in visible_cols {
-                let x = rh_w + cols.pos(c);
-                snapshot.append_color(&line, &rect(x + cols.size(c) - 1.0, 0.0, 1.0, HEADER_H));
+                let (x, cw) = (rh_w + cols.pos(c), cols.size(c));
+                snapshot.append_color(&line, &rect(x + cw - 1.0, 0.0, 1.0, HEADER_H));
+                snapshot.push_clip(&rect(x, 0.0, cw - 1.0, HEADER_H));
                 column_name(c as u32, &mut buf);
-                text_at(&buf, x + PAD, 4.0);
+                match titles.get(c as usize) {
+                    Some(title) => {
+                        let letter_w = text_in(&buf, x + PAD, 4.0, &dim);
+                        text_at(title, x + PAD + letter_w + 6.0, 4.0);
+                    }
+                    None => text_at(&buf, x + PAD, 4.0),
+                }
+                snapshot.pop();
             }
             snapshot.pop();
 
@@ -484,7 +511,21 @@ impl GridView {
                 f64::from(imp.layout(text).pixel_size().0)
             })
         });
-        let width = widest.map_or(COL_W, |w| (w + 2.0 * PAD + 2.0).min(body_w.max(COL_W)));
+        // A column title sits after the dimmed letter (see `snapshot`).
+        let title = imp.table.borrow().as_ref().and_then(|t| {
+            let title = t.header_cell(c)?;
+            let mut letter = String::new();
+            column_name(c, &mut letter);
+            let w = |s: &str| f64::from(imp.layout(s).pixel_size().0);
+            Some(w(&letter) + 6.0 + w(&title))
+        });
+        let width = match (widest, title) {
+            (None, None) => COL_W,
+            (a, b) => {
+                let w = a.unwrap_or(0.0).max(b.unwrap_or(0.0));
+                (w + 2.0 * PAD + 2.0).min(body_w.max(COL_W))
+            }
+        };
         imp.sizing.borrow_mut().cols.set(u64::from(c), width);
     }
 
@@ -742,6 +783,7 @@ impl GridView {
                     };
                     undo.execute(Box::new(SetCell::new(at, text)), table);
                     imp.cache.borrow_mut().invalidate();
+                    imp.titles.take();
                     self.queue_draw();
                 }
             }
@@ -764,6 +806,28 @@ impl GridView {
         self.imp().saving.set(saving);
     }
 
+    /// The first row is shown as column titles rather than data (ENG-7).
+    pub fn has_header(&self) -> bool {
+        self.imp()
+            .table
+            .borrow()
+            .as_ref()
+            .is_some_and(|t| t.has_header())
+    }
+
+    /// Flip "first row is header". Rows shift by one, so cached rows and row heights (which
+    /// belong to the rows they were set on) start over; edits stay with their rows.
+    pub fn set_header(&self, on: bool) {
+        let imp = self.imp();
+        if let Some(t) = imp.table.borrow_mut().as_mut() {
+            t.set_header(on);
+        }
+        imp.cache.borrow_mut().invalidate();
+        imp.titles.take();
+        imp.sizing.borrow_mut().rows.clear();
+        self.update_adjustments();
+    }
+
     /// Every column back to the default width.
     pub fn reset_column_widths(&self) {
         self.imp().sizing.borrow_mut().cols.clear();
@@ -776,6 +840,7 @@ impl GridView {
         imp.table.replace(Some(table));
         imp.undo.replace(Some(UndoStack::new(1_000)));
         imp.cache.borrow_mut().reset();
+        imp.titles.take();
         self.update_adjustments();
     }
 

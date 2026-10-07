@@ -11,17 +11,19 @@ mod source;
 #[cfg(test)]
 mod testutil;
 
-pub use detect::{detect_dialect, DETECT_SAMPLE_BYTES};
+pub use detect::{detect_dialect, detect_header, DETECT_SAMPLE_BYTES};
 pub use encoding::{detect_encoding, open_text, open_text_as, Charset, EncodeWriter, Encoding};
 pub use fields::{encode_field, split_fields, Field};
 pub use index::{IndexError, SparseRowIndex, STRIDE};
 pub use source::Source;
 
-/// How a CSV file is delimited and quoted.
+/// How a CSV file is delimited and quoted, and whether its first row is a header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Dialect {
     pub delimiter: u8,
     pub quote: u8,
+    /// The first row names the columns: shown as column titles, not as data (ENG-7). The
+    /// file keeps it either way. Off by default; [`detect_dialect`] decides for real files.
     pub has_header: bool,
     pub line_ending: LineEnding,
 }
@@ -31,7 +33,7 @@ impl Default for Dialect {
         Self {
             delimiter: b',',
             quote: b'"',
-            has_header: true,
+            has_header: false,
             line_ending: LineEnding::Lf,
         }
     }
@@ -65,16 +67,4 @@ pub trait RowIndex: Send + Sync {
         rows: std::ops::Range<u64>,
         out: &mut Vec<std::ops::Range<u64>>,
     ) -> Result<usize, IndexError>;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn default_dialect_is_comma_with_header() {
-        let d = Dialect::default();
-        assert_eq!(d.delimiter, b',');
-        assert!(d.has_header);
-    }
 }

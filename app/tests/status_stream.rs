@@ -8,8 +8,8 @@
 use std::path::Path;
 use std::process::Command;
 
-/// Rows in corpus/rows_1024mb.csv, header included.
-const ROWS: u64 = 19_094_580;
+/// Data rows in corpus/rows_1024mb.csv: 19,094,580 lines, the first a header (ENG-7).
+const ROWS: u64 = 19_094_579;
 
 #[test]
 #[ignore = "opens a window and needs corpus/; run with --ignored"]

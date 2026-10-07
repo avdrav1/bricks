@@ -105,12 +105,13 @@ fn encoding_and_bom_round_trip_on_save() {
         let path = temp(name, &original);
         let table = open(&path);
         assert_eq!(table.encoding(), enc, "{name}: detected encoding");
+        assert!(table.has_header(), "{name}: header row detected");
         assert_eq!(
-            table.cell_value(2, 1).as_deref(),
+            table.cell_value(1, 1).as_deref(),
             Some("Zoë"),
             "{name}: decoded text"
         );
-        assert_eq!(table.cell_value(3, 2).as_deref(), Some("€5"), "{name}");
+        assert_eq!(table.cell_value(2, 2).as_deref(), Some("€5"), "{name}");
 
         // Unedited save reproduces the file exactly.
         file_format::save_csv(&path, &table.save_job().unwrap()).unwrap();
@@ -124,7 +125,7 @@ fn encoding_and_bom_round_trip_on_save() {
         let mut table = open(&path);
         table.set_cell(
             CellRef {
-                row: table.row_id(2),
+                row: table.row_id(1),
                 col: 1,
             },
             "Ångström, Å",
@@ -139,7 +140,7 @@ fn encoding_and_bom_round_trip_on_save() {
         let reopened = open(&path);
         assert_eq!(reopened.encoding(), enc, "{name}: encoding after save");
         assert_eq!(
-            reopened.cell_value(2, 1).as_deref(),
+            reopened.cell_value(1, 1).as_deref(),
             Some("Ångström, Å"),
             "{name}"
         );
@@ -154,7 +155,7 @@ fn text_the_encoding_cannot_hold_fails_the_save_and_keeps_the_file() {
     let mut table = open(&path);
     table.set_cell(
         CellRef {
-            row: table.row_id(1),
+            row: table.row_id(0),
             col: 1,
         },
         "東京",
