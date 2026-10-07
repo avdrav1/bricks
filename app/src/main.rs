@@ -11,14 +11,14 @@
 mod grid_view;
 
 use csv_engine::{Dialect, Source, SparseRowIndex};
-use data_model::CsvTable;
+use data_model::{CsvTable, SaveStats};
 use grid_view::{GridView, ROW_H};
 use gtk::{glib, prelude::*};
 use std::cell::{Cell, RefCell};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 const APP_ID: &str = "dev.bricks.Spreadsheet";
@@ -78,38 +78,42 @@ fn main() -> glib::ExitCode {
             return glib::ExitCode::from(2);
         }
     };
-    let source = match Source::open(&args.file) {
-        Ok(s) => Arc::new(s),
+    // Comma until delimiter detection (ENG-4).
+    let dialect = Dialect::default();
+    let table = match open_table(&args.file, dialect) {
+        Ok(t) => t,
         Err(e) => {
             eprintln!("spreadsheet: cannot open {}: {e}", args.file.display());
             return glib::ExitCode::FAILURE;
         }
     };
-    // Comma until delimiter detection (ENG-4).
-    let dialect = Dialect::default();
-    let index = SparseRowIndex::new(source, &dialect);
-    // Index off the UI thread; rows become readable as it goes. Moves onto the shared job
-    // pool when ENG-8 builds it (ADR 0005).
-    std::thread::Builder::new()
-        .name("index".into())
-        .spawn({
-            let index = index.clone();
-            move || index.build(&AtomicBool::new(false))
-        })
-        .expect("spawn index thread");
 
     let app = gtk::Application::builder()
         .application_id(APP_ID)
         .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
         .build();
     let args = Rc::new(args);
+    let table = RefCell::new(Some(table));
     app.connect_activate(move |app| {
-        build_window(app, &args, CsvTable::new(index.clone(), dialect))
+        if let Some(table) = table.take() {
+            build_window(app, &args, table, dialect);
+        }
     });
     app.run_with_args::<&str>(&[])
 }
 
-fn build_window(app: &gtk::Application, args: &Args, table: CsvTable) {
+/// Map `path` and start indexing it off the UI thread; rows become readable as it goes.
+/// Indexing moves onto the shared job pool when ENG-8 builds it (ADR 0005).
+fn open_table(path: &Path, dialect: Dialect) -> std::io::Result<CsvTable> {
+    let index = SparseRowIndex::new(Arc::new(Source::open(path)?), &dialect);
+    std::thread::Builder::new().name("index".into()).spawn({
+        let index = index.clone();
+        move || index.build(&AtomicBool::new(false))
+    })?;
+    Ok(CsvTable::new(index, dialect))
+}
+
+fn build_window(app: &gtk::Application, args: &Args, table: CsvTable, dialect: Dialect) {
     let vadj = gtk::Adjustment::new(0.0, 0.0, 0.0, ROW_H, 0.0, 0.0);
     let hadj = gtk::Adjustment::new(0.0, 0.0, 0.0, 30.0, 0.0, 0.0);
     let grid = GridView::new(table, &vadj, &hadj);
@@ -160,12 +164,24 @@ fn build_window(app: &gtk::Application, args: &Args, table: CsvTable) {
     });
     grid.add_controller(scroll);
 
-    // Paging keys until full keyboard navigation (GRID-3).
+    // Paging keys until full keyboard navigation (GRID-3); Ctrl+S saves.
+    let save = Rc::new(RefCell::new(SaveState::Idle));
     let keys = gtk::EventControllerKey::new();
     keys.connect_key_pressed({
-        let vadj = vadj.clone();
-        move |_, key, _, _| {
-            use gtk::gdk::Key;
+        let (vadj, grid, save, path) = (
+            vadj.clone(),
+            grid.downgrade(),
+            save.clone(),
+            args.file.clone(),
+        );
+        move |_, key, _, mods| {
+            use gtk::gdk::{Key, ModifierType};
+            if mods.contains(ModifierType::CONTROL_MASK) && matches!(key, Key::s | Key::S) {
+                if let Some(grid) = grid.upgrade() {
+                    start_save(&grid, &path, dialect, &save);
+                }
+                return glib::Propagation::Stop;
+            }
             let (v, page) = (vadj.value(), vadj.page_size());
             let target = match key {
                 Key::Page_Down => v + page,
@@ -182,31 +198,30 @@ fn build_window(app: &gtk::Application, args: &Args, table: CsvTable) {
     });
     window.add_controller(keys);
 
-    // Follow the indexer: grow the scroll range and show progress in the title.
+    // Status: follow the indexer (grow the scroll range), finish saves, keep the title current.
     let started = Instant::now();
+    let mut was_complete = false;
     glib::timeout_add_local(Duration::from_millis(100), {
-        let (grid, window) = (grid.downgrade(), window.downgrade());
+        let (grid, window, path) = (grid.downgrade(), window.downgrade(), args.file.clone());
         move || {
             let (Some(grid), Some(window)) = (grid.upgrade(), window.upgrade()) else {
                 return glib::ControlFlow::Break;
             };
-            grid.update_adjustments();
-            let rows = grid.row_count();
-            if grid.file_changed() {
-                window.set_title(Some(&format!("{name} — file changed on disk")));
-                return glib::ControlFlow::Break;
+            // While indexing (also after a save reopens the file), grow the scroll range.
+            let complete = grid.is_complete();
+            if !complete || !was_complete {
+                grid.update_adjustments();
             }
-            if grid.is_complete() {
-                window.set_title(Some(&format!("{name} — {} rows", group_digits(rows))));
-                if std::env::var_os("BRICKS_TIMINGS").is_some() {
-                    eprintln!("indexed {rows} rows in {:?}", started.elapsed());
-                }
-                return glib::ControlFlow::Break;
+            if complete && !was_complete && std::env::var_os("BRICKS_TIMINGS").is_some() {
+                eprintln!(
+                    "indexed {} rows ({:?} since start)",
+                    grid.row_count(),
+                    started.elapsed()
+                );
             }
-            window.set_title(Some(&format!(
-                "{name} — {} rows (indexing…)",
-                group_digits(rows)
-            )));
+            was_complete = complete;
+            finish_save(&grid, &path, dialect, &save);
+            window.set_title(Some(&title(&name, &grid, &save.borrow())));
             glib::ControlFlow::Continue
         }
     });
@@ -218,6 +233,113 @@ fn build_window(app: &gtk::Application, args: &Args, table: CsvTable) {
         Some(Bench::Jump { row, jumps }) => bench_jump(app, &grid, &vadj, row, jumps),
         None => {}
     }
+}
+
+enum SaveState {
+    Idle,
+    Saving(mpsc::Receiver<Result<(SaveStats, Duration), String>>),
+    Saved(Duration),
+    Failed(String),
+}
+
+/// Ctrl+S: write the table to its own file on a worker thread (save is atomic, SAVE-1).
+/// Editing is paused until it finishes, so no edit can be lost between snapshot and reopen.
+fn start_save(grid: &GridView, path: &Path, dialect: Dialect, save: &RefCell<SaveState>) {
+    if matches!(*save.borrow(), SaveState::Saving(_)) || grid.edit_count() == 0 {
+        return;
+    }
+    let job = match grid.save_job() {
+        Ok(job) => job,
+        Err(_) => {
+            *save.borrow_mut() = SaveState::Failed("wait for indexing to finish".into());
+            return;
+        }
+    };
+    grid.set_saving(true);
+    let (tx, rx) = mpsc::channel();
+    let path = path.to_owned();
+    let spawned = std::thread::Builder::new()
+        .name("save".into())
+        .spawn(move || {
+            let t = Instant::now();
+            let r = file_format::save_csv(&path, &job, &dialect).map_err(|e| e.to_string());
+            let _ = tx.send(r.map(|s| (s, t.elapsed())));
+        });
+    *save.borrow_mut() = match spawned {
+        Ok(_) => SaveState::Saving(rx),
+        Err(e) => {
+            grid.set_saving(false);
+            SaveState::Failed(e.to_string())
+        }
+    };
+}
+
+/// When a save has finished: reopen the saved file (its edits are now on disk) or report
+/// the error with the edits still in memory.
+fn finish_save(grid: &GridView, path: &Path, dialect: Dialect, save: &RefCell<SaveState>) {
+    let result = match &*save.borrow() {
+        SaveState::Saving(rx) => match rx.try_recv() {
+            Ok(r) => r,
+            Err(mpsc::TryRecvError::Empty) => return,
+            Err(mpsc::TryRecvError::Disconnected) => Err("the save thread stopped".into()),
+        },
+        _ => return,
+    };
+    grid.set_saving(false);
+    let next = match result.and_then(|done| {
+        open_table(path, dialect)
+            .map(|t| (done, t))
+            .map_err(|e| e.to_string())
+    }) {
+        Ok(((stats, took), table)) => {
+            grid.replace_table(table);
+            if std::env::var_os("BRICKS_TIMINGS").is_some() {
+                eprintln!(
+                    "saved {} rows, {} bytes in {took:?}",
+                    stats.rows, stats.bytes
+                );
+            }
+            SaveState::Saved(took)
+        }
+        Err(e) => {
+            eprintln!("spreadsheet: save failed: {e}");
+            SaveState::Failed(e)
+        }
+    };
+    *save.borrow_mut() = next;
+}
+
+fn title(name: &str, grid: &GridView, save: &SaveState) -> String {
+    let edits = grid.edit_count();
+    let mut t = String::new();
+    if edits > 0 {
+        t.push_str("• ");
+    }
+    t.push_str(name);
+    t.push_str(" — ");
+    t.push_str(&group_digits(grid.row_count()));
+    t.push_str(" rows");
+    if !grid.is_complete() {
+        t.push_str(" (indexing…)");
+    }
+    if edits > 0 {
+        t.push_str(&format!(
+            " — {edits} unsaved edit{}",
+            if edits == 1 { "" } else { "s" }
+        ));
+    }
+    match save {
+        SaveState::Saving(_) => t.push_str(" — saving…"),
+        SaveState::Saved(took) if edits == 0 => {
+            t.push_str(&format!(" — saved in {:.1} s", took.as_secs_f64()))
+        }
+        SaveState::Failed(e) => t.push_str(&format!(" — save failed: {e}")),
+        _ => {}
+    }
+    if grid.file_changed() {
+        t.push_str(" — file changed on disk");
+    }
+    t
 }
 
 fn group_digits(n: u64) -> String {

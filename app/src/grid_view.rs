@@ -1,7 +1,7 @@
 //! The grid widget: draws the cells `grid::GridCache` holds with GSK + Pango (ADR 0001).
 
 use commands::{SetCell, UndoStack};
-use data_model::{CellRef, CsvTable, TableSource};
+use data_model::{CellRef, CsvTable, SaveJob, SaveJobError, TableSource};
 use grid::{ColumnViewport, GridCache, Viewport};
 use gtk::{gdk, glib, graphene, pango, prelude::*, subclass::prelude::*};
 use std::cell::{Cell, RefCell};
@@ -39,6 +39,8 @@ mod imp {
         pub editor: RefCell<Option<(gtk::Popover, gtk::Entry)>>,
         /// Cell the editor is open on.
         pub editing: Cell<Option<(u64, u32)>>,
+        /// A save is running; edits wait so none can be lost between snapshot and reopen.
+        pub saving: Cell<bool>,
     }
 
     #[glib::object_subclass]
@@ -242,6 +244,9 @@ impl GridView {
     /// cell's full value.
     fn begin_edit(&self, x: f64, y: f64) {
         let imp = self.imp();
+        if imp.saving.get() {
+            return;
+        }
         let (Some(vadj), Some(hadj)) = (imp.vadj.borrow().clone(), imp.hadj.borrow().clone())
         else {
             return;
@@ -334,6 +339,29 @@ impl GridView {
         if let Some((popover, _)) = imp.editor.borrow().as_ref() {
             popover.popdown();
         }
+    }
+
+    /// Snapshot for a background save (SAVE-1).
+    pub fn save_job(&self) -> Result<SaveJob, SaveJobError> {
+        self.imp()
+            .table
+            .borrow()
+            .as_ref()
+            .map_or(Err(SaveJobError::NotIndexed), |t| t.save_job())
+    }
+
+    pub fn set_saving(&self, saving: bool) {
+        self.imp().saving.set(saving);
+    }
+
+    /// Show a freshly opened table (the file just saved). Its edits are on disk now, so the
+    /// undo history, which refers to the old overlay, starts over.
+    pub fn replace_table(&self, table: CsvTable) {
+        let imp = self.imp();
+        imp.table.replace(Some(table));
+        imp.undo.replace(Some(UndoStack::new(1_000)));
+        imp.cache.borrow_mut().invalidate();
+        self.update_adjustments();
     }
 
     /// Cells edited since open.

@@ -16,7 +16,7 @@ A fast, lightweight spreadsheet for Linux, written in Rust. V0.1 goal: open, bro
 cargo run --release -p spreadsheet -- path/to/file.csv
 ```
 
-Scroll with the wheel, scrollbars, arrows, Page Up/Down, Home/End. Double-click a cell to edit it (Enter applies, Esc cancels); edits stay in memory until saving lands (SAVE-1). Comma-delimited UTF-8 only until delimiter and encoding detection land (ENG-4, ENG-6).
+Scroll with the wheel, scrollbars, arrows, Page Up/Down, Home/End. Double-click a cell to edit it (Enter applies, Esc cancels). Ctrl+S saves over the file atomically: untouched rows are written byte for byte, and a crash mid-save leaves the original intact. The title shows unsaved edits and save progress. Comma-delimited UTF-8 only until delimiter and encoding detection land (ENG-4, ENG-6).
 
 ## Layout
 

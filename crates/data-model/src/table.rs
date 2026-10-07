@@ -106,9 +106,9 @@ pub trait TableSource {
 /// A CSV file read through its row index (ADR 0002), with cell edits in an overlay on top
 /// (ADR 0003). Edits never touch the file; they reach disk only through save (SAVE-1).
 pub struct CsvTable {
-    index: Arc<SparseRowIndex>,
-    dialect: Dialect,
-    overlay: EditOverlay,
+    pub(crate) index: Arc<SparseRowIndex>,
+    pub(crate) dialect: Dialect,
+    pub(crate) overlay: EditOverlay,
     spans: Vec<Range<u64>>,
     fields: Vec<Field>,
 }

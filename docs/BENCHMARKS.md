@@ -14,4 +14,4 @@ Corpus: `python3 scripts/gen_corpus.py` (1 GB file is about 10M rows).
 | Find first match | < 1 s | | |
 | Sort numeric column | < 10 s (< 3 s at 2M rows) | | |
 | Two-column filter | < 3 s | | |
-| Save with 1,000 edits | < 15 s | | |
+| Save with 1,000 edits | < 15 s | 1.03 s incl. fsync and verify re-index (SAVE-1; Ryzen 5900, NVMe btrfs, not the reference box) | |

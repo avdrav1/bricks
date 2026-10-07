@@ -62,6 +62,28 @@ impl Field {
     }
 }
 
+/// Append `value` to `out` as one CSV field: as-is when it is safe bare, otherwise quoted
+/// with inner quotes doubled. Quoted when it holds the delimiter, the quote character, a
+/// line break, or starts with the quote character (so it reads back as the same text).
+pub fn encode_field(value: &[u8], dialect: &Dialect, out: &mut Vec<u8>) {
+    let (delim, quote) = (dialect.delimiter, dialect.quote);
+    if !value
+        .iter()
+        .any(|&b| b == delim || b == quote || b == b'\n' || b == b'\r')
+    {
+        out.extend_from_slice(value);
+        return;
+    }
+    out.push(quote);
+    for &b in value {
+        if b == quote {
+            out.push(quote);
+        }
+        out.push(b);
+    }
+    out.push(quote);
+}
+
 /// Split one row (as returned by [`crate::RowIndex::row_span`], terminator included) into
 /// fields, written to `out` (cleared first, capacity reused). A row always has at least one
 /// field; a blank line is one empty field.
@@ -180,6 +202,36 @@ mod tests {
             matches!(out[2].value(row, b'"'), Cow::Borrowed(_)),
             "quoted without escapes borrows"
         );
+    }
+
+    #[test]
+    fn encoded_fields_split_back_to_the_same_value() {
+        let d = Dialect::default();
+        for v in [
+            "",
+            "plain",
+            "00123",
+            "a,b",
+            "say \"hi\"",
+            "\"",
+            "two\nlines",
+            "cr\r",
+            "  pad  ",
+            "5\" pipe",
+        ] {
+            let mut row = Vec::new();
+            encode_field(v.as_bytes(), &d, &mut row);
+            row.extend_from_slice(b",end\n");
+            assert_eq!(
+                values(&row, &d),
+                [v, "end"],
+                "value {v:?} encoded as {:?}",
+                String::from_utf8_lossy(&row)
+            );
+        }
+        let mut bare = Vec::new();
+        encode_field(b"00123", &d, &mut bare);
+        assert_eq!(bare, b"00123", "safe values are written bare");
     }
 
     #[test]

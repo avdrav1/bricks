@@ -3,8 +3,10 @@
 //! Layers (spec section 16), each kept separate:
 //! source (csv-engine) -> overlay (edits) -> view (sort/filter) -> grid.
 
+mod save;
 mod table;
 
+pub use save::{SaveJob, SaveJobError, SaveStats};
 pub use table::{CsvTable, RowBlock, TableSource, MAX_DISPLAY_BYTES};
 
 use std::collections::{BTreeMap, HashMap};
@@ -81,6 +83,11 @@ impl EditOverlay {
     /// Edits in one row, by column.
     pub fn row(&self, row: RowId) -> Option<&BTreeMap<Col, Box<str>>> {
         self.rows.get(&row)
+    }
+
+    /// Every edited row with its edits, in no particular order.
+    pub fn iter_rows(&self) -> impl Iterator<Item = (&RowId, &BTreeMap<Col, Box<str>>)> {
+        self.rows.iter()
     }
 
     /// Number of edited cells.

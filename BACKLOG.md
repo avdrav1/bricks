@@ -33,7 +33,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | GRID-1 | M0 | P0 | done | DEC-1, ENG-2 | Virtualized grid renders visible cells plus a buffer | Constant memory regardless of row count; 60 fps scrolling at 2M rows |
 | GRID-2 | M0 | P0 | done | GRID-1 | Scrollbar drag jumps to arbitrary positions | Jump to row 1.9M renders in under 100 ms |
 | EDIT-1 | M0 | P0 | done | DEC-3, ENG-2 | Single-cell edit stored in overlay | Edit visible immediately; source file untouched |
-| SAVE-1 | M0 | P0 | todo | EDIT-1 | Atomic save: temp file, verify, rename | kill -9 mid-save leaves original intact; output byte-identical except edited cells |
+| SAVE-1 | M0 | P0 | done | EDIT-1 | Atomic save: temp file, verify, rename | kill -9 mid-save leaves original intact; output byte-identical except edited cells |
 | BENCH-1 | M0 | P0 | todo | INFRA-1, INFRA-2, ENG-1 | Benchmark harness over the corpus | `cargo bench` runs in CI and prints the docs/BENCHMARKS.md table |
 | ENG-4 | M1 | P0 | todo | ENG-3 | Auto-detect delimiter: comma, tab, semicolon, pipe | Correct on 95%+ of a 50-file real-world sample |
 | ENG-5 | M1 | P0 | todo | ENG-4, DEC-5 | Manual delimiter override, re-index in background | Override applies without restart |
@@ -80,6 +80,12 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-06 SAVE-1:** decisions:
+  - The save writes untouched rows as raw byte ranges. In an edited row, untouched fields keep their exact bytes (quoting included) and so does the row's line ending; only edited cells are encoded, with minimal quoting.
+  - Verification re-indexes the temp file and checks its size and row count before the rename. That adds roughly 0.3–0.7 s on 1 GB.
+  - Ctrl+S runs the save on a plain `std::thread`. Progress and cancel are SAVE-3, and the shared pool is ENG-8.
+  - Editing is paused while a save runs. Afterwards the file is reopened and re-indexed, and the undo history starts over.
+  - Follow-up: a save killed mid-write leaves its temp file (`.<name>.<pid>-<n>.bricks-save`) next to the original. Nothing cleans these up yet; pick that up with crash recovery (APP-7) or the next save.
 - **2026-10-06 EDIT-1:** decisions:
   - `EditOverlay` is now keyed by `RowId` (ADR 0003) and grouped per row. `CellRef.row` is a `RowId`, and `CsvTable::row_id` is the identity map until EDIT-3 adds the row map.
   - Edits run as `commands::SetCell` through an `UndoStack`, which keeps invariant 5. No undo keys are bound yet; that's CMD-1/CMD-2.

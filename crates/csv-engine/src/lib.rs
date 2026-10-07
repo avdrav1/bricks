@@ -9,7 +9,7 @@ mod source;
 #[cfg(test)]
 mod testutil;
 
-pub use fields::{split_fields, Field};
+pub use fields::{encode_field, split_fields, Field};
 pub use index::{IndexError, SparseRowIndex, STRIDE};
 pub use source::Source;
 
