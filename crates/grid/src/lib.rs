@@ -2,6 +2,10 @@
 //! the visible rows plus a buffer above and below (spec section 7). Memory depends on the
 //! viewport, never on the row count.
 
+mod nav;
+
+pub use nav::{Bounds, Cell, Key, Mods, Selection};
+
 use data_model::{RowBlock, TableSource};
 use std::ops::Range;
 

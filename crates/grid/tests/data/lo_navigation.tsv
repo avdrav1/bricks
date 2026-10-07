@@ -1,0 +1,41 @@
+# Recorded from LibreOffice 26.8.0.3 by scripts/lo_navigation.py on a 200x6 sheet.
+id	start	keys	cursor	selection
+arrow-down	C3	DOWN	C4	C4:C4
+arrow-up	C3	UP	C2	C2:C2
+arrow-left	C3	LEFT	B3	B3:B3
+arrow-right	C3	RIGHT	D3	D3:D3
+arrow-up-at-top	C1	UP	C1	C1:C1
+arrow-left-at-a	A3	LEFT	A3	A3:A3
+tab	C3	TAB	D3	D3:D3
+shift-tab	C3	SHIFT+TAB	B3	B3:B3
+shift-tab-at-a	A3	SHIFT+TAB	A3	A3:A3
+enter	C3	RETURN	C4	C4:C4
+shift-enter	C3	SHIFT+RETURN	C2	C2:C2
+tab-tab-enter	B3	TAB TAB RETURN	B4	B4:B4
+tab-arrow-enter	B3	TAB DOWN RETURN	C5	C5:C5
+home	C3	HOME	A3	A3:A3
+end	C3	END	F3	F3:F3
+ctrl-home	D50	CTRL+HOME	A1	A1:A1
+ctrl-end	B3	CTRL+END	F200	F200:F200
+page-down	A1	PAGEDOWN	A23	A23:A23
+page-down-twice	C3	PAGEDOWN PAGEDOWN	C47	C47:C47
+page-up	C80	PAGEUP	C58	C58:C58
+page-up-near-top	C5	PAGEUP	C1	C1:C1
+shift-down	C3	SHIFT+DOWN	C3	C3:C4
+shift-down-right	C3	SHIFT+DOWN SHIFT+DOWN SHIFT+RIGHT	C3	C3:D5
+shift-up-left	C5	SHIFT+UP SHIFT+LEFT SHIFT+LEFT	C5	A4:C5
+shift-back	C3	SHIFT+DOWN SHIFT+UP SHIFT+UP	C3	C2:C3
+arrow-after-select	C3	SHIFT+DOWN SHIFT+DOWN DOWN	C4	C4:C4
+tab-in-range	B2	SHIFT+DOWN SHIFT+RIGHT TAB	C2	B2:C3
+tab-wraps-in-range	B2	SHIFT+DOWN SHIFT+RIGHT TAB TAB	B3	B2:C3
+tab-cycles-range	B2	SHIFT+DOWN SHIFT+RIGHT TAB TAB TAB TAB	B2	B2:C3
+enter-in-range	B2	SHIFT+DOWN SHIFT+RIGHT RETURN	B3	B2:C3
+enter-wraps-in-range	B2	SHIFT+DOWN SHIFT+RIGHT RETURN RETURN	C2	B2:C3
+shift-tab-in-range	B2	SHIFT+DOWN SHIFT+RIGHT SHIFT+TAB	C3	B2:C3
+shift-enter-in-range	B2	SHIFT+DOWN SHIFT+RIGHT SHIFT+RETURN	C3	B2:C3
+shift-home	C3	SHIFT+HOME	C3	A3:C3
+shift-end	C3	SHIFT+END	C3	C3:F3
+shift-ctrl-home	C3	SHIFT+CTRL+HOME	C3	A1:C3
+shift-ctrl-end	C3	SHIFT+CTRL+END	C3	C3:F200
+shift-page-down	C3	SHIFT+PAGEDOWN	C3	C3:C25
+shift-page-up	C80	SHIFT+PAGEUP	C80	C58:C80

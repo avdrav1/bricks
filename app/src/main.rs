@@ -242,16 +242,11 @@ fn build_window(app: &gtk::Application, args: &Args, session: &Rc<Session>, tabl
     });
     grid.add_controller(scroll);
 
-    // Paging keys until full keyboard navigation (GRID-3); Ctrl+S saves.
+    // Ctrl+S saves. Navigation keys belong to the grid (GRID-3).
     let save = Rc::new(RefCell::new(SaveState::Idle));
     let keys = gtk::EventControllerKey::new();
     keys.connect_key_pressed({
-        let (vadj, grid, save, session) = (
-            vadj.clone(),
-            grid.downgrade(),
-            save.clone(),
-            session.clone(),
-        );
+        let (grid, save, session) = (grid.downgrade(), save.clone(), session.clone());
         move |_, key, _, mods| {
             use gtk::gdk::{Key, ModifierType};
             if mods.contains(ModifierType::CONTROL_MASK) && matches!(key, Key::s | Key::S) {
@@ -260,18 +255,7 @@ fn build_window(app: &gtk::Application, args: &Args, session: &Rc<Session>, tabl
                 }
                 return glib::Propagation::Stop;
             }
-            let (v, page) = (vadj.value(), vadj.page_size());
-            let target = match key {
-                Key::Page_Down => v + page,
-                Key::Page_Up => v - page,
-                Key::Down => v + ROW_H,
-                Key::Up => v - ROW_H,
-                Key::Home => 0.0,
-                Key::End => vadj.upper(),
-                _ => return glib::Propagation::Proceed,
-            };
-            vadj.set_value(target);
-            glib::Propagation::Stop
+            glib::Propagation::Proceed
         }
     });
     window.add_controller(keys);
