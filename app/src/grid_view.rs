@@ -1322,7 +1322,12 @@ impl GridView {
                 let bytes = glib::Bytes::from_owned(html.into_bytes());
                 flavors.push(gdk::ContentProvider::for_bytes("text/html", &bytes));
             }
-            flavors.push(gdk::ContentProvider::for_value(&copied.tsv.to_value()));
+            // UTF-8 bytes under both names: GTK's own `text/plain` (no charset) turns
+            // non-ASCII into `\C3\AB` escapes, and many programs ask for that one.
+            let text = glib::Bytes::from_owned(copied.tsv.into_bytes());
+            for mime in ["text/plain;charset=utf-8", "text/plain"] {
+                flavors.push(gdk::ContentProvider::for_bytes(mime, &text));
+            }
             let provider = gdk::ContentProvider::new_union(&flavors);
             if g.clipboard().set_content(Some(&provider)).is_ok() {
                 imp.copy.replace(CopyState::Copied {
