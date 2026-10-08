@@ -1,12 +1,12 @@
 //! The grid widget: draws the cells `grid::GridCache` holds with GSK + Pango (ADR 0001).
 
 use crate::editor::{self, Action, ClipCommand, Mode, ShapeCommand, Start};
-use crate::status::CopyView;
+use crate::status::ClipView;
 
-use commands::{ClearCells, Reshape, SetCell, UndoStack};
+use commands::{Batch, ClearCells, Reshape, SetCell, UndoStack};
 use data_model::{
-    CellRef, ColId, CsvTable, DelimiterChoice, Edit, RereadError, RowId, SaveJob, SaveJobError,
-    TableSource,
+    parse_tsv, CellRef, ColId, CsvTable, DelimiterChoice, Edit, PasteError, RereadError, RowId,
+    SaveJob, SaveJobError, TableSource, PASTE_MAX_CELLS,
 };
 use grid::{Bounds, GridCache, Key, Mods, Selection, Sizes, Viewport};
 use gtk::{gdk, gio, glib, graphene, pango, prelude::*, subclass::prelude::*};
@@ -27,24 +27,14 @@ const PAD: f64 = 4.0;
 /// Smallest sizes a drag can give a column or row.
 const MIN_COL_W: f64 = 16.0;
 const MIN_ROW_H: f64 = 8.0;
-/// How long the status bar says what was copied.
-const COPIED_NOTE: Duration = Duration::from_secs(4);
+/// How long the status bar says what was copied or pasted.
+const CLIP_NOTE: Duration = Duration::from_secs(4);
 
-/// The last copy (CLIP-1): running on a worker, or done.
-#[derive(Default)]
-pub enum CopyState {
-    #[default]
-    Idle,
-    Copying {
-        cancel: Arc<AtomicBool>,
-        done: Arc<AtomicU64>,
-        rows: u64,
-    },
-    Copied {
-        cells: u64,
-        text_only: bool,
-        at: Instant,
-    },
+/// A copy running on a worker (CLIP-1).
+pub struct CopyJob {
+    cancel: Arc<AtomicBool>,
+    done: Arc<AtomicU64>,
+    rows: u64,
 }
 
 /// Row heights and column widths, all default until resized (GRID-5). Kept for the life
@@ -108,8 +98,10 @@ mod imp {
         /// from these by position (`refit_sizes`).
         pub row_heights: RefCell<HashMap<RowId, f64>>,
         pub col_widths: RefCell<HashMap<ColId, f64>>,
-        /// The last copy, for the status bar; a new one cancels a running one.
-        pub copy: RefCell<CopyState>,
+        /// The copy running, if any; a new one cancels it.
+        pub copying: RefCell<Option<CopyJob>>,
+        /// The last copy or paste result, and when, for the status bar.
+        pub clip_note: Cell<Option<(ClipView, Instant)>>,
     }
 
     #[glib::object_subclass]
@@ -464,7 +456,11 @@ impl GridView {
                 if let Some((key, mods)) = nav_key(key, state) {
                     g.press(key, mods);
                 } else if let Some(cmd) = editor::clip_command(key, state) {
-                    g.copy_selection(cmd == ClipCommand::Cut);
+                    match cmd {
+                        ClipCommand::Copy => g.copy_selection(false),
+                        ClipCommand::Cut => g.copy_selection(true),
+                        ClipCommand::Paste => g.paste_clipboard(),
+                    }
                 } else if let Some(cmd) = editor::shape_command(key, state) {
                     let columns = g.imp().selection.get().whole_columns().is_some();
                     match (cmd, columns) {
@@ -1286,13 +1282,13 @@ impl GridView {
             Arc::new(AtomicBool::new(false)),
             Arc::new(AtomicU64::new(0)),
         );
-        let running = imp.copy.replace(CopyState::Copying {
+        let running = imp.copying.replace(Some(CopyJob {
             cancel: cancel.clone(),
             done: done.clone(),
             rows: rows.end - rows.start,
-        });
-        if let CopyState::Copying { cancel, .. } = running {
-            cancel.store(true, Ordering::Relaxed);
+        }));
+        if let Some(job) = running {
+            job.cancel.store(true, Ordering::Relaxed);
         }
         let whole_rows = sel.is_whole_rows();
         let job = {
@@ -1311,11 +1307,13 @@ impl GridView {
             let Some(g) = g.upgrade() else { return };
             let imp = g.imp();
             // Only the latest copy reaches the clipboard.
-            let current = matches!(&*imp.copy.borrow(),
-                CopyState::Copying { cancel: c, .. } if Arc::ptr_eq(c, &cancel));
-            let Some(copied) = copied.filter(|_| current) else {
+            let current = matches!(&*imp.copying.borrow(),
+                Some(job) if Arc::ptr_eq(&job.cancel, &cancel));
+            if !current {
                 return;
-            };
+            }
+            imp.copying.take();
+            let Some(copied) = copied else { return };
             let mut flavors = Vec::new();
             let text_only = copied.html.is_none();
             if let Some(html) = copied.html {
@@ -1330,13 +1328,11 @@ impl GridView {
             }
             let provider = gdk::ContentProvider::new_union(&flavors);
             if g.clipboard().set_content(Some(&provider)).is_ok() {
-                imp.copy.replace(CopyState::Copied {
+                let note = ClipView::Copied {
                     cells: copied.cells,
                     text_only,
-                    at: Instant::now(),
-                });
-            } else {
-                imp.copy.replace(CopyState::Idle);
+                };
+                imp.clip_note.set(Some((note, Instant::now())));
             }
         });
         if cut {
@@ -1344,21 +1340,88 @@ impl GridView {
         }
     }
 
-    /// The last copy, as the status bar shows it.
-    pub fn copy_view(&self) -> CopyView {
-        match &*self.imp().copy.borrow() {
-            CopyState::Copying { done, rows, .. } => {
-                CopyView::Copying(done.load(Ordering::Relaxed) as f64 / (*rows).max(1) as f64)
+    /// Ctrl+V / Shift+Insert (CLIP-2): paste the clipboard's text, as TSV, with its
+    /// first cell at the selection's top-left, as one undoable step. Rows are added at
+    /// the end as needed; the pasted range ends up selected, as in Calc.
+    pub fn paste_clipboard(&self) {
+        let imp = self.imp();
+        if imp.saving.get() || imp.editing.get().is_some() {
+            return;
+        }
+        let g = self.downgrade();
+        let read = self.clipboard().read_text_future();
+        glib::spawn_future_local(async move {
+            let Ok(Some(text)) = read.await else { return };
+            if let Some(g) = g.upgrade() {
+                g.paste_text(&text);
             }
-            CopyState::Copied {
-                cells,
-                text_only,
-                at,
-            } if at.elapsed() < COPIED_NOTE => CopyView::Copied {
-                cells: *cells,
-                text_only: *text_only,
-            },
-            _ => CopyView::Idle,
+        });
+    }
+
+    fn paste_text(&self, text: &str) {
+        let imp = self.imp();
+        if imp.saving.get() || imp.editing.get().is_some() {
+            return;
+        }
+        let cells = parse_tsv(text);
+        let width = cells.iter().map(Vec::len).max().unwrap_or(0) as u32;
+        if width == 0 {
+            return;
+        }
+        let (tl, _) = imp.selection.get().range();
+        let note = {
+            let (mut table, mut undo) = (imp.table.borrow_mut(), imp.undo.borrow_mut());
+            let (Some(table), Some(undo)) = (table.as_mut(), undo.as_mut()) else {
+                return;
+            };
+            let at = tl.row.min(table.row_count());
+            match table.paste(at, tl.col, &cells) {
+                Ok(edits) => {
+                    if !edits.is_empty() {
+                        let focus = CellRef {
+                            row: table.row_id(at.min(table.row_count().saturating_sub(1))),
+                            col: table.col_id(tl.col),
+                        };
+                        undo.execute(Box::new(Batch::new("Paste", edits, focus)), table);
+                    }
+                    ClipView::Pasted(cells.iter().map(|r| r.len() as u64).sum())
+                }
+                Err(PasteError::TooLarge(n)) => ClipView::PasteTooLarge {
+                    cells: n,
+                    max: PASTE_MAX_CELLS,
+                },
+                Err(PasteError::NotIndexed) => ClipView::PasteNeedsIndex,
+            }
+        };
+        imp.clip_note.set(Some((note, Instant::now())));
+        if !matches!(note, ClipView::Pasted(_)) {
+            return;
+        }
+        let anchor = grid::Cell {
+            row: tl.row.min(self.row_count().saturating_sub(1)),
+            col: tl.col,
+        };
+        self.after_change(Some(anchor));
+        let mut sel = Selection::at(anchor);
+        sel.extend_to(grid::Cell {
+            row: anchor.row + cells.len() as u64 - 1,
+            col: anchor.col + width - 1,
+        });
+        imp.selection.set(sel);
+        self.queue_draw();
+    }
+
+    /// The last copy or paste, as the status bar shows it.
+    pub fn clip_view(&self) -> ClipView {
+        let imp = self.imp();
+        if let Some(job) = imp.copying.borrow().as_ref() {
+            return ClipView::Copying(
+                job.done.load(Ordering::Relaxed) as f64 / job.rows.max(1) as f64,
+            );
+        }
+        match imp.clip_note.get() {
+            Some((note, at)) if at.elapsed() < CLIP_NOTE => note,
+            _ => ClipView::Idle,
         }
     }
 

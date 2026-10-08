@@ -6,12 +6,14 @@
 mod cleared;
 mod colmap;
 mod copy;
+mod paste;
 mod rowmap;
 mod save;
 mod table;
 
 pub use cleared::ColSet;
 pub use copy::{Copied, HTML_MAX_CELLS};
+pub use paste::{parse_tsv, PasteError, PASTE_MAX_CELLS};
 pub use rowmap::Run;
 pub use save::{SaveJob, SaveJobError, SaveStats};
 pub use table::{CsvTable, DelimiterChoice, RereadError, RowBlock, TableSource, MAX_DISPLAY_BYTES};
@@ -110,6 +112,9 @@ pub enum Edit {
         cols: ColSet,
         edits: Vec<(CellRef, Box<str>)>,
     },
+    /// Many cell edits as one (CLIP-2's paste): each cell gets its value, or with `None`
+    /// drops its edit. The inverse holds what each cell had before.
+    Cells(Vec<(CellRef, Option<Box<str>>)>),
 }
 
 impl Edit {
@@ -152,6 +157,13 @@ impl Edit {
                     + cols.heap_bytes()
                     + edits.capacity() * std::mem::size_of::<(CellRef, Box<str>)>()
                     + edits.iter().map(|(_, v)| v.len()).sum::<usize>()
+            }
+            Self::Cells(cells) => {
+                cells.capacity() * std::mem::size_of::<(CellRef, Option<Box<str>>)>()
+                    + cells
+                        .iter()
+                        .map(|(_, v)| v.as_ref().map_or(0, |v| v.len()))
+                        .sum::<usize>()
             }
         }
     }

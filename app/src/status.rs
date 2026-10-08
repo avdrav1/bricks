@@ -14,9 +14,9 @@ pub enum SaveView<'a> {
     Failed(&'a str),
 }
 
-/// Where the last copy stands (CLIP-1).
+/// The last copy or paste (CLIP-1, CLIP-2).
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum CopyView {
+pub enum ClipView {
     Idle,
     /// Share of the rows copied so far (0..=1).
     Copying(f64),
@@ -25,6 +25,14 @@ pub enum CopyView {
         cells: u64,
         text_only: bool,
     },
+    Pasted(u64),
+    /// A paste refused for its size: its cells, and the most allowed.
+    PasteTooLarge {
+        cells: u64,
+        max: u64,
+    },
+    /// A paste that needs rows added before indexing has finished.
+    PasteNeedsIndex,
 }
 
 /// Everything the status bar shows.
@@ -40,7 +48,7 @@ pub struct Facts<'a> {
     pub edits: usize,
     pub save: SaveView<'a>,
     pub file_changed: bool,
-    pub copy: CopyView,
+    pub clip: ClipView,
 }
 
 /// The three parts of the status bar, left to right.
@@ -66,18 +74,30 @@ pub fn status(f: &Facts) -> Status {
     }
 
     let mut save = Vec::new();
-    match f.copy {
-        CopyView::Idle => {}
-        CopyView::Copying(done) => {
+    let cells = |n: u64| format!("{} cell{}", group_digits(n), if n == 1 { "" } else { "s" });
+    match f.clip {
+        ClipView::Idle => {}
+        ClipView::Copying(done) => {
             let pct = (done.clamp(0.0, 1.0) * 100.0).floor();
             save.push(format!("Copying {pct:.0}%"));
         }
-        CopyView::Copied { cells, text_only } => save.push(format!(
-            "Copied {} cell{}{}",
-            group_digits(cells),
-            if cells == 1 { "" } else { "s" },
+        ClipView::Copied {
+            cells: n,
+            text_only,
+        } => save.push(format!(
+            "Copied {}{}",
+            cells(n),
             if text_only { " as plain text" } else { "" }
         )),
+        ClipView::Pasted(n) => save.push(format!("Pasted {}", cells(n))),
+        ClipView::PasteTooLarge { cells: n, max } => save.push(format!(
+            "Paste too large: {} (at most {})",
+            cells(n),
+            group_digits(max)
+        )),
+        ClipView::PasteNeedsIndex => {
+            save.push("Paste past the last row once indexing finishes".to_owned())
+        }
     }
     let edits = || {
         format!(
@@ -164,7 +184,7 @@ mod tests {
             edits: 0,
             save: SaveView::Idle,
             file_changed: false,
-            copy: CopyView::Idle,
+            clip: ClipView::Idle,
         }
     }
 
@@ -209,22 +229,32 @@ mod tests {
     }
 
     #[test]
-    fn copy_progress_and_result_come_first() {
+    fn clipboard_progress_and_result_come_first() {
         let mut f = facts();
         f.edits = 2;
-        f.copy = CopyView::Copying(0.456);
+        f.clip = ClipView::Copying(0.456);
         assert_eq!(status(&f).save, "Copying 45% · 2 unsaved edits");
-        f.copy = CopyView::Copied {
+        f.clip = ClipView::Copied {
             cells: 1,
             text_only: false,
         };
         assert_eq!(status(&f).save, "Copied 1 cell · 2 unsaved edits");
-        f.copy = CopyView::Copied {
+        f.clip = ClipView::Pasted(80_000);
+        assert_eq!(status(&f).save, "Pasted 80,000 cells · 2 unsaved edits");
+        f.edits = 0;
+        f.clip = ClipView::Copied {
             cells: 19_094_579,
             text_only: true,
         };
-        f.edits = 0;
         assert_eq!(status(&f).save, "Copied 19,094,579 cells as plain text");
+        f.clip = ClipView::PasteTooLarge {
+            cells: 3_000_000,
+            max: 2_097_152,
+        };
+        assert_eq!(
+            status(&f).save,
+            "Paste too large: 3,000,000 cells (at most 2,097,152)"
+        );
     }
 
     #[test]

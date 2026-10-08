@@ -725,7 +725,7 @@ impl StatusBar {
                 SaveState::Failed(e) => status::SaveView::Failed(e),
             },
             file_changed: grid.file_changed(),
-            copy: grid.copy_view(),
+            clip: grid.clip_view(),
         });
         for (label, text) in [
             (&self.rows, &shown.rows),

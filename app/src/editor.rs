@@ -110,13 +110,14 @@ pub fn clears(key: gdk::Key, state: ModifierType) -> bool {
     matches!(key, K::Delete | K::KP_Delete) && !state.intersects(held)
 }
 
-/// Copy and cut from the keyboard (CLIP-1): Ctrl+C and Ctrl+X, and the older Ctrl+Insert
-/// and Shift+Delete.
+/// Clipboard keys (CLIP-1, CLIP-2): Ctrl+C, Ctrl+X, Ctrl+V, and the older Ctrl+Insert,
+/// Shift+Delete, Shift+Insert.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClipCommand {
     Copy,
     /// Copy, then empty the cells (as in Calc; undoable like Delete).
     Cut,
+    Paste,
 }
 
 pub fn clip_command(key: gdk::Key, state: ModifierType) -> Option<ClipCommand> {
@@ -129,6 +130,9 @@ pub fn clip_command(key: gdk::Key, state: ModifierType) -> Option<ClipCommand> {
         (K::c | K::C | K::Insert | K::KP_Insert, true, false) => Some(ClipCommand::Copy),
         (K::x | K::X, true, false) | (K::Delete | K::KP_Delete, false, true) => {
             Some(ClipCommand::Cut)
+        }
+        (K::v | K::V, true, false) | (K::Insert | K::KP_Insert, false, true) => {
+            Some(ClipCommand::Paste)
         }
         _ => None,
     }
@@ -258,5 +262,8 @@ mod tests {
         assert_eq!(clip_command(K::c, NONE), None, "a plain c is typing");
         assert_eq!(clip_command(K::C, ctrl | SHIFT), None);
         assert_eq!(clip_command(K::Delete, NONE), None, "Delete clears");
+        assert_eq!(clip_command(K::v, ctrl), Some(ClipCommand::Paste));
+        assert_eq!(clip_command(K::Insert, SHIFT), Some(ClipCommand::Paste));
+        assert_eq!(clip_command(K::v, NONE), None, "a plain v is typing");
     }
 }

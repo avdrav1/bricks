@@ -499,6 +499,21 @@ impl CsvTable {
                 }
                 Edit::ClearCells { rows, cols }
             }
+            Edit::Cells(cells) => {
+                let mut before: Vec<_> = cells
+                    .into_iter()
+                    .map(|(at, value)| {
+                        let prev = match value {
+                            Some(v) => self.overlay.set(at, v),
+                            None => self.overlay.clear(at),
+                        };
+                        (at, prev)
+                    })
+                    .collect();
+                // Undone last-first, so a cell listed twice gets its first value back.
+                before.reverse();
+                Edit::Cells(before)
+            }
         }
     }
 

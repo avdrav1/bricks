@@ -52,7 +52,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | EDIT-4 | M2 | P0 | done | CMD-1 | Insert and delete columns | Works on 1 GB without a full rewrite before save |
 | EDIT-5 | M2 | P0 | done | CMD-1, GRID-4 | Delete key clears selected cells | Undoable as one step |
 | CLIP-1 | M2 | P0 | done | GRID-4 | Copy/cut range as TSV plus text/html | Pastes cleanly into LibreOffice, Excel web, a text editor |
-| CLIP-2 | M2 | P0 | todo | CLIP-1, CMD-1 | Paste TSV into a range, expanding as needed | 10k rows from LibreOffice paste in under 1 s |
+| CLIP-2 | M2 | P0 | done | CLIP-1, CMD-1 | Paste TSV into a range, expanding as needed | 10k rows from LibreOffice paste in under 1 s |
 | SAVE-2 | M2 | P0 | todo | SAVE-1, ENG-6 | Save, Save As, New | Save As can change delimiter and encoding |
 | SAVE-3 | M2 | P0 | todo | SAVE-1, DEC-5 | Background save with progress and cancel | UI responsive during 1 GB save; save under 15 s |
 | SAVE-4 | M2 | P1 | todo | SAVE-1 | Preserve quoting style and line endings of untouched rows | Saving an unedited file produces an empty diff |
@@ -80,6 +80,25 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-07 CLIP-2:** paste TSV into a range, expanding as needed.
+  - `data_model::parse_tsv`: rows end at `\n`, `\r\n`, or `\r`, and cells split at tabs. A cell starting with `"` is quoted with `""` escapes and may hold tabs and line breaks; a quote that doesn't close properly before a tab or line break is kept as text. A final line break doesn't add an empty row. `"\n"` is one empty cell (what Calc copies for one empty cell); `""` is nothing.
+  - `CsvTable::paste(row, col, cells) -> Result<Vec<Edit>, PasteError>`:
+    - If the paste runs past the last row, it adds rows with `insert_rows` (`NotIndexed` until indexing finishes), and cells in those rows are addressed by the new row ids.
+    - Then one new `Edit::Cells(Vec<(CellRef, Option<Box<str>>)>)` sets every cell, raw. Its inverse holds the previous overlay values in reverse order.
+    - Cells that already show the text are skipped, compared through full-text `read_rows` 4,096 rows at a time; so are empty values where a row has no such cell, so short rows don't grow trailing delimiters for nothing.
+    - `PASTE_MAX_CELLS` = 2^21, roughly 100 MB of overlay, returns `TooLarge`.
+  - `commands::Batch` runs several edits as one command (one undo step): it applies them in order and keeps the inverses reversed. This is the compound command CMD-1's note said would come with its first user.
+  - App: Ctrl+V or Shift+Insert reads the clipboard's text (`read_text_future`) and pastes at the selection's top-left, then selects the pasted range, as Calc does. The status bar says "Pasted N cells", "Paste too large: …", or "Paste past the last row once indexing finishes" for 4 s; `CopyView` became `ClipView`. Paste is refused during a save or while the cell editor is open. HTML on the clipboard isn't read: LibreOffice, Excel, and this app all offer TSV text.
+  - Acceptance: `commands/tests/paste_from_libreoffice.rs` (ignored; needs LibreOffice, the corpus, and release mode).
+    - Headless Calc opens the 10 MB corpus file and copies A2:H10001; its clipboard text is 492 KB of TSV, with Calc's own number display, e.g. `TRUE` and `692` (`scripts/lo_copy.py`).
+    - It is pasted at row 186,622, so 6,689 rows are added. Parse, plan, apply, and reading the screen back take 17.0 ms (target 1 s).
+    - Every pasted cell reads back as Calc's text, and one undo restores the row count with no changes left.
+  - Unit tests: the TSV parsing cases above; a paste with leading zeros, `=`, quotes, and a multi-line cell that lengthens a short row and adds rows, undone and redone in one step; paste past the end refused before indexing; the cell limit.
+  - Smoke test via Broadway on a /tmp copy of the 10 MB file:
+    - Copied B1:D3 and pasted at row 193,310. That added a row (193,312), with "Pasted 9 cells · 10 unsaved edits", the pasted range selected, and Ctrl+Z back to 193,311.
+    - Copied column C (193,311 cells) and pasted at F1. The status showed "Pasted 193,311 cells" in the first screenshot, 300 ms after the key.
+    - Undo, redo, and a save: column F equals column C on every line, and every other column is identical to the source.
+  - Not tested yet: a real desktop paste from GUI LibreOffice into the app on Wayland (needs the user's OK to focus the app's window).
 - **2026-10-07 CLIP-1:** copy and cut a range as TSV plus text/html.
   - `data_model::copy`: `CsvTable::copy_range(rows, cols: impl RangeBounds<Col>, cancel, done) -> Option<Copied { tsv, html, cells }>` reads rows in 4,096-row chunks through the normal read path (edits, row and column order, clears), into a new `RowBlock::full_text()` that doesn't cut cells at the 256-byte display limit. A bounded range pads short rows, so the copy is a rectangle; whole rows (`col..`) take each row's own cells.
   - TSV: a cell is quoted (`""` escapes) only when it holds a tab, a line break, or a leading quote; there is no trailing newline.
