@@ -6,8 +6,8 @@ use crate::colmap::ColMap;
 use crate::rowmap::{RowMap, Run};
 use crate::{CellRef, Col, ColId, ColSet, Edit, EditOverlay, Row, RowId};
 use csv_engine::{
-    detect_dialect, detect_header, open_text, split_fields, Dialect, Encoding, Field, RowIndex,
-    Source, SparseRowIndex, DETECT_SAMPLE_BYTES,
+    detect_dialect, detect_header, open_text, open_text_as, split_fields, Dialect, Encoding, Field,
+    RowIndex, Source, SparseRowIndex, DETECT_SAMPLE_BYTES,
 };
 use std::borrow::Cow;
 use std::ops::{Bound, Range, RangeBounds};
@@ -182,9 +182,13 @@ pub struct CsvTable {
 }
 
 impl CsvTable {
-    /// A table over an index of UTF-8 text.
+    /// A table over an index of UTF-8 text, with a BOM if the text starts with one.
     pub fn new(index: Arc<SparseRowIndex>, dialect: Dialect) -> Self {
-        Self::with_encoding(index, dialect, Encoding::UTF8)
+        let encoding = Encoding {
+            bom: index.source().bytes().starts_with(UTF8_BOM),
+            ..Encoding::UTF8
+        };
+        Self::with_encoding(index, dialect, encoding)
     }
 
     /// A table whose source was decoded from `encoding`; saves encode back to it.
@@ -221,6 +225,33 @@ impl CsvTable {
             spans: Vec::new(),
             fields: Vec::new(),
         }
+    }
+
+    /// A new table with no file behind it (SAVE-2): no rows yet, comma-separated UTF-8,
+    /// nothing to index. It gets a file through Save As.
+    pub fn untitled() -> Self {
+        let dialect = Dialect::default();
+        let index = SparseRowIndex::new(Arc::new(Source::empty()), &dialect);
+        index
+            .build(&std::sync::atomic::AtomicBool::new(false))
+            .expect("an empty source indexes at once");
+        Self::new(index, dialect)
+    }
+
+    /// Open `path` as `encoding` rather than detecting it: the encoding a Save As wrote
+    /// (a Windows-1252 file that happens to be plain ASCII would otherwise read as UTF-8).
+    pub fn open_as(
+        path: &Path,
+        choice: DelimiterChoice,
+        encoding: Encoding,
+    ) -> std::io::Result<Self> {
+        let source = open_text_as(path, encoding)?;
+        let dialect = dialect_for(&source, choice);
+        Ok(Self::with_encoding(
+            SparseRowIndex::new(Arc::new(source), &dialect),
+            dialect,
+            encoding,
+        ))
     }
 
     /// Map `path`, detect its encoding (decoding to UTF-8 if needed), and pick its dialect.

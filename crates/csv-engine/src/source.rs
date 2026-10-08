@@ -43,6 +43,14 @@ impl Source {
         })
     }
 
+    /// No file at all: a new, untitled table's source (SAVE-2).
+    pub fn empty() -> Self {
+        Self {
+            map: None,
+            slot: None,
+        }
+    }
+
     /// The file's bytes. Pages lost to truncation read as zeros; see [`Self::changed`].
     pub fn bytes(&self) -> &[u8] {
         self.map.as_deref().unwrap_or(&[])

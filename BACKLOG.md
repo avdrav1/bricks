@@ -53,7 +53,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | EDIT-5 | M2 | P0 | done | CMD-1, GRID-4 | Delete key clears selected cells | Undoable as one step |
 | CLIP-1 | M2 | P0 | done | GRID-4 | Copy/cut range as TSV plus text/html | Pastes cleanly into LibreOffice, Excel web, a text editor |
 | CLIP-2 | M2 | P0 | done | CLIP-1, CMD-1 | Paste TSV into a range, expanding as needed | 10k rows from LibreOffice paste in under 1 s |
-| SAVE-2 | M2 | P0 | todo | SAVE-1, ENG-6 | Save, Save As, New | Save As can change delimiter and encoding |
+| SAVE-2 | M2 | P0 | done | SAVE-1, ENG-6 | Save, Save As, New | Save As can change delimiter and encoding |
 | SAVE-3 | M2 | P0 | todo | SAVE-1, DEC-5 | Background save with progress and cancel | UI responsive during 1 GB save; save under 15 s |
 | SAVE-4 | M2 | P1 | todo | SAVE-1 | Preserve quoting style and line endings of untouched rows | Saving an unedited file produces an empty diff |
 | ENG-8 | M3 | P0 | todo | DEC-5 | Background job framework: progress and cancel | Every long job cancels within 200 ms |
@@ -80,6 +80,33 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-08 SAVE-2:** Save, Save As, New. Two user decisions: New gets an editable edge (one empty row and column past the data where typing grows the table), and Save As picks the format in a small app dialog before the desktop's file chooser.
+  - `SaveJob::with_format(delimiter, encoding)`. The job keeps the source dialect for parsing and an output dialect for writing.
+    - With another delimiter, every row is re-assembled (the EDIT-4 path, `reassemble_all`): each untouched field is decoded with the source quote and re-encoded with minimal quoting for the new delimiter. So `"Smith, Ann"` loses its quotes in TSV, and `x;y` gains them in semicolon output. Each row keeps its own line ending.
+    - The UTF-8 BOM is now written from the target encoding, not from whether the source bytes started with one. Other encodings get theirs from `EncodeWriter` as before.
+    - `CsvTable::new` (code-built tables) now takes a UTF-8 BOM in the bytes to mean UTF-8 with BOM, so the older save tests keep their bytes.
+  - Untitled: `Source::empty()` and `CsvTable::untitled()` (comma, LF, UTF-8, no header, already indexed).
+  - `CsvTable::open_as(path, choice, encoding)` reopens with the encoding a Save As wrote. Without it, a Windows-1252 file that is pure ASCII would reopen as UTF-8, and the next Ctrl+S would write UTF-8.
+  - Acceptance: `file-format/tests/save_as.rs`.
+    - The table is a BOM'd UTF-8 CRLF file with a quoted comma, escaped quotes, `x;y|z`, a tab, `Zoë`, an edit, an inserted row, and a cleared cell.
+    - It is saved as tab/UTF-16 LE, semicolon/Windows-1252, pipe/UTF-8, and comma/UTF-8 with BOM. Each gives exact expected text and the right BOM, and reopens with that delimiter and encoding detected and the same cells.
+    - The source file is untouched. `東京` to Windows-1252 fails the save, naming the character, and leaves no file.
+  - Edge (grid/app):
+    - `bounds()` and the viewports show one more column than the widest row seen, and one more row once indexing is complete.
+    - Committing a cell on the edge row goes through `CsvTable::paste` (adds the row) as a `Batch` named "Edit cell", so it is one undo step.
+    - `GridCache::widen` counts the new column before rows reload, so Tab can move past it at once.
+    - Clear, delete rows, and delete columns clamp to the data.
+    - End and Ctrl+End stop at the last data cell, not the edge.
+    - Once indexing is done, a cursor left below a reopened file's rows (e.g. a header newly detected) moves back in.
+  - App: `Session.path` is `Option` (untitled) and `Session.encoding` remembers a Save As encoding. The window registry holds sessions, so "already open" follows Save As, and Save As onto a file open in another window is refused with an alert. Title and delimiter dropdown follow the session each tick; `SaveState::Saving` carries the Save As target, which `finish_save` adopts before reopening. Header bar: Open, New, Save As.
+  - **Fixed the EDIT-5 scrolling bug** (scroll range and gutter stuck after a fast-reindexing save): the status tick now runs `finish_save` before reading `is_complete`. Seen working in the smoke test: after Save As of the 10 MB file, Ctrl+End scrolled to row 193,312 with a full-width gutter.
+  - Smoke test via Broadway (private D-Bus, `GDK_DEBUG=no-portals`, desktop display variables unset):
+    - Started without a file and pressed New. Typed `name`/`city`, `Ann`/`Paris, FR`, `Bo`/`00123` into the edge.
+    - Ctrl+S opened the format dialog; picked Tab + UTF-16 LE. GTK's own chooser offered `Untitled.tsv` in /tmp; saved as `save2-new.tsv`. The file starts `FF FE` and decodes to `name\tcity\nAnn\tParis, FR\nBo\t00123\n`. The window became "save2-new.tsv · Tab · UTF-16 LE" with the header detected.
+    - On a /tmp copy of the 10 MB file, typed into the edge row below the last row (`appended`, `x;y`), then Save As semicolon + Windows-1252. The output has 193,313 lines, the original 193,312 identical cell for cell (`;` for `,`), and ends `appended;"x;y";;;;;;`. The source is untouched.
+    - A later plain Ctrl+S on that file kept semicolons.
+  - **Process slip:** the first smoke run used only a private D-Bus session. The session still activated a FileChooser portal, which opened a "Save As" dialog on the user's real desktop (workspace 2) for about a minute until I closed it. Smoke runs that open file dialogs now also set `GDK_DEBUG=no-portals` and unset `WAYLAND_DISPLAY`, `DISPLAY`, and `HYPRLAND_INSTANCE_SIGNATURE`; the reruns put nothing on the desktop (checked with `hyprctl clients`).
+  - Follow-ups: an encoding chosen by Save As lasts for the window; a later fresh open re-detects (APP-4, recent files). Closing a window with unsaved edits still doesn't ask (APP-7). Typing non-ASCII through Broadway's keyboard injection doesn't arrive, so non-ASCII was covered by the Save As test, not the smoke test.
 - **2026-10-07 CLIP-2:** paste TSV into a range, expanding as needed.
   - `data_model::parse_tsv`: rows end at `\n`, `\r\n`, or `\r`, and cells split at tabs. A cell starting with `"` is quoted with `""` escapes and may hold tabs and line breaks; a quote that doesn't close properly before a tab or line break is kept as text. A final line break doesn't add an empty row. `"\n"` is one empty cell (what Calc copies for one empty cell); `""` is nothing.
   - `CsvTable::paste(row, col, cells) -> Result<Vec<Edit>, PasteError>`:
@@ -125,7 +152,7 @@ Story notes, decisions made mid-story, and follow-ups go here, newest first.
   - App: Delete (or keypad Delete) with no modifiers; Shift+Delete and Ctrl+Delete are left alone (cut, delete word). Whole columns wait for indexing so they reach every row; `grid::Selection::is_whole_rows` sends whole rows as an open column range.
   - Acceptance: `commands::clear::tests::delete_clears_the_selection_and_undoes_in_one_step`: a 2 × 2 clear over an edited cell; one undo restores all four (the edit included), one redo clears them again. Model test `cleared_cells_read_and_save_empty_and_undo_exactly`: quoted field, short row, wider row with an open-ended clear, an edit inside a clear, an inserted row; exact saved bytes, and undoing everything gives back the file. `commands/tests/clear_1gb.rs` (ignored, corpus, release): clearing column C over 19,094,579 rows takes 0.004 ms, +0 KiB, 116 B of history; undo 0.001 ms; the save re-assembles every row in 2.9–3.8 s with city empty in every data row and the header kept.
   - Smoke test via Broadway on a /tmp copy of the 10 MB file: Delete on B2:C3, then on column D; two undos back to the original, two redos; Delete on row 5 (whole row); typed "hi" into cleared C2; saved. The file has `1,,hi,,31.78,…`, `2,,,,716.02,…`, `,,,,,,,` for row 5, an empty revenue in every row, and everything else identical.
-  - **Bug found (not EDIT-5, open):** after a save of a file that re-indexes within one 100 ms status tick (anything up to a few hundred MB), the scroll range and row-number gutter stay as they were when the reopened file had hardly any rows: Ctrl+End doesn't scroll, and row numbers overlap column A. Cause: in `app/src/main.rs` the tick computes `complete` before `finish_save` swaps in the reopened table, then sets `was_complete = complete`, so the reopened table's completion never triggers `update_adjustments`. Since SAVE-1. Fix: read `complete` after `finish_save` (or reset `was_complete` when the table is replaced).
+  - **Bug found (not EDIT-5; fixed in SAVE-2):** after a save of a file that re-indexes within one 100 ms status tick (anything up to a few hundred MB), the scroll range and row-number gutter stay as they were when the reopened file had hardly any rows: Ctrl+End doesn't scroll, and row numbers overlap column A. Cause: in `app/src/main.rs` the tick computes `complete` before `finish_save` swaps in the reopened table, then sets `was_complete = complete`, so the reopened table's completion never triggers `update_adjustments`. Since SAVE-1.
 - **2026-10-07 EDIT-4:** insert and delete columns, on a column map in front of the overlay (ADR 0003).
   - `ColId` gives columns a stable identity, like `RowId`: a file column index, or the high bit for inserted columns. `CellRef.col` is now a `ColId` (the type change made the compiler find every call site), and the overlay keys on it, so edits stay with their columns. Positions map through `CsvTable::col_id`/`col_of`.
   - `data_model::colmap::ColMap` holds explicit ids for the first positions, then file columns in order from `tail`. Rows are ragged and the widest isn't known up front, so a plain list can't work. An inserted column reads as `""` in every row, so header titles continue past it. `Edit::InsertCols`/`DeleteCols` with inverses; undo restores deleted columns with their edits.

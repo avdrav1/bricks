@@ -184,7 +184,7 @@ mod imp {
                 scroll: vadj.value(),
                 extent: body_h,
                 sizes: &sizing.rows,
-                count: table.row_count(),
+                count: shown_rows(table),
             };
             let visible = rows.visible(0);
             cache.ensure(visible.clone(), BUFFER_ROWS, table);
@@ -194,7 +194,7 @@ mod imp {
                 scroll: hadj.value(),
                 extent: body_w,
                 sizes: &sizing.cols,
-                count: u64::from(cache.col_count()),
+                count: u64::from(cache.col_count()) + 1,
             };
             let visible_cols = cols.visible(0);
 
@@ -512,13 +512,15 @@ impl GridView {
     }
 
     /// What navigation moves within: the rows indexed so far, the widest row seen, and one
-    /// screen of whole rows. Whole-row and whole-column selections follow it as it grows.
+    /// screen of whole rows, plus the editable edge: one empty row (once indexing is done)
+    /// and one empty column past the data, where typing grows the table (SAVE-2). Whole-row
+    /// and whole-column selections follow it as it grows.
     fn bounds(&self) -> Bounds {
         let imp = self.imp();
         let (_, body_h) = imp.body_size();
         let b = Bounds {
-            rows: self.row_count(),
-            cols: imp.cache.borrow().col_count(),
+            rows: self.shown_rows(),
+            cols: imp.cache.borrow().col_count() + 1,
             page_rows: ((body_h / ROW_H).floor() as u64).max(1),
         };
         if let Some(old) = imp.bounds_seen.replace(Some(b)) {
@@ -527,6 +529,15 @@ impl GridView {
                 sel.grow(old, b);
                 imp.selection.set(sel);
             }
+        }
+        // A reopened file can have fewer rows than the cursor's (a header detected where
+        // there was none); once its row count is final, bring the cursor back in.
+        let cur = imp.selection.get().cursor();
+        if b.rows > 0 && cur.row >= b.rows && self.is_complete() {
+            imp.selection.set(Selection::at(grid::Cell {
+                row: b.rows - 1,
+                col: cur.col,
+            }));
         }
         b
     }
@@ -538,7 +549,7 @@ impl GridView {
         let value = |adj: &RefCell<Option<gtk::Adjustment>>| {
             adj.borrow().as_ref().map_or(0.0, |a| a.value())
         };
-        let (row_count, col_count) = (self.row_count(), imp.cache.borrow().col_count());
+        let (row_count, col_count) = (self.shown_rows(), imp.cache.borrow().col_count() + 1);
         let sizing = imp.sizing.borrow();
         f(
             Viewport {
@@ -823,8 +834,20 @@ impl GridView {
     pub fn press(&self, key: Key, mods: Mods) {
         let imp = self.imp();
         let bounds = self.bounds();
+        // End and Ctrl+End go to the last cell with data, as in Calc, not the empty edge.
+        let within = match key {
+            Key::End => {
+                let (rows, cols) = (self.row_count(), imp.cache.borrow().col_count());
+                Bounds {
+                    rows: if rows > 0 { rows } else { bounds.rows },
+                    cols: if cols > 0 { cols } else { bounds.cols },
+                    ..bounds
+                }
+            }
+            _ => bounds,
+        };
         let mut sel = imp.selection.get();
-        sel.press(key, mods, bounds);
+        sel.press(key, mods, within);
         imp.selection.set(sel);
         // Paging scrolls the view by a page as well, like Calc.
         if let (Key::PageUp | Key::PageDown, Some(vadj)) = (key, imp.vadj.borrow().as_ref()) {
@@ -1008,19 +1031,42 @@ impl GridView {
             .as_ref()
             .map(|e| e.text().to_string())
             .unwrap_or_default();
+        let text_empty = text.is_empty();
+        let mut grew = false;
         {
             let mut table = imp.table.borrow_mut();
             if let (Some(table), Some(undo)) = (table.as_mut(), imp.undo.borrow_mut().as_mut()) {
-                if table.cell_value(row, col).as_deref() != Some(text.as_str()) {
+                if row >= table.row_count() {
+                    // The edge row (SAVE-2): add the row and set the cell, as one step.
+                    if let Ok(edits) = table.paste(row, col, &[vec![text]]) {
+                        if !edits.is_empty() {
+                            let at = CellRef {
+                                row: table.row_id(row.min(table.row_count().saturating_sub(1))),
+                                col: table.col_id(col),
+                            };
+                            undo.execute(Box::new(Batch::new("Edit cell", edits, at)), table);
+                            grew = true;
+                        }
+                    }
+                } else if table.cell_value(row, col).as_deref() != Some(text.as_str()) {
                     let at = CellRef {
                         row: table.row_id(row),
                         col: table.col_id(col),
                     };
                     undo.execute(Box::new(SetCell::new(at, text)), table);
-                    imp.cache.borrow_mut().invalidate();
-                    imp.titles.take();
                 }
             }
+        }
+        let mut cache = imp.cache.borrow_mut();
+        cache.invalidate();
+        if !text_empty {
+            // The edge column is a column now; Tab can move past it before rows reload.
+            cache.widen(col + 1);
+        }
+        drop(cache);
+        imp.titles.take();
+        if grew {
+            self.update_adjustments();
         }
         self.close_editor();
     }
@@ -1132,7 +1178,7 @@ impl GridView {
             .table
             .borrow()
             .as_ref()
-            .and_then(|t| t.delete_rows(first, count));
+            .and_then(|t| t.delete_rows(first, count.min(t.row_count().saturating_sub(first))));
         self.reshape(edit);
     }
 
@@ -1172,6 +1218,8 @@ impl GridView {
     /// Ctrl+- on whole columns (EDIT-4): delete the selected columns.
     pub fn delete_cols(&self) {
         let (first, count) = self.selected_cols();
+        // Not the empty edge column: there is nothing there to delete.
+        let count = count.min(self.imp().cache.borrow().col_count().saturating_sub(first));
         let edit = self
             .imp()
             .table
@@ -1233,7 +1281,7 @@ impl GridView {
             let rows = match sel.whole_columns() {
                 Some(_) if !table.is_complete() => return,
                 Some(_) => tl.row..table.row_count(),
-                None => tl.row..br.row + 1,
+                None => tl.row..(br.row + 1).min(table.row_count()),
             };
             let edit = if sel.is_whole_rows() {
                 table.clear_cells(rows, tl.col..)
@@ -1592,6 +1640,11 @@ impl GridView {
             .map_or(0, |t| t.row_count())
     }
 
+    /// Rows the grid shows: the table's, plus the empty edge row once indexing is done.
+    fn shown_rows(&self) -> u64 {
+        self.imp().table.borrow().as_ref().map_or(0, shown_rows)
+    }
+
     pub fn is_complete(&self) -> bool {
         self.imp()
             .table
@@ -1629,7 +1682,7 @@ impl GridView {
     /// Resize scroll ranges to the rows indexed so far and the widest row seen.
     pub fn update_adjustments(&self) {
         let imp = self.imp();
-        let rows = self.row_count();
+        let rows = self.shown_rows();
         // Room for the widest row number in the current font (digits are tabular).
         let digits = rows.max(1).ilog10() as i32 + 1;
         let digit_w = self.create_pango_layout(Some("0")).pixel_size().0.max(1);
@@ -1643,13 +1696,18 @@ impl GridView {
             v.configure(v.value(), 0.0, upper, ROW_H, body_h * 0.9, body_h);
         }
         if let Some(hz) = imp.hadj.borrow().as_ref() {
-            let cols = u64::from(imp.cache.borrow().col_count().max(1));
+            let cols = u64::from(imp.cache.borrow().col_count() + 1);
             let upper = sizing.cols.start(cols).max(body_w);
             hz.configure(hz.value(), 0.0, upper, COL_W / 4.0, body_w * 0.9, body_w);
         }
         drop(sizing);
         self.queue_draw();
     }
+}
+
+/// Rows shown for `table`: its rows, plus the editable edge row once indexing is done.
+fn shown_rows(table: &CsvTable) -> u64 {
+    table.row_count() + u64::from(table.is_complete())
 }
 
 /// What a mouse drag stretches the selection over (GRID-4): cells, or whole rows/columns

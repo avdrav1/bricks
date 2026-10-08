@@ -3,8 +3,9 @@
 //! Usage: `spreadsheet [FILE.csv] [--bench-scroll FRAMES | --bench-jump ROW [--jumps N]]`
 //!
 //! Without a file it shows a start window; Ctrl+O or an Open button picks one through the
-//! desktop's file dialog (xdg-desktop-portal via `gtk::FileDialog`, APP-1). Each file gets
-//! its own window.
+//! desktop's file dialog (xdg-desktop-portal via `gtk::FileDialog`, APP-1), and Ctrl+N or
+//! New starts an untitled table (SAVE-2). Each file gets its own window. Ctrl+Shift+S
+//! saves as another file, delimiter, or encoding.
 //!
 //! Benchmark modes print JSON and exit; the acceptance tests run them.
 //! - `--bench-scroll` (GRID-1) waits for indexing, jumps to the middle of the file, scrolls
@@ -18,6 +19,7 @@ mod editor;
 mod grid_view;
 mod status;
 
+use csv_engine::{Charset, Encoding};
 use data_model::{CsvTable, DelimiterChoice, RereadError, SaveStats};
 use grid_view::{GridView, ROW_H};
 use gtk::{glib, prelude::*};
@@ -111,8 +113,12 @@ fn main() -> glib::ExitCode {
         let open = gtk::gio::ActionEntry::builder("open")
             .activate(|app: &gtk::Application, _, _| choose_and_open(app))
             .build();
-        app.add_action_entries([open]);
+        let new = gtk::gio::ActionEntry::builder("new")
+            .activate(|app: &gtk::Application, _, _| new_window(app))
+            .build();
+        app.add_action_entries([open, new]);
         app.set_accels_for_action("app.open", &["<Control>o"]);
+        app.set_accels_for_action("app.new", &["<Control>n"]);
     });
     let (opened, bench) = (RefCell::new(opened), args.bench);
     app.connect_activate(move |app| match opened.take() {
@@ -125,20 +131,16 @@ fn main() -> glib::ExitCode {
 
 /// Map `path` and start indexing it.
 fn open_session(path: &Path) -> std::io::Result<(Rc<Session>, CsvTable)> {
-    let session = Rc::new(Session {
-        path: path.to_owned(),
-        choice: Cell::new(DelimiterChoice::Auto),
-        header: Cell::new(None),
-        indexing: RefCell::new(Arc::new(AtomicBool::new(false))),
-    });
+    let session = Rc::new(Session::new(Some(path.to_owned())));
     let table = session.open()?;
     Ok((session, table))
 }
 
 thread_local! {
-    /// Windows showing a file, by canonical path: opening a file again brings its window
-    /// forward instead of a second window that would save over the first one's edits.
-    static OPEN_WINDOWS: RefCell<Vec<(PathBuf, glib::WeakRef<gtk::ApplicationWindow>)>> =
+    /// Every window and the file it shows: opening a file again brings its window forward
+    /// instead of a second window that would save over the first one's edits. Looked up by
+    /// the session's current path, so it follows Save As.
+    static OPEN_WINDOWS: RefCell<Vec<(Rc<Session>, glib::WeakRef<gtk::ApplicationWindow>)>> =
         const { RefCell::new(Vec::new()) };
 }
 
@@ -152,12 +154,28 @@ fn window_for(path: &Path) -> Option<gtk::ApplicationWindow> {
     OPEN_WINDOWS.with_borrow_mut(|open| {
         open.retain(|(_, w)| w.upgrade().is_some());
         open.iter()
-            .find(|(p, _)| *p == path)
+            .find(|(s, _)| s.path.borrow().as_deref().map(canonical) == Some(path.clone()))
             .and_then(|(_, w)| w.upgrade())
     })
 }
 
-/// Shown when the app starts without a file: one button that opens the file dialog.
+/// Ctrl+N (SAVE-2): a new window with an untitled, empty table; type into its edge row
+/// and column to fill it, and Save asks where to put it.
+fn new_window(app: &gtk::Application) {
+    let session = Rc::new(Session::new(None));
+    build_window(app, &session, CsvTable::untitled(), None);
+    close_start_window(app);
+}
+
+fn close_start_window(app: &gtk::Application) {
+    for w in app.windows() {
+        if w.widget_name() == START_WINDOW {
+            w.close();
+        }
+    }
+}
+
+/// Shown when the app starts without a file: buttons that open a file or start a new one.
 fn start_window(app: &gtk::Application) {
     let heading = gtk::Label::new(Some("Open a CSV file"));
     heading.add_css_class("title-2");
@@ -166,7 +184,11 @@ fn start_window(app: &gtk::Application) {
     open.add_css_class("pill");
     open.set_halign(gtk::Align::Center);
     open.set_action_name(Some("app.open"));
-    let hint = gtk::Label::new(Some("Ctrl+O, or run: spreadsheet FILE.csv"));
+    let new = gtk::Button::with_label("New");
+    new.add_css_class("pill");
+    new.set_halign(gtk::Align::Center);
+    new.set_action_name(Some("app.new"));
+    let hint = gtk::Label::new(Some("Ctrl+O, Ctrl+N, or run: spreadsheet FILE.csv"));
     hint.add_css_class("dim-label");
     let page = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
@@ -176,6 +198,7 @@ fn start_window(app: &gtk::Application) {
         .build();
     page.append(&heading);
     page.append(&open);
+    page.append(&new);
     page.append(&hint);
     let window = gtk::ApplicationWindow::builder()
         .application(app)
@@ -192,10 +215,8 @@ fn start_window(app: &gtk::Application) {
 
 const START_WINDOW: &str = "start";
 
-/// The file dialog (APP-1). `gtk::FileDialog` goes through xdg-desktop-portal's
-/// FileChooser when one is running, so each desktop shows its own dialog (GTK falls back
-/// to its built-in one without a portal).
-fn choose_and_open(app: &gtk::Application) {
+/// "CSV and text files" and "All files", the first as the default.
+fn file_filters() -> (gtk::gio::ListStore, gtk::FileFilter) {
     let csv = gtk::FileFilter::new();
     csv.set_name(Some("CSV and text files"));
     for mime in ["text/csv", "text/tab-separated-values", "text/plain"] {
@@ -210,6 +231,14 @@ fn choose_and_open(app: &gtk::Application) {
     let filters = gtk::gio::ListStore::new::<gtk::FileFilter>();
     filters.append(&csv);
     filters.append(&all);
+    (filters, csv)
+}
+
+/// The file dialog (APP-1). `gtk::FileDialog` goes through xdg-desktop-portal's
+/// FileChooser when one is running, so each desktop shows its own dialog (GTK falls back
+/// to its built-in one without a portal).
+fn choose_and_open(app: &gtk::Application) {
+    let (filters, csv) = file_filters();
     let dialog = gtk::FileDialog::builder()
         .title("Open")
         .modal(true)
@@ -247,11 +276,7 @@ fn open_window(app: &gtk::Application, path: &Path, parent: Option<&gtk::Window>
     match open_session(path) {
         Ok((session, table)) => {
             build_window(app, &session, table, None);
-            for w in app.windows() {
-                if w.widget_name() == START_WINDOW {
-                    w.close();
-                }
-            }
+            close_start_window(app);
         }
         Err(e) => alert(
             parent,
@@ -270,10 +295,13 @@ fn alert(parent: Option<&gtk::Window>, message: &str, detail: &str) {
         .show(parent);
 }
 
-/// The open file: where it is, how its delimiter is chosen, and the index build in flight.
+/// The open file: where it is (`None` while untitled), how its delimiter and encoding are
+/// chosen, and the index build in flight.
 struct Session {
-    path: PathBuf,
+    path: RefCell<Option<PathBuf>>,
     choice: Cell<DelimiterChoice>,
+    /// The encoding a Save As wrote (SAVE-2); `None` while detection decides.
+    encoding: Cell<Option<Encoding>>,
     /// "First row is header" as the user set it (ENG-7); `None` while detection decides.
     /// Re-applied whenever the file is read again (delimiter change, save).
     header: Cell<Option<bool>>,
@@ -282,10 +310,39 @@ struct Session {
 }
 
 impl Session {
-    /// Map the file with the current delimiter choice (detected on Auto, ENG-4) and start
-    /// indexing it.
+    fn new(path: Option<PathBuf>) -> Self {
+        Self {
+            path: RefCell::new(path),
+            choice: Cell::new(DelimiterChoice::Auto),
+            encoding: Cell::new(None),
+            header: Cell::new(None),
+            indexing: RefCell::new(Arc::new(AtomicBool::new(false))),
+        }
+    }
+
+    /// The window title's file name: the file's, or "Untitled".
+    fn name(&self) -> String {
+        self.path.borrow().as_deref().map_or_else(
+            || "Untitled".to_owned(),
+            |p| {
+                p.file_name()
+                    .map_or_else(|| p.display().to_string(), |n| n.to_string_lossy().into())
+            },
+        )
+    }
+
+    /// Map the file with the current delimiter choice (detected on Auto, ENG-4) and
+    /// encoding (detected unless a Save As chose it), and start indexing it.
     fn open(&self) -> std::io::Result<CsvTable> {
-        let mut table = CsvTable::open(&self.path, self.choice.get())?;
+        let path = self
+            .path
+            .borrow()
+            .clone()
+            .ok_or_else(|| std::io::Error::other("an untitled table has no file to read"))?;
+        let mut table = match self.encoding.get() {
+            Some(encoding) => CsvTable::open_as(&path, self.choice.get(), encoding)?,
+            None => CsvTable::open(&path, self.choice.get())?,
+        };
         self.apply_header(&mut table);
         self.index(&table)?;
         Ok(table)
@@ -414,25 +471,42 @@ fn build_window(
     let bar = StatusBar::new();
     layout.attach(&bar.root, 0, 2, 2, 1);
 
-    let path = &session.path;
-    let name = path.file_name().map_or_else(
-        || path.display().to_string(),
-        |n| n.to_string_lossy().into(),
-    );
     let window = gtk::ApplicationWindow::builder()
         .application(app)
-        .title(&name)
+        .title(session.name())
         .default_width(1400)
         .default_height(900)
         .child(&layout)
         .build();
-    OPEN_WINDOWS.with_borrow_mut(|open| open.push((canonical(path), window.downgrade())));
+    OPEN_WINDOWS.with_borrow_mut(|open| open.push((session.clone(), window.downgrade())));
     let delimiter = delimiter_dropdown(session, &grid);
     let open = gtk::Button::from_icon_name("document-open-symbolic");
     open.set_tooltip_text(Some("Open… (Ctrl+O)"));
     open.set_action_name(Some("app.open"));
+    let new = gtk::Button::from_icon_name("document-new-symbolic");
+    new.set_tooltip_text(Some("New (Ctrl+N)"));
+    new.set_action_name(Some("app.new"));
+    let save = Rc::new(RefCell::new(SaveState::Idle));
+    let save_as_button = gtk::Button::from_icon_name("document-save-as-symbolic");
+    save_as_button.set_tooltip_text(Some("Save As… (Ctrl+Shift+S)"));
+    save_as_button.connect_clicked({
+        let (window, grid, session, save) = (
+            window.downgrade(),
+            grid.downgrade(),
+            session.clone(),
+            save.clone(),
+        );
+        move |_| {
+            if let (Some(window), Some(grid)) = (window.upgrade(), grid.upgrade()) {
+                grid.finish_editing();
+                save_as(&window, &grid, &session, &save);
+            }
+        }
+    });
     let header = gtk::HeaderBar::new();
     header.pack_start(&open);
+    header.pack_start(&new);
+    header.pack_start(&save_as_button);
     header.pack_end(&delimiter);
     let header_row = header_toggle(session, &grid);
     header.pack_end(&header_row);
@@ -455,15 +529,20 @@ fn build_window(
     });
     grid.add_controller(scroll);
 
-    // Ctrl+S saves; Ctrl+Z undoes, Ctrl+Shift+Z and Ctrl+Y redo (CMD-1). Navigation keys
-    // belong to the grid (GRID-3); the cell editor's entry keeps its own text undo.
-    let save = Rc::new(RefCell::new(SaveState::Idle));
+    // Ctrl+S saves (asking where, for an untitled table) and Ctrl+Shift+S saves as;
+    // Ctrl+Z undoes, Ctrl+Shift+Z and Ctrl+Y redo (CMD-1). Navigation keys belong to the
+    // grid (GRID-3); the cell editor's entry keeps its own text undo.
     let keys = gtk::EventControllerKey::new();
     keys.connect_key_pressed({
-        let (grid, save, session) = (grid.downgrade(), save.clone(), session.clone());
+        let (window, grid, save, session) = (
+            window.downgrade(),
+            grid.downgrade(),
+            save.clone(),
+            session.clone(),
+        );
         move |_, key, _, mods| {
             use gtk::gdk::{Key, ModifierType};
-            let Some(grid) = grid.upgrade() else {
+            let (Some(window), Some(grid)) = (window.upgrade(), grid.upgrade()) else {
                 return glib::Propagation::Proceed;
             };
             if !mods.contains(ModifierType::CONTROL_MASK) {
@@ -473,7 +552,11 @@ fn build_window(
             match key {
                 Key::s | Key::S => {
                     grid.finish_editing(); // save what was typed, as Calc does
-                    start_save(&grid, &session.path, &save);
+                    if shift || session.path.borrow().is_none() {
+                        save_as(&window, &grid, &session, &save);
+                    } else {
+                        start_save(&grid, &session, &save, None);
+                    }
                 }
                 Key::z if !shift => {
                     grid.undo();
@@ -504,6 +587,9 @@ fn build_window(
             let (Some(grid), Some(window)) = (grid.upgrade(), window.upgrade()) else {
                 return glib::ControlFlow::Break;
             };
+            // Finish a save first: it can swap in the reopened file, whose indexing the
+            // rest of this tick follows.
+            finish_save(&grid, &session, &save);
             // While indexing (also after a save reopens the file), grow the scroll range.
             let complete = grid.is_complete();
             if !complete || !was_complete {
@@ -516,21 +602,28 @@ fn build_window(
                     started.elapsed()
                 );
             }
-            finish_save(&grid, &session, &save);
             // Detection runs again when the file is re-read (delimiter change, save).
             if header_row.is_active() != grid.has_header() {
                 header_row.set_active(grid.has_header());
             }
             let can_switch =
-                grid.edit_count() == 0 && !matches!(*save.borrow(), SaveState::Saving(_));
+                grid.edit_count() == 0 && !matches!(*save.borrow(), SaveState::Saving(..));
             delimiter.set_sensitive(can_switch);
             delimiter.set_tooltip_text(Some(if can_switch {
                 "Delimiter"
             } else {
                 "Delimiter (save your edits before changing it)"
             }));
+            // A Save As can change the delimiter choice.
+            let choice = DELIMITERS
+                .iter()
+                .position(|(_, c)| *c == session.choice.get())
+                .unwrap_or(0) as u32;
+            if delimiter.selected() != choice {
+                delimiter.set_selected(choice);
+            }
             let shown = bar.update(&grid, session.choice.get(), &save.borrow());
-            let title = status::title(&name, grid.edit_count());
+            let title = status::title(&session.name(), grid.edit_count());
             if window.title().as_deref() != Some(title.as_str()) {
                 window.set_title(Some(&title));
             }
@@ -597,21 +690,49 @@ fn bench_open(app: &gtk::Application, grid: &GridView) {
     grid.add_tick_callback(|_, _| glib::ControlFlow::Continue);
 }
 
+/// Where and how a Save As writes (SAVE-2).
+struct Target {
+    path: PathBuf,
+    delimiter: u8,
+    encoding: Encoding,
+}
+
 enum SaveState {
     Idle,
-    Saving(mpsc::Receiver<Result<(SaveStats, Duration), String>>),
+    Saving(
+        mpsc::Receiver<Result<(SaveStats, Duration), String>>,
+        Option<Target>,
+    ),
     Saved(Duration),
     Failed(String),
 }
 
-/// Ctrl+S: write the table to its own file on a worker thread (save is atomic, SAVE-1).
-/// Editing is paused until it finishes, so no edit can be lost between snapshot and reopen.
-fn start_save(grid: &GridView, path: &Path, save: &RefCell<SaveState>) {
-    if matches!(*save.borrow(), SaveState::Saving(_)) || grid.edit_count() == 0 {
+/// Ctrl+S: write the table to its own file on a worker thread (save is atomic, SAVE-1);
+/// with a `target`, to another file, delimiter, or encoding (Save As, SAVE-2). Editing is
+/// paused until it finishes, so no edit can be lost between snapshot and reopen.
+fn start_save(
+    grid: &GridView,
+    session: &Session,
+    save: &RefCell<SaveState>,
+    target: Option<Target>,
+) {
+    if matches!(*save.borrow(), SaveState::Saving(..))
+        || (target.is_none() && grid.edit_count() == 0)
+    {
         return;
     }
+    let Some(path) = target
+        .as_ref()
+        .map(|t| t.path.clone())
+        .or_else(|| session.path.borrow().clone())
+    else {
+        return;
+    };
     let job = match grid.save_job() {
-        Ok(job) => job,
+        Ok(job) => match &target {
+            Some(t) => job.with_format(t.delimiter, t.encoding),
+            None => job,
+        },
         Err(_) => {
             *save.borrow_mut() = SaveState::Failed("wait for indexing to finish".into());
             return;
@@ -619,7 +740,6 @@ fn start_save(grid: &GridView, path: &Path, save: &RefCell<SaveState>) {
     };
     grid.set_saving(true);
     let (tx, rx) = mpsc::channel();
-    let path = path.to_owned();
     let spawned = std::thread::Builder::new()
         .name("save".into())
         .spawn(move || {
@@ -628,7 +748,7 @@ fn start_save(grid: &GridView, path: &Path, save: &RefCell<SaveState>) {
             let _ = tx.send(r.map(|s| (s, t.elapsed())));
         });
     *save.borrow_mut() = match spawned {
-        Ok(_) => SaveState::Saving(rx),
+        Ok(_) => SaveState::Saving(rx, target),
         Err(e) => {
             grid.set_saving(false);
             SaveState::Failed(e.to_string())
@@ -636,18 +756,24 @@ fn start_save(grid: &GridView, path: &Path, save: &RefCell<SaveState>) {
     };
 }
 
-/// When a save has finished: reopen the saved file (its edits are now on disk) or report
-/// the error with the edits still in memory.
+/// When a save has finished: reopen the saved file (its edits are now on disk; after a
+/// Save As, the new file with its delimiter and encoding) or report the error with the
+/// edits still in memory.
 fn finish_save(grid: &GridView, session: &Session, save: &RefCell<SaveState>) {
-    let result = match &*save.borrow() {
-        SaveState::Saving(rx) => match rx.try_recv() {
-            Ok(r) => r,
+    let (result, target) = match &mut *save.borrow_mut() {
+        SaveState::Saving(rx, target) => match rx.try_recv() {
+            Ok(r) => (r, target.take()),
             Err(mpsc::TryRecvError::Empty) => return,
-            Err(mpsc::TryRecvError::Disconnected) => Err("the save thread stopped".into()),
+            Err(mpsc::TryRecvError::Disconnected) => (Err("the save thread stopped".into()), None),
         },
         _ => return,
     };
     grid.set_saving(false);
+    if let (Ok(_), Some(t)) = (&result, target) {
+        session.path.replace(Some(t.path));
+        session.encoding.set(Some(t.encoding));
+        session.choice.set(DelimiterChoice::Fixed(t.delimiter));
+    }
     let next = match result
         .and_then(|done| session.open().map(|t| (done, t)).map_err(|e| e.to_string()))
     {
@@ -667,6 +793,248 @@ fn finish_save(grid: &GridView, session: &Session, save: &RefCell<SaveState>) {
         }
     };
     *save.borrow_mut() = next;
+}
+
+/// Delimiters Save As offers, in dropdown order.
+const SAVE_DELIMITERS: [(&str, u8); 4] = [
+    ("Comma", b','),
+    ("Tab", b'\t'),
+    ("Semicolon", b';'),
+    ("Pipe", b'|'),
+];
+
+/// Encodings Save As offers, in dropdown order. UTF-16 is written with its BOM.
+const SAVE_ENCODINGS: [(&str, Encoding); 5] = [
+    ("UTF-8", Encoding::UTF8),
+    (
+        "UTF-8 with BOM",
+        Encoding {
+            charset: Charset::Utf8,
+            bom: true,
+        },
+    ),
+    (
+        "UTF-16 LE",
+        Encoding {
+            charset: Charset::Utf16Le,
+            bom: true,
+        },
+    ),
+    (
+        "UTF-16 BE",
+        Encoding {
+            charset: Charset::Utf16Be,
+            bom: true,
+        },
+    ),
+    (
+        "Windows-1252",
+        Encoding {
+            charset: Charset::Windows1252,
+            bom: false,
+        },
+    ),
+];
+
+/// Ctrl+Shift+S (SAVE-2): pick the delimiter and encoding (the file's own preselected),
+/// then the file, in the desktop's save dialog; the table is written there and the window
+/// shows that file from then on.
+fn save_as(
+    window: &gtk::ApplicationWindow,
+    grid: &GridView,
+    session: &Rc<Session>,
+    save: &Rc<RefCell<SaveState>>,
+) {
+    if matches!(*save.borrow(), SaveState::Saving(..)) {
+        return;
+    }
+    let delimiters = gtk::DropDown::from_strings(&SAVE_DELIMITERS.map(|(n, _)| n));
+    delimiters.set_selected(
+        SAVE_DELIMITERS
+            .iter()
+            .position(|(_, d)| *d == grid.delimiter())
+            .unwrap_or(0) as u32,
+    );
+    let encodings = gtk::DropDown::from_strings(&SAVE_ENCODINGS.map(|(n, _)| n));
+    let current = grid.encoding();
+    encodings.set_selected(
+        SAVE_ENCODINGS
+            .iter()
+            .position(|(_, e)| *e == current)
+            .or_else(|| {
+                SAVE_ENCODINGS
+                    .iter()
+                    .position(|(_, e)| e.charset == current.charset)
+            })
+            .unwrap_or(0) as u32,
+    );
+    let form = gtk::Grid::builder()
+        .row_spacing(10)
+        .column_spacing(12)
+        .margin_top(18)
+        .margin_bottom(18)
+        .margin_start(18)
+        .margin_end(18)
+        .build();
+    for (row, (label, dropdown)) in [("Delimiter", &delimiters), ("Encoding", &encodings)]
+        .into_iter()
+        .enumerate()
+    {
+        let label = gtk::Label::new(Some(label));
+        label.set_xalign(1.0);
+        form.attach(&label, 0, row as i32, 1, 1);
+        dropdown.set_hexpand(true);
+        form.attach(dropdown, 1, row as i32, 1, 1);
+    }
+    let cancel = gtk::Button::with_label("Cancel");
+    let choose = gtk::Button::with_label("Choose File…");
+    choose.add_css_class("suggested-action");
+    let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    buttons.set_halign(gtk::Align::End);
+    buttons.append(&cancel);
+    buttons.append(&choose);
+    form.attach(&buttons, 0, 2, 2, 1);
+    let dialog = gtk::Window::builder()
+        .title("Save As")
+        .transient_for(window)
+        .modal(true)
+        .resizable(false)
+        .child(&form)
+        .default_widget(&choose)
+        .build();
+    let esc = gtk::EventControllerKey::new();
+    esc.connect_key_pressed({
+        let dialog = dialog.downgrade();
+        move |_, key, _, _| {
+            if key != gtk::gdk::Key::Escape {
+                return glib::Propagation::Proceed;
+            }
+            if let Some(d) = dialog.upgrade() {
+                d.close();
+            }
+            glib::Propagation::Stop
+        }
+    });
+    dialog.add_controller(esc);
+    cancel.connect_clicked({
+        let dialog = dialog.downgrade();
+        move |_| {
+            if let Some(d) = dialog.upgrade() {
+                d.close();
+            }
+        }
+    });
+    choose.connect_clicked({
+        let (dialog, window, grid, session, save) = (
+            dialog.downgrade(),
+            window.downgrade(),
+            grid.downgrade(),
+            session.clone(),
+            save.clone(),
+        );
+        move |_| {
+            let delimiter = SAVE_DELIMITERS[delimiters.selected() as usize].1;
+            let encoding = SAVE_ENCODINGS[encodings.selected() as usize].1;
+            if let Some(d) = dialog.upgrade() {
+                d.close();
+            }
+            let (Some(window), Some(grid)) = (window.upgrade(), grid.upgrade()) else {
+                return;
+            };
+            choose_save_file(&window, &grid, &session, &save, delimiter, encoding);
+        }
+    });
+    dialog.present();
+}
+
+/// The second step of Save As: the desktop's save dialog, starting next to the current
+/// file with its name, the extension following the delimiter (`.tsv` for tabs).
+fn choose_save_file(
+    window: &gtk::ApplicationWindow,
+    grid: &GridView,
+    session: &Rc<Session>,
+    save: &Rc<RefCell<SaveState>>,
+    delimiter: u8,
+    encoding: Encoding,
+) {
+    let (filters, csv) = file_filters();
+    let name = suggested_name(&session.name(), session.path.borrow().is_none(), delimiter);
+    let builder = gtk::FileDialog::builder()
+        .title("Save As")
+        .modal(true)
+        .filters(&filters)
+        .default_filter(&csv)
+        .initial_name(name);
+    let folder = session
+        .path
+        .borrow()
+        .as_deref()
+        .and_then(Path::parent)
+        .map(gtk::gio::File::for_path);
+    let dialog = match folder {
+        Some(folder) => builder.initial_folder(&folder).build(),
+        None => builder.build(),
+    };
+    let (window, grid, session, save) = (
+        window.clone(),
+        grid.downgrade(),
+        session.clone(),
+        save.clone(),
+    );
+    glib::spawn_future_local(async move {
+        let file = match dialog.save_future(Some(&window)).await {
+            Ok(file) => file,
+            Err(e) if e.matches(gtk::DialogError::Dismissed) => return,
+            Err(e) => {
+                alert(
+                    Some(window.upcast_ref()),
+                    "Cannot show the file dialog",
+                    &e.to_string(),
+                );
+                return;
+            }
+        };
+        let Some(path) = file.path() else {
+            alert(
+                Some(window.upcast_ref()),
+                &format!("Cannot save to {}", file.uri()),
+                "Only local files can be saved.",
+            );
+            return;
+        };
+        if window_for(&path).is_some_and(|w| w != window) {
+            alert(
+                Some(window.upcast_ref()),
+                &format!("{} is open in another window", path.display()),
+                "Close it there first, or save under another name.",
+            );
+            return;
+        }
+        let Some(grid) = grid.upgrade() else { return };
+        let target = Target {
+            path,
+            delimiter,
+            encoding,
+        };
+        start_save(&grid, &session, &save, Some(target));
+    });
+}
+
+/// The name Save As starts with: the file's own, with `.tsv` for tab-separated output and
+/// `.csv` otherwise when it had one of those extensions; `Untitled.csv`/`.tsv` for a new
+/// table.
+fn suggested_name(name: &str, untitled: bool, delimiter: u8) -> String {
+    let ext = if delimiter == b'\t' { "tsv" } else { "csv" };
+    if untitled {
+        return format!("{name}.{ext}");
+    }
+    let path = Path::new(name);
+    match path.extension().and_then(|e| e.to_str()) {
+        Some(e) if e.eq_ignore_ascii_case("csv") || e.eq_ignore_ascii_case("tsv") => {
+            path.with_extension(ext).to_string_lossy().into_owned()
+        }
+        _ => name.to_owned(),
+    }
 }
 
 /// The bar under the grid (APP-2): rows and indexing progress on the left, save state and
@@ -720,7 +1088,7 @@ impl StatusBar {
             edits: grid.edit_count(),
             save: match save {
                 SaveState::Idle => status::SaveView::Idle,
-                SaveState::Saving(_) => status::SaveView::Saving,
+                SaveState::Saving(..) => status::SaveView::Saving,
                 SaveState::Saved(took) => status::SaveView::Saved(*took),
                 SaveState::Failed(e) => status::SaveView::Failed(e),
             },

@@ -50,6 +50,11 @@ impl GridCache {
         self.cols
     }
 
+    /// Count at least `cols` columns: a cell was just set there, before the rows reload.
+    pub fn widen(&mut self, cols: u32) {
+        self.cols = self.cols.max(cols);
+    }
+
     /// The widest text in column `col` over `rows`, by `measure` (pixels). Autofit
     /// (GRID-5) passes only the visible rows, so its cost doesn't depend on the row count.
     /// `None` when those rows hold no text in the column.

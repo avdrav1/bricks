@@ -3,14 +3,17 @@
 //! edited cells are encoded; every other field keeps its exact bytes, and the row keeps its
 //! line ending. Rows are written in the table's order (EDIT-3): runs of source rows copy as
 //! ranges, inserted rows are encoded from their edits, and deleted rows are left out.
-//! Rows with cleared cells (EDIT-5) are re-assembled with those fields empty.
+//! Rows with cleared cells (EDIT-5) are re-assembled with those fields empty. Save As
+//! (SAVE-2) can write another delimiter and encoding: then every row is re-assembled, each
+//! field's value re-quoted for the new delimiter.
 
 use crate::cleared::{cleared_at, ColSet, Segment};
 use crate::colmap::ColMap;
 use crate::rowmap::Run;
 use crate::{Col, ColId, CsvTable, RowId};
 use csv_engine::{
-    encode_field, split_fields, Dialect, Encoding, Field, LineEnding, RowIndex, SparseRowIndex,
+    encode_field, split_fields, Charset, Dialect, Encoding, Field, LineEnding, RowIndex,
+    SparseRowIndex,
 };
 use std::collections::BTreeMap;
 use std::io::{self, Write};
@@ -25,7 +28,11 @@ const SPAN_CHUNK: u64 = 4_096;
 /// save started.
 pub struct SaveJob {
     index: Arc<SparseRowIndex>,
-    dialect: Dialect,
+    /// The dialect the source is read with.
+    source: Dialect,
+    /// The dialect rows are written in: the source's, or another delimiter (Save As).
+    out: Dialect,
+    /// The encoding written: the file's own, or another (Save As).
     encoding: Encoding,
     /// Rows in the order they are written: source rows by file row, inserted rows by id.
     order: Vec<Run>,
@@ -86,7 +93,8 @@ impl CsvTable {
         };
         Ok(SaveJob {
             index: self.index.clone(),
-            dialect: self.dialect,
+            source: self.dialect,
+            out: self.dialect,
             encoding: self.encoding,
             order,
             cols,
@@ -116,15 +124,30 @@ impl Out<'_> {
 }
 
 impl SaveJob {
-    /// The dialect the file was read with; the save writes the same one.
-    pub fn dialect(&self) -> &Dialect {
-        &self.dialect
+    /// Write `delimiter` and `encoding` instead of the file's own (Save As). Another
+    /// delimiter re-assembles every row; another encoding only changes the bytes written.
+    pub fn with_format(mut self, delimiter: u8, encoding: Encoding) -> Self {
+        self.out.delimiter = delimiter;
+        self.encoding = encoding;
+        self
     }
 
-    /// The file's encoding on disk. [`SaveJob::write_to`] writes UTF-8; the caller encodes
-    /// (`csv_engine::EncodeWriter`) when this is anything else.
+    /// The dialect the save writes (the file's own unless [`Self::with_format`] changed it).
+    pub fn dialect(&self) -> &Dialect {
+        &self.out
+    }
+
+    /// The encoding the save writes. [`SaveJob::write_to`] writes UTF-8 (with the BOM if
+    /// this is UTF-8 with one); the caller encodes (`csv_engine::EncodeWriter`) when this
+    /// is anything else.
     pub fn encoding(&self) -> Encoding {
         self.encoding
+    }
+
+    /// Every source row is written field by field: the columns moved, or the delimiter
+    /// changed.
+    fn reassemble_all(&self) -> bool {
+        self.cols.is_some() || self.out.delimiter != self.source.delimiter
     }
 
     /// Rows the saved file will have.
@@ -133,7 +156,7 @@ impl SaveJob {
     }
 
     fn line_ending(&self) -> &'static [u8] {
-        match self.dialect.line_ending {
+        match self.out.line_ending {
             LineEnding::Lf => b"\n",
             LineEnding::CrLf => b"\r\n",
         }
@@ -150,8 +173,9 @@ impl SaveJob {
             bytes: 0,
             ended: true,
         };
-        // The byte-order mark belongs to the file, not to whichever row comes first.
-        if self.has_bom() {
+        // The byte-order mark belongs to the file, not to whichever row comes first. Other
+        // encodings write their own (`EncodeWriter`).
+        if self.encoding.charset == Charset::Utf8 && self.encoding.bom {
             w.inner.write_all(UTF8_BOM)?;
             w.bytes += UTF8_BOM.len() as u64;
         }
@@ -200,7 +224,7 @@ impl SaveJob {
         let lo = self.edits.partition_point(|(id, _)| id.0 < rows.start);
         let hi = self.edits.partition_point(|(id, _)| id.0 < rows.end);
         let mut edits = self.edits[lo..hi].iter().peekable();
-        if self.cols.is_some() {
+        if self.reassemble_all() {
             return self.assemble_rows(rows, &mut edits, w, fields, line);
         }
         let first = self.cleared.partition_point(|s| s.rows.end <= rows.start);
@@ -315,11 +339,11 @@ impl SaveJob {
         if span.start == 0 {
             line = line.strip_prefix(UTF8_BOM).unwrap_or(line);
         }
-        split_fields(line, &self.dialect, fields);
+        split_fields(line, &self.source, fields);
         let content_end = fields.last().map_or(0, |f| f.raw.end as usize);
         for pos in 0..self.row_width(fields.len(), edits) {
             if pos > 0 {
-                out.push(self.dialect.delimiter);
+                out.push(self.out.delimiter);
             }
             let id = self.col_at(pos);
             let field = (!id.is_inserted())
@@ -327,8 +351,11 @@ impl SaveJob {
                 .flatten()
                 .filter(|_| !cleared.is_some_and(|c| c.contains(id)));
             match (edits.and_then(|e| e.get(&id)), field) {
-                (Some(v), _) => encode_field(v.as_bytes(), &self.dialect, out),
-                (None, Some(f)) => out.extend_from_slice(f.raw(line)),
+                (Some(v), _) => encode_field(v.as_bytes(), &self.out, out),
+                (None, Some(f)) if self.out.delimiter == self.source.delimiter => {
+                    out.extend_from_slice(f.raw(line))
+                }
+                (None, Some(f)) => encode_field(&f.value(line, self.source.quote), &self.out, out),
                 (None, None) => {}
             }
         }
@@ -346,10 +373,10 @@ impl SaveJob {
         let width = self.row_width(0, edits).max(self.width);
         for pos in 0..width {
             if pos > 0 {
-                out.push(self.dialect.delimiter);
+                out.push(self.out.delimiter);
             }
             if let Some(v) = edits.and_then(|e| e.get(&self.col_at(pos))) {
-                encode_field(v.as_bytes(), &self.dialect, out);
+                encode_field(v.as_bytes(), &self.out, out);
             }
         }
         out.extend_from_slice(self.line_ending());
