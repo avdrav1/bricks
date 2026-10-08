@@ -9,8 +9,12 @@ use std::time::Duration;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SaveView<'a> {
     Idle,
-    Saving,
+    /// Share of the file written so far (0..=1).
+    Saving(f64),
+    /// Written; reading it back to verify.
+    Checking,
     Saved(Duration),
+    Cancelled,
     Failed(&'a str),
 }
 
@@ -107,9 +111,19 @@ pub fn status(f: &Facts) -> Status {
         )
     };
     match f.save {
-        SaveView::Saving => save.push("Saving…".to_owned()),
+        SaveView::Saving(done) => {
+            let pct = (done.clamp(0.0, 1.0) * 100.0).floor();
+            save.push(format!("Saving {pct:.0}%"));
+        }
+        SaveView::Checking => save.push("Checking the saved file…".to_owned()),
         SaveView::Failed(e) => {
             save.push(format!("Save failed: {e}"));
+            if f.edits > 0 {
+                save.push(edits());
+            }
+        }
+        SaveView::Cancelled => {
+            save.push("Save cancelled".to_owned());
             if f.edits > 0 {
                 save.push(edits());
             }
@@ -209,8 +223,6 @@ mod tests {
         assert_eq!(status(&f).save, "1 unsaved edit");
         f.edits = 1_200;
         assert_eq!(status(&f).save, "1,200 unsaved edits");
-        f.save = SaveView::Saving;
-        assert_eq!(status(&f).save, "Saving…");
         f.save = SaveView::Failed("disk full");
         assert_eq!(
             status(&f).save,

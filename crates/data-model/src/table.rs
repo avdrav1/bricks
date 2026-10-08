@@ -981,7 +981,10 @@ mod tests {
         assert_eq!(row_text(&mut t, 0), ["1", "Ana"]);
         assert_eq!(t.row_count(), 2);
         let mut saved = Vec::new();
-        t.save_job().unwrap().write_to(&mut saved).unwrap();
+        t.save_job()
+            .unwrap()
+            .write_to(&mut saved, &crate::SaveProgress::default())
+            .unwrap();
         assert_eq!(
             saved, b"id,who\n1,Ana\n2,Bo\n",
             "the header row is saved as a row"
@@ -1001,7 +1004,11 @@ mod tests {
 
     fn saved(t: &CsvTable) -> Vec<u8> {
         let mut out = Vec::new();
-        let stats = t.save_job().unwrap().write_to(&mut out).unwrap();
+        let stats = t
+            .save_job()
+            .unwrap()
+            .write_to(&mut out, &crate::SaveProgress::default())
+            .unwrap();
         assert_eq!(stats.rows, t.row_count() + u64::from(t.has_header()));
         out
     }

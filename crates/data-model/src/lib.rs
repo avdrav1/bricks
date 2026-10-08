@@ -15,7 +15,7 @@ pub use cleared::ColSet;
 pub use copy::{Copied, HTML_MAX_CELLS};
 pub use paste::{parse_tsv, PasteError, PASTE_MAX_CELLS};
 pub use rowmap::Run;
-pub use save::{SaveJob, SaveJobError, SaveStats};
+pub use save::{SaveJob, SaveJobError, SaveProgress, SaveStats};
 pub use table::{CsvTable, DelimiterChoice, RereadError, RowBlock, TableSource, MAX_DISPLAY_BYTES};
 
 use std::collections::{BTreeMap, HashMap};

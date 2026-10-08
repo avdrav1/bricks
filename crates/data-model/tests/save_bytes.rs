@@ -17,7 +17,11 @@ fn table(content: &[u8], name: &str) -> (std::path::PathBuf, CsvTable) {
 
 fn save(table: &CsvTable) -> Vec<u8> {
     let mut out = Vec::new();
-    let stats = table.save_job().unwrap().write_to(&mut out).unwrap();
+    let stats = table
+        .save_job()
+        .unwrap()
+        .write_to(&mut out, &data_model::SaveProgress::default())
+        .unwrap();
     assert_eq!(stats.bytes, out.len() as u64);
     out
 }

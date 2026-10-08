@@ -9,7 +9,7 @@
 //! can't hold fails the save, leaving no file.
 
 use csv_engine::{Charset, Encoding};
-use data_model::{CellRef, CsvTable, DelimiterChoice, Edit, RowBlock, TableSource};
+use data_model::{CellRef, CsvTable, DelimiterChoice, Edit, RowBlock, SaveProgress, TableSource};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
@@ -114,7 +114,7 @@ fn save_as_changes_delimiter_and_encoding() {
     for (name, delimiter, encoding, text) in cases {
         let dest = temp(name);
         let job = table.save_job().unwrap().with_format(delimiter, encoding);
-        file_format::save_csv(&dest, &job).unwrap();
+        file_format::save_csv(&dest, &job, &SaveProgress::default()).unwrap();
         let bytes = std::fs::read(&dest).unwrap();
         let bom: &[u8] = match (encoding.charset, encoding.bom) {
             (Charset::Utf8, true) => b"\xEF\xBB\xBF",
@@ -143,7 +143,7 @@ fn save_as_changes_delimiter_and_encoding() {
     let unmappable = temp("ascii-fails.csv");
     table.apply(Edit::set(at(&table, 0, 1), "東京"));
     let job = table.save_job().unwrap().with_format(b',', w1252);
-    let err = file_format::save_csv(&unmappable, &job).unwrap_err();
+    let err = file_format::save_csv(&unmappable, &job, &SaveProgress::default()).unwrap_err();
     assert!(err.to_string().contains('東'), "{err}");
     assert!(!unmappable.exists(), "a failed save leaves no file");
     std::fs::remove_file(src).unwrap();

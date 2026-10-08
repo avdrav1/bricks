@@ -16,4 +16,4 @@ Run `cargo bench` to measure every row and print this table with Latest filled i
 | Find first match | < 1 s | not built yet (SRCH-1) | |
 | Sort numeric column | < 10 s (< 3 s at 2M rows) | not built yet (SORT-1) | |
 | Two-column filter | < 3 s | not built yet (FILT-2) | |
-| Save with 1,000 edits | < 15 s | 0.91 s incl. fsync and verify | |
+| Save with 1,000 edits | < 15 s | 0.99 s incl. fsync and verify (`save_perf`, NVMe); 0.84 s in the app with the UI scrolling at 60 fps, main loop p99 1.7 ms late (`save_responsive`, tmpfs; SAVE-3, 2026-10-08, same Ryzen box) | |

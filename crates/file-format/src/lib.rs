@@ -4,11 +4,11 @@
 //! never a mix. The rename also keeps the app's open mapping of the old file valid (ADR 0002).
 
 use csv_engine::{open_text_as, Charset, EncodeWriter, RowIndex, SparseRowIndex};
-use data_model::{SaveJob, SaveStats};
+use data_model::{SaveJob, SaveProgress, SaveStats};
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 /// Temp files end in this, next to the file being saved: `.<name>.<pid>-<n>.bricks-save`.
@@ -18,6 +18,8 @@ pub const TEMP_SUFFIX: &str = ".bricks-save";
 pub enum SaveError {
     Io(io::Error),
     Verify(String),
+    /// [`SaveProgress::cancel`] stopped the save; the original is untouched.
+    Cancelled,
 }
 
 impl From<io::Error> for SaveError {
@@ -31,6 +33,7 @@ impl std::fmt::Display for SaveError {
         match self {
             SaveError::Io(e) => write!(f, "{e}"),
             SaveError::Verify(m) => write!(f, "the saved file did not check out: {m}"),
+            SaveError::Cancelled => write!(f, "the save was cancelled"),
         }
     }
 }
@@ -94,24 +97,30 @@ where
 
 /// Save a table to `dest` (usually the file it was opened from), in the file's own encoding
 /// and BOM (ENG-6). Verification decodes the written file the same way, re-indexes it, and
-/// checks its size and row count against what was written.
-pub fn save_csv(dest: &Path, job: &SaveJob) -> Result<SaveStats, SaveError> {
+/// checks its size and row count against what was written. `progress` counts the bytes
+/// written and can cancel the save, which then ends in [`SaveError::Cancelled`] (SAVE-3).
+pub fn save_csv(
+    dest: &Path,
+    job: &SaveJob,
+    progress: &SaveProgress,
+) -> Result<SaveStats, SaveError> {
     let encoding = job.encoding();
     let stats = std::cell::Cell::new(None);
-    save_atomic(
+    let saved = save_atomic(
         dest,
         |w| {
             // UTF-8 BOMs are part of the source bytes and copy through with row 0.
             if encoding.charset == Charset::Utf8 {
-                stats.set(Some(job.write_to(w)?));
+                stats.set(Some(job.write_to(w, progress)?));
             } else {
                 let mut encoded = EncodeWriter::new(w, encoding);
-                stats.set(Some(job.write_to(&mut encoded)?));
+                stats.set(Some(job.write_to(&mut encoded, progress)?));
                 encoded.finish()?;
             }
             Ok(())
         },
         |tmp| {
+            progress.set_checking();
             let written = stats.get().expect("write ran before verify");
             let source = open_text_as(tmp, encoding).map_err(|e| e.to_string())?;
             if source.bytes().len() as u64 != written.bytes {
@@ -123,7 +132,7 @@ pub fn save_csv(dest: &Path, job: &SaveJob) -> Result<SaveStats, SaveError> {
             }
             let index = SparseRowIndex::new(Arc::new(source), job.dialect());
             index
-                .build(&AtomicBool::new(false))
+                .build(progress.cancel_flag())
                 .map_err(|e| e.to_string())?;
             if index.row_count() != written.rows {
                 return Err(format!(
@@ -134,6 +143,10 @@ pub fn save_csv(dest: &Path, job: &SaveJob) -> Result<SaveStats, SaveError> {
             }
             Ok(())
         },
-    )?;
-    Ok(stats.get().expect("save succeeded"))
+    );
+    match saved {
+        Ok(()) => Ok(stats.get().expect("save succeeded")),
+        Err(_) if progress.is_cancelled() => Err(SaveError::Cancelled),
+        Err(e) => Err(e),
+    }
 }

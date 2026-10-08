@@ -47,7 +47,12 @@ fn save_1gb_with_1000_edits() {
     }
 
     let t = Instant::now();
-    let stats = file_format::save_csv(&path, &table.save_job().unwrap()).unwrap();
+    let stats = file_format::save_csv(
+        &path,
+        &table.save_job().unwrap(),
+        &data_model::SaveProgress::default(),
+    )
+    .unwrap();
     let took = t.elapsed();
     eprintln!(
         "saved {} rows, {} bytes with 1,000 edits in {took:.2?} (incl. fsync + verify re-index)",

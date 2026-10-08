@@ -54,7 +54,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | CLIP-1 | M2 | P0 | done | GRID-4 | Copy/cut range as TSV plus text/html | Pastes cleanly into LibreOffice, Excel web, a text editor |
 | CLIP-2 | M2 | P0 | done | CLIP-1, CMD-1 | Paste TSV into a range, expanding as needed | 10k rows from LibreOffice paste in under 1 s |
 | SAVE-2 | M2 | P0 | done | SAVE-1, ENG-6 | Save, Save As, New | Save As can change delimiter and encoding |
-| SAVE-3 | M2 | P0 | todo | SAVE-1, DEC-5 | Background save with progress and cancel | UI responsive during 1 GB save; save under 15 s |
+| SAVE-3 | M2 | P0 | done | SAVE-1, DEC-5 | Background save with progress and cancel | UI responsive during 1 GB save; save under 15 s |
 | SAVE-4 | M2 | P1 | todo | SAVE-1 | Preserve quoting style and line endings of untouched rows | Saving an unedited file produces an empty diff |
 | ENG-8 | M3 | P0 | todo | DEC-5 | Background job framework: progress and cancel | Every long job cancels within 200 ms |
 | TYPE-1 | M3 | P0 | todo | ENG-2 | Infer column types by sampling | Raw value never altered; `00123` stays `00123` |
@@ -79,6 +79,13 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 ## Notes
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
+
+- **2026-10-08 SAVE-3:** background save with progress and cancel. The save already ran on a thread (SAVE-1); this adds progress, cancel, and the proof.
+  - `data_model::SaveProgress` (cancel flag, bytes written, checking flag) is shared between the save thread and the UI. `SaveJob::write_to` takes it: every `put` checks the flag first and counts bytes after. Untouched rows are copied in 4 MiB pieces (`COPY_CHUNK`) so a cancel is seen at least that often. `file_format::save_csv` takes it too, passes the flag to the verify re-index, and maps any error after a cancel to `SaveError::Cancelled`; `save_atomic` still removes the temp file.
+  - App: `SaveState::Saving(Running)` holds the receiver, progress, size estimate (source bytes), and `close_after` (for APP-9). Status shows `Saving N%`, `Checking the saved file…`, then `Saved in X s`; a cancel shows `Save cancelled · N unsaved edits` and keeps the edits. A flat Cancel button sits next to the save status while saving; Esc cancels too.
+  - `--bench-save EDITS` pastes EDITS cells, starts the save on the next frame, scrolls 37 px a frame while it runs, and prints `SAVE {json}` with save time, progress samples, 10 ms timer lateness, and frame stats. It refuses files outside the temp directory. `frame_stats` is shared with `--bench-scroll`'s report.
+  - Proof: `save_responsive` on the Hyprland desktop: 1 GB with 1,000 edits saved in 0.84 s (tmpfs), 38 progress samples, main loop late p50 0.06 / p99 1.65 / max 1.70 ms, 60.6 fps with no missed frames. `save_cancel`: a cancel at 200 MiB written takes effect in 21 ms, the file is unchanged, no temp file. `save_perf` (NVMe): 0.99 s. Under Broadway the lateness p99 is ~42 ms, which is Broadway's own paint time (a plain `--bench-scroll` shows the same 46 ms per frame), so that assertion needs a real compositor.
+  - **Stall found and fixed:** after every save, `GridView::replace_table` dropped the old table on the UI thread; unmapping 1 GB and freeing its index blocked the UI for 196 ms. The old table is now dropped on a worker thread.
 
 - **2026-10-08 SAVE-2:** Save, Save As, New. Two user decisions: New gets an editable edge (one empty row and column past the data where typing grows the table), and Save As picks the format in a small app dialog before the desktop's file chooser.
   - `SaveJob::with_format(delimiter, encoding)`. The job keeps the source dialect for parsing and an output dialect for writing.

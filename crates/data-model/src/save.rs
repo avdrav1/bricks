@@ -17,11 +17,52 @@ use csv_engine::{
 };
 use std::collections::BTreeMap;
 use std::io::{self, Write};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
 /// Rows whose spans a column-changed save fetches at once.
 const SPAN_CHUNK: u64 = 4_096;
+/// Untouched rows are copied in pieces this big, so a cancel is seen at least this often.
+const COPY_CHUNK: usize = 4 << 20;
+
+/// A running save's progress and cancel flag, shared with the UI (SAVE-3).
+#[derive(Debug, Default)]
+pub struct SaveProgress {
+    cancel: AtomicBool,
+    written: AtomicU64,
+    checking: AtomicBool,
+}
+
+impl SaveProgress {
+    /// Ask the save to stop; it ends with an `Interrupted` error and writes nothing more.
+    pub fn cancel(&self) {
+        self.cancel.store(true, Ordering::Relaxed);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancel.load(Ordering::Relaxed)
+    }
+
+    /// The cancel flag, for jobs that take one (`SparseRowIndex::build`).
+    pub fn cancel_flag(&self) -> &AtomicBool {
+        &self.cancel
+    }
+
+    /// UTF-8 bytes written so far.
+    pub fn written(&self) -> u64 {
+        self.written.load(Ordering::Relaxed)
+    }
+
+    /// Verification of the written file has started.
+    pub fn set_checking(&self) {
+        self.checking.store(true, Ordering::Relaxed);
+    }
+
+    pub fn is_checking(&self) -> bool {
+        self.checking.load(Ordering::Relaxed)
+    }
+}
 
 /// Everything a save needs, detached from the UI so it can run on a worker thread: the
 /// source (shared, read-only) and a copy of the row order and edits as they were when the
@@ -110,14 +151,21 @@ struct Out<'a> {
     inner: &'a mut dyn Write,
     bytes: u64,
     ended: bool,
+    progress: &'a SaveProgress,
 }
 
 impl Out<'_> {
     fn put(&mut self, b: &[u8]) -> io::Result<()> {
+        if self.progress.is_cancelled() {
+            return Err(io::Error::new(io::ErrorKind::Interrupted, "save cancelled"));
+        }
         if let Some(&last) = b.last() {
             self.inner.write_all(b)?;
             self.bytes += b.len() as u64;
             self.ended = last == b'\n';
+            self.progress
+                .written
+                .fetch_add(b.len() as u64, Ordering::Relaxed);
         }
         Ok(())
     }
@@ -155,6 +203,11 @@ impl SaveJob {
         self.order.iter().map(|r| r.len).sum()
     }
 
+    /// Roughly the bytes [`Self::write_to`] will write: the source's size.
+    pub fn estimated_bytes(&self) -> u64 {
+        self.index.source().bytes().len() as u64
+    }
+
     fn line_ending(&self) -> &'static [u8] {
         match self.out.line_ending {
             LineEnding::Lf => b"\n",
@@ -166,12 +219,14 @@ impl SaveJob {
         self.index.source().bytes().starts_with(UTF8_BOM)
     }
 
-    /// Write the whole table to `w`.
-    pub fn write_to(&self, w: &mut dyn Write) -> io::Result<SaveStats> {
+    /// Write the whole table to `w`, counting bytes into `progress` and stopping with an
+    /// `Interrupted` error once it is cancelled.
+    pub fn write_to(&self, w: &mut dyn Write, progress: &SaveProgress) -> io::Result<SaveStats> {
         let mut w = Out {
             inner: w,
             bytes: 0,
             ended: true,
+            progress,
         };
         // The byte-order mark belongs to the file, not to whichever row comes first. Other
         // encodings write their own (`EncodeWriter`).
@@ -311,7 +366,8 @@ impl SaveJob {
         Ok(s.start as usize..s.end as usize)
     }
 
-    /// Copy source rows `[a, b)` as one byte range (without the file's BOM).
+    /// Copy source rows `[a, b)` as one byte range (without the file's BOM), in
+    /// [`COPY_CHUNK`] pieces.
     fn copy_rows(&self, rows: std::ops::Range<u64>, w: &mut Out) -> io::Result<()> {
         if rows.is_empty() {
             return Ok(());
@@ -321,7 +377,10 @@ impl SaveJob {
             start = UTF8_BOM.len();
         }
         self.start_row(w)?;
-        w.put(&self.index.source().bytes()[start..end])
+        for chunk in self.index.source().bytes()[start..end].chunks(COPY_CHUNK) {
+            w.put(chunk)?;
+        }
+        Ok(())
     }
 
     /// Re-assemble one source row into `out`: edits encoded, cleared fields empty, every

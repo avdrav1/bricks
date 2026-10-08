@@ -87,7 +87,10 @@ fn insert_and_delete_columns_on_1gb_without_rewriting_until_save() {
     let stats = table
         .save_job()
         .unwrap()
-        .write_to(&mut BufWriter::new(std::fs::File::create(&out).unwrap()))
+        .write_to(
+            &mut BufWriter::new(std::fs::File::create(&out).unwrap()),
+            &data_model::SaveProgress::default(),
+        )
         .unwrap();
     let save_s = t.elapsed().as_secs_f64();
     eprintln!(

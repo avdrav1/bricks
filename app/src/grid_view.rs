@@ -1406,6 +1406,13 @@ impl GridView {
         });
     }
 
+    /// Paste `text` (TSV) with its top-left at `cell`, as one undoable step (the save
+    /// benchmark's edits, SAVE-3).
+    pub fn paste_at(&self, cell: grid::Cell, text: &str) {
+        self.imp().selection.set(Selection::at(cell));
+        self.paste_text(text);
+    }
+
     fn paste_text(&self, text: &str) {
         let imp = self.imp();
         if imp.saving.get() || imp.editing.get().is_some() {
@@ -1574,7 +1581,13 @@ impl GridView {
                 .collect();
             (heights, widths)
         };
-        imp.table.replace(Some(table));
+        // Unmapping a big file and freeing its index takes a while (0.2 s for 1 GB, SAVE-3):
+        // a worker does it, not the UI thread.
+        if let Some(old) = imp.table.replace(Some(table)) {
+            let _ = std::thread::Builder::new()
+                .name("drop-table".into())
+                .spawn(move || drop(old));
+        }
         imp.undo.replace(Some(UndoStack::default()));
         imp.cache.borrow_mut().reset();
         imp.titles.take();

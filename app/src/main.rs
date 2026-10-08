@@ -1,6 +1,6 @@
 //! Application shell: windows, menus, dialogs, OS integration. Toolkit: GTK4 (ADR 0001).
 //!
-//! Usage: `spreadsheet [FILE.csv] [--bench-scroll FRAMES | --bench-jump ROW [--jumps N]]`
+//! Usage: `spreadsheet [FILE.csv] [--bench-scroll FRAMES | --bench-jump ROW [--jumps N] | --bench-save EDITS]`
 //!
 //! Without a file it shows a start window; Ctrl+O or an Open button picks one through the
 //! desktop's file dialog (xdg-desktop-portal via `gtk::FileDialog`, APP-1), and Ctrl+N or
@@ -14,13 +14,16 @@
 //!   first to ROW, then to N-1 random rows, and reports how long each took to paint.
 //! - `--bench-status` (APP-2) prints the status bar's row text (`STATUS …`) on every status
 //!   update while the file indexes, and quits once indexing is complete.
+//! - `--bench-save` (SAVE-3) pastes EDITS cells, saves, scrolls while the save runs, and
+//!   reports the save time, progress updates, main-loop lateness, and frame times. It only
+//!   saves files under the temp directory.
 
 mod editor;
 mod grid_view;
 mod status;
 
 use csv_engine::{Charset, Encoding};
-use data_model::{CsvTable, DelimiterChoice, RereadError, SaveStats};
+use data_model::{CsvTable, DelimiterChoice, RereadError, SaveProgress, SaveStats};
 use grid_view::{GridView, ROW_H};
 use gtk::{glib, prelude::*};
 use std::cell::{Cell, RefCell};
@@ -38,6 +41,7 @@ enum Bench {
     Jump { row: u64, jumps: u32 },
     Open,
     Status,
+    Save { edits: u32 },
 }
 
 struct Args {
@@ -71,6 +75,11 @@ fn parse_args() -> Result<Args, String> {
             "--jumps" => jumps = number(&a, &mut it)?.max(1) as u32,
             "--bench-open" => bench = Some(Bench::Open),
             "--bench-status" => bench = Some(Bench::Status),
+            "--bench-save" => {
+                bench = Some(Bench::Save {
+                    edits: number(&a, &mut it)?.max(1) as u32,
+                })
+            }
             _ if file.is_none() && !a.starts_with("--") => file = Some(PathBuf::from(a)),
             _ => return Err(format!("unexpected argument {a:?}")),
         }
@@ -88,10 +97,21 @@ fn main() -> glib::ExitCode {
     let args = match parse_args() {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("spreadsheet: {e}\nusage: spreadsheet [FILE.csv] [--bench-scroll FRAMES | --bench-jump ROW [--jumps N]]");
+            eprintln!("spreadsheet: {e}\nusage: spreadsheet [FILE.csv] [--bench-scroll FRAMES | --bench-jump ROW [--jumps N] | --bench-save EDITS]");
             return glib::ExitCode::from(2);
         }
     };
+    // The save benchmark overwrites its file: only ever a scratch copy.
+    if let (Some(Bench::Save { .. }), Some(file)) = (args.bench, &args.file) {
+        let canonical = |p: &Path| p.canonicalize().ok();
+        let scratch = canonical(file)
+            .zip(canonical(&std::env::temp_dir()))
+            .is_some_and(|(f, tmp)| f.starts_with(tmp));
+        if !scratch {
+            eprintln!("spreadsheet: --bench-save only saves files under the temp directory");
+            return glib::ExitCode::from(2);
+        }
+    }
     // A file named on the command line is mapped and indexing before the toolkit starts,
     // so its first rows show as early as possible (BENCH-1 times this path).
     let opened = match &args.file {
@@ -499,7 +519,7 @@ fn build_window(
         move |_| {
             if let (Some(window), Some(grid)) = (window.upgrade(), grid.upgrade()) {
                 grid.finish_editing();
-                save_as(&window, &grid, &session, &save);
+                save_as(&window, &grid, &session, &save, false);
             }
         }
     });
@@ -529,9 +549,19 @@ fn build_window(
     });
     grid.add_controller(scroll);
 
+    bar.cancel.connect_clicked({
+        let save = save.clone();
+        move |_| {
+            if let SaveState::Saving(r) = &*save.borrow() {
+                r.progress.cancel();
+            }
+        }
+    });
+
     // Ctrl+S saves (asking where, for an untitled table) and Ctrl+Shift+S saves as;
-    // Ctrl+Z undoes, Ctrl+Shift+Z and Ctrl+Y redo (CMD-1). Navigation keys belong to the
-    // grid (GRID-3); the cell editor's entry keeps its own text undo.
+    // Ctrl+Z undoes, Ctrl+Shift+Z and Ctrl+Y redo (CMD-1); Esc cancels a running save
+    // (SAVE-3). Navigation keys belong to the grid (GRID-3); the cell editor's entry keeps
+    // its own text undo, and the grid lets Esc through when no editor is open.
     let keys = gtk::EventControllerKey::new();
     keys.connect_key_pressed({
         let (window, grid, save, session) = (
@@ -545,6 +575,12 @@ fn build_window(
             let (Some(window), Some(grid)) = (window.upgrade(), grid.upgrade()) else {
                 return glib::Propagation::Proceed;
             };
+            if key == Key::Escape {
+                if let SaveState::Saving(r) = &*save.borrow() {
+                    r.progress.cancel();
+                    return glib::Propagation::Stop;
+                }
+            }
             if !mods.contains(ModifierType::CONTROL_MASK) {
                 return glib::Propagation::Proceed;
             }
@@ -553,9 +589,9 @@ fn build_window(
                 Key::s | Key::S => {
                     grid.finish_editing(); // save what was typed, as Calc does
                     if shift || session.path.borrow().is_none() {
-                        save_as(&window, &grid, &session, &save);
+                        save_as(&window, &grid, &session, &save, false);
                     } else {
-                        start_save(&grid, &session, &save, None);
+                        start_save(&grid, &session, &save, None, false);
                     }
                 }
                 Key::z if !shift => {
@@ -577,11 +613,12 @@ fn build_window(
     let started = Instant::now();
     let mut was_complete = false;
     let mut tick = {
-        let (grid, window, session, app) = (
+        let (grid, window, session, app, save) = (
             grid.downgrade(),
             window.downgrade(),
             session.clone(),
             app.clone(),
+            save.clone(),
         );
         move || {
             let (Some(grid), Some(window)) = (grid.upgrade(), window.upgrade()) else {
@@ -647,6 +684,7 @@ fn build_window(
         Some(Bench::Scroll { frames }) => bench_scroll(app, &grid, &vadj, frames),
         Some(Bench::Jump { row, jumps }) => bench_jump(app, &grid, &vadj, row, jumps),
         Some(Bench::Open) => bench_open(app, &grid),
+        Some(Bench::Save { edits }) => bench_save(app, &grid, session, &save, &vadj, edits),
         Some(Bench::Status) | None => {}
     }
 }
@@ -697,24 +735,35 @@ struct Target {
     encoding: Encoding,
 }
 
+/// A save running on its worker thread (SAVE-3).
+struct Running {
+    rx: mpsc::Receiver<Result<(SaveStats, Duration), file_format::SaveError>>,
+    target: Option<Target>,
+    progress: Arc<SaveProgress>,
+    /// Bytes the save is expected to write, for the progress percentage.
+    estimate: u64,
+    /// Close the window once this save succeeds (APP-9).
+    close_after: bool,
+}
+
 enum SaveState {
     Idle,
-    Saving(
-        mpsc::Receiver<Result<(SaveStats, Duration), String>>,
-        Option<Target>,
-    ),
+    Saving(Running),
     Saved(Duration),
+    Cancelled,
     Failed(String),
 }
 
 /// Ctrl+S: write the table to its own file on a worker thread (save is atomic, SAVE-1);
 /// with a `target`, to another file, delimiter, or encoding (Save As, SAVE-2). Editing is
-/// paused until it finishes, so no edit can be lost between snapshot and reopen.
+/// paused until it finishes, so no edit can be lost between snapshot and reopen. With
+/// `close_after`, the window closes once the save succeeds.
 fn start_save(
     grid: &GridView,
     session: &Session,
     save: &RefCell<SaveState>,
     target: Option<Target>,
+    close_after: bool,
 ) {
     if matches!(*save.borrow(), SaveState::Saving(..))
         || (target.is_none() && grid.edit_count() == 0)
@@ -740,15 +789,24 @@ fn start_save(
     };
     grid.set_saving(true);
     let (tx, rx) = mpsc::channel();
-    let spawned = std::thread::Builder::new()
-        .name("save".into())
-        .spawn(move || {
+    let progress = Arc::new(SaveProgress::default());
+    let estimate = job.estimated_bytes();
+    let spawned = std::thread::Builder::new().name("save".into()).spawn({
+        let progress = progress.clone();
+        move || {
             let t = Instant::now();
-            let r = file_format::save_csv(&path, &job).map_err(|e| e.to_string());
+            let r = file_format::save_csv(&path, &job, &progress);
             let _ = tx.send(r.map(|s| (s, t.elapsed())));
-        });
+        }
+    });
     *save.borrow_mut() = match spawned {
-        Ok(_) => SaveState::Saving(rx, target),
+        Ok(_) => SaveState::Saving(Running {
+            rx,
+            target,
+            progress,
+            estimate,
+            close_after,
+        }),
         Err(e) => {
             grid.set_saving(false);
             SaveState::Failed(e.to_string())
@@ -758,17 +816,29 @@ fn start_save(
 
 /// When a save has finished: reopen the saved file (its edits are now on disk; after a
 /// Save As, the new file with its delimiter and encoding) or report the error with the
-/// edits still in memory.
-fn finish_save(grid: &GridView, session: &Session, save: &RefCell<SaveState>) {
-    let (result, target) = match &mut *save.borrow_mut() {
-        SaveState::Saving(rx, target) => match rx.try_recv() {
-            Ok(r) => (r, target.take()),
-            Err(mpsc::TryRecvError::Empty) => return,
-            Err(mpsc::TryRecvError::Disconnected) => (Err("the save thread stopped".into()), None),
+/// edits still in memory. A cancelled save changes nothing. Returns whether the save
+/// succeeded and asked for the window to close.
+fn finish_save(grid: &GridView, session: &Session, save: &RefCell<SaveState>) -> bool {
+    let (result, target, close_after) = match &mut *save.borrow_mut() {
+        SaveState::Saving(r) => match r.rx.try_recv() {
+            Ok(Err(file_format::SaveError::Cancelled)) => (None, None, false),
+            Ok(done) => (
+                Some(done.map_err(|e| e.to_string())),
+                r.target.take(),
+                r.close_after,
+            ),
+            Err(mpsc::TryRecvError::Empty) => return false,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                (Some(Err("the save thread stopped".into())), None, false)
+            }
         },
-        _ => return,
+        _ => return false,
     };
     grid.set_saving(false);
+    let Some(result) = result else {
+        *save.borrow_mut() = SaveState::Cancelled;
+        return false;
+    };
     if let (Ok(_), Some(t)) = (&result, target) {
         session.path.replace(Some(t.path));
         session.encoding.set(Some(t.encoding));
@@ -792,7 +862,9 @@ fn finish_save(grid: &GridView, session: &Session, save: &RefCell<SaveState>) {
             SaveState::Failed(e)
         }
     };
+    let close = close_after && matches!(next, SaveState::Saved(_));
     *save.borrow_mut() = next;
+    close
 }
 
 /// Delimiters Save As offers, in dropdown order.
@@ -844,6 +916,7 @@ fn save_as(
     grid: &GridView,
     session: &Rc<Session>,
     save: &Rc<RefCell<SaveState>>,
+    close_after: bool,
 ) {
     if matches!(*save.borrow(), SaveState::Saving(..)) {
         return;
@@ -941,7 +1014,15 @@ fn save_as(
             let (Some(window), Some(grid)) = (window.upgrade(), grid.upgrade()) else {
                 return;
             };
-            choose_save_file(&window, &grid, &session, &save, delimiter, encoding);
+            choose_save_file(
+                &window,
+                &grid,
+                &session,
+                &save,
+                delimiter,
+                encoding,
+                close_after,
+            );
         }
     });
     dialog.present();
@@ -956,6 +1037,7 @@ fn choose_save_file(
     save: &Rc<RefCell<SaveState>>,
     delimiter: u8,
     encoding: Encoding,
+    close_after: bool,
 ) {
     let (filters, csv) = file_filters();
     let name = suggested_name(&session.name(), session.path.borrow().is_none(), delimiter);
@@ -1016,7 +1098,7 @@ fn choose_save_file(
             delimiter,
             encoding,
         };
-        start_save(&grid, &session, &save, Some(target));
+        start_save(&grid, &session, &save, Some(target), close_after);
     });
 }
 
@@ -1037,12 +1119,13 @@ fn suggested_name(name: &str, untitled: bool, delimiter: u8) -> String {
     }
 }
 
-/// The bar under the grid (APP-2): rows and indexing progress on the left, save state and
-/// the file's format on the right.
+/// The bar under the grid (APP-2): rows and indexing progress on the left, save state (with
+/// a Cancel button while saving, SAVE-3) and the file's format on the right.
 struct StatusBar {
     root: gtk::Box,
     rows: gtk::Label,
     save: gtk::Label,
+    cancel: gtk::Button,
     format: gtk::Label,
 }
 
@@ -1066,13 +1149,20 @@ impl StatusBar {
             .margin_top(3)
             .margin_bottom(3)
             .build();
+        let cancel = gtk::Button::with_label("Cancel");
+        cancel.add_css_class("flat");
+        cancel.set_tooltip_text(Some("Cancel the save (Esc)"));
+        cancel.set_focus_on_click(false); // keep the keyboard in the grid
+        cancel.set_visible(false);
         root.append(&rows);
         root.append(&save);
+        root.append(&cancel);
         root.append(&format);
         Self {
             root,
             rows,
             save,
+            cancel,
             format,
         }
     }
@@ -1088,8 +1178,12 @@ impl StatusBar {
             edits: grid.edit_count(),
             save: match save {
                 SaveState::Idle => status::SaveView::Idle,
-                SaveState::Saving(..) => status::SaveView::Saving,
+                SaveState::Saving(r) if r.progress.is_checking() => status::SaveView::Checking,
+                SaveState::Saving(r) => status::SaveView::Saving(
+                    (r.progress.written() as f64 / r.estimate.max(1) as f64).min(0.99),
+                ),
                 SaveState::Saved(took) => status::SaveView::Saved(*took),
+                SaveState::Cancelled => status::SaveView::Cancelled,
                 SaveState::Failed(e) => status::SaveView::Failed(e),
             },
             file_changed: grid.file_changed(),
@@ -1104,6 +1198,8 @@ impl StatusBar {
                 label.set_text(text);
             }
         }
+        self.cancel
+            .set_visible(matches!(save, SaveState::Saving(_)));
         shown
     }
 }
@@ -1259,13 +1355,137 @@ fn bench_jump(
     });
 }
 
-fn print_report(
-    ends: &[Instant],
-    cpu_ms: &[f64],
-    peak_cache: usize,
+/// Save driver for the SAVE-3 acceptance test. Once indexed, pastes `edits` cells spread
+/// down the file, saves, and while the save runs scrolls 37 px a frame, records the bytes
+/// written each frame, and measures how late a 10 ms main-loop timer fires. Prints
+/// `SAVE {json}` once the save is done and quits.
+fn bench_save(
+    app: &gtk::Application,
     grid: &GridView,
+    session: &Rc<Session>,
+    save: &Rc<RefCell<SaveState>>,
     vadj: &gtk::Adjustment,
+    edits: u32,
 ) {
+    let Some(clock) = grid.frame_clock() else {
+        return;
+    };
+    #[derive(Default)]
+    struct Rec {
+        saving: bool,
+        paint_start: Option<Instant>,
+        ends: Vec<Instant>,
+        cpu_ms: Vec<f64>,
+        written: Vec<u64>,
+        last_timer: Option<Instant>,
+        late_ms: Vec<f64>,
+    }
+    let rec = Rc::new(RefCell::new(Rec::default()));
+    clock.connect_before_paint({
+        let rec = rec.clone();
+        move |_| rec.borrow_mut().paint_start = Some(Instant::now())
+    });
+    clock.connect_after_paint({
+        let rec = rec.clone();
+        move |_| {
+            let mut r = rec.borrow_mut();
+            if let (true, Some(t0)) = (r.saving, r.paint_start) {
+                r.ends.push(Instant::now());
+                r.cpu_ms.push(t0.elapsed().as_secs_f64() * 1e3);
+            }
+        }
+    });
+    glib::timeout_add_local(Duration::from_millis(10), {
+        let rec = rec.clone();
+        move || {
+            let mut r = rec.borrow_mut();
+            let now = Instant::now();
+            if let (true, Some(last)) = (r.saving, r.last_timer) {
+                let late = (now - last).as_secs_f64() * 1e3 - 10.0;
+                r.late_ms.push(late.max(0.0));
+            }
+            r.last_timer = Some(now);
+            glib::ControlFlow::Continue
+        }
+    });
+
+    // The edits are pasted in one frame and the save starts in the next, so the paste work
+    // is not counted against the save; measuring starts with the save.
+    let rows = Cell::new(None);
+    let (app, session, save, vadj) = (app.clone(), session.clone(), save.clone(), vadj.clone());
+    grid.add_tick_callback(move |grid, _| {
+        let Some(total) = rows.get() else {
+            if !grid.is_complete() {
+                return glib::ControlFlow::Continue;
+            }
+            rows.set(Some(grid.row_count()));
+            let step = grid.row_count() / u64::from(edits);
+            for i in 0..edits {
+                let cell = grid::Cell {
+                    row: u64::from(i) * step,
+                    col: i % 8,
+                };
+                grid.paste_at(cell, "edited");
+            }
+            return glib::ControlFlow::Continue;
+        };
+        if !rec.borrow().saving {
+            let mut r = rec.borrow_mut();
+            r.saving = true;
+            r.last_timer = None;
+            drop(r);
+            start_save(grid, &session, &save, None, false);
+        }
+        let line = match &*save.borrow() {
+            SaveState::Saving(s) => {
+                rec.borrow_mut().written.push(s.progress.written());
+                vadj.set_value(vadj.value() + 37.0);
+                return glib::ControlFlow::Continue;
+            }
+            SaveState::Saved(took) => {
+                let mut r = rec.borrow_mut();
+                r.saving = false;
+                let mut written = r.written.clone();
+                written.retain(|&w| w > 0);
+                written.dedup();
+                format!(
+                    r#"{{"rows":{},"edits":{edits},"save_ms":{},"progress_samples":{},"loop_late_ms":{},{}}}"#,
+                    total,
+                    took.as_millis(),
+                    written.len(),
+                    summary(&mut r.late_ms),
+                    frame_stats(grid, &r.ends, &r.cpu_ms),
+                )
+            }
+            SaveState::Failed(e) => format!(r#"{{"error":{e:?}}}"#),
+            SaveState::Cancelled => r#"{"error":"the save was cancelled"}"#.to_owned(),
+            SaveState::Idle => r#"{"error":"the save did not start"}"#.to_owned(),
+        };
+        println!("SAVE {line}");
+        app.quit();
+        glib::ControlFlow::Break
+    });
+}
+
+/// `{"p50":..,"p99":..,"max":..}` of `xs` (sorted in place).
+fn summary(xs: &mut [f64]) -> String {
+    xs.sort_by(f64::total_cmp);
+    let p = |q: f64| {
+        xs.get(((q / 100.0) * (xs.len().max(1) - 1) as f64).round() as usize)
+            .copied()
+            .unwrap_or(0.0)
+    };
+    format!(
+        r#"{{"p50":{:.2},"p99":{:.2},"max":{:.2}}}"#,
+        p(50.0),
+        p(99.0),
+        xs.last().copied().unwrap_or(0.0)
+    )
+}
+
+/// JSON fields for frames finished at `ends` taking `cpu_ms` each: the display's refresh
+/// rate, frame count and rate, frames that missed it, and interval and CPU percentiles.
+fn frame_stats(grid: &GridView, ends: &[Instant], cpu_ms: &[f64]) -> String {
     let mut intervals: Vec<f64> = ends
         .windows(2)
         .map(|w| (w[1] - w[0]).as_secs_f64() * 1e3)
@@ -1283,28 +1503,27 @@ fn print_report(
     } else {
         1000.0 * intervals.len() as f64 / intervals.iter().sum::<f64>()
     };
-    let summary = |xs: &mut Vec<f64>| {
-        xs.sort_by(f64::total_cmp);
-        let p = |q: f64| {
-            xs.get(((q / 100.0) * (xs.len().max(1) - 1) as f64).round() as usize)
-                .copied()
-                .unwrap_or(0.0)
-        };
-        format!(
-            r#"{{"p50":{:.2},"p99":{:.2},"max":{:.2}}}"#,
-            p(50.0),
-            p(99.0),
-            xs.last().copied().unwrap_or(0.0)
-        )
-    };
-    println!(
-        r#"{{"rows":{},"window":[{},{}],"refresh_hz":{refresh:.1},"frames":{},"mean_fps":{mean_fps:.1},"missed_frames":{missed},"interval_ms":{},"frame_cpu_ms":{},"grid_cache_peak_bytes":{peak_cache},"rss_anon_kib":{},"end_row":{}}}"#,
-        grid.row_count(),
-        grid.width(),
-        grid.height(),
+    format!(
+        r#""refresh_hz":{refresh:.1},"frames":{},"mean_fps":{mean_fps:.1},"missed_frames":{missed},"interval_ms":{},"frame_cpu_ms":{}"#,
         intervals.len(),
         summary(&mut intervals),
         summary(&mut cpu),
+    )
+}
+
+fn print_report(
+    ends: &[Instant],
+    cpu_ms: &[f64],
+    peak_cache: usize,
+    grid: &GridView,
+    vadj: &gtk::Adjustment,
+) {
+    println!(
+        r#"{{"rows":{},"window":[{},{}],{},"grid_cache_peak_bytes":{peak_cache},"rss_anon_kib":{},"end_row":{}}}"#,
+        grid.row_count(),
+        grid.width(),
+        grid.height(),
+        frame_stats(grid, ends, cpu_ms),
         proc_status_kib("RssAnon:"),
         (vadj.value() / ROW_H) as u64,
     );

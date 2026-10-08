@@ -55,7 +55,10 @@ fn child_saver() {
     let job = table.save_job().unwrap();
     file_format::save_atomic(
         &path,
-        |w| job.write_to(&mut Slow(w, 0)).map(|_| ()),
+        |w| {
+            job.write_to(&mut Slow(w, 0), &data_model::SaveProgress::default())
+                .map(|_| ())
+        },
         |_| Ok(()),
     )
     .unwrap();

@@ -6,7 +6,7 @@
 //! BOM, byte for byte; an unedited save must reproduce the original exactly.
 
 use csv_engine::{Charset, Encoding};
-use data_model::{CellRef, ColId, CsvTable, DelimiterChoice, Edit};
+use data_model::{CellRef, ColId, CsvTable, DelimiterChoice, Edit, SaveProgress};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 
@@ -114,7 +114,7 @@ fn encoding_and_bom_round_trip_on_save() {
         assert_eq!(table.cell_value(2, 2).as_deref(), Some("€5"), "{name}");
 
         // Unedited save reproduces the file exactly.
-        file_format::save_csv(&path, &table.save_job().unwrap()).unwrap();
+        file_format::save_csv(&path, &table.save_job().unwrap(), &SaveProgress::default()).unwrap();
         assert_eq!(
             std::fs::read(&path).unwrap(),
             original,
@@ -130,7 +130,7 @@ fn encoding_and_bom_round_trip_on_save() {
             },
             "Ångström, Å",
         ));
-        file_format::save_csv(&path, &table.save_job().unwrap()).unwrap();
+        file_format::save_csv(&path, &table.save_job().unwrap(), &SaveProgress::default()).unwrap();
         assert_eq!(
             std::fs::read(&path).unwrap(),
             encode(EDITED, enc),
@@ -160,7 +160,7 @@ fn text_the_encoding_cannot_hold_fails_the_save_and_keeps_the_file() {
         },
         "東京",
     ));
-    let err = file_format::save_csv(&path, &table.save_job().unwrap())
+    let err = file_format::save_csv(&path, &table.save_job().unwrap(), &SaveProgress::default())
         .unwrap_err()
         .to_string();
     assert!(err.contains('東') && err.contains("Windows-1252"), "{err}");
@@ -183,7 +183,7 @@ fn every_windows_1252_byte_survives() {
     let path = temp("cp1252-all", &original);
     let table = open(&path);
     assert_eq!(table.encoding().charset, Charset::Windows1252);
-    file_format::save_csv(&path, &table.save_job().unwrap()).unwrap();
+    file_format::save_csv(&path, &table.save_job().unwrap(), &SaveProgress::default()).unwrap();
     assert_eq!(std::fs::read(&path).unwrap(), original);
     std::fs::remove_file(path).unwrap();
 }
