@@ -22,7 +22,9 @@ pub use infer::{value_type, ColumnTypes, SAMPLE_HEAD, SAMPLE_SPREAD};
 pub use paste::{parse_tsv, PasteError, PASTE_MAX_CELLS};
 pub use rowmap::{RowOrder, Run};
 pub use save::{SaveJob, SaveJobError, SaveProgress, SaveStats};
-pub use search::{Hit, Matches, Query, SearchError, SearchProgress, Step};
+pub use search::{
+    Hit, Matches, Query, ReplaceError, SearchError, SearchProgress, Step, REPLACE_MAX_CELLS,
+};
 pub use sort::{SortError, SortOrder};
 pub use table::{CsvTable, DelimiterChoice, RereadError, RowBlock, TableSource, MAX_DISPLAY_BYTES};
 

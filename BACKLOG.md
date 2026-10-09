@@ -68,7 +68,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | FILT-4 | M3 | P1 | todo | FILT-2, CLIP-2 | Edits and paste respect the filtered view | Paste into a filtered range touches visible rows only |
 | SRCH-1 | M3 | P0 | done | ENG-8 | Find bar (Ctrl+F): whole file or current column, case toggle | First hit in 1 GB under 1 s, off the UI thread |
 | SRCH-2 | M3 | P0 | done | SRCH-1 | Next/previous result; hit count streams in | New keystroke cancels the running search |
-| SRCH-3 | M3 | P0 | todo | SRCH-2, CMD-1 | Find and replace; replace all | Replace all on 100k hits undoes as one step |
+| SRCH-3 | M3 | P0 | done | SRCH-2, CMD-1 | Find and replace; replace all | Replace all on 100k hits undoes as one step |
 | APP-4 | M4 | P0 | todo | APP-1 | Recent files menu | Last 10 files survive restart |
 | APP-5 | M4 | P0 | todo | APP-1 | Drag and drop to open | Works on Wayland and X11 |
 | APP-6 | M4 | P0 | todo | DEC-1 | Follow system dark/light theme; high-DPI | No blurry text at 1.5x and 2x |
@@ -81,6 +81,31 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-09 SRCH-3:** find and replace; replace all.
+  - Decided with the user: replace all refuses above 2,097,152 cells (`REPLACE_MAX_CELLS`, the paste limit). It names the count: "Too many: 2,725,768 (max 2,097,152)". Every new value and its undo is a cell edit until saved. A compact rule-based store for bigger replaces (ADR 0003's "revisit if") is a follow-up, if wanted.
+  - Rules, following the search's:
+    - Every match in each matching cell is replaced: "Portland, PORTLAND" → "PDX, PDX" when case is ignored. The replacement goes in as typed, and an empty one deletes the text.
+    - Only cells shown are changed: a filter's hidden rows and deleted rows and columns are left alone. Edits count as shown, and raw text stays raw ("00123" with 1 → 9 is "00923").
+  - UI: Ctrl+H, or the replace toggle in the find bar, shows a second row with "Replace with", Replace, and Replace All. Ctrl+F leaves the replace row as it was.
+    - Replace (or Enter in the field) replaces in the cell under the cursor if it is the match the last find went to, then goes to the next match. Otherwise it first goes to the match at or after the cursor, as Calc does.
+    - Replace All runs as a job ("Replacing" in the status bar; Esc cancels) and says "Replaced 19,662 cells". Esc anywhere in the bar closes it.
+  - `data_model`:
+    - `Matches::replace_all(table, with, cancel, done) -> Result<Option<Edit>, ReplaceError::{TooMany, Stale, Cancelled}>` walks the shown rows for those with matches. It then rebuilds unedited file rows in parallel, one chunk of 65,536 file rows at a time, and rows with edits from their cells as shown. The result is one `Edit::Cells`, which the app runs as a `Batch` ("Replace all"), so it is one undo step.
+    - `Matches::replace_in` does one cell.
+    - The per-cell match test is shared with counting (`file_row_matches`, `edited_row_cols`), so the cells replaced are exactly the cells counted.
+  - Acceptance, `commands/tests/replace.rs` `replace_all_on_100k_hits_undoes_as_one_step`: 100,000 matching cells among 120,000 rows. Replace all is one step (3.5 MB of undo). One undo restores every cell and leaves no edit; redo brings them all back.
+    - Other tests: every match in a cell; match case; one column; raw text; quotes as shown; empty replacements; edits, hidden rows, and deleted rows; stale matches, cancel, and single cells.
+  - 1 GB (`commands/tests/replace_1gb.rs`, ignored): codes containing "0099" in column H, 210,477 cells.
+    - Search 175 ms, building the edit 65 ms (job pool), apply 61 ms, undo 29 ms, redo 29 ms (UI thread). Undo holds 12.3 MB.
+    - "portland" is refused with `TooMany(2725768)`.
+  - Smoke test via Broadway on the 1 GB file:
+    - Ctrl+H, "portland" → "1 of 2,725,768". "PDX" and Enter replaced row 6 and moved to row 14, "1 of 2,725,767".
+    - Replace All was refused with the limit note.
+    - "00999" → "X0999": Replace All replaced 19,662 cells (55 ms to build, 4 ms to apply) and showed "19,663 unsaved edits". One Ctrl+Z took them back (row 536 read "00999" again, 1 edit left).
+    - Esc from the Replace All button closes the bar (fixed during the smoke test: Esc was only handled in the fields).
+  - Follow-ups:
+    - The UI-thread apply grows with the cell count, as for paste: about 0.6 s near the 2M limit, extrapolated from 61 ms at 210k.
+    - Replace recounts the whole file after each cell, since the edit makes the matches stale (about 0.2 s on 1 GB per click). Patching the counts in place would make it instant.
 - **2026-10-09 SRCH-2:** search as you type, next/previous, and a count: "12 of 2,725,768".
   - Decided with the user:
     - Typing searches as you type from the cursor, the cursor's own cell first, so a longer text stays on a match that still fits (Firefox-style).

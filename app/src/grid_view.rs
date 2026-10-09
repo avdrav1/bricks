@@ -7,9 +7,9 @@ use commands::{Batch, ClearCells, Reshape, SetCell, UndoStack};
 use csv_engine::RowIndex as _;
 use data_model::{
     parse_tsv, CellRef, ColId, ColumnTypes, Compare, Copied, CsvTable, DelimiterChoice, Edit,
-    Filter, FilterError, Hit, Matches, PasteError, Query, RereadError, RowId, RowSet, SaveJob,
-    SaveJobError, SearchError, SearchProgress, SortError, SortOrder, Step, TableSource, Test,
-    PASTE_MAX_CELLS,
+    Filter, FilterError, Hit, Matches, PasteError, Query, ReplaceError, RereadError, RowId, RowSet,
+    SaveJob, SaveJobError, SearchError, SearchProgress, SortError, SortOrder, Step, TableSource,
+    Test, PASTE_MAX_CELLS,
 };
 use grid::{Bounds, GridCache, Key, Mods, Selection, Sizes, Viewport};
 use gtk::{gdk, gio, glib, graphene, pango, prelude::*, subclass::prelude::*};
@@ -83,6 +83,26 @@ pub enum Found {
     /// The file is still being indexed.
     NotReady,
     /// Cancelled or replaced by a newer search: nothing changed.
+    Cancelled,
+}
+
+/// A replace all on the job pool (SRCH-3): the matching cells and the edit, and the
+/// progress of counting them.
+pub struct ReplaceJob {
+    job: jobs::Job<Result<(u64, Option<Edit>), ReplaceError>>,
+    progress: Arc<SearchProgress>,
+    rows: u64,
+}
+
+/// How a replace all went (SRCH-3), for the find bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Replaced {
+    /// This many cells changed, as one undo step.
+    Cells(u64),
+    Nothing,
+    /// Refused: this many cells is over [`data_model::REPLACE_MAX_CELLS`].
+    TooMany(u64),
+    NotReady,
     Cancelled,
 }
 
@@ -165,6 +185,8 @@ mod imp {
         /// The last search's matches, while they still describe the table, and the match
         /// it went to (SRCH-2).
         pub found: RefCell<Option<Searched>>,
+        /// The replace all running (SRCH-3), if any. Edits wait for it.
+        pub replacing: RefCell<Option<ReplaceJob>>,
         /// Filters to apply again, by column position, once the table is indexed: those
         /// of the table a save replaced (FILT-3).
         pub pending_filters: RefCell<Vec<(u32, Test)>>,
@@ -1718,8 +1740,8 @@ impl GridView {
         });
     }
 
-    /// Esc: stop a running sort, filter, or search; the rows stay as they were. Whether
-    /// one was running.
+    /// Esc: stop a running sort, filter, search, or replace; the rows stay as they were.
+    /// Whether one was running.
     pub fn cancel_job(&self) -> bool {
         let imp = self.imp();
         let mut any = false;
@@ -1735,11 +1757,15 @@ impl GridView {
             s.job.cancel();
             any = true;
         }
+        if let Some(r) = imp.replacing.borrow().as_ref() {
+            r.job.cancel();
+            any = true;
+        }
         any
     }
 
-    /// A running sort, filter, or search, and the share of the file it has read (0..=1),
-    /// for the status bar.
+    /// A running sort, filter, search, or replace, and the share of the file it has read
+    /// (0..=1), for the status bar.
     pub fn job_progress(&self) -> Option<(&'static str, f64)> {
         let imp = self.imp();
         let share =
@@ -1750,18 +1776,34 @@ impl GridView {
         if let Some(f) = imp.filtering.borrow().as_ref() {
             return Some(("Filtering", share(&f.done, f.rows)));
         }
+        if let Some(r) = imp.replacing.borrow().as_ref() {
+            return Some(("Replacing", share(&r.progress.rows, r.rows)));
+        }
         let searching = imp.searching.borrow();
         let s = searching.as_ref()?;
         Some(("Searching", share(&s.progress.rows, s.rows)))
     }
 
-    /// A save, sort, filter, or search is running: the table must not change under it.
+    /// A save, sort, filter, search, or replace is running: the table must not change
+    /// under it.
     pub fn busy(&self) -> bool {
         let imp = self.imp();
         imp.saving.get()
             || imp.sorting.borrow().is_some()
             || imp.filtering.borrow().is_some()
             || imp.searching.borrow().is_some()
+            || imp.replacing.borrow().is_some()
+    }
+
+    /// Something a search must not run beside: an open editor, or a save, sort, filter,
+    /// or replace (a newer search just replaces a running one).
+    fn search_blocked(&self) -> bool {
+        let imp = self.imp();
+        imp.editing.get().is_some()
+            || imp.saving.get()
+            || imp.sorting.borrow().is_some()
+            || imp.filtering.borrow().is_some()
+            || imp.replacing.borrow().is_some()
     }
 
     /// Find (SRCH-1, SRCH-2): the match `step` leads to from the cursor, for `text` in
@@ -1778,33 +1820,19 @@ impl GridView {
         done: impl FnOnce(Found) + 'static,
     ) {
         let imp = self.imp();
-        if imp.editing.get().is_some()
-            || imp.saving.get()
-            || imp.sorting.borrow().is_some()
-            || imp.filtering.borrow().is_some()
-        {
+        if self.search_blocked() {
             return;
         }
         let cur = imp.selection.get().cursor();
-        let (mut snapshot, query, rows, known) = match imp.table.borrow().as_ref() {
-            Some(t) if t.is_complete() => {
-                let query = Query {
-                    text: text.to_owned(),
-                    match_case,
-                    col: column_only.then(|| t.col_id(cur.col)),
-                };
-                let known = imp
-                    .found
-                    .borrow()
-                    .as_ref()
-                    .filter(|(m, _)| *m.query() == query && m.is_current(t))
-                    .map(|(m, hit)| {
-                        let at_hit = hit.filter(|h| (h.row, h.col) == (cur.row, cur.col));
-                        (m.clone(), at_hit)
-                    });
-                (t.snapshot(), query, t.index().row_count(), known)
-            }
-            _ => return done(Found::NotReady),
+        let Some((query, rows)) = self.query(text, match_case, column_only) else {
+            return done(Found::NotReady);
+        };
+        let known = self.known_matches(&query).map(|(m, hit)| {
+            let at_hit = hit.filter(|h| (h.row, h.col) == (cur.row, cur.col));
+            (m, at_hit)
+        });
+        let Some(mut snapshot) = imp.table.borrow().as_ref().map(CsvTable::snapshot) else {
+            return;
         };
         self.cancel_search();
         let progress = Arc::new(SearchProgress::default());
@@ -1879,6 +1907,164 @@ impl GridView {
             s.job.cancel();
         }
         old.is_some()
+    }
+
+    /// The query for `text` as the find bar sets it, at the cursor.
+    fn query(&self, text: &str, match_case: bool, column_only: bool) -> Option<(Query, u64)> {
+        let imp = self.imp();
+        let cur = imp.selection.get().cursor();
+        let table = imp.table.borrow();
+        let t = table.as_ref().filter(|t| t.is_complete())?;
+        let query = Query {
+            text: text.to_owned(),
+            match_case,
+            col: column_only.then(|| t.col_id(cur.col)),
+        };
+        Some((query, t.index().row_count()))
+    }
+
+    /// The last search's matches, if they are for `query` and still describe the table.
+    fn known_matches(&self, query: &Query) -> Option<Searched> {
+        let imp = self.imp();
+        let table = imp.table.borrow();
+        let t = table.as_ref()?;
+        imp.found
+            .borrow()
+            .as_ref()
+            .filter(|(m, _)| m.query() == query && m.is_current(t))
+            .cloned()
+    }
+
+    /// Replace (SRCH-3): if the cursor is on the match the last find went to, replace the
+    /// text in that cell (one undo step) and go to the next match; otherwise go to the
+    /// match at or after the cursor first, as Calc does.
+    pub fn replace_one(
+        &self,
+        text: &str,
+        match_case: bool,
+        column_only: bool,
+        with: &str,
+        done: impl FnOnce(Found) + 'static,
+    ) {
+        if self.search_blocked() {
+            return;
+        }
+        let imp = self.imp();
+        let Some((query, _)) = self.query(text, match_case, column_only) else {
+            return done(Found::NotReady);
+        };
+        let cur = imp.selection.get().cursor();
+        let on_match = self
+            .known_matches(&query)
+            .filter(|(_, hit)| hit.is_some_and(|h| (h.row, h.col) == (cur.row, cur.col)));
+        let Some((matches, _)) = on_match else {
+            return self.find(text, match_case, column_only, Step::Here, done);
+        };
+        {
+            let mut table = imp.table.borrow_mut();
+            let mut undo = imp.undo.borrow_mut();
+            if let (Some(table), Some(undo)) = (table.as_mut(), undo.as_mut()) {
+                let value = table.cell_value(cur.row, cur.col).unwrap_or_default();
+                if let Some(new) = matches.replace_in(&value, with) {
+                    let at = CellRef {
+                        row: table.row_id(cur.row),
+                        col: table.col_id(cur.col),
+                    };
+                    undo.execute(Box::new(SetCell::new(at, new)), table);
+                }
+            }
+        }
+        self.after_change(None);
+        self.find(text, match_case, column_only, Step::Next, done);
+    }
+
+    /// Replace all (SRCH-3): every matching cell shown, every match in each, as one undo
+    /// step. Counting and building the edit run on the job pool; Esc or a keystroke in
+    /// the find bar cancels. Refused above [`data_model::REPLACE_MAX_CELLS`] cells.
+    pub fn replace_all(
+        &self,
+        text: &str,
+        match_case: bool,
+        column_only: bool,
+        with: &str,
+        done: impl FnOnce(Replaced) + 'static,
+    ) {
+        if self.search_blocked() {
+            return;
+        }
+        let imp = self.imp();
+        let Some((query, rows)) = self.query(text, match_case, column_only) else {
+            return done(Replaced::NotReady);
+        };
+        let known = self.known_matches(&query).map(|(m, _)| m);
+        self.cancel_search();
+        let Some(mut snapshot) = imp.table.borrow().as_ref().map(CsvTable::snapshot) else {
+            return;
+        };
+        let progress = Arc::new(SearchProgress::default());
+        let with = with.to_owned();
+        let started = Instant::now();
+        let job = jobs::spawn({
+            let progress = progress.clone();
+            move |cancel| {
+                let matches = match known {
+                    Some(m) => m,
+                    None => Arc::new(
+                        snapshot
+                            .search(&query, cancel.flag(), &progress)
+                            .map_err(|_| ReplaceError::Cancelled)?,
+                    ),
+                };
+                let done = AtomicU64::new(0);
+                let edit = matches.replace_all(&snapshot, &with, cancel.flag(), &done)?;
+                Ok((matches.total(), edit))
+            }
+        });
+        imp.replacing.replace(Some(ReplaceJob {
+            job: job.clone(),
+            progress,
+            rows,
+        }));
+        let g = self.downgrade();
+        glib::spawn_future_local(async move {
+            let result = job.finished().await;
+            let Some(g) = g.upgrade() else { return };
+            let imp = g.imp();
+            if !matches!(&*imp.replacing.borrow(), Some(r) if r.job.is(&job)) {
+                return done(Replaced::Cancelled); // a new table
+            }
+            imp.replacing.take();
+            let (cells, edit) = match result {
+                Ok(Ok(r)) => r,
+                Ok(Err(ReplaceError::TooMany(n))) => return done(Replaced::TooMany(n)),
+                _ => return done(Replaced::Cancelled),
+            };
+            let Some(edit) = edit else {
+                return done(Replaced::Nothing);
+            };
+            let built = started.elapsed();
+            {
+                let mut table = imp.table.borrow_mut();
+                let mut undo = imp.undo.borrow_mut();
+                let (Some(table), Some(undo)) = (table.as_mut(), undo.as_mut()) else {
+                    return;
+                };
+                let Edit::Cells(list) = &edit else { return };
+                let focus = list[0].0;
+                undo.execute(
+                    Box::new(Batch::new("Replace all", vec![edit], focus)),
+                    table,
+                );
+            }
+            if std::env::var_os("BRICKS_TIMINGS").is_some() {
+                eprintln!(
+                    "replace all: {cells} cells, built in {built:?}, applied in {:?}",
+                    started.elapsed() - built
+                );
+            }
+            g.after_change(None);
+            done(Replaced::Cells(cells));
+        });
     }
 
     /// Matching cells found so far by a search that counts them, for the find bar.
@@ -2251,6 +2437,9 @@ impl GridView {
             old.job.cancel();
         }
         self.cancel_search();
+        if let Some(old) = imp.replacing.take() {
+            old.job.cancel();
+        }
         imp.found.take();
         imp.pending_filters.take(); // a save gives them back with `restore_filters`
         self.close_filter_menu();

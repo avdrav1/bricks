@@ -15,7 +15,9 @@
 //! with edits are counted from their cells as shown. [`Matches::step`] then walks the rows
 //! shown, a chunk at a time, to the next row with a match, and finds the cell in it.
 
-use crate::{Col, ColId, CsvTable, Row, RowBlock, RowId, Run, TableSource};
+use crate::{
+    CellRef, Col, ColId, CsvTable, Edit, Row, RowBlock, RowId, Run, TableSource, PASTE_MAX_CELLS,
+};
 use csv_engine::{split_fields, RowIndex};
 use memchr::memmem;
 use rayon::prelude::*;
@@ -73,6 +75,19 @@ const WALK: u64 = 65_536;
 /// A row's count at or past this lives in `Matches::many`.
 const MANY: u8 = u8::MAX;
 const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
+
+/// Cells one replace all may change, at most (SRCH-3): the paste limit. Every new value,
+/// and its undo, is held as a cell edit until saved (user decision, 2026-10-09).
+pub const REPLACE_MAX_CELLS: u64 = PASTE_MAX_CELLS;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplaceError {
+    /// More matching cells than [`REPLACE_MAX_CELLS`].
+    TooMany(u64),
+    /// The table changed since the search.
+    Stale,
+    Cancelled,
+}
 
 /// Every matching cell of a table at one revision, counted by row.
 pub struct Matches {
@@ -155,6 +170,110 @@ impl Matches {
         let len = self.counts.len();
         let a = (run.first.0 as usize).min(len);
         (a, (a + run.len as usize).min(len))
+    }
+
+    /// `value` with every match of the text replaced by `with`; `None` if it has none.
+    /// Matching ignores case as the search did; `with` goes in as typed.
+    pub fn replace_in(&self, value: &str, with: &str) -> Option<String> {
+        self.needle.replace(value, with, &mut Vec::new())
+    }
+
+    /// Replace all (SRCH-3): one edit giving every matching cell shown its value with
+    /// the text replaced, for one undo step. Run it on a snapshot on the job pool; `done`
+    /// counts rows done. `None` if there is nothing to replace.
+    pub fn replace_all(
+        &self,
+        table: &CsvTable,
+        with: &str,
+        cancel: &AtomicBool,
+        done: &AtomicU64,
+    ) -> Result<Option<Edit>, ReplaceError> {
+        if !self.is_current(table) {
+            return Err(ReplaceError::Stale);
+        }
+        if self.total > REPLACE_MAX_CELLS {
+            return Err(ReplaceError::TooMany(self.total));
+        }
+        if self.total == 0 {
+            return Ok(None);
+        }
+        // The rows shown with a match, by id.
+        let mut rows: Vec<RowId> = Vec::new();
+        table
+            .walk(0..table.row_count(), false, cancel, |_, run| {
+                if run.first.is_inserted() {
+                    let ids = (0..run.len).map(|i| RowId(run.first.0 + i));
+                    rows.extend(ids.filter(|id| self.inserted.contains_key(id)));
+                } else {
+                    let (a, b) = self.file_range(run);
+                    let hits = self.counts[a..b].iter().enumerate();
+                    rows.extend(
+                        hits.filter(|(_, &c)| c != 0)
+                            .map(|(i, _)| RowId::source((a + i) as u64)),
+                    );
+                }
+                None::<()>
+            })
+            .map_err(|_| ReplaceError::Cancelled)?;
+        rows.sort_unstable();
+        let (plain, edited): (Vec<RowId>, Vec<RowId>) = rows
+            .into_iter()
+            .partition(|&id| !id.is_inserted() && table.overlay.row(id).is_none());
+
+        // Rows as in the file: their spans a chunk of file rows at a time, in parallel.
+        let groups: Vec<&[RowId]> = plain.chunk_by(|a, b| a.0 / CHUNK == b.0 / CHUNK).collect();
+        let mut cells: Vec<(CellRef, Option<Box<str>>)> = groups
+            .into_par_iter()
+            .map(|group| {
+                if cancel.load(Ordering::Relaxed) {
+                    return Err(ReplaceError::Cancelled);
+                }
+                let (first, last) = (group[0].0, group[group.len() - 1].0);
+                let mut spans = Vec::new();
+                let found = table.index.row_spans(first..last + 1, &mut spans).ok();
+                if found != Some((last + 1 - first) as usize) {
+                    return Err(ReplaceError::Stale); // the file changed underneath
+                }
+                let (mut fields, mut scratch, mut out) = (Vec::new(), Vec::new(), Vec::new());
+                let mut folded = Vec::new();
+                for &id in group {
+                    let span = &spans[(id.0 - first) as usize];
+                    table.file_row_matches(
+                        self,
+                        id.0,
+                        span,
+                        &mut fields,
+                        &mut scratch,
+                        |col, v| {
+                            let v = String::from_utf8_lossy(v);
+                            if let Some(new) = self.needle.replace(&v, with, &mut folded) {
+                                out.push((CellRef { row: id, col }, Some(new.into_boxed_str())));
+                            }
+                        },
+                    );
+                }
+                done.fetch_add(group.len() as u64, Ordering::Relaxed);
+                Ok(out)
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .flatten()
+            .collect();
+
+        // Rows with edits, from their cells as shown.
+        let mut scratch = Vec::new();
+        for id in edited {
+            for col in table.edited_row_cols(self, id, table.overlay.row(id)) {
+                let Some(v) = table.cell_of(id, col) else {
+                    continue;
+                };
+                if let Some(new) = self.needle.replace(&v, with, &mut scratch) {
+                    cells.push((CellRef { row: id, col }, Some(new.into_boxed_str())));
+                }
+            }
+            done.fetch_add(1, Ordering::Relaxed);
+        }
+        Ok((!cells.is_empty()).then_some(Edit::Cells(cells)))
     }
 
     /// The match `step` leads to from cell `from` (row, column of the rows shown), going
@@ -274,6 +393,30 @@ impl Needle {
             value
         };
         memmem::find(hay, &self.bytes).is_some()
+    }
+
+    /// `value` with every match replaced by `with`; `None` if it has none. Folding is
+    /// ASCII-only, so offsets in the folded text are offsets in `value`, and a match of
+    /// UTF-8 text in UTF-8 text starts and ends on character boundaries.
+    fn replace(&self, value: &str, with: &str, scratch: &mut Vec<u8>) -> Option<String> {
+        let hay = if self.fold {
+            scratch.clear();
+            scratch.extend(value.bytes().map(|b| b.to_ascii_lowercase()));
+            &scratch[..]
+        } else {
+            value.as_bytes()
+        };
+        let mut matches = memmem::find_iter(hay, &self.bytes).peekable();
+        matches.peek()?;
+        let mut out = String::with_capacity(value.len());
+        let mut last = 0;
+        for at in matches {
+            out.push_str(&value[last..at]);
+            out.push_str(with);
+            last = at + self.bytes.len();
+        }
+        out.push_str(&value[last..]);
+        Some(out)
     }
 }
 
@@ -417,6 +560,21 @@ impl CsvTable {
         fields: &mut Vec<csv_engine::Field>,
         scratch: &mut Vec<u8>,
     ) -> u32 {
+        let mut n = 0;
+        self.file_row_matches(m, row, span, fields, scratch, |_, _| n += 1);
+        n
+    }
+
+    /// Each matching cell of file row `row` (at `span`, without edits), with its value.
+    fn file_row_matches(
+        &self,
+        m: &Matches,
+        row: u64,
+        span: &Range<u64>,
+        fields: &mut Vec<csv_engine::Field>,
+        scratch: &mut Vec<u8>,
+        mut each: impl FnMut(ColId, &[u8]),
+    ) {
         let bytes = self.index.source().bytes();
         let mut line = &bytes[span.start as usize..span.end as usize];
         if span.start == 0 {
@@ -424,15 +582,44 @@ impl CsvTable {
         }
         split_fields(line, &self.dialect, fields);
         let cleared = self.cleared.at(row);
-        let n = fields.iter().enumerate().filter(|(i, f)| {
-            let id = ColId::source(*i as Col);
-            m.query.col.is_none_or(|c| c == id)
+        for (i, f) in fields.iter().enumerate() {
+            let id = ColId::source(i as Col);
+            if m.query.col.is_none_or(|c| c == id)
                 && (self.cols.is_none() || self.col_of(id).is_some())
                 && !cleared.is_some_and(|c| c.contains(id))
-                && m.needle
-                    .in_value(&f.value(line, self.dialect.quote), scratch)
-        });
-        n.count() as u32
+            {
+                let value = f.value(line, self.dialect.quote);
+                if m.needle.in_value(&value, scratch) {
+                    each(id, &value);
+                }
+            }
+        }
+    }
+
+    /// The columns in scope of row `id`, which has the edits `edits` (or none).
+    fn edited_row_cols(
+        &self,
+        m: &Matches,
+        id: RowId,
+        edits: Option<&BTreeMap<ColId, Box<str>>>,
+    ) -> Vec<ColId> {
+        if let Some(c) = m.query.col {
+            return vec![c];
+        }
+        let fields = if id.is_inserted() {
+            0
+        } else {
+            let mut f = Vec::new();
+            self.index
+                .row_fields(id.0, &mut f)
+                .map_or(0, |_| f.len() as Col)
+        };
+        let edited = || edits.into_iter().flat_map(|e| e.keys().copied());
+        let width = match &self.cols {
+            Some(map) => map.width_with(fields, edited()),
+            None => fields.max(edited().next_back().map_or(0, |c| c.0 + 1)),
+        };
+        (0..width).map(|p| self.col_id(p)).collect()
     }
 
     /// Count every row with edits (source rows the file pass skipped, and inserted rows)
@@ -440,25 +627,8 @@ impl CsvTable {
     fn count_edited_rows(&self, m: &mut Matches) {
         let mut scratch = Vec::new();
         for (&id, edits) in self.overlay.iter_rows() {
-            let cols: Vec<ColId> = match m.query.col {
-                Some(c) => vec![c],
-                None => {
-                    let fields = if id.is_inserted() {
-                        0
-                    } else {
-                        let mut f = Vec::new();
-                        self.index
-                            .row_fields(id.0, &mut f)
-                            .map_or(0, |_| f.len() as Col)
-                    };
-                    let width = match &self.cols {
-                        Some(map) => map.width_with(fields, edits.keys().copied()),
-                        None => fields.max(edits.keys().next_back().map_or(0, |c| c.0 + 1)),
-                    };
-                    (0..width).map(|p| self.col_id(p)).collect()
-                }
-            };
-            let n = cols
+            let n = self
+                .edited_row_cols(m, id, Some(edits))
                 .into_iter()
                 .filter(|&c| {
                     self.cell_of(id, c)

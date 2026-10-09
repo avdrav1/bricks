@@ -179,16 +179,25 @@ pub fn title(name: &str, edits: usize) -> String {
     }
 }
 
-/// The find bar's note (SRCH-2): the count streaming in while matches are counted, then
-/// which match the cursor is on.
+/// The find bar's note (SRCH-2, SRCH-3): the count streaming in while matches are
+/// counted, then which match the cursor is on, or how a replace all went.
 pub enum FindNote {
     Counting { found: u64 },
     Hit { ordinal: u64, total: u64 },
     Nothing,
     NotReady,
+    Replaced { cells: u64 },
+    TooMany { cells: u64 },
 }
 
 pub fn find_note(n: FindNote) -> String {
+    let cells = |n: u64| {
+        format!(
+            "{} {}",
+            group_digits(n),
+            if n == 1 { "cell" } else { "cells" }
+        )
+    };
     match n {
         FindNote::Counting { found } => format!("{} so far…", group_digits(found)),
         FindNote::Hit { ordinal, total } => {
@@ -196,6 +205,12 @@ pub fn find_note(n: FindNote) -> String {
         }
         FindNote::Nothing => "No matches".into(),
         FindNote::NotReady => "Wait for indexing to finish".into(),
+        FindNote::Replaced { cells: n } => format!("Replaced {}", cells(n)),
+        FindNote::TooMany { cells: n } => format!(
+            "Too many: {} (max {})",
+            group_digits(n),
+            group_digits(data_model::REPLACE_MAX_CELLS)
+        ),
     }
 }
 

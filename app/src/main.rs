@@ -594,7 +594,11 @@ fn build_window(
             match key {
                 Key::f | Key::F if !shift => {
                     grid.finish_editing();
-                    find.open();
+                    find.open(false);
+                }
+                Key::h | Key::H if !shift => {
+                    grid.finish_editing();
+                    find.open(true);
                 }
                 Key::s | Key::S => {
                     grid.finish_editing(); // save what was typed, as Calc does
@@ -810,7 +814,7 @@ fn bench_find(app: &gtk::Application, grid: &GridView, find: &FindBar, text: Rc<
             return glib::ControlFlow::Continue;
         }
         if typed == 0 {
-            find.open();
+            find.open(false);
             t0.set(Some(Instant::now()));
         }
         // One character at the end, as a keystroke does (`set_text` would empty the
@@ -1268,12 +1272,16 @@ fn suggested_name(name: &str, untitled: bool, delimiter: u8) -> String {
     }
 }
 
-/// The find bar (SRCH-1, SRCH-2), over the status bar. Ctrl+F opens it on the text field;
+/// The find bar (SRCH-1–3), over the status bar. Ctrl+F opens it on the text field;
 /// typing searches as you type from the cursor, its own cell first (each keystroke cancels
 /// the running search); Enter or Ctrl+G goes to the next match, Shift+Enter or
 /// Ctrl+Shift+G to the previous one; Esc closes it. Searches the whole file or the
 /// cursor's column, with or without matching case. The note counts the matches as they
 /// stream in, then says which one the cursor is on ("12 of 2,725,768").
+///
+/// Ctrl+H (or the replace toggle) shows the replace row: Replace (or Enter there)
+/// replaces the text in the match under the cursor and goes to the next; Replace All
+/// changes every match shown as one undo step.
 #[derive(Clone)]
 struct FindBar(Rc<FindParts>);
 
@@ -1283,6 +1291,9 @@ struct FindParts {
     case: gtk::CheckButton,
     scope: gtk::DropDown,
     note: gtk::Label,
+    replacing: gtk::ToggleButton,
+    replace_row: gtk::Box,
+    with: gtk::Entry,
     grid: glib::WeakRef<GridView>,
     /// Hears what the bar does (`--bench-find`).
     trace: RefCell<Option<FindTrace>>,
@@ -1323,15 +1334,25 @@ impl FindBar {
         note.set_width_chars(22);
         note.set_xalign(1.0);
         let close = button("window-close-symbolic", "Close (Esc)");
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        row.set_margin_start(6);
-        row.set_margin_end(6);
-        row.set_margin_top(4);
-        row.set_margin_bottom(4);
+        let replacing = gtk::ToggleButton::builder()
+            .icon_name("edit-find-replace-symbolic")
+            .tooltip_text("Replace (Ctrl+H)")
+            .css_classes(["flat"])
+            .build();
+        let bar_row = || {
+            let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            row.set_margin_start(6);
+            row.set_margin_end(6);
+            row.set_margin_top(4);
+            row.set_margin_bottom(4);
+            row
+        };
+        let row = bar_row();
         for w in [
             entry.upcast_ref::<gtk::Widget>(),
             previous.upcast_ref(),
             next.upcast_ref(),
+            replacing.upcast_ref(),
             case.upcast_ref(),
             scope.upcast_ref(),
             note.upcast_ref(),
@@ -1339,8 +1360,23 @@ impl FindBar {
         ] {
             row.append(w);
         }
+        let with = gtk::Entry::builder()
+            .placeholder_text("Replace with")
+            .hexpand(true)
+            .build();
+        let replace = gtk::Button::with_label("Replace");
+        let replace_all = gtk::Button::with_label("Replace All");
+        let replace_row = bar_row();
+        replace_row.set_margin_top(0);
+        replace_row.append(&with);
+        replace_row.append(&replace);
+        replace_row.append(&replace_all);
+        replace_row.set_visible(false);
+        let rows = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        rows.append(&row);
+        rows.append(&replace_row);
         let root = gtk::Revealer::builder()
-            .child(&row)
+            .child(&rows)
             .transition_type(gtk::RevealerTransitionType::SlideUp)
             .build();
         let bar = Self(Rc::new(FindParts {
@@ -1349,6 +1385,9 @@ impl FindBar {
             case,
             scope,
             note,
+            replacing,
+            replace_row,
+            with,
             grid: grid.downgrade(),
             trace: RefCell::new(None),
         }));
@@ -1425,6 +1464,35 @@ impl FindBar {
             let bar = bar.clone();
             move |_| bar.close()
         });
+        p.replacing.connect_toggled({
+            let bar = bar.clone();
+            move |t| bar.0.replace_row.set_visible(t.is_active())
+        });
+        p.with.connect_activate({
+            let bar = bar.clone();
+            move |_| bar.replace_one()
+        });
+        replace.connect_clicked({
+            let bar = bar.clone();
+            move |_| bar.replace_one()
+        });
+        replace_all.connect_clicked({
+            let bar = bar.clone();
+            move |_| bar.replace_all()
+        });
+        // Esc anywhere in the bar closes it: the replace field, a button, the toggle.
+        let keys = gtk::EventControllerKey::new();
+        keys.connect_key_pressed({
+            let bar = bar.clone();
+            move |_, key, _, _| {
+                if key == gtk::gdk::Key::Escape {
+                    bar.close();
+                    return glib::Propagation::Stop;
+                }
+                glib::Propagation::Proceed
+            }
+        });
+        p.root.add_controller(keys);
         bar
     }
 
@@ -1455,17 +1523,68 @@ impl FindBar {
             p.scope.selected() == 1,
             step,
             move |found| {
-                use grid_view::Found;
-                let note = match found {
-                    Found::Hit { ordinal, total } => Some(FindNote::Hit { ordinal, total }),
-                    Found::Nothing => Some(FindNote::Nothing),
-                    Found::NotReady => Some(FindNote::NotReady),
-                    Found::Cancelled => None,
-                };
-                if let Some(n) = note {
-                    bar.0.note.set_text(&status::find_note(n));
-                }
+                bar.show(found);
                 bar.trace(FindEvent::Done(&text, found));
+            },
+        );
+    }
+
+    /// Say how a find went.
+    fn show(&self, found: grid_view::Found) {
+        use grid_view::Found;
+        let note = match found {
+            Found::Hit { ordinal, total } => FindNote::Hit { ordinal, total },
+            Found::Nothing => FindNote::Nothing,
+            Found::NotReady => FindNote::NotReady,
+            Found::Cancelled => return,
+        };
+        self.0.note.set_text(&status::find_note(note));
+    }
+
+    /// Replace in the match under the cursor and go to the next (or first go to a match).
+    fn replace_one(&self) {
+        let p = &self.0;
+        let (Some(grid), text) = (p.grid.upgrade(), p.entry.text()) else {
+            return;
+        };
+        if text.is_empty() {
+            return;
+        }
+        let bar = self.clone();
+        grid.replace_one(
+            &text,
+            p.case.is_active(),
+            p.scope.selected() == 1,
+            &p.with.text(),
+            move |found| bar.show(found),
+        );
+    }
+
+    /// Replace every match shown, as one undo step.
+    fn replace_all(&self) {
+        let p = &self.0;
+        let (Some(grid), text) = (p.grid.upgrade(), p.entry.text()) else {
+            return;
+        };
+        if text.is_empty() {
+            return;
+        }
+        let bar = self.clone();
+        grid.replace_all(
+            &text,
+            p.case.is_active(),
+            p.scope.selected() == 1,
+            &p.with.text(),
+            move |done| {
+                use grid_view::Replaced;
+                let note = match done {
+                    Replaced::Cells(cells) => FindNote::Replaced { cells },
+                    Replaced::TooMany(cells) => FindNote::TooMany { cells },
+                    Replaced::Nothing => FindNote::Nothing,
+                    Replaced::NotReady => FindNote::NotReady,
+                    Replaced::Cancelled => return,
+                };
+                bar.0.note.set_text(&status::find_note(note));
             },
         );
     }
@@ -1479,9 +1598,14 @@ impl FindBar {
         }
     }
 
-    fn open(&self) {
+    /// Show the bar on the find field, with the replace row (Ctrl+H) or as it was
+    /// (Ctrl+F).
+    fn open(&self, replace: bool) {
         let p = &self.0;
         p.root.set_reveal_child(true);
+        if replace {
+            p.replacing.set_active(true);
+        }
         p.entry.grab_focus();
         p.entry.select_region(0, -1);
     }
