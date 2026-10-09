@@ -688,6 +688,7 @@ fn build_window(
             }
             if complete && !was_complete {
                 grid.infer_types();
+                grid.apply_pending_filters(); // the filters a save had on (FILT-3)
             }
             if complete && !was_complete && std::env::var_os("BRICKS_TIMINGS").is_some() {
                 eprintln!(
@@ -909,7 +910,10 @@ fn finish_save(
         .and_then(|done| session.open().map(|t| (done, t)).map_err(|e| e.to_string()))
     {
         Ok(((stats, took), table)) => {
+            // The reopened file has the same columns: its filters come back (FILT-3).
+            let filters = grid.filters();
             grid.replace_table(table);
+            grid.restore_filters(filters);
             if std::env::var_os("BRICKS_TIMINGS").is_some() {
                 eprintln!(
                     "saved {} rows, {} bytes in {took:?}",

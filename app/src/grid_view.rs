@@ -51,8 +51,8 @@ pub struct SortJob {
 /// A filter evaluated on the job pool (FILT-1): the filter, its result, and file rows
 /// tested so far.
 pub struct FilterJob {
-    filter: Filter,
-    job: jobs::Job<Result<RowSet, FilterError>>,
+    filters: Vec<Filter>,
+    job: jobs::Job<Result<Vec<RowSet>, FilterError>>,
     done: Arc<AtomicU64>,
     rows: u64,
 }
@@ -131,6 +131,9 @@ mod imp {
         pub sorting: RefCell<Option<SortJob>>,
         /// The filter being evaluated (FILT-1), if any. Edits wait for it.
         pub filtering: RefCell<Option<FilterJob>>,
+        /// Filters to apply again, by column position, once the table is indexed: those
+        /// of the table a save replaced (FILT-3).
+        pub pending_filters: RefCell<Vec<(u32, Test)>>,
         /// A column's filter settings, open under its header button.
         pub filter_popover: RefCell<Option<gtk::Popover>>,
     }
@@ -1822,7 +1825,7 @@ impl GridView {
                 match test_of(conditions.selected() as usize, &value.text()) {
                     Some(test) => {
                         value.remove_css_class("error");
-                        g.apply_filter(col, test);
+                        g.apply_filters(vec![(col, test)]);
                     }
                     None => value.add_css_class("error"), // not a number
                 }
@@ -1833,32 +1836,42 @@ impl GridView {
         value.grab_focus();
     }
 
-    /// Evaluate `test` on column `col` on the job pool and show the rows that pass, with
-    /// the other columns' filters. Waits for indexing; Esc cancels.
-    fn apply_filter(&self, col: u32, test: Test) {
+    /// Evaluate `filters` (column, test) on the job pool, one after the other, and show
+    /// the rows that pass them and the other columns' filters. Waits for indexing; Esc
+    /// cancels.
+    fn apply_filters(&self, filters: Vec<(u32, Test)>) {
         let imp = self.imp();
         self.close_filter_menu();
-        if self.busy() || imp.editing.get().is_some() {
+        if filters.is_empty() || self.busy() || imp.editing.get().is_some() {
             return;
         }
-        let (snapshot, filter, rows) = match imp.table.borrow().as_ref() {
+        let (snapshot, filters, rows) = match imp.table.borrow().as_ref() {
             Some(t) if t.is_complete() => {
-                let filter = Filter {
-                    col: t.col_id(col),
-                    test,
-                };
-                (t.snapshot(), filter, t.index().row_count())
+                let filters: Vec<Filter> = filters
+                    .into_iter()
+                    .map(|(col, test)| Filter {
+                        col: t.col_id(col),
+                        test,
+                    })
+                    .collect();
+                let rows = t.index().row_count() * filters.len() as u64;
+                (t.snapshot(), filters, rows)
             }
             _ => return,
         };
         let done = Arc::new(AtomicU64::new(0));
         let started = Instant::now();
         let job = jobs::spawn({
-            let (done, filter) = (done.clone(), filter.clone());
-            move |cancel| snapshot.filter_rows(&filter, cancel.flag(), &done)
+            let (done, filters) = (done.clone(), filters.clone());
+            move |cancel| {
+                filters
+                    .iter()
+                    .map(|f| snapshot.filter_rows(f, cancel.flag(), &done))
+                    .collect()
+            }
         });
         imp.filtering.replace(Some(FilterJob {
-            filter,
+            filters,
             job: job.clone(),
             done,
             rows,
@@ -1871,8 +1884,8 @@ impl GridView {
             let current = matches!(&*imp.filtering.borrow(), Some(f) if f.job.is(&job));
             if std::env::var_os("BRICKS_TIMINGS").is_some() {
                 eprintln!(
-                    "filter on column {col}: {:?} in {:?}{}",
-                    result.as_ref().map(|r| r.as_ref().map(|_| ())),
+                    "filters: {:?} in {:?}{}",
+                    result.as_ref().map(|r| r.as_ref().map(Vec::len)),
                     started.elapsed(),
                     if current { "" } else { " (dropped)" }
                 );
@@ -1883,12 +1896,42 @@ impl GridView {
             let Some(running) = imp.filtering.take() else {
                 return;
             };
-            let Ok(Ok(rows)) = result else { return };
+            let Ok(Ok(sets)) = result else { return };
             if let Some(t) = imp.table.borrow_mut().as_mut() {
-                t.set_filter(running.filter, rows);
+                for (filter, rows) in running.filters.into_iter().zip(sets) {
+                    t.set_filter(filter, rows);
+                }
             }
             g.after_change(None);
         });
+    }
+
+    /// The filters on, by column position and test, to apply again to the table a save
+    /// reopens (FILT-3).
+    pub fn filters(&self) -> Vec<(u32, Test)> {
+        let table = self.imp().table.borrow();
+        let Some(t) = table.as_ref() else {
+            return Vec::new();
+        };
+        (0..t.min_width())
+            .filter_map(|c| t.filter_on(c).map(|f| (c, f.test.clone())))
+            .collect()
+    }
+
+    /// Apply `filters` (from [`Self::filters`]) once the table is indexed: now if it is,
+    /// else when the status tick sees indexing finish ([`Self::apply_pending_filters`]).
+    pub fn restore_filters(&self, filters: Vec<(u32, Test)>) {
+        self.imp().pending_filters.replace(filters);
+        self.apply_pending_filters();
+    }
+
+    /// Apply filters waiting for indexing to finish, if it has.
+    pub fn apply_pending_filters(&self) {
+        if !self.is_complete() || self.busy() {
+            return;
+        }
+        let pending = self.imp().pending_filters.take();
+        self.apply_filters(pending);
     }
 
     /// Show column `col`'s rows again, as far as the other filters allow.
@@ -2036,6 +2079,7 @@ impl GridView {
         if let Some(old) = imp.filtering.take() {
             old.job.cancel();
         }
+        imp.pending_filters.take(); // a save gives them back with `restore_filters`
         self.close_filter_menu();
         imp.undo.replace(Some(UndoStack::default()));
         imp.cache.borrow_mut().reset();

@@ -64,7 +64,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | SORT-2 | M3 | P0 | done | SORT-1, ENG-7 | Sort moves whole rows and honors the header | Header row never moves |
 | FILT-1 | M3 | P0 | done | TYPE-1, DEC-4 | Per-column filter from header dropdown | Exact, contains, not contains, empty, non-empty, numeric compare |
 | FILT-2 | M3 | P0 | done | FILT-1 | Combine filters across columns (AND) | Status bar shows "x of y rows" |
-| FILT-3 | M3 | P0 | todo | FILT-1, SAVE-1 | Saving with an active filter keeps hidden rows | Test confirms on-disk row count unchanged |
+| FILT-3 | M3 | P0 | done | FILT-1, SAVE-1 | Saving with an active filter keeps hidden rows | Test confirms on-disk row count unchanged |
 | FILT-4 | M3 | P1 | todo | FILT-2, CLIP-2 | Edits and paste respect the filtered view | Paste into a filtered range touches visible rows only |
 | SRCH-1 | M3 | P0 | todo | ENG-8 | Find bar (Ctrl+F): whole file or current column, case toggle | First hit in 1 GB under 1 s, off the UI thread |
 | SRCH-2 | M3 | P0 | todo | SRCH-1 | Next/previous result; hit count streams in | New keystroke cancels the running search |
@@ -80,6 +80,18 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 ## Notes
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
+
+- **2026-10-09 FILT-3:** saving with an active filter keeps hidden rows. The save always wrote every row (it walks the row order, never the view: ADR 0004, invariant 7); this story proves it through the real atomic save, and keeps the filters across the save.
+  - `file-format/tests/save_filtered.rs`:
+    - A small file, filtered to 2 of 5 rows, with a shown row edited and the whole table sorted while filtered. `save_csv` writes all 5 rows in the sorted order with the edit, and the reopened file has 5 rows.
+    - Ignored, 1 GB: filtered to 1,362,719 of 19,094,579 rows, one shown row edited, saved atomically. The reopened file has every row (19,094,580 lines with the header) and matches the corpus line for line except the edited one, which stays in place.
+  - **Gap closed:** a save reopens the file as a new table, which dropped the filters, so the view jumped back to every row. `finish_save` now takes the filters by column position (`GridView::filters`) and gives them back (`restore_filters`). They are applied again in one job once the reopened file is indexed (`apply_pending_filters`, from the status tick next to type inference). The saved file's columns are the table's columns in order, so positions carry over, Save As included. A delimiter change still drops them, since its columns differ.
+  - Being applied again means being evaluated again: a row edited so it no longer matches is hidden after the save, as with Apply.
+  - `GridView::apply_filter` became `apply_filters`, one job for several filters.
+  - Smoke test via Broadway on a /tmp copy of the 1 GB file:
+    - City ▾ `portland` (2,725,768 rows), then `Edited` typed into B1, then Ctrl+S: `Saved in 0.8 s`.
+    - The reopened table was indexed, re-inferred, and filtered again in 168 ms: `2,725,768 of 19,094,579 rows`, with C's ▾ highlighted.
+    - On disk: 19,094,580 lines, `5,Edited,Portland,…` on line 7, every other line identical to the corpus.
 
 - **2026-10-09 FILT-2:** combine filters across columns (AND), with "x of y rows" in the status bar. Both were built in FILT-1; this story proves them and fixes one bug.
   - Proof:
