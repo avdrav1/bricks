@@ -55,7 +55,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | CLIP-2 | M2 | P0 | done | CLIP-1, CMD-1 | Paste TSV into a range, expanding as needed | 10k rows from LibreOffice paste in under 1 s |
 | SAVE-2 | M2 | P0 | done | SAVE-1, ENG-6 | Save, Save As, New | Save As can change delimiter and encoding |
 | SAVE-3 | M2 | P0 | done | SAVE-1, DEC-5 | Background save with progress and cancel | UI responsive during 1 GB save; save under 15 s |
-| SAVE-4 | M2 | P1 | todo | SAVE-1 | Preserve quoting style and line endings of untouched rows | Saving an unedited file produces an empty diff |
+| SAVE-4 | M2 | P1 | done | SAVE-1 | Preserve quoting style and line endings of untouched rows | Saving an unedited file produces an empty diff |
 | ENG-8 | M3 | P0 | todo | DEC-5 | Background job framework: progress and cancel | Every long job cancels within 200 ms |
 | TYPE-1 | M3 | P0 | todo | ENG-2 | Infer column types by sampling | Raw value never altered; `00123` stays `00123` |
 | TYPE-2 | M3 | P1 | todo | TYPE-1 | Show inferred type in header; allow override | Override changes sort and filter only |
@@ -79,6 +79,10 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 ## Notes
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
+
+- **2026-10-08 SAVE-4:** untouched rows keep their quoting and line endings. Nothing to fix: the writer already copies untouched rows and fields as raw bytes (SAVE-1, EDIT-4); this story proves it.
+  - `file-format/tests/untouched_rows.rs` (ignored; needs `corpus/nasty` and `corpus/realworld`): for each of the 63 files, an unedited save is byte-identical; then (55 files with 2+ rows) one edit to the middle row's first cell changes only that row's physical lines in the file decoded with its own encoding. Covers BOM, CRLF, a last row without a newline, quoted newlines, ragged rows, Latin-1, UTF-16 LE, and the 256 KiB real-world samples that end mid-row.
+  - Smoke test via Broadway on a /tmp copy of `comma-population.csv` (CRLF, quoted fields): typed `999` into E4 and saved. `diff` shows one line, `Aruba,ABW,1963,57002,999\r`.
 
 - **2026-10-08 SAVE-3:** background save with progress and cancel. The save already ran on a thread (SAVE-1); this adds progress, cancel, and the proof.
   - `data_model::SaveProgress` (cancel flag, bytes written, checking flag) is shared between the save thread and the UI. `SaveJob::write_to` takes it: every `put` checks the flag first and counts bytes after. Untouched rows are copied in 4 MiB pieces (`COPY_CHUNK`) so a cancel is seen at least that often. `file_format::save_csv` takes it too, passes the flag to the verify re-index, and maps any error after a cancel to `SaveError::Cancelled`; `save_atomic` still removes the temp file.
