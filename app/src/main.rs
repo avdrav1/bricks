@@ -998,9 +998,11 @@ fn finish_save(
         .and_then(|done| session.open().map(|t| (done, t)).map_err(|e| e.to_string()))
     {
         Ok(((stats, took), table)) => {
-            // The reopened file has the same columns: its filters come back (FILT-3).
-            let filters = grid.filters();
+            // The reopened file has the same columns: the types the user set (TYPE-2) and
+            // the filters (FILT-3) come back, types first since filters read them.
+            let (types, filters) = (grid.type_overrides(), grid.filters());
             grid.replace_table(table);
+            grid.restore_type_overrides(types);
             grid.restore_filters(filters);
             if std::env::var_os("BRICKS_TIMINGS").is_some() {
                 eprintln!(

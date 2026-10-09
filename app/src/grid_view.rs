@@ -7,9 +7,9 @@ use commands::{Batch, ClearCells, Reshape, SetCell, UndoStack};
 use csv_engine::RowIndex as _;
 use data_model::{
     parse_tsv, CellRef, ColId, ColumnTypes, Compare, Copied, CsvTable, DelimiterChoice, Edit,
-    Filter, FilterError, Hit, Matches, PasteError, Query, ReplaceError, RereadError, RowId, RowSet,
-    SaveJob, SaveJobError, SearchError, SearchProgress, SortError, SortOrder, Step, TableSource,
-    Test, PASTE_MAX_CELLS,
+    Filter, FilterError, Hit, InferredType, Matches, PasteError, Query, ReplaceError, RereadError,
+    RowId, RowSet, SaveJob, SaveJobError, SearchError, SearchProgress, SortError, SortOrder, Step,
+    TableSource, Test, PASTE_MAX_CELLS,
 };
 use grid::{Bounds, GridCache, Key, Mods, Selection, Sizes, Viewport};
 use gtk::{gdk, gio, glib, graphene, pango, prelude::*, subclass::prelude::*};
@@ -408,8 +408,14 @@ mod imp {
             for c in visible_cols {
                 let (x, cw) = (rh_w + cols.pos(c), cols.size(c));
                 snapshot.append_color(&line, &rect(x + cw - 1.0, 0.0, 1.0, HEADER_H));
-                // The title stops short of the filter button.
-                snapshot.push_clip(&rect(x, 0.0, (cw - 1.0 - FILTER_W).max(0.0), HEADER_H));
+                // The column's type (TYPE-2) sits right of the title, left of the filter
+                // button; blue when the user set it.
+                let ty = table.column_type(c as u32);
+                let tag_w = ty.map_or(0.0, |t| self.layout(type_tag(t)).pixel_size().0 as f64);
+                let tag_x = x + cw - FILTER_W - tag_w - PAD;
+                // The title stops short of the type and the filter button.
+                let title_w = (tag_x - x - PAD).max(0.0);
+                snapshot.push_clip(&rect(x, 0.0, title_w, HEADER_H));
                 column_name(c as u32, &mut buf);
                 match titles.get(c as usize) {
                     Some(title) => {
@@ -419,14 +425,16 @@ mod imp {
                     None => text_at(&buf, x + PAD, 4.0),
                 }
                 snapshot.pop();
-                let filtered = gdk::RGBA::new(0.21, 0.52, 0.89, 1.0);
+                let blue = gdk::RGBA::new(0.21, 0.52, 0.89, 1.0);
+                if let Some(t) = ty {
+                    // Narrow columns drop the tag before the button.
+                    if tag_x > x + PAD {
+                        let set = table.type_override(c as u32).is_some();
+                        text_in(type_tag(t), tag_x, 4.0, if set { &blue } else { &dim });
+                    }
+                }
                 let on = table.filter_on(c as u32).is_some();
-                text_in(
-                    "▾",
-                    x + cw - FILTER_W,
-                    3.0,
-                    if on { &filtered } else { &dim },
-                );
+                text_in("▾", x + cw - FILTER_W, 3.0, if on { &blue } else { &dim });
             }
             snapshot.pop();
 
@@ -2090,19 +2098,37 @@ impl GridView {
         Some(t.unfiltered_row_count())
     }
 
-    /// The filter settings of column `col` (FILT-1), in a popover under its header button
-    /// at `x`: a condition, a value, Apply, and Clear when the column is filtered.
+    /// The settings of column `col` (FILT-1, TYPE-2), in a popover under its header button
+    /// at `x`: the column's type (Automatic or set), then a filter condition, a value,
+    /// Apply, and Clear when the column is filtered. Number conditions are offered for
+    /// number columns only.
     fn filter_menu(&self, col: u32, x: f64) {
         let imp = self.imp();
         if let Some(old) = imp.filter_popover.take() {
             old.unparent();
         }
-        let current = imp
-            .table
-            .borrow()
-            .as_ref()
-            .and_then(|t| t.filter_on(col).map(|f| f.test.clone()));
-        let conditions = gtk::DropDown::from_strings(&CONDITIONS.map(|(name, _)| name));
+        let (current, inferred, set) = match imp.table.borrow().as_ref() {
+            Some(t) => (
+                t.filter_on(col).map(|f| f.test.clone()),
+                t.inferred_type(col),
+                t.type_override(col),
+            ),
+            None => (None, None, None),
+        };
+        // A number filter already on keeps its conditions listed whatever the type.
+        let number_filter = matches!(current, Some(Test::Number(..)));
+        let names = move |number: bool| -> Vec<&'static str> {
+            conditions_for(number || number_filter)
+                .iter()
+                .map(|(name, _)| *name)
+                .collect()
+        };
+        let conditions = gtk::DropDown::from_strings(&names(is_number(set.or(inferred))));
+        let auto = format!("Automatic ({})", type_name(inferred));
+        let mut type_names = vec![auto.as_str()];
+        type_names.extend(TYPES.map(|(name, _)| name));
+        let types = gtk::DropDown::from_strings(&type_names);
+        types.set_selected(set.map_or(0, |t| 1 + type_choice(t) as u32));
         let value = gtk::Entry::builder()
             .placeholder_text("Value")
             .activates_default(true)
@@ -2115,6 +2141,31 @@ impl GridView {
         let needs_value =
             |i: u32| !matches!(CONDITIONS[i as usize].1, Kind::Empty | Kind::NonEmpty);
         value.set_sensitive(needs_value(conditions.selected()));
+        types.connect_selected_notify({
+            let (g, conditions) = (self.downgrade(), conditions.downgrade());
+            move |dd| {
+                let (Some(g), Some(conditions)) = (g.upgrade(), conditions.upgrade()) else {
+                    return;
+                };
+                let ty = (dd.selected() as usize).checked_sub(1).map(|i| TYPES[i].1);
+                g.set_column_type(col, ty);
+                // Number conditions come and go with the type.
+                let shown = names(is_number(ty.or(inferred)));
+                let Some(list) = conditions.model().and_downcast::<gtk::StringList>() else {
+                    return;
+                };
+                if list.n_items() as usize != shown.len() {
+                    let keep = conditions.selected();
+                    list.splice(0, list.n_items(), &shown);
+                    let keep = if (keep as usize) < shown.len() {
+                        keep
+                    } else {
+                        0
+                    };
+                    conditions.set_selected(keep);
+                }
+            }
+        });
         conditions.connect_selected_notify({
             let value = value.downgrade();
             move |dd| {
@@ -2147,6 +2198,12 @@ impl GridView {
         form.set_margin_end(6);
         let mut title = String::new();
         column_name(col, &mut title);
+        let type_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        type_row.append(&gtk::Label::new(Some("Type")));
+        types.set_hexpand(true);
+        type_row.append(&types);
+        form.append(&type_row);
+        form.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
         form.append(&gtk::Label::new(Some(&format!(
             "Show rows where column {title}"
         ))));
@@ -2261,6 +2318,47 @@ impl GridView {
             }
             g.after_change(None);
         });
+    }
+
+    /// Set (or with `None`, drop) the user's type for column `col` (TYPE-2). Only sort and
+    /// filter read it; a number filter on the column is applied again, since which cells
+    /// are numbers may have changed. Not undoable, like filters.
+    pub fn set_column_type(&self, col: u32, ty: Option<InferredType>) {
+        let imp = self.imp();
+        let refilter = {
+            let mut table = imp.table.borrow_mut();
+            let Some(t) = table.as_mut() else { return };
+            t.set_type_override(col, ty);
+            t.filter_on(col)
+                .map(|f| f.test.clone())
+                .filter(|test| matches!(test, Test::Number(..)))
+        };
+        self.queue_draw();
+        if let Some(test) = refilter {
+            self.apply_filters(vec![(col, test)]);
+        }
+    }
+
+    /// The types the user set, by column position, to set again on the table a save
+    /// reopens (TYPE-2).
+    pub fn type_overrides(&self) -> Vec<(u32, InferredType)> {
+        let table = self.imp().table.borrow();
+        let Some(t) = table.as_ref() else {
+            return Vec::new();
+        };
+        (0..t.min_width())
+            .filter_map(|c| t.type_override(c).map(|ty| (c, ty)))
+            .collect()
+    }
+
+    /// Set types from [`Self::type_overrides`] again.
+    pub fn restore_type_overrides(&self, types: Vec<(u32, InferredType)>) {
+        if let Some(t) = self.imp().table.borrow_mut().as_mut() {
+            for (c, ty) in types {
+                t.set_type_override(c, Some(ty));
+            }
+        }
+        self.queue_draw();
     }
 
     /// The filters on, by column position and test, to apply again to the table a save
@@ -2582,6 +2680,66 @@ impl GridView {
 /// (not while filtered: rows can't be added then, FILT-1).
 fn shown_rows(table: &CsvTable) -> u64 {
     table.row_count() + u64::from(table.is_complete() && !table.is_filtered())
+}
+
+/// What the popover calls an inferred type: "Automatic (whole numbers)".
+fn type_name(t: Option<InferredType>) -> &'static str {
+    match t {
+        None => "not detected yet",
+        Some(InferredType::Integer) => "whole numbers",
+        Some(InferredType::Decimal) => "numbers",
+        Some(InferredType::Text) => "text",
+        Some(InferredType::Date) => "dates",
+        Some(InferredType::DateTime) => "dates and times",
+        Some(InferredType::Boolean) => "true/false",
+    }
+}
+
+/// A column type's tag in the header (TYPE-2).
+fn type_tag(t: InferredType) -> &'static str {
+    match t {
+        InferredType::Integer => "123",
+        InferredType::Decimal => "1.5",
+        InferredType::Text => "abc",
+        InferredType::Date | InferredType::DateTime => "date",
+        InferredType::Boolean => "T/F",
+    }
+}
+
+/// The types the popover offers after "Automatic" (TYPE-2), and the type each sets.
+const TYPES: [(&str, InferredType); 4] = [
+    ("Text", InferredType::Text),
+    ("Number", InferredType::Decimal),
+    ("Date", InferredType::DateTime),
+    ("True/false", InferredType::Boolean),
+];
+
+/// The popover's entry for type `t`: its index in [`TYPES`].
+fn type_choice(t: InferredType) -> usize {
+    match t {
+        InferredType::Text => 0,
+        InferredType::Integer | InferredType::Decimal => 1,
+        InferredType::Date | InferredType::DateTime => 2,
+        InferredType::Boolean => 3,
+    }
+}
+
+fn is_number(t: Option<InferredType>) -> bool {
+    matches!(t, Some(InferredType::Integer | InferredType::Decimal))
+}
+
+/// Conditions offered for a column: number ones only for number columns (they come
+/// last in [`CONDITIONS`], so list positions stay the same).
+fn conditions_for(number: bool) -> &'static [(&'static str, Kind)] {
+    let text = CONDITIONS
+        .iter()
+        .position(|(_, k)| matches!(k, Kind::Number(_)))
+        .unwrap_or(CONDITIONS.len());
+    if number {
+        &CONDITIONS
+    } else {
+        &CONDITIONS[..text]
+    }
 }
 
 /// What a filter condition in the popover needs (FILT-1).

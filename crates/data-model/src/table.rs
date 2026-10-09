@@ -188,6 +188,8 @@ pub struct CsvTable {
     pub(crate) cleared: Cleared,
     /// Inferred column types (TYPE-1), by column identity; empty until inferred.
     pub(crate) types: HashMap<ColId, InferredType>,
+    /// Types the user set (TYPE-2), by column identity; they win over `types`.
+    pub(crate) type_overrides: HashMap<ColId, InferredType>,
     /// Column filters (FILT-1) and the rows each passed.
     pub(crate) filters: Vec<(Filter, Arc<RowSet>)>,
     /// While filtered: positions of the rows shown, in order (the header excluded).
@@ -223,6 +225,7 @@ impl CsvTable {
             next_inserted_col: 0,
             cleared: Cleared::default(),
             types: HashMap::new(),
+            type_overrides: HashMap::new(),
             filters: Vec::new(),
             visible: None,
             revision: next_revision(),
@@ -246,6 +249,7 @@ impl CsvTable {
             next_inserted_col: self.next_inserted_col,
             cleared: self.cleared.clone(),
             types: self.types.clone(),
+            type_overrides: self.type_overrides.clone(),
             filters: self.filters.clone(),
             visible: self.visible.clone(),
             revision: self.revision,

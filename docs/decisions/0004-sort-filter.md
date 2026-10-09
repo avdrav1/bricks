@@ -42,6 +42,7 @@ Filter representation (19.1M rows, 1,362,719 visible):
   - Both options produce the same 2M-row permutation (same digest) in every CPU configuration.
   - Bitmap, visible list and fetch-filter agree on the visible count (142,776 at 2M rows, 1,362,719 at 19.1M), and `select(k)` matches `list[k]` on every sampled window.
 - **Typed keys:** numbers map to an order-preserving `u64`. Non-numeric and empty cells sort after all numbers, and raw bytes are never altered (invariant 1). Text and date keys are TYPE-1/SORT-1 work, with the same shape.
+  - As built in TYPE-2 (2026-10-09): the type a sort or filter reads is the user's override if set, else the inferred one. In a number column (either way), number filter conditions read zero-padded cells such as `00999` as numbers. The raw bytes stay untouched.
 - **Hardware:** Ryzen 9 5900, 125 GB RAM, NVMe, Rust 1.99, file in the page cache. "7 threads" means `taskset -c 0-7` (8 physical cores, pool 7 per ADR 0005), which approximates the reference box. This is not the reference box.
 
 To rerun:

@@ -7,7 +7,8 @@
 //! Rules (user decisions, 2026-10-09):
 //! - Text conditions ignore ASCII case, like the sort.
 //! - Number conditions take cells that are numbers (as TYPE-1 reads them); any other
-//!   cell fails them.
+//!   cell fails them. In a column whose type is a number (inferred, or set by the user:
+//!   TYPE-2), they take every cell that parses as a number, zero-padded ones included.
 //! - A filter is evaluated when applied: a row edited afterwards stays shown until the
 //!   filter is applied again.
 
@@ -86,10 +87,12 @@ const CHUNK: u64 = 65_536;
 struct Matcher {
     test: Test,
     needle: Vec<u8>,
+    /// The column's type is a number: read every cell that parses as one.
+    numeric: bool,
 }
 
 impl Matcher {
-    fn new(test: &Test) -> Self {
+    fn new(test: &Test, numeric: bool) -> Self {
         let needle = match test {
             Test::Equals(s) | Test::Contains(s) | Test::NotContains(s) => s.to_ascii_lowercase(),
             _ => String::new(),
@@ -97,6 +100,25 @@ impl Matcher {
         Self {
             test: test.clone(),
             needle: needle.into_bytes(),
+            numeric,
+        }
+    }
+
+    /// `raw` as a number, if a number condition takes it.
+    fn number(&self, raw: &str) -> Option<f64> {
+        let plain = matches!(
+            value_type(raw),
+            Some(InferredType::Integer | InferredType::Decimal)
+        );
+        // Digits, sign, point, exponent only: no "inf", "NaN", or "1,234".
+        let numeric_text = || {
+            raw.bytes()
+                .all(|b| b.is_ascii_digit() || b"+-.eE".contains(&b))
+        };
+        if plain || (self.numeric && numeric_text()) {
+            raw.parse::<f64>().ok().filter(|v| v.is_finite())
+        } else {
+            None
         }
     }
 
@@ -116,19 +138,14 @@ impl Matcher {
             Test::NotContains(_) => !contains(),
             Test::Empty => raw.is_empty(),
             Test::NonEmpty => !raw.is_empty(),
-            Test::Number(cmp, x) => {
-                matches!(
-                    value_type(raw),
-                    Some(InferredType::Integer | InferredType::Decimal)
-                ) && raw.parse::<f64>().is_ok_and(|v| match cmp {
-                    Compare::Eq => v == *x,
-                    Compare::Ne => v != *x,
-                    Compare::Lt => v < *x,
-                    Compare::Le => v <= *x,
-                    Compare::Gt => v > *x,
-                    Compare::Ge => v >= *x,
-                })
-            }
+            Test::Number(cmp, x) => self.number(raw).is_some_and(|v| match cmp {
+                Compare::Eq => v == *x,
+                Compare::Ne => v != *x,
+                Compare::Lt => v < *x,
+                Compare::Le => v <= *x,
+                Compare::Gt => v > *x,
+                Compare::Ge => v >= *x,
+            }),
         }
     }
 }
@@ -146,7 +163,11 @@ impl CsvTable {
         if !self.index.is_complete() {
             return Err(FilterError::NotIndexed);
         }
-        let m = Matcher::new(&filter.test);
+        let numeric = matches!(
+            self.type_of(filter.col),
+            Some(InferredType::Integer | InferredType::Decimal)
+        );
+        let m = Matcher::new(&filter.test, numeric);
         let col = filter.col;
         let file_rows = self.index.row_count();
         let chunks: Vec<Vec<u64>> = (0..file_rows.div_ceil(CHUNK))
@@ -340,7 +361,7 @@ mod tests {
     use super::*;
 
     fn passes(test: Test, raw: &str) -> bool {
-        Matcher::new(&test).matches(raw)
+        Matcher::new(&test, false).matches(raw)
     }
 
     #[test]

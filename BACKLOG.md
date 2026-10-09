@@ -59,7 +59,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | APP-9 | M2 | P0 | done | SAVE-2 | Ask before closing with unsaved edits | Closing a window with edits offers Save / Don't Save / Cancel; nothing is lost silently |
 | ENG-8 | M3 | P0 | done | DEC-5 | Background job framework: progress and cancel | Every long job cancels within 200 ms |
 | TYPE-1 | M3 | P0 | done | ENG-2 | Infer column types by sampling | Raw value never altered; `00123` stays `00123` |
-| TYPE-2 | M3 | P1 | todo | TYPE-1 | Show inferred type in header; allow override | Override changes sort and filter only |
+| TYPE-2 | M3 | P1 | done | TYPE-1 | Show inferred type in header; allow override | Override changes sort and filter only |
 | SORT-1 | M3 | P0 | done | TYPE-1, DEC-4, CMD-1, ENG-8 | Type-aware sort, ascending and descending | 2M-row numeric sort under 3 s; stable; undoable |
 | SORT-2 | M3 | P0 | done | SORT-1, ENG-7 | Sort moves whole rows and honors the header | Header row never moves |
 | FILT-1 | M3 | P0 | done | TYPE-1, DEC-4 | Per-column filter from header dropdown | Exact, contains, not contains, empty, non-empty, numeric compare |
@@ -81,6 +81,32 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-09 TYPE-2:** each header shows its column's type, and the user can override it.
+  - Decided with the user:
+    - The type shows as a dim tag right of the title, left of ▾: 123, 1.5, abc, date, T/F. It is blue when overridden, and narrow columns drop it before the button.
+    - The ▾ popover gets a "Type" dropdown: "Automatic (whole numbers)" (the inferred type, named), Text, Number, Date, True/false.
+    - In a Number column, detected or overridden, number filter conditions read every cell that parses as a number, zero-padded included: "00999" > 500 passes. In other columns they take only plain numbers, as before.
+    - The popover hides the number conditions for columns that aren't numbers. A number filter already on keeps them listed.
+  - My calls:
+    - Overrides aren't undoable, like filters: they change no data.
+    - They stay with their column through header flips and new inferences.
+    - A save gives them back by column position, before the filters, since filters read them.
+    - Changing a column's type re-applies a number filter on that column. Text filters don't depend on the type.
+  - `data_model`:
+    - `CsvTable::type_overrides` (by `ColId`) sit apart from the inferred `types`. `column_type(col)` (what sort and filter use) returns the override first, then the inferred type.
+    - Accessors: `inferred_type(col)`, `type_override(col)`, `set_type_override(col, Option<InferredType>)`.
+    - The filter's `Matcher` takes the column's numberness from `type_of(filter.col)`. Its numeric reading accepts only digits, sign, point, and exponent: no "inf", "NaN", or "1,234".
+  - Acceptance: `file-format/tests/type_override.rs`, on a file whose `code` column ("00999", 10, 9, abc, blank) is inferred Text.
+    - Sort goes from 00999, 10, 9, abc to 9, 10, 00999, abc with Number. A number column read as Text sorts as text.
+    - "> 500" goes from no rows to "00999".
+    - Values, edits (none), and the saved file are unchanged (the saved bytes equal the source). Automatic brings the inferred order back.
+    - A second test: an override survives a header flip and a new inference.
+  - Smoke test via Broadway on a /tmp copy of the 10 MB file:
+    - Tags showed on every column. Column H's ▾ showed "Automatic (text)" without number conditions.
+    - Number turned the tag blue ("1.5") and listed them. "> (number) 990" showed 1,670 of 193,311 rows, codes 00991–00999.
+    - An edit and Ctrl+S kept the blue tag and the 1,670 rows: the filter, applied again after the reopen, needed the override.
+    - `diff` against the corpus file showed only the edited line; codes stayed zero-padded.
+  - Follow-up: Date and True/false overrides change only the sort, since there are no date or boolean filter conditions yet.
 - **2026-10-09 SRCH-3:** find and replace; replace all.
   - Decided with the user: replace all refuses above 2,097,152 cells (`REPLACE_MAX_CELLS`, the paste limit). It names the count: "Too many: 2,725,768 (max 2,097,152)". Every new value and its undo is a cell edit until saved. A compact rule-based store for bigger replaces (ADR 0003's "revisit if") is a follow-up, if wanted.
   - Rules, following the search's:

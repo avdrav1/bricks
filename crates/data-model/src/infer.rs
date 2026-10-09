@@ -266,14 +266,45 @@ impl CsvTable {
     }
 
     /// Keep the inferred types (from [`Self::infer_types`]) for the columns they name.
+    /// Overrides ([`Self::set_type_override`]) stay as they are.
     pub fn set_types(&mut self, types: ColumnTypes) {
         self.types = types.into_iter().collect();
     }
 
-    /// The inferred type of the column shown at `col`; `None` until inferred, and for
-    /// columns inserted since.
+    /// The type sort and filter use for the column shown at `col`: the user's override
+    /// (TYPE-2), else the inferred type; `None` until inferred, and for columns inserted
+    /// since that have no override.
     pub fn column_type(&self, col: crate::Col) -> Option<InferredType> {
+        self.type_of(self.col_id(col))
+    }
+
+    pub(crate) fn type_of(&self, id: crate::ColId) -> Option<InferredType> {
+        self.type_overrides
+            .get(&id)
+            .or_else(|| self.types.get(&id))
+            .copied()
+    }
+
+    /// The inferred type of the column shown at `col`, whatever the override.
+    pub fn inferred_type(&self, col: crate::Col) -> Option<InferredType> {
         self.types.get(&self.col_id(col)).copied()
+    }
+
+    /// The type the user set for the column shown at `col`, if any.
+    pub fn type_override(&self, col: crate::Col) -> Option<InferredType> {
+        self.type_overrides.get(&self.col_id(col)).copied()
+    }
+
+    /// Set (or with `None`, drop) the user's type for the column shown at `col` (TYPE-2).
+    /// It changes only how sort and filter read the column: values, display, and saves
+    /// stay as they are. It stays with its column, and through header flips and new
+    /// inferences; a sort or filter already done is not redone.
+    pub fn set_type_override(&mut self, col: crate::Col, ty: Option<InferredType>) {
+        let id = self.col_id(col);
+        match ty {
+            Some(t) => self.type_overrides.insert(id, t),
+            None => self.type_overrides.remove(&id),
+        };
     }
 }
 
