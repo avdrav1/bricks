@@ -340,7 +340,7 @@ impl CsvTable {
     }
 
     /// Id of the row at position `k` among all rows (< `total_rows()`).
-    fn id_at(&self, k: u64) -> RowId {
+    pub(crate) fn id_at(&self, k: u64) -> RowId {
         self.rows.as_ref().map_or(RowId::source(k), |m| m.get(k))
     }
 

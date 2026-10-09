@@ -231,7 +231,7 @@ mod imp {
                 scroll: hadj.value(),
                 extent: body_w,
                 sizes: &sizing.cols,
-                count: u64::from(cache.col_count()) + 1,
+                count: u64::from(cache.col_count().max(table.min_width())) + 1,
             };
             let visible_cols = cols.visible(0);
 
@@ -568,7 +568,7 @@ impl GridView {
         let (_, body_h) = imp.body_size();
         let b = Bounds {
             rows: self.shown_rows(),
-            cols: imp.cache.borrow().col_count() + 1,
+            cols: self.col_count() + 1,
             page_rows: ((body_h / ROW_H).floor() as u64).max(1),
         };
         if let Some(old) = imp.bounds_seen.replace(Some(b)) {
@@ -590,6 +590,14 @@ impl GridView {
         b
     }
 
+    /// Columns with data: the widest row loaded, and never fewer than the header row's or
+    /// than reach every filtered column (FILT-2: a filter hiding every row stays clearable).
+    fn col_count(&self) -> u32 {
+        let imp = self.imp();
+        let min = imp.table.borrow().as_ref().map_or(0, |t| t.min_width());
+        imp.cache.borrow().col_count().max(min)
+    }
+
     /// Both axes of the body as they are scrolled and sized now: rows, then columns.
     fn with_viewports<R>(&self, f: impl FnOnce(Viewport<'_>, Viewport<'_>) -> R) -> R {
         let imp = self.imp();
@@ -597,7 +605,7 @@ impl GridView {
         let value = |adj: &RefCell<Option<gtk::Adjustment>>| {
             adj.borrow().as_ref().map_or(0.0, |a| a.value())
         };
-        let (row_count, col_count) = (self.shown_rows(), imp.cache.borrow().col_count() + 1);
+        let (row_count, col_count) = (self.shown_rows(), self.col_count() + 1);
         let sizing = imp.sizing.borrow();
         f(
             Viewport {
@@ -898,7 +906,7 @@ impl GridView {
         // End and Ctrl+End go to the last cell with data, as in Calc, not the empty edge.
         let within = match key {
             Key::End => {
-                let (rows, cols) = (self.row_count(), imp.cache.borrow().col_count());
+                let (rows, cols) = (self.row_count(), self.col_count());
                 Bounds {
                     rows: if rows > 0 { rows } else { bounds.rows },
                     cols: if cols > 0 { cols } else { bounds.cols },
@@ -1099,8 +1107,8 @@ impl GridView {
             if let (Some(table), Some(undo)) = (table.as_mut(), imp.undo.borrow_mut().as_mut()) {
                 if row >= table.row_count() {
                     // The edge row (SAVE-2): add the row and set the cell, as one step.
-                    if let Ok(edits) = table.paste(row, col, &[vec![text]]) {
-                        if !edits.is_empty() {
+                    match table.paste(row, col, &[vec![text]]) {
+                        Ok(edits) if !edits.is_empty() => {
                             let at = CellRef {
                                 row: table.row_id(row.min(table.row_count().saturating_sub(1))),
                                 col: table.col_id(col),
@@ -1108,6 +1116,11 @@ impl GridView {
                             undo.execute(Box::new(Batch::new("Edit cell", edits, at)), table);
                             grew = true;
                         }
+                        // No row to type into while every row is filtered out (FILT-2).
+                        Err(PasteError::Filtered) => imp
+                            .clip_note
+                            .set(Some((ClipView::Filtered, Instant::now()))),
+                        _ => {}
                     }
                 } else if table.cell_value(row, col).as_deref() != Some(text.as_str()) {
                     let at = CellRef {
@@ -1297,7 +1310,7 @@ impl GridView {
     pub fn delete_cols(&self) {
         let (first, count) = self.selected_cols();
         // Not the empty edge column: there is nothing there to delete.
-        let count = count.min(self.imp().cache.borrow().col_count().saturating_sub(first));
+        let count = count.min(self.col_count().saturating_sub(first));
         let edit = self
             .imp()
             .table
@@ -2150,7 +2163,7 @@ impl GridView {
             v.configure(v.value(), 0.0, upper, ROW_H, body_h * 0.9, body_h);
         }
         if let Some(hz) = imp.hadj.borrow().as_ref() {
-            let cols = u64::from(imp.cache.borrow().col_count() + 1);
+            let cols = u64::from(self.col_count() + 1);
             let upper = sizing.cols.start(cols).max(body_w);
             hz.configure(hz.value(), 0.0, upper, COL_W / 4.0, body_w * 0.9, body_w);
         }

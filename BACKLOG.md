@@ -63,7 +63,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | SORT-1 | M3 | P0 | done | TYPE-1, DEC-4, CMD-1, ENG-8 | Type-aware sort, ascending and descending | 2M-row numeric sort under 3 s; stable; undoable |
 | SORT-2 | M3 | P0 | done | SORT-1, ENG-7 | Sort moves whole rows and honors the header | Header row never moves |
 | FILT-1 | M3 | P0 | done | TYPE-1, DEC-4 | Per-column filter from header dropdown | Exact, contains, not contains, empty, non-empty, numeric compare |
-| FILT-2 | M3 | P0 | todo | FILT-1 | Combine filters across columns (AND) | Status bar shows "x of y rows" |
+| FILT-2 | M3 | P0 | done | FILT-1 | Combine filters across columns (AND) | Status bar shows "x of y rows" |
 | FILT-3 | M3 | P0 | todo | FILT-1, SAVE-1 | Saving with an active filter keeps hidden rows | Test confirms on-disk row count unchanged |
 | FILT-4 | M3 | P1 | todo | FILT-2, CLIP-2 | Edits and paste respect the filtered view | Paste into a filtered range touches visible rows only |
 | SRCH-1 | M3 | P0 | todo | ENG-8 | Find bar (Ctrl+F): whole file or current column, case toggle | First hit in 1 GB under 1 s, off the UI thread |
@@ -80,6 +80,15 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 ## Notes
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
+
+- **2026-10-09 FILT-2:** combine filters across columns (AND), with "x of y rows" in the status bar. Both were built in FILT-1; this story proves them and fixes one bug.
+  - Proof:
+    - `status::tests::filtered_rows_read_x_of_y`: the spec's own example (`14,392 of 2,103,814 rows`), `0 of 19,094,579 rows`, `1 of 1 row`, and plain `1 row` with no filter.
+    - `commands/tests/filter.rs::filters_combine_in_any_order_down_to_no_rows`: three filters narrow 6 rows to 3, 2, and 1, with `row_count` of `unfiltered_row_count` (what the bar shows) checked at each step. The same filters in the other order show the same row.
+    - A fourth filter shows nothing: no rows to read, clear, or copy, and the save is the file byte for byte. Clearing filters one at a time brings back what the rest allow.
+  - **Bug found and fixed:** a filter that hid every row also hid every column but A. The grid's column count comes from the rows it has loaded, so the ▾ needed to clear the filter was gone. The only way out was reopening the file. `CsvTable::min_width` (the header row's width, edits and inserted columns included, and every filtered column) is now a floor for `GridView::col_count`, used for drawing, navigation, scrolling, and column deletes.
+  - Typing into the cell where no row is shown now gives the filter note instead of being dropped without one. With no rows, no editor opens, so nothing is lost.
+  - Smoke test via Broadway on the 1 GB file: city equals `nowhere` showed `0 of 19,094,579 rows` with all eight columns and their ▾, C highlighted. Typing did nothing, with no crash. C's ▾ reopened with `nowhere`, and Clear brought back `19,094,579 rows`.
 
 - **2026-10-09 FILT-1:** per-column filter from a header dropdown. Four user decisions: a ▾ on every column title (highlighted when that column is filtered); text conditions ignore case; a filter is evaluated when applied, so an edited row stays shown until it is applied again; and row inserts and deletes are refused while filtered, with a status note.
   - `data_model::Filter { col: ColId, test: Test }`, where `Test` is `Equals` (whole cell), `Contains`, `NotContains`, `Empty`, `NonEmpty`, or `Number(Compare, f64)` with `=` `≠` `<` `≤` `>` `≥`. Number tests take only cells TYPE-1 reads as numbers (`00123` is a code, not 123); any other cell fails them, `≠` included.

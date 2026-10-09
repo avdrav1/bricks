@@ -232,8 +232,27 @@ mod tests {
         assert_eq!(status(&f).rows, "1,898,604 rows");
         f.rows = 1;
         assert_eq!(status(&f).rows, "1 row");
-        f.of = Some(1_898_604);
-        assert_eq!(status(&f).rows, "1 of 1,898,604 rows", "while filtered");
+    }
+
+    /// FILT-2 acceptance: while filters hide rows, the bar says how many are shown of all.
+    #[test]
+    fn filtered_rows_read_x_of_y() {
+        let mut f = facts();
+        f.rows = 14_392;
+        f.of = Some(2_103_814);
+        assert_eq!(
+            status(&f).rows,
+            "14,392 of 2,103,814 rows",
+            "the spec's example"
+        );
+        f.rows = 0;
+        f.of = Some(19_094_579);
+        assert_eq!(status(&f).rows, "0 of 19,094,579 rows");
+        f.rows = 1;
+        f.of = Some(1);
+        assert_eq!(status(&f).rows, "1 of 1 row");
+        f.of = None;
+        assert_eq!(status(&f).rows, "1 row", "no filter: just the count");
     }
 
     #[test]

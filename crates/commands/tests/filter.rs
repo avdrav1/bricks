@@ -105,6 +105,53 @@ fn filters_on_several_columns_combine() {
     std::fs::remove_file(path).unwrap();
 }
 
+/// FILT-2: filters on any number of columns combine with AND, in any order, down to no
+/// rows at all; the status bar's "x of y rows" reads `row_count` of `unfiltered_row_count`.
+#[test]
+fn filters_combine_in_any_order_down_to_no_rows() {
+    let (path, mut t) = open("and3");
+    let counts = |t: &CsvTable| (t.row_count(), t.unfiltered_row_count());
+    assert_eq!(counts(&t), (6, 6));
+    filter(&mut t, 1, Test::Contains("e".into())); // Denver, DENVER, Denver East
+    assert_eq!(counts(&t), (3, 6));
+    filter(&mut t, 3, Test::NonEmpty); // 1, 3
+    assert_eq!(counts(&t), (2, 6));
+    filter(&mut t, 2, Test::Number(Compare::Gt, 8.0)); // 1
+    assert_eq!((ids(&mut t), counts(&t)), (vec!["1".to_owned()], (1, 6)));
+
+    // The same filters applied the other way round show the same rows.
+    let (other, mut u) = open("and3-rev");
+    filter(&mut u, 2, Test::Number(Compare::Gt, 8.0));
+    filter(&mut u, 3, Test::NonEmpty);
+    filter(&mut u, 1, Test::Contains("e".into()));
+    assert_eq!(ids(&mut u), ["1"]);
+
+    // Nothing passes: no rows shown, nothing to clear or copy, every row still saved.
+    filter(&mut t, 0, Test::Equals("6".into()));
+    assert_eq!(counts(&t), (0, 6));
+    assert_eq!(ids(&mut t), Vec::<String>::new());
+    assert_eq!(
+        t.min_width(),
+        4,
+        "the grid keeps every column, so the filters stay clearable"
+    );
+    assert_eq!(t.cell_value(0, 0), None);
+    assert!(t.clear_cells(0..1, 0..1).is_none());
+    assert_eq!(saved(&t), CSV);
+
+    // Clearing one filter brings back what the others pass.
+    t.clear_filter(2);
+    assert_eq!(counts(&t), (0, 6), "id = 6 is not a Denver row");
+    t.clear_filter(0);
+    assert_eq!(ids(&mut t), ["1", "3"]);
+    t.clear_filter(1);
+    t.clear_filter(3);
+    assert!(!t.is_filtered());
+    assert_eq!(counts(&t), (6, 6));
+    std::fs::remove_file(path).unwrap();
+    std::fs::remove_file(other).unwrap();
+}
+
 #[test]
 fn edits_clears_copies_and_pastes_reach_the_rows_shown() {
     let (path, mut t) = open("view");

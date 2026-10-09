@@ -220,6 +220,41 @@ impl CsvTable {
         !self.filters.is_empty()
     }
 
+    /// Columns the grid must show however few rows are loaded: the header row's, and
+    /// every filtered one, so a filter that hides every row can still be cleared (FILT-2).
+    pub fn min_width(&self) -> Col {
+        let filtered = self
+            .filters
+            .iter()
+            .filter_map(|(f, _)| self.col_of(f.col))
+            .map(|c| c + 1)
+            .max()
+            .unwrap_or(0);
+        let header = if self.has_header() && self.total_rows() > 0 {
+            let id = self.id_at(0);
+            let mut fields = Vec::new();
+            let n = if id.is_inserted() {
+                0
+            } else {
+                self.index
+                    .row_fields(id.0, &mut fields)
+                    .map_or(0, |_| fields.len() as Col)
+            };
+            let edits = self.overlay.row(id);
+            match &self.cols {
+                Some(m) => m.width(n, |c| edits.is_some_and(|e| e.contains_key(&c))),
+                None => n.max(
+                    edits
+                        .and_then(|e| e.keys().next_back())
+                        .map_or(0, |c| c.0 + 1),
+                ),
+            }
+        } else {
+            0
+        };
+        filtered.max(header)
+    }
+
     /// Rows with no filter applied: the "y" in "x of y rows".
     pub fn unfiltered_row_count(&self) -> u64 {
         self.total_rows().saturating_sub(self.first_row())
