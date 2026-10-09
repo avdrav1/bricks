@@ -1,6 +1,6 @@
 //! Application shell: windows, menus, dialogs, OS integration. Toolkit: GTK4 (ADR 0001).
 //!
-//! Usage: `spreadsheet [FILE.csv] [--bench-scroll FRAMES | --bench-jump ROW [--jumps N] | --bench-save EDITS]`
+//! Usage: `spreadsheet [FILE.csv] [--bench-scroll FRAMES | --bench-jump ROW [--jumps N] | --bench-save EDITS | --bench-find TEXT]`
 //!
 //! Without a file it shows a start window; Ctrl+O or an Open button picks one through the
 //! desktop's file dialog (xdg-desktop-portal via `gtk::FileDialog`, APP-1), and Ctrl+N or
@@ -17,15 +17,18 @@
 //! - `--bench-save` (SAVE-3) pastes EDITS cells, saves, scrolls while the save runs, and
 //!   reports the save time, progress updates, main-loop lateness, and frame times. It only
 //!   saves files under the temp directory.
+//! - `--bench-find TEXT` (SRCH-2) types TEXT into the find bar a character at a time and
+//!   prints each keystroke, search start, and result (`FIND …`).
 
 mod editor;
 mod grid_view;
 mod status;
 
 use csv_engine::{Charset, Encoding, IndexError};
-use data_model::{CsvTable, DelimiterChoice, RereadError, SaveProgress, SaveStats};
+use data_model::{CsvTable, DelimiterChoice, RereadError, SaveProgress, SaveStats, Step};
 use grid_view::{GridView, ROW_H};
 use gtk::{glib, prelude::*};
+use status::FindNote;
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -34,13 +37,14 @@ use std::time::{Duration, Instant};
 
 const APP_ID: &str = "dev.bricks.Spreadsheet";
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum Bench {
     Scroll { frames: u32 },
     Jump { row: u64, jumps: u32 },
     Open,
     Status,
     Save { edits: u32 },
+    Find { text: String },
 }
 
 struct Args {
@@ -74,6 +78,10 @@ fn parse_args() -> Result<Args, String> {
             "--jumps" => jumps = number(&a, &mut it)?.max(1) as u32,
             "--bench-open" => bench = Some(Bench::Open),
             "--bench-status" => bench = Some(Bench::Status),
+            "--bench-find" => {
+                let text = it.next().ok_or("--bench-find needs text")?;
+                bench = Some(Bench::Find { text })
+            }
             "--bench-save" => {
                 bench = Some(Bench::Save {
                     edits: number(&a, &mut it)?.max(1) as u32,
@@ -96,12 +104,12 @@ fn main() -> glib::ExitCode {
     let args = match parse_args() {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("spreadsheet: {e}\nusage: spreadsheet [FILE.csv] [--bench-scroll FRAMES | --bench-jump ROW [--jumps N] | --bench-save EDITS]");
+            eprintln!("spreadsheet: {e}\nusage: spreadsheet [FILE.csv] [--bench-scroll FRAMES | --bench-jump ROW [--jumps N] | --bench-save EDITS | --bench-find TEXT]");
             return glib::ExitCode::from(2);
         }
     };
     // The save benchmark overwrites its file: only ever a scratch copy.
-    if let (Some(Bench::Save { .. }), Some(file)) = (args.bench, &args.file) {
+    if let (Some(Bench::Save { .. }), Some(file)) = (&args.bench, &args.file) {
         let canonical = |p: &Path| p.canonicalize().ok();
         let scratch = canonical(file)
             .zip(canonical(&std::env::temp_dir()))
@@ -141,7 +149,7 @@ fn main() -> glib::ExitCode {
     });
     let (opened, bench) = (RefCell::new(opened), args.bench);
     app.connect_activate(move |app| match opened.take() {
-        Some((session, table)) => build_window(app, &session, table, bench),
+        Some((session, table)) => build_window(app, &session, table, bench.clone()),
         None if app.windows().is_empty() => start_window(app),
         None => {}
     });
@@ -481,7 +489,7 @@ fn build_window(
         1,
     );
     let find = FindBar::new(&grid);
-    layout.attach(&find.root, 0, 2, 2, 1);
+    layout.attach(&find.0.root, 0, 2, 2, 1);
     let bar = StatusBar::new();
     layout.attach(&bar.root, 0, 3, 2, 1);
 
@@ -670,13 +678,15 @@ fn build_window(
     // current. Runs once now, so the bar is filled from the first frame, then every 100 ms.
     let started = Instant::now();
     let (mut was_complete, mut generation) = (false, 0);
+    let status_bench = matches!(bench, Some(Bench::Status));
     let mut tick = {
-        let (grid, window, session, app, save) = (
+        let (grid, window, session, app, save, find) = (
             grid.downgrade(),
             window.downgrade(),
             session.clone(),
             app.clone(),
             save.clone(),
+            find.clone(),
         );
         move || {
             let (Some(grid), Some(window)) = (grid.upgrade(), window.upgrade()) else {
@@ -725,11 +735,12 @@ fn build_window(
                 delimiter.set_selected(choice);
             }
             let shown = bar.update(&grid, session.choice.get(), &save.borrow());
+            find.tick(&grid);
             let title = status::title(&session.name(), grid.edit_count());
             if window.title().as_deref() != Some(title.as_str()) {
                 window.set_title(Some(&title));
             }
-            if matches!(bench, Some(Bench::Status)) {
+            if status_bench {
                 // The status acceptance test reads every update of the row count.
                 println!("STATUS {}", shown.rows);
                 if complete {
@@ -750,8 +761,74 @@ fn build_window(
         Some(Bench::Jump { row, jumps }) => bench_jump(app, &grid, &vadj, row, jumps),
         Some(Bench::Open) => bench_open(app, &grid),
         Some(Bench::Save { edits }) => bench_save(app, &grid, session, &save, &vadj, edits),
+        Some(Bench::Find { text }) => bench_find(app, &grid, &find, text.into()),
         Some(Bench::Status) | None => {}
     }
+}
+
+/// Find benchmark (SRCH-2). Once the file is indexed, opens the find bar and types TEXT
+/// one character every 200 ms, as a quick typist would, and prints a line per event with
+/// milliseconds since the first keystroke:
+/// - `FIND <ms> key <cancelled 0|1> <text>`: the text changed; whether that cancelled a
+///   running search;
+/// - `FIND <ms> start <text>`: a search started;
+/// - `FIND <ms> done <hit:N/TOTAL | nothing | cancelled | notready> <text>`: it came back.
+///
+/// Quits once the search for the whole TEXT is done.
+fn bench_find(app: &gtk::Application, grid: &GridView, find: &FindBar, text: Rc<str>) {
+    let t0 = Rc::new(Cell::new(None::<Instant>));
+    let ms = {
+        let t0 = t0.clone();
+        move || t0.get().map_or(0.0, |t| t.elapsed().as_secs_f64() * 1e3)
+    };
+    let (app, full) = (app.clone(), text.clone());
+    find.0
+        .trace
+        .replace(Some(Box::new(move |event| match event {
+            FindEvent::Key { text, cancelled } => {
+                println!("FIND {:.1} key {} {text}", ms(), u8::from(cancelled))
+            }
+            FindEvent::Start(text) => println!("FIND {:.1} start {text}", ms()),
+            FindEvent::Done(done, found) => {
+                use grid_view::Found;
+                let result = match found {
+                    Found::Hit { ordinal, total } => format!("hit:{ordinal}/{total}"),
+                    Found::Nothing => "nothing".into(),
+                    Found::Cancelled => "cancelled".into(),
+                    Found::NotReady => "notready".into(),
+                };
+                println!("FIND {:.1} done {result} {done}", ms());
+                if done == &*full && !matches!(found, Found::Cancelled) {
+                    app.quit();
+                }
+            }
+        })));
+    let (grid, find) = (grid.clone(), find.clone());
+    let mut typed = 0;
+    glib::timeout_add_local(Duration::from_millis(200), move || {
+        if !grid.is_complete() {
+            return glib::ControlFlow::Continue;
+        }
+        if typed == 0 {
+            find.open();
+            t0.set(Some(Instant::now()));
+        }
+        // One character at the end, as a keystroke does (`set_text` would empty the
+        // field first: two changes).
+        let ch = text
+            .chars()
+            .nth(typed)
+            .map(String::from)
+            .unwrap_or_default();
+        typed += 1;
+        let mut end = -1;
+        find.0.entry.insert_text(&ch, &mut end);
+        if typed >= text.chars().count() {
+            glib::ControlFlow::Break
+        } else {
+            glib::ControlFlow::Continue
+        }
+    });
 }
 
 /// Open benchmark (BENCH-1, APP-3). Prints `FIRST_FRAME {json}` at the end of the first
@@ -1191,13 +1268,37 @@ fn suggested_name(name: &str, untitled: bool, delimiter: u8) -> String {
     }
 }
 
-/// The find bar (SRCH-1), over the status bar: Ctrl+F opens it on the text field, Enter
-/// finds the next match from the cursor, and Esc closes it. Searches the whole file or the
-/// cursor's column, with or without matching case.
+/// The find bar (SRCH-1, SRCH-2), over the status bar. Ctrl+F opens it on the text field;
+/// typing searches as you type from the cursor, its own cell first (each keystroke cancels
+/// the running search); Enter or Ctrl+G goes to the next match, Shift+Enter or
+/// Ctrl+Shift+G to the previous one; Esc closes it. Searches the whole file or the
+/// cursor's column, with or without matching case. The note counts the matches as they
+/// stream in, then says which one the cursor is on ("12 of 2,725,768").
 #[derive(Clone)]
-struct FindBar {
+struct FindBar(Rc<FindParts>);
+
+struct FindParts {
     root: gtk::Revealer,
     entry: gtk::SearchEntry,
+    case: gtk::CheckButton,
+    scope: gtk::DropDown,
+    note: gtk::Label,
+    grid: glib::WeakRef<GridView>,
+    /// Hears what the bar does (`--bench-find`).
+    trace: RefCell<Option<FindTrace>>,
+}
+
+type FindTrace = Box<dyn Fn(FindEvent)>;
+
+/// What the find bar did, for `--bench-find`.
+enum FindEvent<'a> {
+    /// The text changed; whether that cancelled a running search.
+    Key {
+        text: &'a str,
+        cancelled: bool,
+    },
+    Start(&'a str),
+    Done(&'a str, grid_view::Found),
 }
 
 impl FindBar {
@@ -1206,13 +1307,22 @@ impl FindBar {
             .placeholder_text("Find")
             .hexpand(true)
             .build();
+        let button = |icon: &str, tip: &str| {
+            let b = gtk::Button::from_icon_name(icon);
+            b.add_css_class("flat");
+            b.set_tooltip_text(Some(tip));
+            b
+        };
+        let previous = button("go-up-symbolic", "Previous match (Shift+Enter)");
+        let next = button("go-down-symbolic", "Next match (Enter)");
         let case = gtk::CheckButton::with_label("Match case");
         let scope = gtk::DropDown::from_strings(&["Whole file", "Current column"]);
         let note = gtk::Label::new(None);
         note.add_css_class("dim-label");
-        let close = gtk::Button::from_icon_name("window-close-symbolic");
-        close.add_css_class("flat");
-        close.set_tooltip_text(Some("Close (Esc)"));
+        // Room for "2,725,768 of 2,725,768", so the field doesn't jump as the count grows.
+        note.set_width_chars(22);
+        note.set_xalign(1.0);
+        let close = button("window-close-symbolic", "Close (Esc)");
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         row.set_margin_start(6);
         row.set_margin_end(6);
@@ -1220,6 +1330,8 @@ impl FindBar {
         row.set_margin_bottom(4);
         for w in [
             entry.upcast_ref::<gtk::Widget>(),
+            previous.upcast_ref(),
+            next.upcast_ref(),
             case.upcast_ref(),
             scope.upcast_ref(),
             note.upcast_ref(),
@@ -1231,66 +1343,152 @@ impl FindBar {
             .child(&row)
             .transition_type(gtk::RevealerTransitionType::SlideUp)
             .build();
-        let bar = Self { root, entry };
-        bar.entry.connect_activate({
-            let (grid, case, scope, note) = (
-                grid.downgrade(),
-                case.downgrade(),
-                scope.downgrade(),
-                note.downgrade(),
-            );
+        let bar = Self(Rc::new(FindParts {
+            root,
+            entry,
+            case,
+            scope,
+            note,
+            grid: grid.downgrade(),
+            trace: RefCell::new(None),
+        }));
+        let p = &bar.0;
+        // A keystroke stops the search for the text before it at once; the search for the
+        // new text starts once typing pauses (`search-changed`).
+        p.entry.connect_changed({
+            let bar = bar.clone();
             move |entry| {
-                let (Some(grid), Some(case), Some(scope)) =
-                    (grid.upgrade(), case.upgrade(), scope.upgrade())
-                else {
-                    return;
-                };
-                let note = note.clone();
-                grid.find_next(
-                    &entry.text(),
-                    case.is_active(),
-                    scope.selected() == 1,
-                    move |found| {
-                        if let Some(n) = note.upgrade() {
-                            n.set_text(match found {
-                                grid_view::Found::Cell => "",
-                                grid_view::Found::Nothing => "No matches",
-                                grid_view::Found::NotReady => "Wait for indexing to finish",
-                            });
-                        }
-                    },
-                );
-            }
-        });
-        // Editing the text clears an old "No matches".
-        bar.entry.connect_search_changed({
-            let note = note.downgrade();
-            move |_| {
-                if let Some(n) = note.upgrade() {
-                    n.set_text("");
+                let cancelled = bar.0.grid.upgrade().is_some_and(|g| g.cancel_search());
+                let text = entry.text();
+                bar.trace(FindEvent::Key {
+                    text: &text,
+                    cancelled,
+                });
+                if text.is_empty() {
+                    bar.0.note.set_text("");
                 }
             }
         });
-        bar.entry.connect_stop_search({
-            let (bar, grid) = (bar.clone(), grid.downgrade());
-            move |_| bar.close(grid.upgrade().as_ref())
+        p.entry.connect_search_changed({
+            let bar = bar.clone();
+            move |_| bar.run(Step::Here)
+        });
+        p.entry.connect_activate({
+            let bar = bar.clone();
+            move |_| bar.run(Step::Next)
+        });
+        p.entry.connect_next_match({
+            let bar = bar.clone();
+            move |_| bar.run(Step::Next)
+        });
+        p.entry.connect_previous_match({
+            let bar = bar.clone();
+            move |_| bar.run(Step::Previous)
+        });
+        let keys = gtk::EventControllerKey::new();
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        keys.connect_key_pressed({
+            let bar = bar.clone();
+            move |_, key, _, mods| {
+                use gtk::gdk::{Key, ModifierType};
+                if matches!(key, Key::Return | Key::KP_Enter)
+                    && mods.contains(ModifierType::SHIFT_MASK)
+                {
+                    bar.run(Step::Previous);
+                    return glib::Propagation::Stop;
+                }
+                glib::Propagation::Proceed
+            }
+        });
+        p.entry.add_controller(keys);
+        previous.connect_clicked({
+            let bar = bar.clone();
+            move |_| bar.run(Step::Previous)
+        });
+        next.connect_clicked({
+            let bar = bar.clone();
+            move |_| bar.run(Step::Next)
+        });
+        p.case.connect_toggled({
+            let bar = bar.clone();
+            move |_| bar.run(Step::Here)
+        });
+        p.scope.connect_selected_notify({
+            let bar = bar.clone();
+            move |_| bar.run(Step::Here)
+        });
+        p.entry.connect_stop_search({
+            let bar = bar.clone();
+            move |_| bar.close()
         });
         close.connect_clicked({
-            let (bar, grid) = (bar.clone(), grid.downgrade());
-            move |_| bar.close(grid.upgrade().as_ref())
+            let bar = bar.clone();
+            move |_| bar.close()
         });
         bar
     }
 
-    fn open(&self) {
-        self.root.set_reveal_child(true);
-        self.entry.grab_focus();
-        self.entry.select_region(0, -1);
+    fn trace(&self, event: FindEvent) {
+        if let Some(t) = self.0.trace.borrow().as_ref() {
+            t(event);
+        }
     }
 
-    fn close(&self, grid: Option<&GridView>) {
-        self.root.set_reveal_child(false);
-        if let Some(g) = grid {
+    /// Search for the bar's text: from the cursor's cell (`Here`), or the next or previous
+    /// match.
+    fn run(&self, step: Step) {
+        let p = &self.0;
+        let Some(grid) = p.grid.upgrade() else {
+            return;
+        };
+        let text = p.entry.text().to_string();
+        if text.is_empty() {
+            grid.cancel_search();
+            p.note.set_text("");
+            return;
+        }
+        self.trace(FindEvent::Start(&text));
+        let bar = self.clone();
+        grid.find(
+            &text.clone(),
+            p.case.is_active(),
+            p.scope.selected() == 1,
+            step,
+            move |found| {
+                use grid_view::Found;
+                let note = match found {
+                    Found::Hit { ordinal, total } => Some(FindNote::Hit { ordinal, total }),
+                    Found::Nothing => Some(FindNote::Nothing),
+                    Found::NotReady => Some(FindNote::NotReady),
+                    Found::Cancelled => None,
+                };
+                if let Some(n) = note {
+                    bar.0.note.set_text(&status::find_note(n));
+                }
+                bar.trace(FindEvent::Done(&text, found));
+            },
+        );
+    }
+
+    /// The status tick: the count so far while matches are counted.
+    fn tick(&self, grid: &GridView) {
+        if let Some(found) = grid.search_found() {
+            self.0
+                .note
+                .set_text(&status::find_note(FindNote::Counting { found }));
+        }
+    }
+
+    fn open(&self) {
+        let p = &self.0;
+        p.root.set_reveal_child(true);
+        p.entry.grab_focus();
+        p.entry.select_region(0, -1);
+    }
+
+    fn close(&self) {
+        self.0.root.set_reveal_child(false);
+        if let Some(g) = self.0.grid.upgrade() {
             g.cancel_job();
             g.grab_focus();
         }

@@ -14,6 +14,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::{Bound, Range, RangeBounds};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 /// How a file's delimiter is chosen: detected (ENG-4) or set by the user (ENG-5).
@@ -54,6 +55,12 @@ fn dialect_for(source: &Source, choice: DelimiterChoice) -> Dialect {
 pub const MAX_DISPLAY_BYTES: usize = 256;
 
 const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
+
+/// A revision no table has had yet.
+pub(crate) fn next_revision() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
 
 /// Display text of consecutive rows in flat, reusable buffers.
 #[derive(Debug, Default)]
@@ -186,6 +193,9 @@ pub struct CsvTable {
     /// While filtered: positions of the rows shown, in order (the header excluded).
     /// Table rows count through it; `None` shows every row.
     pub(crate) visible: Option<Arc<Vec<u32>>>,
+    /// Changes when what the table shows changes (edits, the header row, filters); unique
+    /// across tables, so a replaced table never repeats one. Snapshots share it.
+    pub(crate) revision: u64,
     spans: Vec<Range<u64>>,
     fields: Vec<Field>,
 }
@@ -215,6 +225,7 @@ impl CsvTable {
             types: HashMap::new(),
             filters: Vec::new(),
             visible: None,
+            revision: next_revision(),
             spans: Vec::new(),
             fields: Vec::new(),
         }
@@ -237,6 +248,7 @@ impl CsvTable {
             types: self.types.clone(),
             filters: self.filters.clone(),
             visible: self.visible.clone(),
+            revision: self.revision,
             spans: Vec::new(),
             fields: Vec::new(),
         }
@@ -544,6 +556,7 @@ impl CsvTable {
     /// # }
     /// ```
     pub fn apply(&mut self, edit: Edit) -> Edit {
+        self.revision = next_revision();
         let inverse = self.apply_edit(edit);
         // Rows moved, came, or went: the filtered view follows (FILT-1).
         if self.is_filtered()

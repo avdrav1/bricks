@@ -7,8 +7,9 @@ use commands::{Batch, ClearCells, Reshape, SetCell, UndoStack};
 use csv_engine::RowIndex as _;
 use data_model::{
     parse_tsv, CellRef, ColId, ColumnTypes, Compare, Copied, CsvTable, DelimiterChoice, Edit,
-    Filter, FilterError, PasteError, Query, RereadError, RowId, RowSet, SaveJob, SaveJobError,
-    SearchError, SortError, SortOrder, TableSource, Test, PASTE_MAX_CELLS,
+    Filter, FilterError, Hit, Matches, PasteError, Query, RereadError, RowId, RowSet, SaveJob,
+    SaveJobError, SearchError, SearchProgress, SortError, SortOrder, Step, TableSource, Test,
+    PASTE_MAX_CELLS,
 };
 use grid::{Bounds, GridCache, Key, Mods, Selection, Sizes, Viewport};
 use gtk::{gdk, gio, glib, graphene, pango, prelude::*, subclass::prelude::*};
@@ -57,21 +58,32 @@ pub struct FilterJob {
     rows: u64,
 }
 
-/// A search on the job pool (SRCH-1): its result, and file rows searched so far.
+/// A search's matches, and the match it went to (if any).
+pub type Searched = (Arc<Matches>, Option<Hit>);
+
+/// A search on the job pool (SRCH-1, SRCH-2): the matches (counted again, or the ones
+/// from before) and where it went, and its progress.
 pub struct SearchJob {
-    job: jobs::Job<Result<Option<(u64, u32)>, SearchError>>,
-    done: Arc<AtomicU64>,
+    job: jobs::Job<Result<Searched, SearchError>>,
+    progress: Arc<SearchProgress>,
     rows: u64,
+    /// It counts the matches again (not a step through the ones from before).
+    counting: bool,
 }
 
-/// How a find went (SRCH-1), for the find bar.
+/// How a find went (SRCH-1, SRCH-2), for the find bar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Found {
-    /// The cursor is on the match now.
-    Cell,
+    /// The cursor is on a match now: the `ordinal`th of `total`.
+    Hit {
+        ordinal: u64,
+        total: u64,
+    },
     Nothing,
     /// The file is still being indexed.
     NotReady,
+    /// Cancelled or replaced by a newer search: nothing changed.
+    Cancelled,
 }
 
 /// Row heights and column widths, all default until resized (GRID-5). Kept for the life
@@ -150,6 +162,9 @@ mod imp {
         pub filtering: RefCell<Option<FilterJob>>,
         /// The search running (SRCH-1), if any. Edits wait for it.
         pub searching: RefCell<Option<SearchJob>>,
+        /// The last search's matches, while they still describe the table, and the match
+        /// it went to (SRCH-2).
+        pub found: RefCell<Option<Searched>>,
         /// Filters to apply again, by column position, once the table is indexed: those
         /// of the table a save replaced (FILT-3).
         pub pending_filters: RefCell<Vec<(u32, Test)>>,
@@ -1737,7 +1752,7 @@ impl GridView {
         }
         let searching = imp.searching.borrow();
         let s = searching.as_ref()?;
-        Some(("Searching", share(&s.done, s.rows)))
+        Some(("Searching", share(&s.progress.rows, s.rows)))
     }
 
     /// A save, sort, filter, or search is running: the table must not change under it.
@@ -1749,15 +1764,17 @@ impl GridView {
             || imp.searching.borrow().is_some()
     }
 
-    /// Find (SRCH-1): the next cell after the cursor containing `text`, row by row and
-    /// wrapping, in every column or the cursor's (`column_only`), on the job pool. The
-    /// match becomes the cursor; `done` hears how it went. A new search replaces a
-    /// running one; Esc cancels.
-    pub fn find_next(
+    /// Find (SRCH-1, SRCH-2): the match `step` leads to from the cursor, for `text` in
+    /// every column or the cursor's (`column_only`), row by row and wrapping, on the job
+    /// pool. The match becomes the cursor; `done` hears how it went. Matches are counted
+    /// once per query and kept until the table changes, so stepping through them only
+    /// walks the rows. A new search replaces a running one; Esc cancels.
+    pub fn find(
         &self,
         text: &str,
         match_case: bool,
         column_only: bool,
+        step: Step,
         done: impl FnOnce(Found) + 'static,
     ) {
         let imp = self.imp();
@@ -1769,55 +1786,106 @@ impl GridView {
             return;
         }
         let cur = imp.selection.get().cursor();
-        let (mut snapshot, query, rows) = match imp.table.borrow().as_ref() {
+        let (mut snapshot, query, rows, known) = match imp.table.borrow().as_ref() {
             Some(t) if t.is_complete() => {
                 let query = Query {
                     text: text.to_owned(),
                     match_case,
                     col: column_only.then(|| t.col_id(cur.col)),
                 };
-                (t.snapshot(), query, t.index().row_count())
+                let known = imp
+                    .found
+                    .borrow()
+                    .as_ref()
+                    .filter(|(m, _)| *m.query() == query && m.is_current(t))
+                    .map(|(m, hit)| {
+                        let at_hit = hit.filter(|h| (h.row, h.col) == (cur.row, cur.col));
+                        (m.clone(), at_hit)
+                    });
+                (t.snapshot(), query, t.index().row_count(), known)
             }
             _ => return done(Found::NotReady),
         };
-        if let Some(old) = imp.searching.take() {
-            old.job.cancel();
-        }
-        let read = Arc::new(AtomicU64::new(0));
+        self.cancel_search();
+        let progress = Arc::new(SearchProgress::default());
+        let counting = known.is_none();
         let started = Instant::now();
         let job = jobs::spawn({
-            let read = read.clone();
-            move |cancel| snapshot.find(&query, (cur.row, cur.col), cancel.flag(), &read)
+            let progress = progress.clone();
+            move |cancel| {
+                let (matches, hint) = match known {
+                    Some(k) => k,
+                    None => (
+                        Arc::new(snapshot.search(&query, cancel.flag(), &progress)?),
+                        None,
+                    ),
+                };
+                let from = (cur.row, cur.col);
+                let hit = matches.step(&mut snapshot, from, step, hint, cancel.flag())?;
+                Ok((matches, hit))
+            }
         });
         imp.searching.replace(Some(SearchJob {
             job: job.clone(),
-            done: read,
+            progress,
             rows,
+            counting,
         }));
         let g = self.downgrade();
         glib::spawn_future_local(async move {
             let result = job.finished().await;
             let Some(g) = g.upgrade() else { return };
             let imp = g.imp();
-            if !matches!(&*imp.searching.borrow(), Some(s) if s.job.is(&job)) {
-                return; // a newer search, or a new table
+            let current = matches!(&*imp.searching.borrow(), Some(s) if s.job.is(&job));
+            if current {
+                imp.searching.take();
             }
-            imp.searching.take();
             if std::env::var_os("BRICKS_TIMINGS").is_some() {
-                eprintln!("find: {result:?} in {:?}", started.elapsed());
+                let r = result
+                    .as_ref()
+                    .map(|r| r.as_ref().map(|(m, hit)| (m.total(), hit)));
+                eprintln!("find: {r:?} in {:?}", started.elapsed());
             }
-            match result {
-                Ok(Ok(Some((row, col)))) => {
-                    let cell = grid::Cell { row, col };
+            let (matches, hit) = match result {
+                Ok(Ok(r)) if current => r,
+                _ => return done(Found::Cancelled),
+            };
+            let total = matches.total();
+            imp.found.replace(Some((matches, hit)));
+            match hit {
+                Some(h) => {
+                    let cell = grid::Cell {
+                        row: h.row,
+                        col: h.col,
+                    };
                     imp.selection.set(Selection::at(cell));
-                    g.scroll_to((Some(row), Some(col)));
+                    g.scroll_to((Some(h.row), Some(h.col)));
                     g.queue_draw();
-                    done(Found::Cell);
+                    done(Found::Hit {
+                        ordinal: h.ordinal,
+                        total,
+                    });
                 }
-                Ok(Ok(None)) => done(Found::Nothing),
-                _ => {}
+                None => done(Found::Nothing),
             }
         });
+    }
+
+    /// Stop the running search, if any (a new keystroke in the find bar, SRCH-2); whether
+    /// one was running. Its `done` hears [`Found::Cancelled`].
+    pub fn cancel_search(&self) -> bool {
+        let old = self.imp().searching.take();
+        if let Some(s) = &old {
+            s.job.cancel();
+        }
+        old.is_some()
+    }
+
+    /// Matching cells found so far by a search that counts them, for the find bar.
+    pub fn search_found(&self) -> Option<u64> {
+        let searching = self.imp().searching.borrow();
+        let s = searching.as_ref().filter(|s| s.counting)?;
+        Some(s.progress.found.load(Ordering::Relaxed))
     }
 
     /// Some rows are hidden by filters (FILT-1).
@@ -2182,9 +2250,8 @@ impl GridView {
         if let Some(old) = imp.filtering.take() {
             old.job.cancel();
         }
-        if let Some(old) = imp.searching.take() {
-            old.job.cancel();
-        }
+        self.cancel_search();
+        imp.found.take();
         imp.pending_filters.take(); // a save gives them back with `restore_filters`
         self.close_filter_menu();
         imp.undo.replace(Some(UndoStack::default()));

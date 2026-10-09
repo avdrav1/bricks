@@ -179,6 +179,26 @@ pub fn title(name: &str, edits: usize) -> String {
     }
 }
 
+/// The find bar's note (SRCH-2): the count streaming in while matches are counted, then
+/// which match the cursor is on.
+pub enum FindNote {
+    Counting { found: u64 },
+    Hit { ordinal: u64, total: u64 },
+    Nothing,
+    NotReady,
+}
+
+pub fn find_note(n: FindNote) -> String {
+    match n {
+        FindNote::Counting { found } => format!("{} so far…", group_digits(found)),
+        FindNote::Hit { ordinal, total } => {
+            format!("{} of {}", group_digits(ordinal), group_digits(total))
+        }
+        FindNote::Nothing => "No matches".into(),
+        FindNote::NotReady => "Wait for indexing to finish".into(),
+    }
+}
+
 fn delimiter_name(d: u8) -> &'static str {
     match d {
         b',' => "Comma",

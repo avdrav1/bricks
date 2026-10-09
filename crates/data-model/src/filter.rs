@@ -264,6 +264,7 @@ impl CsvTable {
     /// Runs on the UI thread, so it touches each row once at most: the filters fold into
     /// one bitmap first, and file-order runs only visit the rows that pass.
     pub(crate) fn update_view(&mut self) {
+        self.revision = crate::table::next_revision();
         let Some(((_, head), rest)) = self.filters.split_first() else {
             self.visible = None;
             return;

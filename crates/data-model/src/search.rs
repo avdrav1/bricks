@@ -1,23 +1,25 @@
-//! Find (SRCH-1): the next cell, from a given one, whose shown value contains some text.
+//! Find (SRCH-1, SRCH-2): every cell whose shown value contains some text, then stepping
+//! through them from a cell, forwards or backwards, with the match's place among them all.
 //!
 //! Rules (user decisions, 2026-10-09):
 //! - A match is the text anywhere in a cell's value as shown: edits included, quotes
 //!   unescaped. "Match case" off ignores ASCII case, like sort and filter.
-//! - The search goes row by row from the cursor: across its row, then down, and wraps to
-//!   the top. It visits the rows shown (a filter's hidden rows don't count), in their order.
-//! - Scope: the whole table, or one column.
+//! - Order is row by row through the rows shown (a filter's hidden rows don't count), in
+//!   their order, wrapping at either end. Scope: the whole table, or one column.
+//! - The count is of matching cells shown, and a match's place is its 1-based rank in that
+//!   order ("12 of 2,725,768").
 //!
-//! One parallel pass over the file in file order finds every row with a match. A byte
-//! search over each chunk of rows (case-folded when case doesn't matter) picks the rows
-//! worth splitting into cells; rows with edits are checked from their edits. Then a walk
-//! through the rows as shown, from the cursor, finds the next one, and the cell in it.
+//! [`CsvTable::search`] is one parallel pass over the file in file order that counts the
+//! matching cells of every row ([`Matches`]). A byte search over each chunk of rows
+//! (case-folded when case doesn't matter) picks the rows worth splitting into cells; rows
+//! with edits are counted from their cells as shown. [`Matches::step`] then walks the rows
+//! shown, a chunk at a time, to the next row with a match, and finds the cell in it.
 
-use crate::{Col, ColId, CsvTable, Row, RowBlock, RowId, TableSource};
+use crate::{Col, ColId, CsvTable, Row, RowBlock, RowId, Run, TableSource};
 use csv_engine::{split_fields, RowIndex};
 use memchr::memmem;
 use rayon::prelude::*;
-use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
@@ -37,42 +39,211 @@ pub enum SearchError {
     Cancelled,
 }
 
-/// File rows searched per task, and between cancel checks.
-const CHUNK: u64 = 65_536;
-const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
-
-/// The rows with a match somewhere in scope.
-struct Hits {
-    /// One bit per file row.
-    file: Vec<u64>,
-    inserted: HashSet<RowId>,
+/// Where [`Matches::step`] goes from the cell it starts at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Step {
+    /// That cell if it matches, else the next match (searching as you type).
+    Here,
+    Next,
+    Previous,
 }
 
-impl Hits {
-    fn has(&self, id: RowId) -> bool {
-        if id.is_inserted() {
-            self.inserted.contains(&id)
-        } else {
-            let r = id.0 as usize;
-            self.file
-                .get(r / 64)
-                .is_some_and(|w| w >> (r % 64) & 1 == 1)
+/// A match: its cell, and its place among the matches shown (1-based).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Hit {
+    pub row: Row,
+    pub col: Col,
+    pub ordinal: u64,
+}
+
+/// A running search's progress, for the UI to read.
+#[derive(Debug, Default)]
+pub struct SearchProgress {
+    /// File rows searched.
+    pub rows: AtomicU64,
+    /// Matching cells found so far in rows that pass the filters. Provisional: deleted
+    /// rows still count until the search ends, and edited rows count only at the end.
+    pub found: AtomicU64,
+}
+
+/// File rows searched per task, and between cancel checks.
+const CHUNK: u64 = 65_536;
+/// Table rows per step of a walk through the rows shown, and between cancel checks.
+const WALK: u64 = 65_536;
+/// A row's count at or past this lives in `Matches::many`.
+const MANY: u8 = u8::MAX;
+const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
+
+/// Every matching cell of a table at one revision, counted by row.
+pub struct Matches {
+    query: Query,
+    needle: Needle,
+    revision: u64,
+    /// Matching cells per file row; [`MANY`] means the count is in `many`.
+    counts: Vec<u8>,
+    many: BTreeMap<u64, u32>,
+    inserted: HashMap<RowId, u32>,
+    /// Matching cells in the rows shown.
+    total: u64,
+}
+
+impl Matches {
+    pub fn query(&self) -> &Query {
+        &self.query
+    }
+
+    /// Matching cells in the rows shown.
+    pub fn total(&self) -> u64 {
+        self.total
+    }
+
+    /// Still true of `table`: nothing it shows changed since the search.
+    pub fn is_current(&self, table: &CsvTable) -> bool {
+        self.revision == table.revision
+    }
+
+    fn file_count(&self, r: u64) -> u64 {
+        match self.counts.get(r as usize) {
+            Some(&MANY) => u64::from(self.many[&r]),
+            Some(&c) => u64::from(c),
+            None => 0,
         }
     }
 
-    /// The first file row in `rows` with a match.
-    fn first_in(&self, rows: Range<u64>) -> Option<u64> {
-        let mut r = rows.start;
-        while r < rows.end {
-            let word = self.file.get((r / 64) as usize).copied().unwrap_or(0) >> (r % 64);
-            if word == 0 {
-                r = (r / 64 + 1) * 64;
-                continue;
-            }
-            r += u64::from(word.trailing_zeros());
-            return (r < rows.end).then_some(r);
+    /// Matching cells in the rows of `run`.
+    fn sum(&self, run: Run) -> u64 {
+        if run.first.is_inserted() {
+            return (0..run.len)
+                .map(|i| {
+                    self.inserted
+                        .get(&RowId(run.first.0 + i))
+                        .map_or(0, |&c| u64::from(c))
+                })
+                .sum();
         }
-        None
+        let (a, b) = self.file_range(run);
+        let plain: u64 = self.counts[a..b].iter().map(|&c| u64::from(c)).sum();
+        let extra: u64 = self
+            .many
+            .range(a as u64..b as u64)
+            .map(|(_, &c)| u64::from(c) - u64::from(MANY))
+            .sum();
+        plain + extra
+    }
+
+    /// Offset in `run` of its first row with a match, or its last one when `last`.
+    fn hit_in(&self, run: Run, last: bool) -> Option<u64> {
+        if run.first.is_inserted() {
+            let has = |i: &u64| self.inserted.contains_key(&RowId(run.first.0 + i));
+            return if last {
+                (0..run.len).rev().find(has)
+            } else {
+                (0..run.len).find(has)
+            };
+        }
+        let (a, b) = self.file_range(run);
+        let mut rows = self.counts[a..b].iter();
+        let i = if last {
+            rows.rposition(|&c| c != 0)
+        } else {
+            rows.position(|&c| c != 0)
+        };
+        i.map(|i| i as u64)
+    }
+
+    fn file_range(&self, run: Run) -> (usize, usize) {
+        let len = self.counts.len();
+        let a = (run.first.0 as usize).min(len);
+        (a, (a + run.len as usize).min(len))
+    }
+
+    /// The match `step` leads to from cell `from` (row, column of the rows shown), going
+    /// row by row and wrapping at either end. `hint`, the match the search was at before,
+    /// spares counting the matches before the new one when it is `from`. `None` if there
+    /// is no match. `table` must be the one searched ([`Self::is_current`]).
+    pub fn step(
+        &self,
+        table: &mut CsvTable,
+        from: (Row, Col),
+        step: Step,
+        hint: Option<Hit>,
+        cancel: &AtomicBool,
+    ) -> Result<Option<Hit>, SearchError> {
+        let n = table.row_count();
+        if self.total == 0 || n == 0 {
+            return Ok(None);
+        }
+        let (row, col) = (from.0.min(n - 1), from.1);
+        let back = step == Step::Previous;
+        let in_row = |table: &mut CsvTable, r: Row, want: &dyn Fn(Col) -> bool| {
+            let cols = table.match_cols(self, r);
+            let mut it = cols.into_iter().filter(|&c| want(c));
+            if back {
+                it.next_back()
+            } else {
+                it.next()
+            }
+        };
+        // The rest of the starting row, then the rows after it (before it, going back),
+        // then from the other end, then the starting row's other side.
+        let near = match step {
+            Step::Here => in_row(table, row, &|c| c >= col),
+            Step::Next => in_row(table, row, &|c| c > col),
+            Step::Previous => in_row(table, row, &|c| c < col),
+        };
+        let mut hit = near.map(|c| (row, c, false));
+        if hit.is_none() {
+            let spans = if back {
+                [0..row, row + 1..n]
+            } else {
+                [row + 1..n, 0..row]
+            };
+            'spans: for (k, mut span) in spans.into_iter().enumerate() {
+                while let Some(r) = table.walk_to_hit(self, span.clone(), back, cancel)? {
+                    if let Some(c) = in_row(table, r, &|_| true) {
+                        hit = Some((r, c, k == 1));
+                        break 'spans;
+                    }
+                    // Counted but not found: can't happen while the table is current.
+                    if back {
+                        span.end = r;
+                    } else {
+                        span.start = r + 1;
+                    }
+                }
+            }
+        }
+        if hit.is_none() {
+            let far = match step {
+                Step::Here => in_row(table, row, &|c| c < col),
+                Step::Next => in_row(table, row, &|c| c <= col),
+                Step::Previous => in_row(table, row, &|c| c >= col),
+            };
+            hit = far.map(|c| (row, c, true));
+        }
+        let Some((r, c, wrapped)) = hit else {
+            return Ok(None);
+        };
+        let ordinal = match hint {
+            Some(h) if (h.row, h.col) == (row, col) && step != Step::Here => {
+                match (back, wrapped) {
+                    (false, false) => h.ordinal + 1,
+                    (false, true) => 1,
+                    (true, false) => h.ordinal - 1,
+                    (true, true) => self.total,
+                }
+            }
+            _ => {
+                let before = table.count_matches(self, 0..r, cancel)?;
+                let in_row = table.match_cols(self, r).iter().filter(|&&x| x < c).count();
+                before + in_row as u64 + 1
+            }
+        };
+        Ok(Some(Hit {
+            row: r,
+            col: c,
+            ordinal,
+        }))
     }
 }
 
@@ -106,60 +277,69 @@ impl Needle {
     }
 }
 
+/// One chunk's share of the pass: counts of its file rows, and those too big for a byte.
+struct ChunkCounts {
+    counts: Vec<u8>,
+    many: Vec<(u64, u32)>,
+}
+
 impl CsvTable {
-    /// The next cell after `from` (row, column of the rows shown) whose value contains
-    /// the query, row by row and wrapping to the top; `from` itself last. `None` if no
-    /// cell does. Run it on a snapshot on the job pool; `done` counts file rows searched.
-    pub fn find(
+    /// Every cell whose shown value contains the query's text, counted by row: one pass
+    /// over the file. Run it on a snapshot on the job pool.
+    pub fn search(
         &mut self,
         q: &Query,
-        from: (Row, Col),
         cancel: &AtomicBool,
-        done: &AtomicU64,
-    ) -> Result<Option<(Row, Col)>, SearchError> {
+        progress: &SearchProgress,
+    ) -> Result<Matches, SearchError> {
         if !self.index.is_complete() {
             return Err(SearchError::NotIndexed);
         }
-        let n = self.row_count();
-        if q.text.is_empty() || n == 0 {
-            return Ok(None);
+        let mut m = Matches {
+            query: q.clone(),
+            needle: Needle::new(q),
+            revision: self.revision,
+            counts: Vec::new(),
+            many: BTreeMap::new(),
+            inserted: HashMap::new(),
+            total: 0,
+        };
+        if q.text.is_empty() {
+            return Ok(m);
         }
-        let needle = Needle::new(q);
-        let hits = self.hit_rows(q, &needle, cancel, done)?;
-        let (row, col) = (from.0.min(n - 1), from.1);
-        let mut scratch = Vec::new();
-        // Rest of the cursor's row, the rows below, the rows above, then the cursor's row
-        // up to the cursor.
-        if let Some(c) = self.match_in_row(q, &needle, row, |c| c > col, &mut scratch) {
-            return Ok(Some((row, c)));
+        let chunks = self.count_file_rows(&m, cancel, progress)?;
+        m.counts.reserve_exact(self.index.row_count() as usize);
+        for c in chunks {
+            m.counts.extend(c.counts);
+            m.many.extend(c.many);
         }
-        for rows in [row + 1..n, 0..row] {
-            let mut start = rows.start;
-            while let Some(r) = self.next_hit_row(&hits, start..rows.end) {
-                if let Some(c) = self.match_in_row(q, &needle, r, |_| true, &mut scratch) {
-                    return Ok(Some((r, c)));
-                }
-                start = r + 1;
-            }
-        }
-        Ok(self
-            .match_in_row(q, &needle, row, |c| c <= col, &mut scratch)
-            .map(|c| (row, c)))
+        self.count_edited_rows(&mut m);
+        m.total = self.count_matches(&m, 0..self.row_count(), cancel)?;
+        progress.found.store(m.total, Ordering::Relaxed);
+        Ok(m)
     }
 
-    /// Every row with a match in scope, shown or not.
-    fn hit_rows(
+    /// Matching cells per file row, from the file alone (rows with edits are left at 0
+    /// for [`Self::count_edited_rows`]).
+    fn count_file_rows(
         &self,
-        q: &Query,
-        needle: &Needle,
+        m: &Matches,
         cancel: &AtomicBool,
-        done: &AtomicU64,
-    ) -> Result<Hits, SearchError> {
+        progress: &SearchProgress,
+    ) -> Result<Vec<ChunkCounts>, SearchError> {
         let file_rows = self.index.row_count();
+        let needle = &m.needle;
         // Quotes are doubled in the file, so a quote in the text can't be looked for in
         // the raw bytes: then every row is checked cell by cell.
         let prefilter = !needle.bytes.contains(&self.dialect.quote);
-        let chunks: Vec<Vec<u64>> = (0..file_rows.div_ceil(CHUNK))
+        let shown = |row: u64| {
+            row >= self.first_row()
+                && self
+                    .filters
+                    .iter()
+                    .all(|(_, set)| set.passes(RowId::source(row)))
+        };
+        (0..file_rows.div_ceil(CHUNK))
             .into_par_iter()
             .map(|c| {
                 if cancel.load(Ordering::Relaxed) {
@@ -171,22 +351,26 @@ impl CsvTable {
                 if found != Some((rows.end - rows.start) as usize) {
                     return Err(SearchError::Cancelled); // the file changed underneath
                 }
-                let mut words = vec![0u64; spans.len().div_ceil(64)];
+                let mut out = ChunkCounts {
+                    counts: vec![0; spans.len()],
+                    many: Vec::new(),
+                };
                 let (mut fields, mut scratch) = (Vec::new(), Vec::new());
-                let mut check = |i: usize| {
+                let mut shown_found = 0;
+                let mut count = |i: usize| {
                     let row = rows.start + i as u64;
-                    // Edited rows are checked from their edits (`edited_hits`).
-                    if self.overlay.row(RowId::source(row)).is_none()
-                        && self.file_row_matches(
-                            q,
-                            needle,
-                            row,
-                            &spans[i],
-                            &mut fields,
-                            &mut scratch,
-                        )
-                    {
-                        words[i / 64] |= 1 << (i % 64);
+                    if self.overlay.row(RowId::source(row)).is_some() {
+                        return; // counted from its edits
+                    }
+                    let n = self.count_in_file_row(m, row, &spans[i], &mut fields, &mut scratch);
+                    if n >= u32::from(MANY) {
+                        out.counts[i] = MANY;
+                        out.many.push((row, n));
+                    } else {
+                        out.counts[i] = n as u8;
+                    }
+                    if n > 0 && shown(row) {
+                        shown_found += u64::from(n);
                     }
                 };
                 if prefilter {
@@ -196,9 +380,9 @@ impl CsvTable {
                         _ => (0, 0),
                     };
                     let chunk = &bytes[start..end];
-                    let mut folded = Vec::new();
+                    let folded: Vec<u8>;
                     let hay = if needle.fold {
-                        folded.extend(chunk.iter().map(u8::to_ascii_lowercase));
+                        folded = chunk.iter().map(u8::to_ascii_lowercase).collect();
                         &folded[..]
                     } else {
                         chunk
@@ -208,38 +392,31 @@ impl CsvTable {
                         let at = (start + at) as u64;
                         let i = spans.partition_point(|s| s.end <= at);
                         if i >= next_row && i < spans.len() {
-                            check(i);
+                            count(i);
                             next_row = i + 1;
                         }
                     }
                 } else {
-                    (0..spans.len()).for_each(&mut check);
+                    (0..spans.len()).for_each(&mut count);
                 }
-                done.fetch_add(rows.end - rows.start, Ordering::Relaxed);
-                Ok(words)
+                progress
+                    .rows
+                    .fetch_add(rows.end - rows.start, Ordering::Relaxed);
+                progress.found.fetch_add(shown_found, Ordering::Relaxed);
+                Ok(out)
             })
-            .collect::<Result<_, _>>()?;
-        let mut hits = Hits {
-            file: Vec::with_capacity(file_rows.div_ceil(64) as usize),
-            inserted: HashSet::new(),
-        };
-        for c in chunks {
-            hits.file.extend(c);
-        }
-        self.edited_hits(q, needle, &mut hits);
-        Ok(hits)
+            .collect()
     }
 
-    /// Whether file row `row` (at `span`, without edits) has a match in scope.
-    fn file_row_matches(
+    /// Matching cells of file row `row` (at `span`, without edits).
+    fn count_in_file_row(
         &self,
-        q: &Query,
-        needle: &Needle,
+        m: &Matches,
         row: u64,
         span: &Range<u64>,
         fields: &mut Vec<csv_engine::Field>,
         scratch: &mut Vec<u8>,
-    ) -> bool {
+    ) -> u32 {
         let bytes = self.index.source().bytes();
         let mut line = &bytes[span.start as usize..span.end as usize];
         if span.start == 0 {
@@ -247,21 +424,23 @@ impl CsvTable {
         }
         split_fields(line, &self.dialect, fields);
         let cleared = self.cleared.at(row);
-        fields.iter().enumerate().any(|(i, f)| {
-            let id = ColId::source(i as Col);
-            q.col.is_none_or(|c| c == id)
+        let n = fields.iter().enumerate().filter(|(i, f)| {
+            let id = ColId::source(*i as Col);
+            m.query.col.is_none_or(|c| c == id)
                 && (self.cols.is_none() || self.col_of(id).is_some())
                 && !cleared.is_some_and(|c| c.contains(id))
-                && needle.in_value(&f.value(line, self.dialect.quote), scratch)
-        })
+                && m.needle
+                    .in_value(&f.value(line, self.dialect.quote), scratch)
+        });
+        n.count() as u32
     }
 
-    /// Check every row with edits (source rows the file pass skipped, and inserted rows)
+    /// Count every row with edits (source rows the file pass skipped, and inserted rows)
     /// from its cells as shown.
-    fn edited_hits(&self, q: &Query, needle: &Needle, hits: &mut Hits) {
+    fn count_edited_rows(&self, m: &mut Matches) {
         let mut scratch = Vec::new();
         for (&id, edits) in self.overlay.iter_rows() {
-            let cols: Vec<ColId> = match q.col {
+            let cols: Vec<ColId> = match m.query.col {
                 Some(c) => vec![c],
                 None => {
                     let fields = if id.is_inserted() {
@@ -273,78 +452,144 @@ impl CsvTable {
                             .map_or(0, |_| f.len() as Col)
                     };
                     let width = match &self.cols {
-                        Some(m) => m.width_with(fields, edits.keys().copied()),
+                        Some(map) => map.width_with(fields, edits.keys().copied()),
                         None => fields.max(edits.keys().next_back().map_or(0, |c| c.0 + 1)),
                     };
                     (0..width).map(|p| self.col_id(p)).collect()
                 }
             };
-            let found = cols.into_iter().any(|c| {
-                self.cell_of(id, c)
-                    .is_some_and(|v| needle.in_value(v.as_bytes(), &mut scratch))
-            });
+            let n = cols
+                .into_iter()
+                .filter(|&c| {
+                    self.cell_of(id, c)
+                        .is_some_and(|v| m.needle.in_value(v.as_bytes(), &mut scratch))
+                })
+                .count() as u32;
             if id.is_inserted() {
-                if found {
-                    hits.inserted.insert(id);
+                if n > 0 {
+                    m.inserted.insert(id, n);
                 }
-            } else if let Some(w) = hits.file.get_mut(id.0 as usize / 64) {
-                let bit = 1 << (id.0 % 64);
-                if found {
-                    *w |= bit;
+            } else if let Some(slot) = m.counts.get_mut(id.0 as usize) {
+                m.many.remove(&id.0);
+                if n >= u32::from(MANY) {
+                    *slot = MANY;
+                    m.many.insert(id.0, n);
                 } else {
-                    *w &= !bit;
+                    *slot = n as u8;
                 }
             }
         }
     }
 
-    /// The first row in `rows` (of the rows shown) with a match.
-    fn next_hit_row(&self, hits: &Hits, rows: Range<Row>) -> Option<Row> {
-        let mut r = rows.start;
-        for positions in self.view_ranges(rows) {
-            let runs = match &self.rows {
-                None => vec![crate::Run {
-                    first: RowId::source(positions.start),
-                    len: positions.end - positions.start,
-                }],
-                Some(order) => order.runs_in(positions),
-            };
-            for run in runs {
-                if run.first.is_inserted() {
-                    if let Some(i) = (0..run.len).find(|&i| hits.has(RowId(run.first.0 + i))) {
-                        return Some(r + i);
+    /// Visit the rows shown at table rows `rows` as runs of consecutive ids, each with
+    /// the table row it starts at; last first when `back` (each run still low to high).
+    /// Stops at the first `Some` that `f` returns.
+    fn walk<T>(
+        &self,
+        rows: Range<Row>,
+        back: bool,
+        cancel: &AtomicBool,
+        mut f: impl FnMut(Row, Run) -> Option<T>,
+    ) -> Result<Option<T>, SearchError> {
+        let steps = rows.end.saturating_sub(rows.start).div_ceil(WALK);
+        let mut runs: Vec<(Row, Run)> = Vec::new();
+        for k in 0..steps {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(SearchError::Cancelled);
+            }
+            let k = if back { steps - 1 - k } else { k };
+            let chunk = rows.start + k * WALK..rows.end.min(rows.start + (k + 1) * WALK);
+            runs.clear();
+            let mut at = chunk.start;
+            for p in self.view_ranges(chunk) {
+                match &self.rows {
+                    None => {
+                        let len = p.end - p.start;
+                        runs.push((
+                            at,
+                            Run {
+                                first: RowId::source(p.start),
+                                len,
+                            },
+                        ));
+                        at += len;
                     }
-                } else if let Some(k) = hits.first_in(run.first.0..run.first.0 + run.len) {
-                    return Some(r + (k - run.first.0));
+                    Some(order) => {
+                        for run in order.runs_in(p) {
+                            runs.push((at, run));
+                            at += run.len;
+                        }
+                    }
                 }
-                r += run.len;
+            }
+            let found = if back {
+                runs.iter().rev().find_map(|&(r, run)| f(r, run))
+            } else {
+                runs.iter().find_map(|&(r, run)| f(r, run))
+            };
+            if found.is_some() {
+                return Ok(found);
             }
         }
-        None
+        Ok(None)
     }
 
-    /// The first column of row `row` (shown) that `want` admits and whose value contains
-    /// the query.
-    fn match_in_row(
-        &mut self,
-        q: &Query,
-        needle: &Needle,
-        row: Row,
-        want: impl Fn(Col) -> bool,
-        scratch: &mut Vec<u8>,
-    ) -> Option<Col> {
-        let mut block = RowBlock::full_text();
-        self.read_rows(row..row + 1, &mut block);
-        let only = match q.col {
-            Some(id) => Some(self.col_of(id)?),
+    /// The first row in `rows` (of the rows shown) with a match; the last when `back`.
+    fn walk_to_hit(
+        &self,
+        m: &Matches,
+        rows: Range<Row>,
+        back: bool,
+        cancel: &AtomicBool,
+    ) -> Result<Option<Row>, SearchError> {
+        self.walk(rows, back, cancel, |r, run| {
+            m.hit_in(run, back).map(|i| r + i)
+        })
+    }
+
+    /// Matching cells in table rows `rows`.
+    fn count_matches(
+        &self,
+        m: &Matches,
+        rows: Range<Row>,
+        cancel: &AtomicBool,
+    ) -> Result<u64, SearchError> {
+        let mut total = 0;
+        self.walk(rows, false, cancel, |_, run| {
+            total += m.sum(run);
+            None::<()>
+        })?;
+        Ok(total)
+    }
+
+    /// The columns of table row `row` whose values contain the text, in order.
+    fn match_cols(&mut self, m: &Matches, row: Row) -> Vec<Col> {
+        let id = self.row_id(row);
+        let counted = if id.is_inserted() {
+            m.inserted.contains_key(&id)
+        } else {
+            m.file_count(id.0) > 0
+        };
+        if !counted {
+            return Vec::new();
+        }
+        let only = match m.query.col {
+            Some(c) => match self.col_of(c) {
+                Some(p) => Some(p),
+                None => return Vec::new(),
+            },
             None => None,
         };
+        let mut block = RowBlock::full_text();
+        self.read_rows(row..row + 1, &mut block);
+        let mut scratch = Vec::new();
         (0..block.cells_in_row(row))
-            .filter(|&c| only.is_none_or(|o| o == c) && want(c))
-            .find(|&c| {
-                let v: Cow<str> = Cow::Borrowed(block.cell(row, c).unwrap_or(""));
-                needle.in_value(v.as_bytes(), scratch)
+            .filter(|&c| only.is_none_or(|o| o == c))
+            .filter(|&c| {
+                let v = block.cell(row, c).unwrap_or("");
+                m.needle.in_value(v.as_bytes(), &mut scratch)
             })
+            .collect()
     }
 }
 

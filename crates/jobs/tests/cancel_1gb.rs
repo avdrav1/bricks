@@ -11,7 +11,7 @@
 use csv_engine::{Dialect, IndexError, RowIndex, Source, SparseRowIndex};
 use data_model::{
     CellRef, CsvTable, DelimiterChoice, Edit, Filter, FilterError, Query, SaveProgress,
-    SearchError, SortError, SortOrder, TableSource, Test,
+    SearchError, SearchProgress, SortError, SortOrder, TableSource, Test,
 };
 use file_format::{save_csv, SaveError, TEMP_SUFFIX};
 use jobs::{Job, Stopped};
@@ -264,12 +264,18 @@ fn searching_cancels_within_200ms() {
     let mut times = Vec::new();
     for pct in [0, 10, 50, 90] {
         let (mut snapshot, query) = (table.snapshot(), query.clone());
-        let done = Arc::new(AtomicU64::new(0));
+        let progress = Arc::new(SearchProgress::default());
         let job = jobs::spawn({
-            let done = done.clone();
-            move |cancel| snapshot.find(&query, (0, 0), cancel.flag(), &done)
+            let progress = progress.clone();
+            move |cancel| {
+                snapshot
+                    .search(&query, cancel.flag(), &progress)
+                    .map(|m| m.total())
+            }
         });
-        let (took, out) = cancel_when(&job, || done.load(Ordering::Relaxed) * 100 >= rows * pct);
+        let (took, out) = cancel_when(&job, || {
+            progress.rows.load(Ordering::Relaxed) * 100 >= rows * pct
+        });
         assert!(
             matches!(out, None | Some(Err(SearchError::Cancelled))),
             "at {pct}%: searched anyway"

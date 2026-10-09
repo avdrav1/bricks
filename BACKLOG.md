@@ -67,7 +67,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | FILT-3 | M3 | P0 | done | FILT-1, SAVE-1 | Saving with an active filter keeps hidden rows | Test confirms on-disk row count unchanged |
 | FILT-4 | M3 | P1 | todo | FILT-2, CLIP-2 | Edits and paste respect the filtered view | Paste into a filtered range touches visible rows only |
 | SRCH-1 | M3 | P0 | done | ENG-8 | Find bar (Ctrl+F): whole file or current column, case toggle | First hit in 1 GB under 1 s, off the UI thread |
-| SRCH-2 | M3 | P0 | todo | SRCH-1 | Next/previous result; hit count streams in | New keystroke cancels the running search |
+| SRCH-2 | M3 | P0 | done | SRCH-1 | Next/previous result; hit count streams in | New keystroke cancels the running search |
 | SRCH-3 | M3 | P0 | todo | SRCH-2, CMD-1 | Find and replace; replace all | Replace all on 100k hits undoes as one step |
 | APP-4 | M4 | P0 | todo | APP-1 | Recent files menu | Last 10 files survive restart |
 | APP-5 | M4 | P0 | todo | APP-1 | Drag and drop to open | Works on Wayland and X11 |
@@ -81,6 +81,36 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-09 SRCH-2:** search as you type, next/previous, and a count: "12 of 2,725,768".
+  - Decided with the user:
+    - Typing searches as you type from the cursor, the cursor's own cell first, so a longer text stays on a match that still fits (Firefox-style).
+    - The count is of matching cells shown, with the cursor's place among them.
+  - Keys and controls:
+    - Enter, Ctrl+G, or ↓ goes to the next match; Shift+Enter, Ctrl+Shift+G, or ↑ to the previous one, wrapping at either end.
+    - Changing "Match case" or the scope searches again from the cursor.
+    - While matches are counted, the note shows "N so far…" from the 100 ms status tick.
+  - Acceptance: every keystroke cancels the running search at once (`SearchEntry::changed` → `GridView::cancel_search`); the search for the new text starts when typing pauses (`search-changed`, GTK's 150 ms).
+    - `app/tests/find_typing.rs` (ignored, needs a display; Broadway works) runs `--bench-find portland`, which types one character every 200 ms on the 1 GB file. Each search still running at a key came back cancelled, 5.5–10.4 ms after the key (7 of 7), and the last one landed on "1 of 2,725,768".
+  - `data_model::search` reworked:
+    - `CsvTable::search(query, cancel, &SearchProgress) -> Matches` counts matching cells per file row: one byte a row (19 MB on 1 GB), with counts of 255 or more in a `BTreeMap` and inserted rows in a `HashMap`. Counting replaced SRCH-1's bitmap.
+    - `Matches::step(table, from, Step::{Here, Next, Previous}, hint, cancel) -> Hit { row, col, ordinal }`. The place is counted over the rows shown before the hit, or taken from `hint` ±1 when stepping from the previous hit.
+    - `SearchProgress.found` streams a provisional count (rows passing the filters; deleted rows and edits settle at the end).
+    - `CsvTable::find` is gone.
+  - Staleness: `CsvTable` got a `revision`, from a process-wide counter, so a replaced table never repeats one. It changes on every `apply` (edits, undo, sort, inserts) and every `update_view` (header flip, filters). `GridView::found` keeps the last `Matches` while `is_current` holds and the query is the same, so stepping takes 0.05–1.3 ms in the app against 241 ms for counting.
+  - **Bug fixed from SRCH-1:** the walk to the next hit called `runs_in` over every remaining row, which on a sorted table builds one `Run` per row (about 450 MB for 19M rows). The walk now goes 65,536 table rows at a time, either way, checking cancel between steps.
+    - Sorted 1 GB: first match 335 ms; previous from the top, which counts every row shown, 512 ms.
+  - Tests: `commands/tests/search.rs`, 9 tests, now also covering:
+    - the place and total on every match of every tour, counted fresh and from the hint;
+    - previous with wrap, and `Here`;
+    - staleness after an edit, undo, header flip, filter, or another table;
+    - deleted rows, and the streamed count.
+    - `data-model/tests/search_1gb.rs` adds totals, previous, and a sorted table.
+  - Smoke test via Broadway on the 1 GB file:
+    - Typing "portland" went to row 6, "1 of 2,725,768"; Enter twice went to row 19, "3 of".
+    - Shift+Enter three times went to 2, then 1, then wrapped to row 19,094,577, "2,725,768 of 2,725,768".
+    - Editing that cell to "Paris" and pressing Enter again recounted: "1 of 2,725,767".
+    - The note has a fixed width, so the field no longer jumps as the count grows.
+  - Follow-up: in a sorted or filtered table, the first place after a jump costs a walk over the rows before it (up to 0.5 s on a sorted 1 GB), on the job pool.
 - **2026-10-09 SRCH-1:** find bar (Ctrl+F) over the status bar: text field, "Match case", "Whole file" or "Current column", a "No matches" note, close button. Enter finds the next match from the cursor, and Esc closes the bar (and cancels a running search).
   - Rules, decided with the user: a match is the text anywhere in a cell's value as shown (edits included, quotes unescaped; no whole-cell option), row by row from the cursor, wrapping to the top, with the cursor's own cell last; the bar goes at the bottom.
     - "Shown" also means a filter's hidden rows and deleted columns are skipped, and the order is the sorted order when sorted.
