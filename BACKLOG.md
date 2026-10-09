@@ -12,7 +12,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 - [x] S0: decision records DEC-1 to DEC-5 accepted; CI green on every PR
 - [x] M0: a 1 GB CSV opens, scrolls smoothly, takes one edit, and saves safely
 - [x] M1: viewer passes the LibreOffice navigation checklist; first rows of 1 GB in under 500 ms
-- [ ] M2: editor round-trips edits, paste, inserts, and undo on 1 GB without full rewrites before save
+- [x] M2: editor round-trips edits, paste, inserts, and undo on 1 GB without full rewrites before save
 - [ ] M3: all V0.1 benchmarks in docs/BENCHMARKS.md pass on reference hardware (V0.1 release)
 - [ ] M4: AUR package installs on a clean Arch VM and opens CSVs by double-click
 
@@ -80,6 +80,11 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 ## Notes
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
+
+- **2026-10-09 M2 gate:** approved by the user on this machine's numbers (Ryzen 9 5900, warm page cache).
+  - Combined check (throwaway, deleted) on a copy of the 1 GB file: 1,000 edits (0.35 ms in total), a 100-row insert at row 5M, a 10k×3 paste at row 10M (6.8 ms; undo + redo 1.7 ms), a paste that added 3 rows at the end, and a column insert. Three steps were then undone.
+  - Before saving: the process had written 0 bytes, the file's size and mtime were unchanged, and anonymous memory had grown by 7.4 MiB. The atomic save took 2.7 s. After reopening, all 19,094,682 data rows matched the editor's view with 0 mismatches, and none of the undone steps reached the file.
+  - All ignored release tests pass, except `app/tests/status_stream.rs` (APP-2) when the 1 GB file is already in page cache. It indexes in 0.36 s, before a second 100 ms status update can fire. It passes cold (3 updates). Follow-up: make it independent of the page cache, or evict the file first.
 
 - **2026-10-08 APP-9 (new story):** closing a window with unsaved edits asks first: Save / Don't Save / Cancel, in a `gtk::AlertDialog` (`Save changes to “name”?`, `N unsaved edits will be lost if you close without saving.`). This is a tester-safety story added for the v0.0.1 tester build.
   - `close-request` commits an open cell editor first, so typed text counts. With no edits the window closes as before. While a save runs, closing sets `close_after` on it and waits: the window closes when that save succeeds. A failed or cancelled save keeps the window and its edits.
