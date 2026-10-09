@@ -572,6 +572,9 @@ fn build_window(
                     r.job.cancel();
                     return glib::Propagation::Stop;
                 }
+                if grid.cancel_sort() {
+                    return glib::Propagation::Stop;
+                }
             }
             if !mods.contains(ModifierType::CONTROL_MASK) {
                 return glib::Propagation::Proceed;
@@ -823,6 +826,7 @@ fn start_save(
     close_after: bool,
 ) {
     if matches!(*save.borrow(), SaveState::Saving(..))
+        || grid.busy()
         || (target.is_none() && grid.edit_count() == 0)
     {
         return;
@@ -1233,6 +1237,7 @@ impl StatusBar {
             detected: choice == DelimiterChoice::Auto,
             encoding: grid.encoding(),
             edits: grid.edit_count(),
+            sorting: grid.sort_progress(),
             save: match save {
                 SaveState::Idle => status::SaveView::Idle,
                 SaveState::Saving(r) if r.progress.is_checking() => status::SaveView::Checking,

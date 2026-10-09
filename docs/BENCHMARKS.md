@@ -14,6 +14,6 @@ Run `cargo bench` to measure every row and print this table with Latest filled i
 | Scroll frame time p99 | < 16 ms | 1.8 ms frame CPU p99; 60.0 fps, 0 of 600 frames late; 1906×1048 px grid | |
 | Peak RAM after open | < 1.5x file size | 1.13x (1158 MiB peak RSS incl. mapped file pages; 28 MiB anonymous) | |
 | Find first match | < 1 s | not built yet (SRCH-1) | |
-| Sort numeric column | < 10 s (< 3 s at 2M rows) | not built yet (SORT-1) | |
+| Sort numeric column | < 10 s (< 3 s at 2M rows) | 0.90 s for 19.1M rows, 144 ms at 2M (`sort_1gb`, 23-thread pool); 1.13 s and 170 ms on 8 cores (`taskset -c 0-7`). Saving the sorted file: 3.7 s (SORT-1, 2026-10-09, same Ryzen box) | |
 | Two-column filter | < 3 s | not built yet (FILT-2) | |
 | Save with 1,000 edits | < 15 s | 0.90–0.95 s incl. fsync and verify (`save_perf`, NVMe, 3 runs); 0.77 s in the app with the UI scrolling at 60 fps, main loop p99 1.1 ms late (`save_responsive`, tmpfs; ENG-8, 2026-10-09, same Ryzen box) | |

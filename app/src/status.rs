@@ -50,6 +50,8 @@ pub struct Facts<'a> {
     pub detected: bool,
     pub encoding: Encoding,
     pub edits: usize,
+    /// Share of the file a running sort has read (0..=1).
+    pub sorting: Option<f64>,
     pub save: SaveView<'a>,
     pub file_changed: bool,
     pub clip: ClipView,
@@ -78,6 +80,10 @@ pub fn status(f: &Facts) -> Status {
     }
 
     let mut save = Vec::new();
+    if let Some(done) = f.sorting {
+        let pct = (done.clamp(0.0, 1.0) * 100.0).floor();
+        save.push(format!("Sorting {pct:.0}%"));
+    }
     let cells = |n: u64| format!("{} cell{}", group_digits(n), if n == 1 { "" } else { "s" });
     match f.clip {
         ClipView::Idle => {}
@@ -196,6 +202,7 @@ mod tests {
             detected: true,
             encoding: Encoding::UTF8,
             edits: 0,
+            sorting: None,
             save: SaveView::Idle,
             file_changed: false,
             clip: ClipView::Idle,
@@ -246,6 +253,12 @@ mod tests {
         f.edits = 2;
         f.clip = ClipView::Copying(0.456);
         assert_eq!(status(&f).save, "Copying 45% · 2 unsaved edits");
+        f.sorting = Some(0.5);
+        assert_eq!(
+            status(&f).save,
+            "Sorting 50% · Copying 45% · 2 unsaved edits"
+        );
+        f.sorting = None;
         f.clip = ClipView::Copied {
             cells: 1,
             text_only: false,

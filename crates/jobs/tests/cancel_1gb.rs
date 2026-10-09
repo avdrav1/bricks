@@ -9,7 +9,9 @@
 //! `cargo test --release -p jobs --test cancel_1gb -- --ignored --nocapture`
 
 use csv_engine::{Dialect, IndexError, RowIndex, Source, SparseRowIndex};
-use data_model::{CellRef, CsvTable, DelimiterChoice, Edit, SaveProgress, TableSource};
+use data_model::{
+    CellRef, CsvTable, DelimiterChoice, Edit, SaveProgress, SortError, SortOrder, TableSource,
+};
 use file_format::{save_csv, SaveError, TEMP_SUFFIX};
 use jobs::{Job, Stopped};
 use std::path::{Path, PathBuf};
@@ -177,6 +179,46 @@ fn copying_cancels_within_200ms() {
         let (took, out) = cancel_when(&job, || done.load(Ordering::Relaxed) * 100 >= rows * pct);
         assert!(matches!(out, None | Some(None)), "at {pct}%: copied anyway");
         times.push((format!("copy of every row at {pct}%"), took));
+    }
+    check(&times);
+}
+
+#[test]
+#[ignore = "needs corpus/rows_1024mb.csv; run with --release --ignored"]
+fn sorting_cancels_within_200ms() {
+    let mut table = open(&corpus());
+    let types = table.infer_types(&AtomicBool::new(false)).unwrap();
+    table.set_types(types);
+    let rows = table.index().row_count();
+    let mut times = Vec::new();
+    // By share of the file read into keys; then 150 ms after that, inside the sort proper
+    // (the keys are gathered by then; the sort itself takes 250 ms or more).
+    let points = ["0%", "10%", "50%", "90%", "keys read + 150 ms"];
+    for point in points {
+        let snapshot = table.snapshot();
+        let done = Arc::new(AtomicU64::new(0));
+        let job = jobs::spawn({
+            let done = done.clone();
+            move |cancel| snapshot.sort_rows(4, SortOrder::Ascending, cancel.flag(), &done)
+        });
+        let read_all = std::cell::Cell::new(None::<Instant>);
+        let (took, out) = cancel_when(&job, || {
+            let read = done.load(Ordering::Relaxed);
+            match point.strip_suffix('%') {
+                Some(pct) => read * 100 >= rows * pct.parse::<u64>().unwrap(),
+                None if read < rows => false,
+                None => {
+                    let since = read_all.get().unwrap_or_else(Instant::now);
+                    read_all.set(Some(since));
+                    since.elapsed() >= Duration::from_millis(150)
+                }
+            }
+        });
+        assert!(
+            matches!(out, None | Some(Err(SortError::Cancelled))),
+            "{point}: sorted anyway"
+        );
+        times.push((format!("sort of every row at {point}"), took));
     }
     check(&times);
 }

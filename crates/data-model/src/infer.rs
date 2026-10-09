@@ -170,6 +170,54 @@ fn time(rest: &str) -> bool {
     }
 }
 
+/// Microseconds since 0000-03-01T00:00Z of a value [`value_type`] calls a Date or a
+/// DateTime, for sorting (SORT-1): a date is its midnight, a time without a zone is taken
+/// as UTC, and fractions finer than a microsecond are dropped.
+pub(crate) fn instant(raw: &str) -> Option<i64> {
+    let rest = date(raw)?;
+    let b = raw.as_bytes();
+    let (y, m, d) = (digits(b, 4)?, digits(&b[5..], 2)?, digits(&b[8..], 2)?);
+    let (y, m, d) = (i64::from(y), i64::from(m), i64::from(d));
+    // Days since 0000-03-01 (H. Hinnant's days_from_civil, years starting in March).
+    let (y, m) = if m <= 2 { (y - 1, m + 9) } else { (y, m - 3) };
+    let days =
+        y * 365 + y.div_euclid(4) - y.div_euclid(100) + y.div_euclid(400) + (153 * m + 2) / 5 + d
+            - 1;
+    let mut micros = days * 86_400_000_000;
+    if rest.is_empty() {
+        return Some(micros);
+    }
+    if !time(rest) {
+        return None;
+    }
+    let t = &rest.as_bytes()[1..];
+    let minutes = |b: &[u8]| Some(i64::from(digits(b, 2)? * 60 + digits(&b[3..], 2)?));
+    micros += minutes(t)? * 60_000_000;
+    let mut i = 5;
+    if t.get(i) == Some(&b':') {
+        micros += i64::from(digits(&t[i + 1..], 2)?) * 1_000_000;
+        i += 3;
+        if t.get(i) == Some(&b'.') {
+            let n = t[i + 1..].iter().take_while(|c| c.is_ascii_digit()).count();
+            let mut frac = 0;
+            for k in 0..6 {
+                frac = frac * 10
+                    + t.get(i + 1 + k)
+                        .filter(|_| k < n)
+                        .map_or(0, |c| i64::from(c - b'0'));
+            }
+            micros += frac;
+            i += 1 + n;
+        }
+    }
+    match t.get(i) {
+        Some(b'+') => micros -= minutes(&t[i + 1..])? * 60_000_000,
+        Some(b'-') => micros += minutes(&t[i + 1..])? * 60_000_000,
+        _ => {}
+    }
+    Some(micros)
+}
+
 impl CsvTable {
     /// Infer every column's type from a sample: the first [`SAMPLE_HEAD`] rows and
     /// [`SAMPLE_SPREAD`] more at even steps through the rest, the last row included. Reads

@@ -60,7 +60,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | ENG-8 | M3 | P0 | done | DEC-5 | Background job framework: progress and cancel | Every long job cancels within 200 ms |
 | TYPE-1 | M3 | P0 | done | ENG-2 | Infer column types by sampling | Raw value never altered; `00123` stays `00123` |
 | TYPE-2 | M3 | P1 | todo | TYPE-1 | Show inferred type in header; allow override | Override changes sort and filter only |
-| SORT-1 | M3 | P0 | todo | TYPE-1, DEC-4, CMD-1, ENG-8 | Type-aware sort, ascending and descending | 2M-row numeric sort under 3 s; stable; undoable |
+| SORT-1 | M3 | P0 | done | TYPE-1, DEC-4, CMD-1, ENG-8 | Type-aware sort, ascending and descending | 2M-row numeric sort under 3 s; stable; undoable |
 | SORT-2 | M3 | P0 | todo | SORT-1, ENG-7 | Sort moves whole rows and honors the header | Header row never moves |
 | FILT-1 | M3 | P0 | todo | TYPE-1, DEC-4 | Per-column filter from header dropdown | Exact, contains, not contains, empty, non-empty, numeric compare |
 | FILT-2 | M3 | P0 | todo | FILT-1 | Combine filters across columns (AND) | Status bar shows "x of y rows" |
@@ -80,6 +80,34 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 ## Notes
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
+
+- **2026-10-09 SORT-1:** type-aware sort, ascending and descending. Three user decisions: text ignores ASCII case, with exact bytes breaking ties; empty cells are always last, while values that don't fit the column type (`n/a` in numbers) follow the typed ones ascending and lead descending; and the entries are "Sort Ascending" and "Sort Descending" in the right-click menu, sorting by the cursor's column.
+  - `CsvTable::sort_rows(col, order, cancel, done)` returns one `Edit::Reorder` (or `Ok(None)` if the rows are already in that order); `commands::Batch` makes it one undo step. Keys follow TYPE-1's column type: numbers by value (as f64), dates and date-times by instant (offsets applied), `false` before `true`, text as above. Ties keep the current order, so the sort is stable, and repeated sorts compose. The header row never moves.
+  - Row order is now `RowOrder::Runs` (the treap) or `RowOrder::Sorted` (4 B/row). Inserts, deletes, edits, clears, and save all work on a sorted order. A sorted order counts as one unsaved change, and sorting back to file order clears it. ADR 0004 has the as-built details (key layout, file-order key pass, the save's row-start table, cancel by unwinding).
+  - App: `GridView::sort` runs on the job pool from a snapshot. The status shows `Sorting N%`, Esc cancels, and edits, undo, and Save wait while it runs (`GridView::busy`). A reopened table cancels a running sort. `BRICKS_TIMINGS` logs each result.
+  - Proof:
+    - `commands/tests/sort.rs`:
+      - Numbers with misfits and blanks, both directions, with ties in file order.
+      - Case-insensitive text, including `alexandra`/`Alexandria`, which tie on their first 8 bytes. A mutation that skipped the whole-value compare failed this test.
+      - Sorting by name then by score keeps names in order within a score.
+      - Undo restores file order with 0 changes and an identical save; redo sorts again.
+      - A sorted save writes whole rows, a multi-line quoted cell included, in the new order; an edit, an insert, and a delete on the sorted order save too.
+      - Already in order returns `None`, and sorting back to file order leaves 0 changes.
+      - A cancel returns nothing.
+    - Unit tests cover the key order for numbers, text, date-times with offsets, and booleans.
+    - `commands/tests/sort_1gb.rs` (ignored, release): 2M-row numeric sort in 144 ms (8 cores: 170 ms; target 3 s), ascending, stable for equal values, every row once, and undo restores the order. 19.1M rows: numeric 0.90 s, then a text re-sort of the sorted table 0.89 s, then a save in sorted order in 3.7 s with every line checked.
+    - `jobs/tests/cancel_1gb.rs` gains the sort: cancels at 0/10/50/90% of the key pass and inside the sort itself take 0/15/29/24/2 ms on 8 cores.
+  - Smoke test via Broadway on a /tmp copy of the 1 GB file:
+    - Right-click → Sort Descending on score: 0.86 s, then `1000.00` rows on top with ids ascending, • in the title, and `1 unsaved edit`.
+    - Ctrl+Z restored file order and cleared the •.
+    - Sort Ascending on city with Esc 200 ms in was cancelled, with the order unchanged.
+    - Sort Descending again and Ctrl+S: saved in 3.6 s, reopened, and re-inferred. On disk: the header, then 19,094,579 rows with 0 order violations, the same multiset of lines as the corpus.
+  - SORT-2's criterion (the header row never moves) already holds and is asserted in `sort.rs`. Rows move whole by construction.
+  - Follow-ups (not fixed):
+    - Work that walks a sorted table in order reads rows at random: copying the whole city column takes 15.3 s sorted, against 3.6 s in file order. It is a background job with progress and cancel, so the window stays responsive. Paste and Delete over huge sorted ranges are in the same position.
+    - `CsvTable::row_of` is O(rows) on a sorted order; undo and redo use it to jump to the changed row.
+    - Case folding is ASCII-only (`É` and `é` sort by bytes). Integers beyond 2^53 compare as f64.
+    - A sort of an already-sorted 19M-row table holds 76 MB of undo, which drops older history past the 50 MB budget.
 
 - **2026-10-09 TYPE-1:** infer column types by sampling. Three user decisions: integers with a leading zero (`00123`, `000`) are Text; a column has a type only if every non-empty sampled value has it (empty cells and the null markers `NA`, `N/A`, `null`, `-` don't count); and only plain formats count (`-12`, `+3`, `0.5`, `1e6`; ISO dates; ISO date-times with `T` or a space, optional seconds, fraction, and `Z`/`±HH:MM`; `true`/`false`/`yes`/`no` in any case).
   - `data_model::value_type(raw)` classifies one value. A column folds its values: Integer with Decimal makes Decimal, Date with DateTime makes DateTime, anything else mixed makes Text, and a column with no values is Text.

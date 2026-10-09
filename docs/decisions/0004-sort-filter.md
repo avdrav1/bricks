@@ -74,3 +74,12 @@ python3 spikes/dec-4/run.py
   - Within the "1.5x file size" target, 1 GB of source leaves room for this, but not for several cached columns at once.
 - **Off the UI thread:** the passes must check the cancel token (ENG-8) once per block (65,536 rows, about 1 ms of work).
 - **Revisit if:** sorts over text columns, which need collation and longer keys, can't stay within budget with fixed-width key prefixes and a fallback comparison.
+- **As built in SORT-1 (2026-10-09):**
+  - **Order:** the row order is `RowOrder::Runs` (the treap of runs) or `RowOrder::Sorted` (`Arc<Vec<u32>>`: 4 B/row, inserted rows marked by bit 31). Inserts and deletes work on both; a sorted order copies its vector first if a snapshot or undo shares it. A sort back to file order becomes `None` again.
+  - **Keys:** 24 B per row: `k1` (an order-preserving number or instant, or the ASCII case-folded first 8 bytes), `k2` (the exact first 8 bytes), the current position, a class (typed, misfit, blank), and a long-text bit. Text rows longer than 8 bytes with equal `k1` are re-sorted by whole value afterwards, a group at a time. A column of long values sharing a prefix (URLs) re-reads every value in that group.
+  - **Reading:** the key pass reads the file in file order, a chunk of 65,536 rows per task, and keys each row with its current position. A sort of an already-sorted table therefore costs the same as the first one (0.88 s against 0.90 s at 19.1M rows).
+  - **Stability:** the position, not the RowId, breaks ties, so a sort keeps the current order among equal values: sort by B, then by A, gives A then B.
+  - **Saving a sorted order:** this would read rows at random, about 32 rows of scanning each from the 64-row checkpoints. So the save first finds every row's start in one parallel pass (8 B/row, transient) and copies rows from there: 3.7 s for 1 GB.
+  - **Cancel:** the sort phase can't pause, so once cancelled its comparator unwinds with a private payload (`resume_unwind`, no panic message), which rayon's sort survives without losing elements. Cancels land in 2–38 ms in every phase (`jobs/tests/cancel_1gb.rs`).
+  - **Undo:** a sort is one `Edit::Reorder` whose inverse is the previous order. From file order or a run order, that is a few bytes; only a sort of an already-sorted table holds 4 B/row (76 MiB at 19.1M), and that clears older history past CMD-2's 50 MB budget. The step just taken always stays.
+  - **Peak memory at 19.1M rows:** keys 460 MB, plus the old order, each row's position, and the new order at 76 MB each, all transient.

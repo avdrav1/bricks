@@ -1,9 +1,11 @@
 //! Row order (EDIT-3, ADR 0003): which row is shown at each position, as an
 //! order-statistic treap of runs of consecutive [`RowId`]s. Source order plus local
 //! inserts and deletes stays a handful of runs, so finding, inserting, and removing are
-//! O(log runs) at any row count.
+//! O(log runs) at any row count. A sort (SORT-1, ADR 0004) makes every row its own run,
+//! so a sorted order is a flat permutation instead: 4 bytes a row ([`RowOrder::Sorted`]).
 
 use crate::RowId;
+use std::sync::Arc;
 
 /// Consecutive row ids `first, first + 1, ...` shown one after another.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,7 +31,7 @@ impl Run {
 
 const NIL: u32 = u32::MAX;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Node {
     run: Run,
     prio: u64,
@@ -39,7 +41,7 @@ struct Node {
     sum: u64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RowMap {
     nodes: Vec<Node>,
     /// Slots of removed nodes, reused before the arena grows.
@@ -254,6 +256,159 @@ impl RowMap {
             let ny = self.node(y);
             let rt = self.merge(ny, r);
             (t, rt)
+        }
+    }
+}
+
+/// High bit of a packed id: an inserted row, numbered by the low 31 bits.
+const PACKED_INSERTED: u32 = 1 << 31;
+
+/// A row id in 4 bytes, for sorted orders: source rows and inserted rows below 2^31.
+pub(crate) fn pack(id: RowId) -> Option<u32> {
+    let n = id.0 & !RowId::INSERTED;
+    (n < u64::from(PACKED_INSERTED))
+        .then(|| n as u32 | if id.is_inserted() { PACKED_INSERTED } else { 0 })
+}
+
+pub(crate) fn unpack(v: u32) -> RowId {
+    if v & PACKED_INSERTED != 0 {
+        RowId::inserted(u64::from(v & !PACKED_INSERTED))
+    } else {
+        RowId::source(u64::from(v))
+    }
+}
+
+/// Consecutive packed ids as runs, in order.
+pub(crate) fn coalesce(ids: &[u32]) -> impl Iterator<Item = Run> + '_ {
+    let mut i = 0;
+    std::iter::from_fn(move || {
+        let first = unpack(*ids.get(i)?);
+        let mut len = 1;
+        while ids
+            .get(i + len as usize)
+            .is_some_and(|&v| unpack(v).0 == first.0 + len)
+        {
+            len += 1;
+        }
+        i += len as usize;
+        Some(Run { first, len })
+    })
+}
+
+/// Which row is shown at each position once it is no longer file order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RowOrder {
+    /// File order with local inserts and deletes: a tree of runs.
+    Runs(RowMap),
+    /// A sorted order (SORT-1): one packed id per row. Shared, so snapshots and undo
+    /// hold it without copying; an insert or delete copies it first if it is shared.
+    Sorted(Arc<Vec<u32>>),
+}
+
+impl RowOrder {
+    pub fn len(&self) -> u64 {
+        match self {
+            Self::Runs(m) => m.len(),
+            Self::Sorted(ids) => ids.len() as u64,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Id of the row at position `k` (< `len()`).
+    pub fn get(&self, k: u64) -> RowId {
+        match self {
+            Self::Runs(m) => m.get(k),
+            Self::Sorted(ids) => unpack(ids[k as usize]),
+        }
+    }
+
+    /// Position of row `id`, if it is shown: O(runs), or O(rows) once sorted.
+    pub fn position(&self, id: RowId) -> Option<u64> {
+        match self {
+            Self::Runs(m) => m.position(id),
+            Self::Sorted(ids) => {
+                let v = pack(id)?;
+                ids.iter().position(|&x| x == v).map(|k| k as u64)
+            }
+        }
+    }
+
+    /// Put `runs` (in order) at position `k`, shifting later rows down.
+    pub fn insert(&mut self, k: u64, runs: &[Run]) {
+        match self {
+            Self::Runs(m) => m.insert(k, runs),
+            Self::Sorted(ids) => {
+                let new = runs.iter().flat_map(|r| {
+                    (0..r.len).map(move |i| pack(RowId(r.first.0 + i)).expect("a sorted row id"))
+                });
+                let k = k as usize;
+                Arc::make_mut(ids).splice(k..k, new);
+            }
+        }
+    }
+
+    /// Take out `count` rows at position `k`; returns them as runs, in order.
+    pub fn remove(&mut self, k: u64, count: u64) -> Vec<Run> {
+        match self {
+            Self::Runs(m) => m.remove(k, count),
+            Self::Sorted(ids) => {
+                let ids = Arc::make_mut(ids);
+                let gone: Vec<u32> = ids.drain(k as usize..(k + count) as usize).collect();
+                coalesce(&gone).collect()
+            }
+        }
+    }
+
+    /// The runs covering positions `range`, cut to it, in order.
+    pub fn runs_in(&self, range: std::ops::Range<u64>) -> Vec<Run> {
+        match self {
+            Self::Runs(m) => m.runs_in(range),
+            Self::Sorted(ids) => {
+                let end = range.end.min(ids.len() as u64);
+                let start = range.start.min(end);
+                coalesce(&ids[start as usize..end as usize]).collect()
+            }
+        }
+    }
+
+    /// Visit every run in order.
+    pub fn for_each(&self, mut f: impl FnMut(&Run)) {
+        match self {
+            Self::Runs(m) => m.for_each(f),
+            Self::Sorted(ids) => coalesce(ids).for_each(|r| f(&r)),
+        }
+    }
+
+    /// Packed ids of every row in order, for a sort to permute.
+    pub(crate) fn packed(&self) -> Option<Vec<u32>> {
+        match self {
+            Self::Sorted(ids) => Some(ids.to_vec()),
+            Self::Runs(m) => {
+                let mut out = Vec::with_capacity(m.len() as usize);
+                let mut ok = true;
+                m.for_each(|r| {
+                    for i in 0..r.len {
+                        match pack(RowId(r.first.0 + i)) {
+                            Some(v) => out.push(v),
+                            None => ok = false,
+                        }
+                    }
+                });
+                ok.then_some(out)
+            }
+        }
+    }
+
+    /// Heap the order holds.
+    pub fn heap_bytes(&self) -> usize {
+        match self {
+            Self::Runs(m) => {
+                (m.nodes.capacity() * std::mem::size_of::<Node>()) + m.free.capacity() * 4
+            }
+            Self::Sorted(ids) => ids.capacity() * 4,
         }
     }
 }

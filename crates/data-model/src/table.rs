@@ -3,7 +3,7 @@
 
 use crate::cleared::Cleared;
 use crate::colmap::ColMap;
-use crate::rowmap::{RowMap, Run};
+use crate::rowmap::{RowMap, RowOrder, Run};
 use crate::{CellRef, Col, ColId, ColSet, Edit, EditOverlay, InferredType, Row, RowId};
 use csv_engine::{
     detect_dialect, detect_header, open_text, open_text_as, split_fields, Dialect, Encoding, Field,
@@ -166,9 +166,9 @@ pub struct CsvTable {
     pub(crate) dialect: Dialect,
     pub(crate) encoding: Encoding,
     pub(crate) overlay: EditOverlay,
-    /// Row order once rows were inserted or deleted (EDIT-3, ADR 0003); `None` while it
-    /// is still file order.
-    pub(crate) rows: Option<RowMap>,
+    /// Row order once rows were inserted, deleted, or sorted (EDIT-3, SORT-1, ADR 0003);
+    /// `None` while it is still file order.
+    pub(crate) rows: Option<RowOrder>,
     /// Inserted rows so far: the next inserted row's number.
     next_inserted: u64,
     /// Column order once columns were inserted or deleted (EDIT-4); `None` while it is
@@ -317,7 +317,7 @@ impl CsvTable {
     }
 
     /// Position of table row 0 among all rows: past the header row, if there is one.
-    fn first_row(&self) -> u64 {
+    pub(crate) fn first_row(&self) -> u64 {
         u64::from(self.dialect.has_header)
     }
 
@@ -325,7 +325,7 @@ impl CsvTable {
     fn total_rows(&self) -> u64 {
         self.rows
             .as_ref()
-            .map_or_else(|| self.index.row_count(), RowMap::len)
+            .map_or_else(|| self.index.row_count(), RowOrder::len)
     }
 
     /// Id of the row at position `k` among all rows (< `total_rows()`).
@@ -402,7 +402,10 @@ impl CsvTable {
         };
         let positions = rows.start + self.first_row()..rows.end + self.first_row();
         let rows = match &self.rows {
-            Some(map) => map.runs_in(positions),
+            // A clear is a set of rows: sorted ones go back to file order, so a whole
+            // column stays one run however the rows are shown.
+            Some(order @ RowOrder::Sorted(_)) => merge_runs(order.runs_in(positions)),
+            Some(order) => order.runs_in(positions),
             None => vec![Run {
                 first: RowId::source(positions.start),
                 len: positions.end - positions.start,
@@ -430,7 +433,8 @@ impl CsvTable {
         self.id_at(row + self.first_row())
     }
 
-    /// Unsaved changes: edited cells, plus rows inserted and source rows deleted.
+    /// Unsaved changes: edited cells, plus rows inserted and source rows deleted, plus one
+    /// for a sorted row order (SORT-1).
     pub fn changes(&self) -> usize {
         let rows = self.rows.as_ref().map_or(0, |m| {
             let (mut inserted, mut kept) = (0, 0);
@@ -443,8 +447,9 @@ impl CsvTable {
             });
             inserted + self.index.row_count().saturating_sub(kept)
         });
+        let sorted = usize::from(matches!(self.rows, Some(RowOrder::Sorted(_))));
         let cols = self.cols.as_ref().map_or(0, ColMap::changes);
-        self.overlay.len() + rows as usize + cols + self.cleared.len()
+        self.overlay.len() + rows as usize + sorted + cols + self.cleared.len()
     }
 
     /// An edit inserting `count` empty rows before table row `row` (at the end when
@@ -554,11 +559,19 @@ impl CsvTable {
                 before.reverse();
                 Edit::Cells(before)
             }
+            Edit::Reorder(order) => {
+                debug_assert_eq!(
+                    order.as_ref().map_or(self.index.row_count(), RowOrder::len),
+                    self.total_rows(),
+                    "a reorder keeps every row"
+                );
+                Edit::Reorder(std::mem::replace(&mut self.rows, order))
+            }
         }
     }
 
-    /// The row map, made from file order on the first insert or delete.
-    fn row_map(&mut self) -> &mut RowMap {
+    /// The row order, made from file order on the first insert or delete.
+    fn row_map(&mut self) -> &mut RowOrder {
         // A map made before indexing ends would freeze the row count and drop the rest
         // of the file on save; `insert_rows`/`delete_rows` return `None` until then.
         assert!(
@@ -567,10 +580,10 @@ impl CsvTable {
         );
         let rows = self.index.row_count();
         self.rows.get_or_insert_with(|| {
-            RowMap::new(Run {
+            RowOrder::Runs(RowMap::new(Run {
                 first: RowId::source(0),
                 len: rows,
-            })
+            }))
         })
     }
 
@@ -598,7 +611,7 @@ impl CsvTable {
         self.cell_of(self.id_at(k), self.col_id(col))
     }
 
-    fn cell_of(&self, row: RowId, col: ColId) -> Option<Cow<'_, str>> {
+    pub(crate) fn cell_of(&self, row: RowId, col: ColId) -> Option<Cow<'_, str>> {
         if let Some(v) = self.overlay.get(CellRef { row, col }) {
             return Some(Cow::Borrowed(v));
         }
@@ -732,6 +745,18 @@ fn file_rows(mut ids: Vec<Range<u64>>) -> Vec<Range<u64>> {
     ids
 }
 
+/// Runs of file rows in file order, adjacent ones joined (inserted rows after them).
+fn merge_runs(mut runs: Vec<Run>) -> Vec<Run> {
+    runs.sort_unstable_by_key(|r| r.first);
+    let mut out: Vec<Run> = Vec::with_capacity(runs.len());
+    for r in runs {
+        match out.last_mut() {
+            Some(last) if last.first.0 + last.len == r.first.0 => last.len += r.len,
+            _ => out.push(r),
+        }
+    }
+    out
+}
 impl TableSource for CsvTable {
     fn row_count(&self) -> u64 {
         self.total_rows().saturating_sub(self.first_row())

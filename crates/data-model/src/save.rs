@@ -2,19 +2,22 @@
 //! ranges, so they come out byte for byte (invariant 1, SAVE-4). In an edited row only the
 //! edited cells are encoded; every other field keeps its exact bytes, and the row keeps its
 //! line ending. Rows are written in the table's order (EDIT-3): runs of source rows copy as
-//! ranges, inserted rows are encoded from their edits, and deleted rows are left out.
+//! ranges, inserted rows are encoded from their edits, and deleted rows are left out. A
+//! sorted table (SORT-1) visits rows out of file order, so its save first finds where every
+//! row starts in one parallel pass and copies each row from there.
 //! Rows with cleared cells (EDIT-5) are re-assembled with those fields empty. Save As
 //! (SAVE-2) can write another delimiter and encoding: then every row is re-assembled, each
 //! field's value re-quoted for the new delimiter.
 
 use crate::cleared::{cleared_at, ColSet, Segment};
 use crate::colmap::ColMap;
-use crate::rowmap::Run;
+use crate::rowmap::{RowOrder, Run};
 use crate::{Col, ColId, CsvTable, RowId};
 use csv_engine::{
     encode_field, split_fields, Charset, Dialect, Encoding, Field, LineEnding, RowIndex,
     SparseRowIndex,
 };
+use rayon::prelude::*;
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -23,6 +26,8 @@ use std::sync::Arc;
 const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
 /// Rows whose spans a column-changed save fetches at once.
 const SPAN_CHUNK: u64 = 4_096;
+/// Rows a parallel pass over the whole file takes at a time.
+const SCAN_CHUNK: u64 = 65_536;
 /// Untouched rows are copied in pieces this big, so a cancel is seen at least this often.
 const COPY_CHUNK: usize = 4 << 20;
 
@@ -61,8 +66,10 @@ pub struct SaveJob {
     out: Dialect,
     /// The encoding written: the file's own, or another (Save As).
     encoding: Encoding,
-    /// Rows in the order they are written: source rows by file row, inserted rows by id.
-    order: Vec<Run>,
+    /// Rows in the order they are written (`None`: the file's own order).
+    order: Option<RowOrder>,
+    /// Rows in the file.
+    file_rows: u64,
     /// Column order, if columns were inserted or deleted (EDIT-4): then every row is
     /// re-assembled, fields still copied as their raw bytes.
     cols: Option<ColMap>,
@@ -93,17 +100,7 @@ impl CsvTable {
         if !self.index.is_complete() {
             return Err(SaveJobError::NotIndexed);
         }
-        let order = match &self.rows {
-            Some(map) => {
-                let mut runs = Vec::new();
-                map.for_each(|r| runs.push(*r));
-                runs
-            }
-            None => vec![Run {
-                first: RowId::source(0),
-                len: self.index.row_count(),
-            }],
-        };
+        let order = self.rows.clone();
         let mut edits: Vec<(RowId, BTreeMap<ColId, Box<str>>)> = self
             .overlay
             .iter_rows()
@@ -124,6 +121,7 @@ impl CsvTable {
             out: self.dialect,
             encoding: self.encoding,
             order,
+            file_rows: self.index.row_count(),
             cols,
             edits,
             cleared: self.cleared.segments().clone(),
@@ -187,7 +185,7 @@ impl SaveJob {
 
     /// Rows the saved file will have.
     pub fn row_count(&self) -> u64 {
-        self.order.iter().map(|r| r.len).sum()
+        self.order.as_ref().map_or(self.file_rows, RowOrder::len)
     }
 
     /// Roughly the bytes [`Self::write_to`] will write: the source's size.
@@ -227,8 +225,29 @@ impl SaveJob {
             w.inner.write_all(UTF8_BOM)?;
             w.bytes += UTF8_BOM.len() as u64;
         }
+        // A sorted order visits rows out of file order: look each one up directly.
+        let spans = Spans {
+            index: &self.index,
+            starts: match &self.order {
+                Some(RowOrder::Sorted(_)) => Some(row_starts(&self.index, cancel)?),
+                _ => None,
+            },
+        };
+        let file_order = Run {
+            first: RowId::source(0),
+            len: self.file_rows,
+        };
+        let mut runs = Vec::new();
+        let runs: Box<dyn Iterator<Item = Run>> = match &self.order {
+            None => Box::new(std::iter::once(file_order)),
+            Some(RowOrder::Sorted(ids)) => Box::new(crate::rowmap::coalesce(ids)),
+            Some(order) => {
+                order.for_each(|r| runs.push(*r));
+                Box::new(runs.into_iter())
+            }
+        };
         let (mut fields, mut line) = (Vec::new(), Vec::new());
-        for run in &self.order {
+        for run in runs {
             let ids = run.first.0..run.first.0 + run.len;
             if run.first.is_inserted() {
                 for id in ids {
@@ -237,7 +256,7 @@ impl SaveJob {
                     w.put(&line)?;
                 }
             } else {
-                self.write_source(ids, &mut w, &mut fields, &mut line)?;
+                self.write_source(ids, &mut w, &spans, &mut fields, &mut line)?;
             }
         }
         if self.index.source().changed() {
@@ -266,6 +285,7 @@ impl SaveJob {
         &self,
         rows: std::ops::Range<u64>,
         w: &mut Out,
+        spans: &Spans,
         fields: &mut Vec<Field>,
         line: &mut Vec<u8>,
     ) -> io::Result<()> {
@@ -273,7 +293,7 @@ impl SaveJob {
         let hi = self.edits.partition_point(|(id, _)| id.0 < rows.end);
         let mut edits = self.edits[lo..hi].iter().peekable();
         if self.reassemble_all() {
-            return self.assemble_rows(rows, &mut edits, w, fields, line);
+            return self.assemble_rows(rows, &mut edits, w, spans, fields, line);
         }
         let first = self.cleared.partition_point(|s| s.rows.end <= rows.start);
         let mut cleared = self.cleared[first..]
@@ -290,11 +310,11 @@ impl SaveJob {
                 (Some(e), None) => e..e + 1,
                 (_, Some(_)) => cleared.next().unwrap_or_default(),
             };
-            self.copy_rows(next..dirty.start, w)?;
+            self.copy_rows(next..dirty.start, w, spans)?;
             next = dirty.end;
-            self.assemble_rows(dirty, &mut edits, w, fields, line)?;
+            self.assemble_rows(dirty, &mut edits, w, spans, fields, line)?;
         }
-        self.copy_rows(next..rows.end, w)
+        self.copy_rows(next..rows.end, w, spans)
     }
 
     /// Re-assemble source rows `rows`, taking their edits from the front of `edits`.
@@ -307,18 +327,16 @@ impl SaveJob {
             impl Iterator<Item = &'e (RowId, BTreeMap<ColId, Box<str>>)>,
         >,
         w: &mut Out,
+        spans: &Spans,
         fields: &mut Vec<Field>,
         line: &mut Vec<u8>,
     ) -> io::Result<()> {
-        let mut spans = Vec::new();
+        let mut found = Vec::new();
         let mut start = rows.start;
         while start < rows.end {
             let end = rows.end.min(start + SPAN_CHUNK);
-            let found = self.index.row_spans(start..end, &mut spans).ok();
-            if found != Some((end - start) as usize) {
-                return Err(io::Error::other("the source file changed on disk"));
-            }
-            for (row, span) in (start..end).zip(&spans) {
+            spans.fill(start..end, &mut found)?;
+            for (row, span) in (start..end).zip(&found) {
                 let cols = edits.next_if(|(id, _)| id.0 == row).map(|(_, c)| c);
                 let cleared = cleared_at(&self.cleared, row);
                 let span = span.start as usize..span.end as usize;
@@ -351,21 +369,13 @@ impl SaveJob {
         }
     }
 
-    fn span(&self, row: u64) -> io::Result<std::ops::Range<usize>> {
-        let s = self
-            .index
-            .row_span(row)
-            .ok_or_else(|| io::Error::other("the source file changed on disk"))?;
-        Ok(s.start as usize..s.end as usize)
-    }
-
     /// Copy source rows `[a, b)` as one byte range (without the file's BOM), in
     /// [`COPY_CHUNK`] pieces.
-    fn copy_rows(&self, rows: std::ops::Range<u64>, w: &mut Out) -> io::Result<()> {
+    fn copy_rows(&self, rows: std::ops::Range<u64>, w: &mut Out, spans: &Spans) -> io::Result<()> {
         if rows.is_empty() {
             return Ok(());
         }
-        let (mut start, end) = (self.span(rows.start)?.start, self.span(rows.end - 1)?.end);
+        let (mut start, end) = (spans.span(rows.start)?.start, spans.span(rows.end - 1)?.end);
         if start == 0 && self.has_bom() {
             start = UTF8_BOM.len();
         }
@@ -433,4 +443,83 @@ impl SaveJob {
         }
         out.extend_from_slice(self.line_ending());
     }
+}
+
+fn changed() -> io::Error {
+    io::Error::other("the source file changed on disk")
+}
+
+/// Where source rows are in the file: through the index (a checkpoint and a short scan
+/// per lookup), or, for a save that visits rows out of file order, from a table of every
+/// row's start.
+struct Spans<'a> {
+    index: &'a SparseRowIndex,
+    /// Start of each file row, then the end of the last one.
+    starts: Option<Vec<u64>>,
+}
+
+impl Spans<'_> {
+    fn span(&self, row: u64) -> io::Result<std::ops::Range<usize>> {
+        let s = match &self.starts {
+            Some(s) => *s.get(row as usize).ok_or_else(changed)?..s[row as usize + 1],
+            None => self.index.row_span(row).ok_or_else(changed)?,
+        };
+        Ok(s.start as usize..s.end as usize)
+    }
+
+    /// Spans of `rows` into `out`, all of them or an error.
+    fn fill(
+        &self,
+        rows: std::ops::Range<u64>,
+        out: &mut Vec<std::ops::Range<u64>>,
+    ) -> io::Result<()> {
+        match &self.starts {
+            Some(s) => {
+                out.clear();
+                let (a, b) = (rows.start as usize, rows.end as usize);
+                let starts = s.get(a..=b).ok_or_else(changed)?;
+                out.extend(starts.windows(2).map(|w| w[0]..w[1]));
+            }
+            None => {
+                let found = self.index.row_spans(rows.clone(), out).ok();
+                if found != Some((rows.end - rows.start) as usize) {
+                    return Err(changed());
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Start of every row in the file, then the end of the last: one parallel pass, a chunk
+/// of rows per task, each from its checkpoint. Stops with `Interrupted` once cancelled.
+fn row_starts(index: &SparseRowIndex, cancel: &AtomicBool) -> io::Result<Vec<u64>> {
+    let rows = index.row_count();
+    let chunks: Vec<Vec<u64>> = (0..rows.div_ceil(SCAN_CHUNK))
+        .into_par_iter()
+        .map(|c| {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(io::Error::new(io::ErrorKind::Interrupted, "save cancelled"));
+            }
+            let range = c * SCAN_CHUNK..rows.min((c + 1) * SCAN_CHUNK);
+            let mut spans = Vec::new();
+            let found = index.row_spans(range.clone(), &mut spans).ok();
+            if found != Some((range.end - range.start) as usize) {
+                return Err(changed());
+            }
+            let mut starts: Vec<u64> = spans.iter().map(|s| s.start).collect();
+            if range.end == rows {
+                starts.push(spans.last().map_or(0, |s| s.end));
+            }
+            Ok(starts)
+        })
+        .collect::<io::Result<_>>()?;
+    let mut starts = Vec::with_capacity(rows as usize + 1);
+    for c in chunks {
+        starts.extend(c);
+    }
+    if starts.is_empty() {
+        starts.push(0);
+    }
+    Ok(starts)
 }

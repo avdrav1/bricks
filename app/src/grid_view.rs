@@ -4,9 +4,10 @@ use crate::editor::{self, Action, ClipCommand, Mode, ShapeCommand, Start};
 use crate::status::ClipView;
 
 use commands::{Batch, ClearCells, Reshape, SetCell, UndoStack};
+use csv_engine::RowIndex as _;
 use data_model::{
     parse_tsv, CellRef, ColId, ColumnTypes, Copied, CsvTable, DelimiterChoice, Edit, PasteError,
-    RereadError, RowId, SaveJob, SaveJobError, TableSource, PASTE_MAX_CELLS,
+    RereadError, RowId, SaveJob, SaveJobError, SortError, SortOrder, TableSource, PASTE_MAX_CELLS,
 };
 use grid::{Bounds, GridCache, Key, Mods, Selection, Sizes, Viewport};
 use gtk::{gdk, gio, glib, graphene, pango, prelude::*, subclass::prelude::*};
@@ -33,6 +34,13 @@ const CLIP_NOTE: Duration = Duration::from_secs(4);
 /// A copy running on the job pool (CLIP-1, ENG-8).
 pub struct CopyJob {
     job: jobs::Job<Option<Copied>>,
+    done: Arc<AtomicU64>,
+    rows: u64,
+}
+
+/// A sort running on the job pool (SORT-1): its result, and file rows read so far.
+pub struct SortJob {
+    job: jobs::Job<Result<Option<Edit>, SortError>>,
     done: Arc<AtomicU64>,
     rows: u64,
 }
@@ -107,6 +115,8 @@ mod imp {
         pub generation: Cell<u64>,
         /// The type inference running (TYPE-1), if any; a newer one cancels it.
         pub inferring: RefCell<Option<jobs::Job<Option<ColumnTypes>>>>,
+        /// The sort running (SORT-1), if any. Edits wait for it, as for a save.
+        pub sorting: RefCell<Option<SortJob>>,
     }
 
     #[glib::object_subclass]
@@ -395,6 +405,8 @@ impl GridView {
             ("insert-left", Self::insert_cols_left),
             ("insert-right", Self::insert_cols_right),
             ("delete-cols", Self::delete_cols),
+            ("sort-asc", Self::sort_ascending),
+            ("sort-desc", Self::sort_descending),
         ] {
             let action = gio::SimpleAction::new(name, None);
             action.connect_activate({
@@ -926,7 +938,7 @@ impl GridView {
 
     fn open_editor(&self, cell: grid::Cell, text: &str, mode: Mode) {
         let imp = self.imp();
-        if imp.saving.get() {
+        if self.busy() {
             return;
         }
         let entry = imp
@@ -1103,7 +1115,7 @@ impl GridView {
 
     fn step_history(&self, back: bool) -> bool {
         let imp = self.imp();
-        if imp.saving.get() {
+        if self.busy() {
             return false;
         }
         let focus = {
@@ -1246,7 +1258,7 @@ impl GridView {
     fn reshape(&self, edit: Option<Edit>) {
         let imp = self.imp();
         let Some(edit) = edit else { return };
-        if imp.saving.get() || imp.editing.get().is_some() {
+        if self.busy() || imp.editing.get().is_some() {
             return;
         }
         {
@@ -1273,7 +1285,7 @@ impl GridView {
     /// indexing to finish so they reach every row.
     pub fn clear_selected(&self) {
         let imp = self.imp();
-        if imp.saving.get() || imp.editing.get().is_some() {
+        if self.busy() || imp.editing.get().is_some() {
             return;
         }
         let sel = imp.selection.get();
@@ -1313,7 +1325,7 @@ impl GridView {
     /// Calc does, as one undoable step. Whole columns wait for indexing to finish.
     pub fn copy_selection(&self, cut: bool) {
         let imp = self.imp();
-        if imp.editing.get().is_some() || (cut && imp.saving.get()) {
+        if imp.editing.get().is_some() || (cut && self.busy()) {
             return;
         }
         let sel = imp.selection.get();
@@ -1395,7 +1407,7 @@ impl GridView {
     /// the end as needed; the pasted range ends up selected, as in Calc.
     pub fn paste_clipboard(&self) {
         let imp = self.imp();
-        if imp.saving.get() || imp.editing.get().is_some() {
+        if self.busy() || imp.editing.get().is_some() {
             return;
         }
         let g = self.downgrade();
@@ -1417,7 +1429,7 @@ impl GridView {
 
     fn paste_text(&self, text: &str) {
         let imp = self.imp();
-        if imp.saving.get() || imp.editing.get().is_some() {
+        if self.busy() || imp.editing.get().is_some() {
             return;
         }
         let cells = parse_tsv(text);
@@ -1509,9 +1521,13 @@ impl GridView {
                 cols.append(Some("Insert Columns Left"), Some("grid.insert-left"));
                 cols.append(Some("Insert Columns Right"), Some("grid.insert-right"));
                 cols.append(Some("Delete Columns"), Some("grid.delete-cols"));
+                let sort = gio::Menu::new();
+                sort.append(Some("Sort Ascending"), Some("grid.sort-asc"));
+                sort.append(Some("Sort Descending"), Some("grid.sort-desc"));
                 let model = gio::Menu::new();
                 model.append_section(None, &rows);
                 model.append_section(None, &cols);
+                model.append_section(None, &sort);
                 let menu = gtk::PopoverMenu::from_model(Some(&model));
                 menu.set_has_arrow(false);
                 menu.set_halign(gtk::Align::Start);
@@ -1521,6 +1537,91 @@ impl GridView {
             .clone();
         menu.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
         menu.popup();
+    }
+
+    fn sort_ascending(&self) {
+        self.sort(SortOrder::Ascending);
+    }
+
+    fn sort_descending(&self) {
+        self.sort(SortOrder::Descending);
+    }
+
+    /// Sort every row by the cursor's column (SORT-1), on the job pool from a snapshot;
+    /// the result applies as one undoable step. Waits for indexing; edits wait for it,
+    /// and Esc cancels it ([`Self::cancel_sort`]).
+    pub fn sort(&self, order: SortOrder) {
+        let imp = self.imp();
+        if self.busy() || imp.editing.get().is_some() {
+            return;
+        }
+        let col = imp.selection.get().cursor().col;
+        let (snapshot, rows) = match imp.table.borrow().as_ref() {
+            Some(t) if t.is_complete() => (t.snapshot(), t.index().row_count()),
+            _ => return,
+        };
+        let done = Arc::new(AtomicU64::new(0));
+        let started = Instant::now();
+        let job = jobs::spawn({
+            let done = done.clone();
+            move |cancel| snapshot.sort_rows(col, order, cancel.flag(), &done)
+        });
+        imp.sorting.replace(Some(SortJob {
+            job: job.clone(),
+            done,
+            rows,
+        }));
+        let g = self.downgrade();
+        glib::spawn_future_local(async move {
+            let result = job.finished().await;
+            let Some(g) = g.upgrade() else { return };
+            let imp = g.imp();
+            if !matches!(&*imp.sorting.borrow(), Some(s) if s.job.is(&job)) {
+                return; // replaced by a new table
+            }
+            imp.sorting.take();
+            if std::env::var_os("BRICKS_TIMINGS").is_some() {
+                eprintln!(
+                    "sort {order:?} by column {col}: {:?} in {:?}",
+                    result.as_ref().map(|r| r.as_ref().map(Option::is_some)),
+                    started.elapsed()
+                );
+            }
+            let Ok(Ok(Some(edit))) = result else { return };
+            {
+                let (mut table, mut undo) = (imp.table.borrow_mut(), imp.undo.borrow_mut());
+                let (Some(table), Some(undo)) = (table.as_mut(), undo.as_mut()) else {
+                    return;
+                };
+                let focus = CellRef {
+                    row: table.row_id(0),
+                    col: table.col_id(col),
+                };
+                undo.execute(Box::new(Batch::new("Sort", vec![edit], focus)), table);
+            }
+            g.after_change(None);
+        });
+    }
+
+    /// Esc: stop a running sort; the rows stay as they were. Whether one was running.
+    pub fn cancel_sort(&self) -> bool {
+        let sorting = self.imp().sorting.borrow();
+        if let Some(s) = sorting.as_ref() {
+            s.job.cancel();
+        }
+        sorting.is_some()
+    }
+
+    /// Share of the file a running sort has read (0..=1), for the status bar.
+    pub fn sort_progress(&self) -> Option<f64> {
+        let sorting = self.imp().sorting.borrow();
+        let s = sorting.as_ref()?;
+        Some(s.done.load(Ordering::Relaxed) as f64 / s.rows.max(1) as f64)
+    }
+
+    /// A save or a sort is running: the table must not change under it.
+    pub fn busy(&self) -> bool {
+        self.imp().saving.get() || self.imp().sorting.borrow().is_some()
     }
 
     /// Snapshot for a background save (SAVE-1).
@@ -1633,6 +1734,10 @@ impl GridView {
         // again once it is indexed.
         if let Some(old) = imp.inferring.take() {
             old.cancel();
+        }
+        // A sort of the old table can't apply to this one.
+        if let Some(old) = imp.sorting.take() {
+            old.job.cancel();
         }
         imp.undo.replace(Some(UndoStack::default()));
         imp.cache.borrow_mut().reset();

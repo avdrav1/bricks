@@ -10,14 +10,16 @@ mod infer;
 mod paste;
 mod rowmap;
 mod save;
+mod sort;
 mod table;
 
 pub use cleared::ColSet;
 pub use copy::{Copied, HTML_MAX_CELLS};
 pub use infer::{value_type, ColumnTypes, SAMPLE_HEAD, SAMPLE_SPREAD};
 pub use paste::{parse_tsv, PasteError, PASTE_MAX_CELLS};
-pub use rowmap::Run;
+pub use rowmap::{RowOrder, Run};
 pub use save::{SaveJob, SaveJobError, SaveProgress, SaveStats};
+pub use sort::{SortError, SortOrder};
 pub use table::{CsvTable, DelimiterChoice, RereadError, RowBlock, TableSource, MAX_DISPLAY_BYTES};
 
 use std::collections::{BTreeMap, HashMap};
@@ -117,6 +119,9 @@ pub enum Edit {
     /// Many cell edits as one (CLIP-2's paste): each cell gets its value, or with `None`
     /// drops its edit. The inverse holds what each cell had before.
     Cells(Vec<(CellRef, Option<Box<str>>)>),
+    /// Show every row in this order, the header row included (`None`: file order). The
+    /// inverse holds the order before. Build it with [`CsvTable::sort_rows`] (SORT-1).
+    Reorder(Option<RowOrder>),
 }
 
 impl Edit {
@@ -167,6 +172,7 @@ impl Edit {
                         .map(|(_, v)| v.as_ref().map_or(0, |v| v.len()))
                         .sum::<usize>()
             }
+            Self::Reorder(order) => order.as_ref().map_or(0, RowOrder::heap_bytes),
         }
     }
 }
