@@ -56,6 +56,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | SAVE-2 | M2 | P0 | done | SAVE-1, ENG-6 | Save, Save As, New | Save As can change delimiter and encoding |
 | SAVE-3 | M2 | P0 | done | SAVE-1, DEC-5 | Background save with progress and cancel | UI responsive during 1 GB save; save under 15 s |
 | SAVE-4 | M2 | P1 | done | SAVE-1 | Preserve quoting style and line endings of untouched rows | Saving an unedited file produces an empty diff |
+| APP-9 | M2 | P0 | done | SAVE-2 | Ask before closing with unsaved edits | Closing a window with edits offers Save / Don't Save / Cancel; nothing is lost silently |
 | ENG-8 | M3 | P0 | todo | DEC-5 | Background job framework: progress and cancel | Every long job cancels within 200 ms |
 | TYPE-1 | M3 | P0 | todo | ENG-2 | Infer column types by sampling | Raw value never altered; `00123` stays `00123` |
 | TYPE-2 | M3 | P1 | todo | TYPE-1 | Show inferred type in header; allow override | Override changes sort and filter only |
@@ -79,6 +80,13 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 ## Notes
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
+
+- **2026-10-08 APP-9 (new story):** closing a window with unsaved edits asks first: Save / Don't Save / Cancel, in a `gtk::AlertDialog` (`Save changes to “name”?`, `N unsaved edits will be lost if you close without saving.`). This is a tester-safety story added for the v0.0.1 tester build.
+  - `close-request` commits an open cell editor first, so typed text counts. With no edits the window closes as before. While a save runs, closing sets `close_after` on it and waits: the window closes when that save succeeds. A failed or cancelled save keeps the window and its edits.
+  - Save goes through `start_save(.., close_after: true)`, or Save As for an untitled table (`save_as`/`choose_save_file` pass `close_after` through). A dismissed format dialog or file chooser starts nothing and closes nothing. Don't Save sets a flag and closes again.
+  - No app-level Quit action exists, so `close-request` covers the titlebar button, Alt+F4 and compositor close.
+  - Proved by smoke tests via Broadway, not by a unit test: the logic is all dialog wiring. On a /tmp copy of the 10 MB file, a cell typed but not committed, then closed, shows the dialog with `1 unsaved edit`. Cancel keeps the window. Don't Save exits, and `cmp` matches the corpus file. Save exits after saving, with the edit on line 7. On an untitled table, Save opens the format dialog and file chooser: dismissing the chooser keeps the window, and saving `untitled1` writes the file and exits. On a 1 GB copy, closing at `Saving 30%` shows no dialog and exits once the save is done, with all 19,094,580 lines and the edit.
+  - Follow-up (not fixed): a file that another program is still writing when it is opened shows only the bytes present at open, and saving writes only those. `Source::changed` catches files that shrink, not ones that grow. Found when a smoke test launched the app while `cp` of the 1 GB file was still running: 3,466,742 rows, reported as complete.
 
 - **2026-10-08 SAVE-4:** untouched rows keep their quoting and line endings. Nothing to fix: the writer already copies untouched rows and fields as raw bytes (SAVE-1, EDIT-4); this story proves it.
   - `file-format/tests/untouched_rows.rs` (ignored; needs `corpus/nasty` and `corpus/realworld`): for each of the 63 files, an unedited save is byte-identical; then (55 files with 2+ rows) one edit to the middle row's first cell changes only that row's physical lines in the file decoded with its own encoding. Covers BOM, CRLF, a last row without a newline, quoted newlines, ragged rows, Latin-1, UTF-16 LE, and the 256 KiB real-world samples that end mid-row.

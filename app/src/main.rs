@@ -607,6 +607,63 @@ fn build_window(
     });
     window.add_controller(keys);
 
+    // Closing with unsaved edits asks first (APP-9): Save, Don't Save, or Cancel. Closing
+    // while a save runs waits for it and closes once it succeeds; a failed or cancelled
+    // save keeps the window and its edits.
+    let discard = Rc::new(Cell::new(false));
+    window.connect_close_request({
+        let (grid, session, save) = (grid.downgrade(), session.clone(), save.clone());
+        move |window| {
+            let Some(grid) = grid.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
+            grid.finish_editing(); // what was typed counts as an edit
+            if discard.get() {
+                return glib::Propagation::Proceed;
+            }
+            if let SaveState::Saving(r) = &mut *save.borrow_mut() {
+                r.close_after = true;
+                return glib::Propagation::Stop;
+            }
+            let edits = grid.edit_count();
+            if edits == 0 {
+                return glib::Propagation::Proceed;
+            }
+            let dialog = gtk::AlertDialog::builder()
+                .message(format!("Save changes to “{}”?", session.name()))
+                .detail(format!(
+                    "{} unsaved edit{} will be lost if you close without saving.",
+                    status::group_digits(edits as u64),
+                    if edits == 1 { "" } else { "s" }
+                ))
+                .buttons(["Cancel", "Don't Save", "Save"])
+                .cancel_button(0)
+                .default_button(2)
+                .modal(true)
+                .build();
+            let (window, session, save, discard) = (
+                window.clone(),
+                session.clone(),
+                save.clone(),
+                discard.clone(),
+            );
+            glib::spawn_future_local(async move {
+                match dialog.choose_future(Some(&window)).await {
+                    Ok(1) => {
+                        discard.set(true);
+                        window.close();
+                    }
+                    Ok(2) if session.path.borrow().is_none() => {
+                        save_as(&window, &grid, &session, &save, true)
+                    }
+                    Ok(2) => start_save(&grid, &session, &save, None, true),
+                    _ => {}
+                }
+            });
+            glib::Propagation::Stop
+        }
+    });
+
     // Status: follow the indexer (grow the scroll range), finish saves, keep the status bar
     // and title current. Runs once now, so the bar is filled from the first frame, then
     // every 100 ms.
@@ -625,8 +682,10 @@ fn build_window(
                 return glib::ControlFlow::Break;
             };
             // Finish a save first: it can swap in the reopened file, whose indexing the
-            // rest of this tick follows.
-            finish_save(&grid, &session, &save);
+            // rest of this tick follows. A save chosen when closing closes the window.
+            if finish_save(&grid, &session, &save) {
+                window.close();
+            }
             // While indexing (also after a save reopens the file), grow the scroll range.
             let complete = grid.is_complete();
             if !complete || !was_complete {
