@@ -1,0 +1,23 @@
+[package]
+name = "jobs"
+description = "Background jobs on one shared pool, with cancel and a result channel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+async-channel = "2.5.0"
+rayon = "1.12.0"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+csv-engine.workspace = true
+data-model.workspace = true
+file-format.workspace = true
+
+[lib]
+# `cargo bench` runs only app/benches/corpus.rs (BENCH-1).
+bench = false

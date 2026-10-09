@@ -57,7 +57,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | SAVE-3 | M2 | P0 | done | SAVE-1, DEC-5 | Background save with progress and cancel | UI responsive during 1 GB save; save under 15 s |
 | SAVE-4 | M2 | P1 | done | SAVE-1 | Preserve quoting style and line endings of untouched rows | Saving an unedited file produces an empty diff |
 | APP-9 | M2 | P0 | done | SAVE-2 | Ask before closing with unsaved edits | Closing a window with edits offers Save / Don't Save / Cancel; nothing is lost silently |
-| ENG-8 | M3 | P0 | todo | DEC-5 | Background job framework: progress and cancel | Every long job cancels within 200 ms |
+| ENG-8 | M3 | P0 | done | DEC-5 | Background job framework: progress and cancel | Every long job cancels within 200 ms |
 | TYPE-1 | M3 | P0 | todo | ENG-2 | Infer column types by sampling | Raw value never altered; `00123` stays `00123` |
 | TYPE-2 | M3 | P1 | todo | TYPE-1 | Show inferred type in header; allow override | Override changes sort and filter only |
 | SORT-1 | M3 | P0 | todo | TYPE-1, DEC-4, CMD-1, ENG-8 | Type-aware sort, ascending and descending | 2M-row numeric sort under 3 s; stable; undoable |
@@ -80,6 +80,28 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 ## Notes
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
+
+- **2026-10-09 ENG-8:** background job framework with progress and cancel: the new `jobs` crate (ADR 0005, "As built" added there).
+  - `jobs::spawn(work)` runs `work(&CancelToken)` on one shared Rayon pool (`available_parallelism() - 1` threads) and returns a `Job<T>`. The app awaits `Job::finished()` with `glib::spawn_future_local`. A job cancelled while still queued never runs and reports `Stopped::Cancelled` at once; a panic reports `Stopped::Panicked`. Progress stays as each job's own atomics, read on the 100 ms status tick; only the result goes over the channel.
+  - Moved onto it: indexing (was its own thread), save (its own thread, polled with `try_recv` every tick; now awaited), and copy (was `gio::spawn_blocking`). The save's cancel flag left `SaveProgress`: `SaveJob::write_to`, `save_csv`, and `save_atomic` now take `cancel: &AtomicBool`, as `build` and `copy_range` already did.
+  - **Fixed:** cancelling during the save's fsync waited for the disk (136 ms for 1 GB on NVMe here; seconds on a slow disk). The fsync now runs on a helper thread, and the save stops waiting once cancel is set. The temp file is removed as before, and the helper finishes syncing the unlinked file. That cancel now takes 2.8 ms.
+  - **Fixed (regression risk from the cutover):** with the save's finish no longer inside the status tick, a reopened file that indexes within one tick would have kept the scroll range of its first few rows (the SAVE-2 bug). `GridView::generation` counts `replace_table` calls, and the tick treats a new table as not yet complete. That also covers the delimiter-change path, which had the same pattern.
+  - The workspace `rust-version` went from 1.75 to 1.92: the GTK crates already need 1.92, and rayon needs 1.80. With the real MSRV, clippy's `manual_is_multiple_of` flagged two spots (`commands/src/edit.rs` test, `app/src/status.rs`), now fixed.
+  - Proof: `crates/jobs/tests/cancel_1gb.rs` (ignored, corpus, release) cancels each job on the 1 GB file and times `cancel()` until the result is back (target 200 ms):
+    - Index at 0/10/50/90%: 0.0/0.6/0.5/0.4 ms.
+    - Save (on disk under `target/`) at 10/50/90% written, during the fsync, and during verify: 0.7/0.7/0.7/2.8/32 ms. The original is unchanged and no temp file is left.
+    - Copy of every row at 0/10/50/90%: 0.0/1.9/3.7/6.2 ms.
+  - Unit tests in `jobs`: a running job returns its own result soon after cancel; a job queued behind a full pool reports at once and never runs; a panic is reported and the pool keeps working.
+  - Save timing unchanged: `save_perf` 0.90–0.95 s over 3 runs (0.84–0.99 s before); `save_responsive` 0.77 s, main loop p99 1.1 ms late. All ignored release tests pass, except `status_stream` with a warm page cache (see the M2 gate note); it passes cold (4 updates).
+  - Smoke test via Broadway on /tmp copies:
+    - 1 GB: an edit, Ctrl+S, Esc shows `Save cancelled · 1 unsaved edit`, and `cmp` matches the corpus. Ctrl+S then saved in 0.6 s, and Ctrl+End reached row 19,094,579.
+    - A whole-column copy (`Copying 3%`) replaced by a one-cell copy: Ctrl+V pasted the one cell.
+    - Closing with 1 unsaved edit → Save: saved, closed, and exited 0, with the edit on disk.
+    - 10 MB: an edit and save (reindexed within one tick), then Ctrl+End reached row 193,311 with a full-width gutter.
+    - Broadway note: the headless browser tab freezes between tool calls, so its frames go stale; reload the page before a screenshot.
+  - Follow-ups (not fixed):
+    - Non-UTF-8 files are decoded in full (`csv_engine::open_text_as` → `transcode`) inside `CsvTable::open`, synchronously on the UI thread and with no cancel: on open, on a delimiter change, and when the file is reopened after a save. A big UTF-16 or Windows-1252 file blocks the window for the whole decode (invariant 4). It should become a job, with the window showing before it finishes.
+    - Pool size is untuned (ADR 0005 asked for ENG-8 to tune it). No job is data-parallel yet, so there is nothing to measure. Tune it with the first `par_iter`/`par_sort` job (SORT-1 or SRCH-1).
 
 - **2026-10-09 M2 gate:** approved by the user on this machine's numbers (Ryzen 9 5900, warm page cache).
   - Combined check (throwaway, deleted) on a copy of the 1 GB file: 1,000 edits (0.35 ms in total), a 100-row insert at row 5M, a 10k×3 paste at row 10M (6.8 ms; undo + redo 1.7 ms), a paste that added 3 rows at the end, and a column insert. Three steps were then undone.

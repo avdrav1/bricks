@@ -22,15 +22,14 @@ mod editor;
 mod grid_view;
 mod status;
 
-use csv_engine::{Charset, Encoding};
+use csv_engine::{Charset, Encoding, IndexError};
 use data_model::{CsvTable, DelimiterChoice, RereadError, SaveProgress, SaveStats};
 use grid_view::{GridView, ROW_H};
 use gtk::{glib, prelude::*};
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const APP_ID: &str = "dev.bricks.Spreadsheet";
@@ -325,8 +324,8 @@ struct Session {
     /// "First row is header" as the user set it (ENG-7); `None` while detection decides.
     /// Re-applied whenever the file is read again (delimiter change, save).
     header: Cell<Option<bool>>,
-    /// Cancel flag of the running index build; set when a newer reading replaces it.
-    indexing: RefCell<Arc<AtomicBool>>,
+    /// The running index build; cancelled when a newer reading replaces it.
+    indexing: RefCell<Option<jobs::Job<Result<(), IndexError>>>>,
 }
 
 impl Session {
@@ -336,7 +335,7 @@ impl Session {
             choice: Cell::new(DelimiterChoice::Auto),
             encoding: Cell::new(None),
             header: Cell::new(None),
-            indexing: RefCell::new(Arc::new(AtomicBool::new(false))),
+            indexing: RefCell::new(None),
         }
     }
 
@@ -364,7 +363,7 @@ impl Session {
             None => CsvTable::open(&path, self.choice.get())?,
         };
         self.apply_header(&mut table);
-        self.index(&table)?;
+        self.index(&table);
         Ok(table)
     }
 
@@ -375,18 +374,14 @@ impl Session {
         }
     }
 
-    /// Index `table` off the UI thread, cancelling any earlier build; rows become readable
-    /// as it goes. Moves onto the shared job pool when ENG-8 builds it (ADR 0005).
-    fn index(&self, table: &CsvTable) -> std::io::Result<()> {
-        let cancel = Arc::new(AtomicBool::new(false));
-        self.indexing
-            .replace(cancel.clone())
-            .store(true, Ordering::Relaxed);
+    /// Index `table` on the job pool (ENG-8), cancelling any earlier build; rows become
+    /// readable as it goes.
+    fn index(&self, table: &CsvTable) {
         let index = table.index().clone();
-        std::thread::Builder::new()
-            .name("index".into())
-            .spawn(move || index.build(&cancel))?;
-        Ok(())
+        let job = jobs::spawn(move |cancel| index.build(cancel.flag()));
+        if let Some(old) = self.indexing.replace(Some(job)) {
+            old.cancel();
+        }
     }
 }
 
@@ -420,10 +415,7 @@ fn delimiter_dropdown(session: &Rc<Session>, grid: &GridView) -> gtk::DropDown {
             match grid.reread(choice) {
                 Ok(mut table) => {
                     session.apply_header(&mut table);
-                    if let Err(e) = session.index(&table) {
-                        eprintln!("spreadsheet: cannot index: {e}");
-                        return;
-                    }
+                    session.index(&table);
                     session.choice.set(choice);
                     // Other columns now: the old widths don't belong to them.
                     grid.reset_column_widths();
@@ -553,7 +545,7 @@ fn build_window(
         let save = save.clone();
         move |_| {
             if let SaveState::Saving(r) = &*save.borrow() {
-                r.progress.cancel();
+                r.job.cancel();
             }
         }
     });
@@ -577,7 +569,7 @@ fn build_window(
             };
             if key == Key::Escape {
                 if let SaveState::Saving(r) = &*save.borrow() {
-                    r.progress.cancel();
+                    r.job.cancel();
                     return glib::Propagation::Stop;
                 }
             }
@@ -664,11 +656,10 @@ fn build_window(
         }
     });
 
-    // Status: follow the indexer (grow the scroll range), finish saves, keep the status bar
-    // and title current. Runs once now, so the bar is filled from the first frame, then
-    // every 100 ms.
+    // Status: follow the indexer (grow the scroll range) and keep the status bar and title
+    // current. Runs once now, so the bar is filled from the first frame, then every 100 ms.
     let started = Instant::now();
-    let mut was_complete = false;
+    let (mut was_complete, mut generation) = (false, 0);
     let mut tick = {
         let (grid, window, session, app, save) = (
             grid.downgrade(),
@@ -681,12 +672,13 @@ fn build_window(
             let (Some(grid), Some(window)) = (grid.upgrade(), window.upgrade()) else {
                 return glib::ControlFlow::Break;
             };
-            // Finish a save first: it can swap in the reopened file, whose indexing the
-            // rest of this tick follows. A save chosen when closing closes the window.
-            if finish_save(&grid, &session, &save) {
-                window.close();
+            // While indexing, grow the scroll range; also once more for a table swapped in
+            // since the last tick (a save or delimiter change), which may have finished
+            // indexing in between.
+            if grid.generation() != generation {
+                generation = grid.generation();
+                was_complete = false;
             }
-            // While indexing (also after a save reopens the file), grow the scroll range.
             let complete = grid.is_complete();
             if !complete || !was_complete {
                 grid.update_adjustments();
@@ -794,9 +786,9 @@ struct Target {
     encoding: Encoding,
 }
 
-/// A save running on its worker thread (SAVE-3).
+/// A save running on the job pool (SAVE-3, ENG-8).
 struct Running {
-    rx: mpsc::Receiver<Result<(SaveStats, Duration), file_format::SaveError>>,
+    job: jobs::Job<SaveResult>,
     target: Option<Target>,
     progress: Arc<SaveProgress>,
     /// Bytes the save is expected to write, for the progress percentage.
@@ -813,14 +805,17 @@ enum SaveState {
     Failed(String),
 }
 
-/// Ctrl+S: write the table to its own file on a worker thread (save is atomic, SAVE-1);
-/// with a `target`, to another file, delimiter, or encoding (Save As, SAVE-2). Editing is
-/// paused until it finishes, so no edit can be lost between snapshot and reopen. With
+/// What a save job returns: its stats and how long it took, or why it failed.
+type SaveResult = Result<(SaveStats, Duration), file_format::SaveError>;
+
+/// Ctrl+S: write the table to its own file on the job pool (save is atomic, SAVE-1); with
+/// a `target`, to another file, delimiter, or encoding (Save As, SAVE-2). Editing is paused
+/// until it finishes, so no edit can be lost between snapshot and reopen. With
 /// `close_after`, the window closes once the save succeeds.
 fn start_save(
     grid: &GridView,
-    session: &Session,
-    save: &RefCell<SaveState>,
+    session: &Rc<Session>,
+    save: &Rc<RefCell<SaveState>>,
     target: Option<Target>,
     close_after: bool,
 ) {
@@ -847,56 +842,56 @@ fn start_save(
         }
     };
     grid.set_saving(true);
-    let (tx, rx) = mpsc::channel();
     let progress = Arc::new(SaveProgress::default());
     let estimate = job.estimated_bytes();
-    let spawned = std::thread::Builder::new().name("save".into()).spawn({
+    let running = jobs::spawn({
         let progress = progress.clone();
-        move || {
+        move |cancel| {
             let t = Instant::now();
-            let r = file_format::save_csv(&path, &job, &progress);
-            let _ = tx.send(r.map(|s| (s, t.elapsed())));
+            file_format::save_csv(&path, &job, &progress, cancel.flag()).map(|s| (s, t.elapsed()))
         }
     });
-    *save.borrow_mut() = match spawned {
-        Ok(_) => SaveState::Saving(Running {
-            rx,
-            target,
-            progress,
-            estimate,
-            close_after,
-        }),
-        Err(e) => {
-            grid.set_saving(false);
-            SaveState::Failed(e.to_string())
+    *save.borrow_mut() = SaveState::Saving(Running {
+        job: running.clone(),
+        target,
+        progress,
+        estimate,
+        close_after,
+    });
+    let (grid, session, save) = (grid.downgrade(), session.clone(), save.clone());
+    glib::spawn_future_local(async move {
+        let result = running.finished().await;
+        let Some(grid) = grid.upgrade() else { return };
+        if finish_save(&grid, &session, &save, result) {
+            if let Some(window) = grid.root().and_downcast::<gtk::Window>() {
+                window.close();
+            }
         }
-    };
+    });
 }
 
 /// When a save has finished: reopen the saved file (its edits are now on disk; after a
 /// Save As, the new file with its delimiter and encoding) or report the error with the
 /// edits still in memory. A cancelled save changes nothing. Returns whether the save
 /// succeeded and asked for the window to close.
-fn finish_save(grid: &GridView, session: &Session, save: &RefCell<SaveState>) -> bool {
-    let (result, target, close_after) = match &mut *save.borrow_mut() {
-        SaveState::Saving(r) => match r.rx.try_recv() {
-            Ok(Err(file_format::SaveError::Cancelled)) => (None, None, false),
-            Ok(done) => (
-                Some(done.map_err(|e| e.to_string())),
-                r.target.take(),
-                r.close_after,
-            ),
-            Err(mpsc::TryRecvError::Empty) => return false,
-            Err(mpsc::TryRecvError::Disconnected) => {
-                (Some(Err("the save thread stopped".into())), None, false)
-            }
-        },
+fn finish_save(
+    grid: &GridView,
+    session: &Session,
+    save: &RefCell<SaveState>,
+    result: Result<SaveResult, jobs::Stopped>,
+) -> bool {
+    let (target, close_after) = match &mut *save.borrow_mut() {
+        SaveState::Saving(r) => (r.target.take(), r.close_after),
         _ => return false,
     };
     grid.set_saving(false);
-    let Some(result) = result else {
-        *save.borrow_mut() = SaveState::Cancelled;
-        return false;
+    let result = match result {
+        Ok(Err(file_format::SaveError::Cancelled)) | Err(jobs::Stopped::Cancelled) => {
+            *save.borrow_mut() = SaveState::Cancelled;
+            return false;
+        }
+        Ok(done) => done.map_err(|e| e.to_string()),
+        Err(jobs::Stopped::Panicked) => Err("the save stopped unexpectedly".to_owned()),
     };
     if let (Ok(_), Some(t)) = (&result, target) {
         session.path.replace(Some(t.path));

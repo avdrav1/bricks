@@ -7,7 +7,7 @@ use data_model::{CellRef, CsvTable, DelimiterChoice, Edit, SaveProgress, TableSo
 use file_format::{save_csv, SaveError, TEMP_SUFFIX};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -43,9 +43,12 @@ fn a_cancelled_save_leaves_the_original_and_no_temp_file() {
     let mut table = open(&path);
     set(&mut table, 1, 1, "Zoe");
 
-    let progress = SaveProgress::default();
-    progress.cancel();
-    let r = save_csv(&path, &table.save_job().unwrap(), &progress);
+    let r = save_csv(
+        &path,
+        &table.save_job().unwrap(),
+        &SaveProgress::default(),
+        &AtomicBool::new(true),
+    );
 
     assert!(matches!(r, Err(SaveError::Cancelled)), "{r:?}");
     assert_eq!(std::fs::read(&path).unwrap(), original);
@@ -84,16 +87,17 @@ fn cancel_stops_a_1gb_save_within_200ms() {
 
     let job = table.save_job().unwrap();
     let progress = Arc::new(SaveProgress::default());
+    let cancel = Arc::new(AtomicBool::new(false));
     let saving = std::thread::spawn({
-        let (path, progress) = (path.clone(), progress.clone());
-        move || save_csv(&path, &job, &progress)
+        let (path, progress, cancel) = (path.clone(), progress.clone(), cancel.clone());
+        move || save_csv(&path, &job, &progress, &cancel)
     });
     while progress.written() <= 200 << 20 {
         assert!(!saving.is_finished(), "the save ended before 200 MiB");
         std::thread::sleep(Duration::from_millis(1));
     }
     let t = Instant::now();
-    progress.cancel();
+    cancel.store(true, Ordering::Relaxed);
     let r = saving.join().unwrap();
     let took = t.elapsed();
     eprintln!("cancel took effect in {took:.2?}");

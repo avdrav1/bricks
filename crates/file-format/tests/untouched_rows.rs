@@ -34,7 +34,14 @@ fn open(path: &Path) -> CsvTable {
 }
 
 fn save(path: &Path, t: &CsvTable) {
-    file_format::save_csv(path, &t.save_job().unwrap(), &SaveProgress::default()).unwrap();
+    let cancel = AtomicBool::new(false);
+    file_format::save_csv(
+        path,
+        &t.save_job().unwrap(),
+        &SaveProgress::default(),
+        &cancel,
+    )
+    .unwrap();
 }
 
 /// The file's text in `t`'s encoding, as the app reads it (UTF-8), split into lines.

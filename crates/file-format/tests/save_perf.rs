@@ -51,6 +51,7 @@ fn save_1gb_with_1000_edits() {
         &path,
         &table.save_job().unwrap(),
         &data_model::SaveProgress::default(),
+        &AtomicBool::new(false),
     )
     .unwrap();
     let took = t.elapsed();

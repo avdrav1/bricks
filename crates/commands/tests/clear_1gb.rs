@@ -96,6 +96,7 @@ fn clear_a_whole_column_of_1gb_in_one_step() {
         .write_to(
             &mut BufWriter::new(std::fs::File::create(&out).unwrap()),
             &data_model::SaveProgress::default(),
+            &AtomicBool::new(false),
         )
         .unwrap();
     let save_s = t.elapsed().as_secs_f64();

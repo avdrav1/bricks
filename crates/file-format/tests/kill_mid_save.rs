@@ -53,11 +53,17 @@ fn child_saver() {
         "EDITED",
     ));
     let job = table.save_job().unwrap();
+    let cancel = AtomicBool::new(false);
     file_format::save_atomic(
         &path,
+        &cancel,
         |w| {
-            job.write_to(&mut Slow(w, 0), &data_model::SaveProgress::default())
-                .map(|_| ())
+            job.write_to(
+                &mut Slow(w, 0),
+                &data_model::SaveProgress::default(),
+                &cancel,
+            )
+            .map(|_| ())
         },
         |_| Ok(()),
     )

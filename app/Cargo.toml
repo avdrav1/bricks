@@ -17,6 +17,7 @@ data-model.workspace = true
 grid.workspace = true
 commands.workspace = true
 file-format.workspace = true
+jobs.workspace = true
 # UI toolkit per docs/decisions/0001-ui-toolkit.md; v4_14 matches Ubuntu 24.04's GTK.
 gtk = { package = "gtk4", version = "0.11", features = ["v4_14"] }
 

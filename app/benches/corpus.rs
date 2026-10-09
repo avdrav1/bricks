@@ -174,6 +174,7 @@ fn measure_all(corpus: &Path) -> HashMap<&'static str, Measured> {
         &copy,
         &table.save_job().unwrap(),
         &data_model::SaveProgress::default(),
+        &AtomicBool::new(false),
     )
     .unwrap();
     let s = t.elapsed().as_secs_f64();

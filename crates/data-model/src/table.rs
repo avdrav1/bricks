@@ -983,7 +983,11 @@ mod tests {
         let mut saved = Vec::new();
         t.save_job()
             .unwrap()
-            .write_to(&mut saved, &crate::SaveProgress::default())
+            .write_to(
+                &mut saved,
+                &crate::SaveProgress::default(),
+                &std::sync::atomic::AtomicBool::new(false),
+            )
             .unwrap();
         assert_eq!(
             saved, b"id,who\n1,Ana\n2,Bo\n",
@@ -1007,7 +1011,11 @@ mod tests {
         let stats = t
             .save_job()
             .unwrap()
-            .write_to(&mut out, &crate::SaveProgress::default())
+            .write_to(
+                &mut out,
+                &crate::SaveProgress::default(),
+                &std::sync::atomic::AtomicBool::new(false),
+            )
             .unwrap();
         assert_eq!(stats.rows, t.row_count() + u64::from(t.has_header()));
         out

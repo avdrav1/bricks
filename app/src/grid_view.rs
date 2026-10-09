@@ -5,15 +5,15 @@ use crate::status::ClipView;
 
 use commands::{Batch, ClearCells, Reshape, SetCell, UndoStack};
 use data_model::{
-    parse_tsv, CellRef, ColId, CsvTable, DelimiterChoice, Edit, PasteError, RereadError, RowId,
-    SaveJob, SaveJobError, TableSource, PASTE_MAX_CELLS,
+    parse_tsv, CellRef, ColId, Copied, CsvTable, DelimiterChoice, Edit, PasteError, RereadError,
+    RowId, SaveJob, SaveJobError, TableSource, PASTE_MAX_CELLS,
 };
 use grid::{Bounds, GridCache, Key, Mods, Selection, Sizes, Viewport};
 use gtk::{gdk, gio, glib, graphene, pango, prelude::*, subclass::prelude::*};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::fmt::Write as _;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -30,9 +30,9 @@ const MIN_ROW_H: f64 = 8.0;
 /// How long the status bar says what was copied or pasted.
 const CLIP_NOTE: Duration = Duration::from_secs(4);
 
-/// A copy running on a worker (CLIP-1).
+/// A copy running on the job pool (CLIP-1, ENG-8).
 pub struct CopyJob {
-    cancel: Arc<AtomicBool>,
+    job: jobs::Job<Option<Copied>>,
     done: Arc<AtomicU64>,
     rows: u64,
 }
@@ -102,6 +102,9 @@ mod imp {
         pub copying: RefCell<Option<CopyJob>>,
         /// The last copy or paste result, and when, for the status bar.
         pub clip_note: Cell<Option<(ClipView, Instant)>>,
+        /// Tables shown so far: `replace_table` counts up, so the status tick can tell a
+        /// reopened file (whose indexing it must follow) from the one before.
+        pub generation: Cell<u64>,
     }
 
     #[glib::object_subclass]
@@ -1326,37 +1329,34 @@ impl GridView {
             }
             (table.snapshot(), rows)
         };
-        let (cancel, done) = (
-            Arc::new(AtomicBool::new(false)),
-            Arc::new(AtomicU64::new(0)),
-        );
-        let running = imp.copying.replace(Some(CopyJob {
-            cancel: cancel.clone(),
-            done: done.clone(),
-            rows: rows.end - rows.start,
-        }));
-        if let Some(job) = running {
-            job.cancel.store(true, Ordering::Relaxed);
-        }
+        let done = Arc::new(AtomicU64::new(0));
         let whole_rows = sel.is_whole_rows();
-        let job = {
-            let cancel = cancel.clone();
-            gio::spawn_blocking(move || {
+        let count = rows.end - rows.start;
+        let job = jobs::spawn({
+            let done = done.clone();
+            move |cancel| {
                 if whole_rows {
-                    snapshot.copy_range(rows, tl.col.., &cancel, &done)
+                    snapshot.copy_range(rows, tl.col.., cancel.flag(), &done)
                 } else {
-                    snapshot.copy_range(rows, tl.col..br.col + 1, &cancel, &done)
+                    snapshot.copy_range(rows, tl.col..br.col + 1, cancel.flag(), &done)
                 }
-            })
-        };
+            }
+        });
+        let running = imp.copying.replace(Some(CopyJob {
+            job: job.clone(),
+            done,
+            rows: count,
+        }));
+        if let Some(old) = running {
+            old.job.cancel();
+        }
         let g = self.downgrade();
         glib::spawn_future_local(async move {
-            let copied = job.await.ok().flatten();
+            let copied = job.finished().await.ok().flatten();
             let Some(g) = g.upgrade() else { return };
             let imp = g.imp();
             // Only the latest copy reaches the clipboard.
-            let current = matches!(&*imp.copying.borrow(),
-                Some(job) if Arc::ptr_eq(&job.cancel, &cancel));
+            let current = matches!(&*imp.copying.borrow(), Some(c) if c.job.is(&job));
             if !current {
                 return;
             }
@@ -1588,6 +1588,7 @@ impl GridView {
                 .name("drop-table".into())
                 .spawn(move || drop(old));
         }
+        imp.generation.set(imp.generation.get() + 1);
         imp.undo.replace(Some(UndoStack::default()));
         imp.cache.borrow_mut().reset();
         imp.titles.take();
@@ -1609,6 +1610,11 @@ impl GridView {
         }
         self.refit_sizes();
         self.update_adjustments();
+    }
+
+    /// How many times the table was replaced (`replace_table`) since the window opened.
+    pub fn generation(&self) -> u64 {
+        self.imp().generation.get()
     }
 
     /// The open file read with another delimiter (ENG-5); refused with unsaved edits.

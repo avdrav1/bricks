@@ -4,6 +4,7 @@
 use file_format::{save_atomic, SaveError};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 
 fn dir(name: &str) -> PathBuf {
     let d = std::env::temp_dir().join(format!("save1-atomic-{}-{name}", std::process::id()));
@@ -28,6 +29,7 @@ fn replaces_contents_and_keeps_permissions() {
     std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o640)).unwrap();
     save_atomic(
         &f,
+        &AtomicBool::new(false),
         |w| w.write_all(b"new\n"),
         |tmp| {
             assert_eq!(
@@ -55,6 +57,7 @@ fn write_error_leaves_original_and_no_temp() {
     std::fs::write(&f, "old\n").unwrap();
     let r = save_atomic(
         &f,
+        &AtomicBool::new(false),
         |w| {
             w.write_all(b"partial")?;
             Err(std::io::Error::other("disk full"))
@@ -74,6 +77,7 @@ fn failed_verification_leaves_original_and_no_temp() {
     std::fs::write(&f, "old\n").unwrap();
     let r = save_atomic(
         &f,
+        &AtomicBool::new(false),
         |w| w.write_all(b"new\n"),
         |_| Err("row count 1, expected 2".into()),
     );

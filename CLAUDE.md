@@ -29,6 +29,7 @@ A fast, lightweight Linux spreadsheet in Rust. V0.1 is the best large-CSV editor
 | `grid` | toolkit-free viewport, selection, navigation |
 | `commands` | `Command` trait, undo/redo |
 | `file-format` | atomic save |
+| `jobs` | background jobs: shared pool, cancel tokens, results to the UI loop (ADR 0005) |
 | `app` | windows, menus, dialogs, OS integration (toolkit set by DEC-1) |
 
 ## Commands

@@ -93,7 +93,7 @@ mod tests {
                 row: table.row_id(x % rows),
                 col: ColId::source(((x >> 8) % u64::from(cols)) as u32),
             };
-            let cmd = if (x >> 16) % 4 == 0 {
+            let cmd = if (x >> 16).is_multiple_of(4) {
                 SetCell::clear(at)
             } else {
                 SetCell::new(at, format!("v{step}"))

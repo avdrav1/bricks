@@ -6,6 +6,7 @@ members = [
     "crates/grid",
     "crates/commands",
     "crates/file-format",
+    "crates/jobs",
     "app",
 ]
 
@@ -14,7 +15,7 @@ version = "0.0.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/YOUR_GITHUB/spreadsheet"
-rust-version = "1.75"
+rust-version = "1.92"
 
 [workspace.dependencies]
 csv-engine = { path = "crates/csv-engine" }
@@ -22,6 +23,7 @@ data-model = { path = "crates/data-model" }
 grid = { path = "crates/grid" }
 commands = { path = "crates/commands" }
 file-format = { path = "crates/file-format" }
+jobs = { path = "crates/jobs" }
 
 [workspace.lints.rust]
 unsafe_code = "warn"

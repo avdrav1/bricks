@@ -26,29 +26,15 @@ const SPAN_CHUNK: u64 = 4_096;
 /// Untouched rows are copied in pieces this big, so a cancel is seen at least this often.
 const COPY_CHUNK: usize = 4 << 20;
 
-/// A running save's progress and cancel flag, shared with the UI (SAVE-3).
+/// A running save's progress, shared with the UI (SAVE-3). Its cancel flag is the job's
+/// (ENG-8), passed to [`SaveJob::write_to`] beside it.
 #[derive(Debug, Default)]
 pub struct SaveProgress {
-    cancel: AtomicBool,
     written: AtomicU64,
     checking: AtomicBool,
 }
 
 impl SaveProgress {
-    /// Ask the save to stop; it ends with an `Interrupted` error and writes nothing more.
-    pub fn cancel(&self) {
-        self.cancel.store(true, Ordering::Relaxed);
-    }
-
-    pub fn is_cancelled(&self) -> bool {
-        self.cancel.load(Ordering::Relaxed)
-    }
-
-    /// The cancel flag, for jobs that take one (`SparseRowIndex::build`).
-    pub fn cancel_flag(&self) -> &AtomicBool {
-        &self.cancel
-    }
-
     /// UTF-8 bytes written so far.
     pub fn written(&self) -> u64 {
         self.written.load(Ordering::Relaxed)
@@ -152,11 +138,12 @@ struct Out<'a> {
     bytes: u64,
     ended: bool,
     progress: &'a SaveProgress,
+    cancel: &'a AtomicBool,
 }
 
 impl Out<'_> {
     fn put(&mut self, b: &[u8]) -> io::Result<()> {
-        if self.progress.is_cancelled() {
+        if self.cancel.load(Ordering::Relaxed) {
             return Err(io::Error::new(io::ErrorKind::Interrupted, "save cancelled"));
         }
         if let Some(&last) = b.last() {
@@ -220,13 +207,19 @@ impl SaveJob {
     }
 
     /// Write the whole table to `w`, counting bytes into `progress` and stopping with an
-    /// `Interrupted` error once it is cancelled.
-    pub fn write_to(&self, w: &mut dyn Write, progress: &SaveProgress) -> io::Result<SaveStats> {
+    /// `Interrupted` error once `cancel` is set.
+    pub fn write_to(
+        &self,
+        w: &mut dyn Write,
+        progress: &SaveProgress,
+        cancel: &AtomicBool,
+    ) -> io::Result<SaveStats> {
         let mut w = Out {
             inner: w,
             bytes: 0,
             ended: true,
             progress,
+            cancel,
         };
         // The byte-order mark belongs to the file, not to whichever row comes first. Other
         // encodings write their own (`EncodeWriter`).
