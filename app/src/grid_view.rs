@@ -1576,17 +1576,20 @@ impl GridView {
             let result = job.finished().await;
             let Some(g) = g.upgrade() else { return };
             let imp = g.imp();
-            if !matches!(&*imp.sorting.borrow(), Some(s) if s.job.is(&job)) {
-                return; // replaced by a new table
-            }
-            imp.sorting.take();
+            let current = matches!(&*imp.sorting.borrow(), Some(s) if s.job.is(&job));
             if std::env::var_os("BRICKS_TIMINGS").is_some() {
                 eprintln!(
-                    "sort {order:?} by column {col}: {:?} in {:?}",
+                    "sort {order:?} by column {col}: {:?} in {:?}{}",
                     result.as_ref().map(|r| r.as_ref().map(Option::is_some)),
-                    started.elapsed()
+                    started.elapsed(),
+                    if current { "" } else { " (dropped)" }
                 );
             }
+            // A new table or a header flip since: the result is for rows as they were.
+            if !current {
+                return;
+            }
+            imp.sorting.take();
             let Ok(Ok(Some(edit))) = result else { return };
             {
                 let (mut table, mut undo) = (imp.table.borrow_mut(), imp.undo.borrow_mut());
@@ -1648,9 +1651,13 @@ impl GridView {
 
     /// Flip "first row is header". Rows shift by one: cached rows reload, and row
     /// heights follow their rows; edits stay with their rows. Column types are inferred
-    /// again, now that the first row counts differently.
+    /// again, now that the first row counts differently. A running sort stops: it was
+    /// keeping a different first row in place (SORT-2).
     pub fn set_header(&self, on: bool) {
         let imp = self.imp();
+        if let Some(s) = imp.sorting.take() {
+            s.job.cancel();
+        }
         if let Some(t) = imp.table.borrow_mut().as_mut() {
             t.set_header(on);
         }

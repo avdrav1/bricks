@@ -61,7 +61,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | TYPE-1 | M3 | P0 | done | ENG-2 | Infer column types by sampling | Raw value never altered; `00123` stays `00123` |
 | TYPE-2 | M3 | P1 | todo | TYPE-1 | Show inferred type in header; allow override | Override changes sort and filter only |
 | SORT-1 | M3 | P0 | done | TYPE-1, DEC-4, CMD-1, ENG-8 | Type-aware sort, ascending and descending | 2M-row numeric sort under 3 s; stable; undoable |
-| SORT-2 | M3 | P0 | todo | SORT-1, ENG-7 | Sort moves whole rows and honors the header | Header row never moves |
+| SORT-2 | M3 | P0 | done | SORT-1, ENG-7 | Sort moves whole rows and honors the header | Header row never moves |
 | FILT-1 | M3 | P0 | todo | TYPE-1, DEC-4 | Per-column filter from header dropdown | Exact, contains, not contains, empty, non-empty, numeric compare |
 | FILT-2 | M3 | P0 | todo | FILT-1 | Combine filters across columns (AND) | Status bar shows "x of y rows" |
 | FILT-3 | M3 | P0 | todo | FILT-1, SAVE-1 | Saving with an active filter keeps hidden rows | Test confirms on-disk row count unchanged |
@@ -80,6 +80,14 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 ## Notes
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
+
+- **2026-10-09 SORT-2:** sort moves whole rows and honors the header. The sort already kept the header row in place (SORT-1); this story proves it and closes one gap.
+  - `commands/tests/sort_header.rs`:
+    - With the header on, sorting by a column whose title (`name`) sorts mid-column leaves the title on top in both directions, in the grid and as the saved file's first line. An edited title stays the title through a sort.
+    - With the header off, the first row is data and sorts among the rest (it saves as line 3).
+    - Every part of a row moves with it: its source fields, an edit, a cleared cell, a value in an inserted column, a ragged row's extra fields, a short row's missing ones, and a quoted cell spanning two lines. The grid and the saved bytes are checked.
+  - **Fixed:** flipping "Header row" while a sort ran applied a result taken with the other setting. If the header was off when the sort started and on when it finished, a data row became the header. `GridView::set_header` now cancels the running sort, and its result is dropped (`BRICKS_TIMINGS` logs `(dropped)`).
+  - Smoke test via Broadway on the 1 GB file: header off, Sort Descending on score, header on 250 ms later. The log shows `Err(Cancelled) ... (dropped)`, the grid shows the real titles over rows in file order, and there are no unsaved changes.
 
 - **2026-10-09 SORT-1:** type-aware sort, ascending and descending. Three user decisions: text ignores ASCII case, with exact bytes breaking ties; empty cells are always last, while values that don't fit the column type (`n/a` in numbers) follow the typed ones ascending and lead descending; and the entries are "Sort Ascending" and "Sort Descending" in the right-click menu, sorting by the cursor's column.
   - `CsvTable::sort_rows(col, order, cancel, done)` returns one `Edit::Reorder` (or `Ok(None)` if the rows are already in that order); `commands::Batch` makes it one undo step. Keys follow TYPE-1's column type: numbers by value (as f64), dates and date-times by instant (offsets applied), `false` before `true`, text as above. Ties keep the current order, so the sort is stable, and repeated sorts compose. The header row never moves.
