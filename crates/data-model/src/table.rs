@@ -4,12 +4,13 @@
 use crate::cleared::Cleared;
 use crate::colmap::ColMap;
 use crate::rowmap::{RowMap, Run};
-use crate::{CellRef, Col, ColId, ColSet, Edit, EditOverlay, Row, RowId};
+use crate::{CellRef, Col, ColId, ColSet, Edit, EditOverlay, InferredType, Row, RowId};
 use csv_engine::{
     detect_dialect, detect_header, open_text, open_text_as, split_fields, Dialect, Encoding, Field,
     RowIndex, Source, SparseRowIndex, DETECT_SAMPLE_BYTES,
 };
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::ops::{Bound, Range, RangeBounds};
 use std::path::Path;
 use std::sync::Arc;
@@ -177,6 +178,8 @@ pub struct CsvTable {
     next_inserted_col: u32,
     /// Cells cleared in blocks (EDIT-5).
     pub(crate) cleared: Cleared,
+    /// Inferred column types (TYPE-1), by column identity; empty until inferred.
+    pub(crate) types: HashMap<ColId, InferredType>,
     spans: Vec<Range<u64>>,
     fields: Vec<Field>,
 }
@@ -203,6 +206,7 @@ impl CsvTable {
             cols: None,
             next_inserted_col: 0,
             cleared: Cleared::default(),
+            types: HashMap::new(),
             spans: Vec::new(),
             fields: Vec::new(),
         }
@@ -222,6 +226,7 @@ impl CsvTable {
             cols: self.cols.clone(),
             next_inserted_col: self.next_inserted_col,
             cleared: self.cleared.clone(),
+            types: self.types.clone(),
             spans: Vec::new(),
             fields: Vec::new(),
         }
@@ -302,8 +307,12 @@ impl CsvTable {
     }
 
     /// Treat the first row as column titles, or as data. Nothing in the file changes, and
-    /// edits stay with their file rows: only which row is shown where moves.
+    /// edits stay with their file rows: only which row is shown where moves. A flip drops
+    /// the inferred types: they were taken with the first row on the other side.
     pub fn set_header(&mut self, on: bool) {
+        if on != self.dialect.has_header {
+            self.types.clear();
+        }
         self.dialect.has_header = on;
     }
 

@@ -5,8 +5,8 @@ use crate::status::ClipView;
 
 use commands::{Batch, ClearCells, Reshape, SetCell, UndoStack};
 use data_model::{
-    parse_tsv, CellRef, ColId, Copied, CsvTable, DelimiterChoice, Edit, PasteError, RereadError,
-    RowId, SaveJob, SaveJobError, TableSource, PASTE_MAX_CELLS,
+    parse_tsv, CellRef, ColId, ColumnTypes, Copied, CsvTable, DelimiterChoice, Edit, PasteError,
+    RereadError, RowId, SaveJob, SaveJobError, TableSource, PASTE_MAX_CELLS,
 };
 use grid::{Bounds, GridCache, Key, Mods, Selection, Sizes, Viewport};
 use gtk::{gdk, gio, glib, graphene, pango, prelude::*, subclass::prelude::*};
@@ -105,6 +105,8 @@ mod imp {
         /// Tables shown so far: `replace_table` counts up, so the status tick can tell a
         /// reopened file (whose indexing it must follow) from the one before.
         pub generation: Cell<u64>,
+        /// The type inference running (TYPE-1), if any; a newer one cancels it.
+        pub inferring: RefCell<Option<jobs::Job<Option<ColumnTypes>>>>,
     }
 
     #[glib::object_subclass]
@@ -1544,7 +1546,8 @@ impl GridView {
     }
 
     /// Flip "first row is header". Rows shift by one: cached rows reload, and row
-    /// heights follow their rows; edits stay with their rows.
+    /// heights follow their rows; edits stay with their rows. Column types are inferred
+    /// again, now that the first row counts differently.
     pub fn set_header(&self, on: bool) {
         let imp = self.imp();
         if let Some(t) = imp.table.borrow_mut().as_mut() {
@@ -1554,6 +1557,43 @@ impl GridView {
         imp.titles.take();
         self.refit_sizes();
         self.update_adjustments();
+        self.infer_types();
+    }
+
+    /// Infer the column types (TYPE-1) on the job pool from a snapshot, once the table is
+    /// fully indexed, and keep them on the table. A newer inference, a header flip, or a
+    /// new table makes a running one moot.
+    pub fn infer_types(&self) {
+        let imp = self.imp();
+        let mut snapshot = match imp.table.borrow().as_ref() {
+            Some(t) if t.is_complete() => t.snapshot(),
+            _ => return,
+        };
+        let started = Instant::now();
+        let job = jobs::spawn(move |cancel| snapshot.infer_types(cancel.flag()));
+        if let Some(old) = imp.inferring.replace(Some(job.clone())) {
+            old.cancel();
+        }
+        let g = self.downgrade();
+        glib::spawn_future_local(async move {
+            let types = job.finished().await.ok().flatten();
+            let Some(g) = g.upgrade() else { return };
+            let imp = g.imp();
+            if !matches!(&*imp.inferring.borrow(), Some(j) if j.is(&job)) {
+                return;
+            }
+            imp.inferring.take();
+            let Some(types) = types else { return };
+            if std::env::var_os("BRICKS_TIMINGS").is_some() {
+                eprintln!(
+                    "inferred column types in {:?}: {types:?}",
+                    started.elapsed()
+                );
+            }
+            if let Some(table) = imp.table.borrow_mut().as_mut() {
+                table.set_types(types);
+            };
+        });
     }
 
     /// Every column back to the default width.
@@ -1589,6 +1629,11 @@ impl GridView {
                 .spawn(move || drop(old));
         }
         imp.generation.set(imp.generation.get() + 1);
+        // Types of the old table don't belong to the new one; the status tick infers them
+        // again once it is indexed.
+        if let Some(old) = imp.inferring.take() {
+            old.cancel();
+        }
         imp.undo.replace(Some(UndoStack::default()));
         imp.cache.borrow_mut().reset();
         imp.titles.take();

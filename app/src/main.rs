@@ -683,6 +683,9 @@ fn build_window(
             if !complete || !was_complete {
                 grid.update_adjustments();
             }
+            if complete && !was_complete {
+                grid.infer_types();
+            }
             if complete && !was_complete && std::env::var_os("BRICKS_TIMINGS").is_some() {
                 eprintln!(
                     "indexed {} rows ({:?} since start)",

@@ -58,7 +58,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | SAVE-4 | M2 | P1 | done | SAVE-1 | Preserve quoting style and line endings of untouched rows | Saving an unedited file produces an empty diff |
 | APP-9 | M2 | P0 | done | SAVE-2 | Ask before closing with unsaved edits | Closing a window with edits offers Save / Don't Save / Cancel; nothing is lost silently |
 | ENG-8 | M3 | P0 | done | DEC-5 | Background job framework: progress and cancel | Every long job cancels within 200 ms |
-| TYPE-1 | M3 | P0 | todo | ENG-2 | Infer column types by sampling | Raw value never altered; `00123` stays `00123` |
+| TYPE-1 | M3 | P0 | done | ENG-2 | Infer column types by sampling | Raw value never altered; `00123` stays `00123` |
 | TYPE-2 | M3 | P1 | todo | TYPE-1 | Show inferred type in header; allow override | Override changes sort and filter only |
 | SORT-1 | M3 | P0 | todo | TYPE-1, DEC-4, CMD-1, ENG-8 | Type-aware sort, ascending and descending | 2M-row numeric sort under 3 s; stable; undoable |
 | SORT-2 | M3 | P0 | todo | SORT-1, ENG-7 | Sort moves whole rows and honors the header | Header row never moves |
@@ -80,6 +80,23 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 ## Notes
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
+
+- **2026-10-09 TYPE-1:** infer column types by sampling. Three user decisions: integers with a leading zero (`00123`, `000`) are Text; a column has a type only if every non-empty sampled value has it (empty cells and the null markers `NA`, `N/A`, `null`, `-` don't count); and only plain formats count (`-12`, `+3`, `0.5`, `1e6`; ISO dates; ISO date-times with `T` or a space, optional seconds, fraction, and `Z`/`±HH:MM`; `true`/`false`/`yes`/`no` in any case).
+  - `data_model::value_type(raw)` classifies one value. A column folds its values: Integer with Decimal makes Decimal, Date with DateTime makes DateTime, anything else mixed makes Text, and a column with no values is Text.
+  - `CsvTable::infer_types(cancel)` samples the first 1,000 rows and 1,000 more at even steps to the last row, reading cells as shown (edits included). It returns `ColumnTypes` (`(ColId, InferredType)` pairs), or `None` once cancelled. `set_types` keeps them on the table by column identity, and `column_type(col)` reads them (`None` before inference and for inserted columns). Flipping the header clears them. Types never touch a value (invariant 1).
+  - App: `GridView::infer_types` runs it as a job (ENG-8) on a snapshot when indexing completes. That includes a table reopened after a save or a delimiter change, through the status tick's generation check. A header flip runs it again, and a new table cancels a running one. Edits don't re-infer until the file is saved and reopened; TYPE-2's override covers the rest. Nothing shows the types yet (TYPE-2, SORT-1, FILT-1 use them). `BRICKS_TIMINGS` logs each result.
+  - Proof: `data-model/tests/infer_types.rs`:
+    - Ten columns get their expected types: zip and code codes are Text, a leap day is a Date, a date among date-times gives DateTime, `NA` and empty cells are ignored, and one word among numbers makes Text.
+    - Every cell still reads as its source text (`00123` included), and an unedited save is byte-identical.
+    - The spread sample reaches the last row.
+    - A header flip clears the types, and re-inferring counts the title row.
+    - A cancel returns nothing.
+    - Unit tests cover 44 single values (signs, exponents, `00.5`, `.5`, `1,234`, invalid dates and times, offsets).
+  - 1 GB: `data-model/tests/infer_1gb.rs` (ignored) finds the corpus types (Integer, Text, Text, Integer, Decimal, Date, Boolean, Text; `code` is `%05d`, so Text) in 1.4 ms from 2,000 rows. In the app, 1.7 ms after indexing.
+  - Real-world survey of the 50 `corpus/realworld` and 13 `corpus/nasty` files (throwaway, deleted). Census FIPS codes (`01`, `00161526`) come out Text, titanic `True`/`no` Boolean, French fuel prices DateTime and Decimal, wine data Decimal. `comma-nyt-us-states.csv`'s date column is Text only because the 256 KiB sample ends mid-row (`2020-07-2`), and the spread sample includes the last row.
+  - Smoke test via Broadway:
+    - 1 GB: types inferred right after indexing. Header off re-inferred every column as Text (the title row is data); header on restored them.
+    - 10 MB copy: typed `abc` into a revenue cell and saved. The reopened table re-inferred revenue as Text, and the file differs from the corpus only on that line (`00517` intact).
 
 - **2026-10-09 ENG-8:** background job framework with progress and cancel: the new `jobs` crate (ADR 0005, "As built" added there).
   - `jobs::spawn(work)` runs `work(&CancelToken)` on one shared Rayon pool (`available_parallelism() - 1` threads) and returns a `Job<T>`. The app awaits `Job::finished()` with `glib::spawn_future_local`. A job cancelled while still queued never runs and reports `Stopped::Cancelled` at once; a panic reports `Stopped::Panicked`. Progress stays as each job's own atomics, read on the 100 ms status tick; only the result goes over the channel.

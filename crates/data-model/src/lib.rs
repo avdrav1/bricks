@@ -6,6 +6,7 @@
 mod cleared;
 mod colmap;
 mod copy;
+mod infer;
 mod paste;
 mod rowmap;
 mod save;
@@ -13,6 +14,7 @@ mod table;
 
 pub use cleared::ColSet;
 pub use copy::{Copied, HTML_MAX_CELLS};
+pub use infer::{value_type, ColumnTypes, SAMPLE_HEAD, SAMPLE_SPREAD};
 pub use paste::{parse_tsv, PasteError, PASTE_MAX_CELLS};
 pub use rowmap::Run;
 pub use save::{SaveJob, SaveJobError, SaveProgress, SaveStats};
