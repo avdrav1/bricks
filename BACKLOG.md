@@ -66,7 +66,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | FILT-2 | M3 | P0 | done | FILT-1 | Combine filters across columns (AND) | Status bar shows "x of y rows" |
 | FILT-3 | M3 | P0 | done | FILT-1, SAVE-1 | Saving with an active filter keeps hidden rows | Test confirms on-disk row count unchanged |
 | FILT-4 | M3 | P1 | todo | FILT-2, CLIP-2 | Edits and paste respect the filtered view | Paste into a filtered range touches visible rows only |
-| SRCH-1 | M3 | P0 | todo | ENG-8 | Find bar (Ctrl+F): whole file or current column, case toggle | First hit in 1 GB under 1 s, off the UI thread |
+| SRCH-1 | M3 | P0 | done | ENG-8 | Find bar (Ctrl+F): whole file or current column, case toggle | First hit in 1 GB under 1 s, off the UI thread |
 | SRCH-2 | M3 | P0 | todo | SRCH-1 | Next/previous result; hit count streams in | New keystroke cancels the running search |
 | SRCH-3 | M3 | P0 | todo | SRCH-2, CMD-1 | Find and replace; replace all | Replace all on 100k hits undoes as one step |
 | APP-4 | M4 | P0 | todo | APP-1 | Recent files menu | Last 10 files survive restart |
@@ -81,6 +81,16 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-09 SRCH-1:** find bar (Ctrl+F) over the status bar: text field, "Match case", "Whole file" or "Current column", a "No matches" note, close button. Enter finds the next match from the cursor, and Esc closes the bar (and cancels a running search).
+  - Rules, decided with the user: a match is the text anywhere in a cell's value as shown (edits included, quotes unescaped; no whole-cell option), row by row from the cursor, wrapping to the top, with the cursor's own cell last; the bar goes at the bottom.
+    - "Shown" also means a filter's hidden rows and deleted columns are skipped, and the order is the sorted order when sorted.
+    - Case folding is ASCII-only, as for sort and filter.
+  - `data_model::search` (`CsvTable::find(query, from, cancel, done)`, `Query`, `SearchError`) is one parallel pass over the file that marks every row with a match in a bitmap. Per 65,536-row chunk, `memmem` over the raw bytes (lower-cased first when case is ignored) picks the rows worth splitting into fields. A query containing the quote character skips that filter and splits every row, since quotes are doubled in the file. Rows with edits are checked from their cells as shown, and inserted rows from the overlay. A walk through the shown rows (runs of the row order, the filter's ranges) from the cursor then finds the first marked row, and the cell in it.
+  - The pass always reads the whole file, so the first hit costs the same wherever it is: 0.17–0.21 s on 1 GB (`data-model/tests/search_1gb.rs`, ignored), and 167–209 ms in the app. A search that stops at the first hit would be faster near the cursor, but would need the scan in view order (slow when sorted: random reads). SRCH-2's streaming hit count needs the full pass anyway.
+  - The app: `GridView::find_next(text, match_case, column_only, done)` runs the job (`searching`, counted in `busy`, `cancel_job`, and `job_progress` as "Searching"), and on a hit moves the cursor and scrolls to it. Editing and other jobs wait, as for sort and filter. A search before indexing finishes says "Wait for indexing to finish".
+  - Tests: `commands/tests/search.rs` (order and wrap, case, one column, edits/undo/inserted rows/deleted columns, sorted and filtered views, cancel); `jobs/tests/cancel_1gb.rs` `searching_cancels_within_200ms` (at most 8 ms).
+  - Smoke test via Broadway on the 1 GB file: Ctrl+F opened the bar; "Zanzibar" said "No matches"; "portland" went to row 6, then Enter to row 14; "19094000" jumped to row 19,094,001; Esc closed the bar.
+  - Follow-ups: the bitmap is thrown away after each search, so Enter repeats the whole pass (SRCH-2 can keep it per query and table generation). There is no Shift+Enter for the previous match yet (SRCH-2).
 - **2026-10-09 FILT-3:** saving with an active filter keeps hidden rows. The save always wrote every row (it walks the row order, never the view: ADR 0004, invariant 7); this story proves it through the real atomic save, and keeps the filters across the save.
   - `file-format/tests/save_filtered.rs`:
     - A small file, filtered to 2 of 5 rows, with a shown row edited and the whole table sorted while filtered. `save_csv` writes all 5 rows in the sorted order with the edit, and the reopened file has 5 rows.

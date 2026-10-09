@@ -10,8 +10,8 @@
 
 use csv_engine::{Dialect, IndexError, RowIndex, Source, SparseRowIndex};
 use data_model::{
-    CellRef, CsvTable, DelimiterChoice, Edit, Filter, FilterError, SaveProgress, SortError,
-    SortOrder, TableSource, Test,
+    CellRef, CsvTable, DelimiterChoice, Edit, Filter, FilterError, Query, SaveProgress,
+    SearchError, SortError, SortOrder, TableSource, Test,
 };
 use file_format::{save_csv, SaveError, TEMP_SUFFIX};
 use jobs::{Job, Stopped};
@@ -247,6 +247,34 @@ fn filtering_cancels_within_200ms() {
             "at {pct}%: filtered anyway"
         );
         times.push((format!("filter of every row at {pct}%"), took));
+    }
+    check(&times);
+}
+
+#[test]
+#[ignore = "needs corpus/rows_1024mb.csv; run with --release --ignored"]
+fn searching_cancels_within_200ms() {
+    let table = open(&corpus());
+    let rows = table.index().row_count();
+    let query = Query {
+        text: "Zanzibar".into(), // not there: the search reads every row
+        match_case: false,
+        col: None,
+    };
+    let mut times = Vec::new();
+    for pct in [0, 10, 50, 90] {
+        let (mut snapshot, query) = (table.snapshot(), query.clone());
+        let done = Arc::new(AtomicU64::new(0));
+        let job = jobs::spawn({
+            let done = done.clone();
+            move |cancel| snapshot.find(&query, (0, 0), cancel.flag(), &done)
+        });
+        let (took, out) = cancel_when(&job, || done.load(Ordering::Relaxed) * 100 >= rows * pct);
+        assert!(
+            matches!(out, None | Some(Err(SearchError::Cancelled))),
+            "at {pct}%: searched anyway"
+        );
+        times.push((format!("search of every row at {pct}%"), took));
     }
     check(&times);
 }

@@ -7,8 +7,8 @@ use commands::{Batch, ClearCells, Reshape, SetCell, UndoStack};
 use csv_engine::RowIndex as _;
 use data_model::{
     parse_tsv, CellRef, ColId, ColumnTypes, Compare, Copied, CsvTable, DelimiterChoice, Edit,
-    Filter, FilterError, PasteError, RereadError, RowId, RowSet, SaveJob, SaveJobError, SortError,
-    SortOrder, TableSource, Test, PASTE_MAX_CELLS,
+    Filter, FilterError, PasteError, Query, RereadError, RowId, RowSet, SaveJob, SaveJobError,
+    SearchError, SortError, SortOrder, TableSource, Test, PASTE_MAX_CELLS,
 };
 use grid::{Bounds, GridCache, Key, Mods, Selection, Sizes, Viewport};
 use gtk::{gdk, gio, glib, graphene, pango, prelude::*, subclass::prelude::*};
@@ -55,6 +55,23 @@ pub struct FilterJob {
     job: jobs::Job<Result<Vec<RowSet>, FilterError>>,
     done: Arc<AtomicU64>,
     rows: u64,
+}
+
+/// A search on the job pool (SRCH-1): its result, and file rows searched so far.
+pub struct SearchJob {
+    job: jobs::Job<Result<Option<(u64, u32)>, SearchError>>,
+    done: Arc<AtomicU64>,
+    rows: u64,
+}
+
+/// How a find went (SRCH-1), for the find bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Found {
+    /// The cursor is on the match now.
+    Cell,
+    Nothing,
+    /// The file is still being indexed.
+    NotReady,
 }
 
 /// Row heights and column widths, all default until resized (GRID-5). Kept for the life
@@ -131,6 +148,8 @@ mod imp {
         pub sorting: RefCell<Option<SortJob>>,
         /// The filter being evaluated (FILT-1), if any. Edits wait for it.
         pub filtering: RefCell<Option<FilterJob>>,
+        /// The search running (SRCH-1), if any. Edits wait for it.
+        pub searching: RefCell<Option<SearchJob>>,
         /// Filters to apply again, by column position, once the table is indexed: those
         /// of the table a save replaced (FILT-3).
         pub pending_filters: RefCell<Vec<(u32, Test)>>,
@@ -1684,21 +1703,28 @@ impl GridView {
         });
     }
 
-    /// Esc: stop a running sort or filter; the rows stay as they were. Whether one was.
+    /// Esc: stop a running sort, filter, or search; the rows stay as they were. Whether
+    /// one was running.
     pub fn cancel_job(&self) -> bool {
         let imp = self.imp();
-        let (sorting, filtering) = (imp.sorting.borrow(), imp.filtering.borrow());
-        if let Some(s) = sorting.as_ref() {
+        let mut any = false;
+        if let Some(s) = imp.sorting.borrow().as_ref() {
             s.job.cancel();
+            any = true;
         }
-        if let Some(f) = filtering.as_ref() {
+        if let Some(f) = imp.filtering.borrow().as_ref() {
             f.job.cancel();
+            any = true;
         }
-        sorting.is_some() || filtering.is_some()
+        if let Some(s) = imp.searching.borrow().as_ref() {
+            s.job.cancel();
+            any = true;
+        }
+        any
     }
 
-    /// A running sort or filter, and the share of the file it has read (0..=1), for the
-    /// status bar.
+    /// A running sort, filter, or search, and the share of the file it has read (0..=1),
+    /// for the status bar.
     pub fn job_progress(&self) -> Option<(&'static str, f64)> {
         let imp = self.imp();
         let share =
@@ -1706,15 +1732,92 @@ impl GridView {
         if let Some(s) = imp.sorting.borrow().as_ref() {
             return Some(("Sorting", share(&s.done, s.rows)));
         }
-        let filtering = imp.filtering.borrow();
-        let f = filtering.as_ref()?;
-        Some(("Filtering", share(&f.done, f.rows)))
+        if let Some(f) = imp.filtering.borrow().as_ref() {
+            return Some(("Filtering", share(&f.done, f.rows)));
+        }
+        let searching = imp.searching.borrow();
+        let s = searching.as_ref()?;
+        Some(("Searching", share(&s.done, s.rows)))
     }
 
-    /// A save, sort, or filter is running: the table must not change under it.
+    /// A save, sort, filter, or search is running: the table must not change under it.
     pub fn busy(&self) -> bool {
         let imp = self.imp();
-        imp.saving.get() || imp.sorting.borrow().is_some() || imp.filtering.borrow().is_some()
+        imp.saving.get()
+            || imp.sorting.borrow().is_some()
+            || imp.filtering.borrow().is_some()
+            || imp.searching.borrow().is_some()
+    }
+
+    /// Find (SRCH-1): the next cell after the cursor containing `text`, row by row and
+    /// wrapping, in every column or the cursor's (`column_only`), on the job pool. The
+    /// match becomes the cursor; `done` hears how it went. A new search replaces a
+    /// running one; Esc cancels.
+    pub fn find_next(
+        &self,
+        text: &str,
+        match_case: bool,
+        column_only: bool,
+        done: impl FnOnce(Found) + 'static,
+    ) {
+        let imp = self.imp();
+        if imp.editing.get().is_some()
+            || imp.saving.get()
+            || imp.sorting.borrow().is_some()
+            || imp.filtering.borrow().is_some()
+        {
+            return;
+        }
+        let cur = imp.selection.get().cursor();
+        let (mut snapshot, query, rows) = match imp.table.borrow().as_ref() {
+            Some(t) if t.is_complete() => {
+                let query = Query {
+                    text: text.to_owned(),
+                    match_case,
+                    col: column_only.then(|| t.col_id(cur.col)),
+                };
+                (t.snapshot(), query, t.index().row_count())
+            }
+            _ => return done(Found::NotReady),
+        };
+        if let Some(old) = imp.searching.take() {
+            old.job.cancel();
+        }
+        let read = Arc::new(AtomicU64::new(0));
+        let started = Instant::now();
+        let job = jobs::spawn({
+            let read = read.clone();
+            move |cancel| snapshot.find(&query, (cur.row, cur.col), cancel.flag(), &read)
+        });
+        imp.searching.replace(Some(SearchJob {
+            job: job.clone(),
+            done: read,
+            rows,
+        }));
+        let g = self.downgrade();
+        glib::spawn_future_local(async move {
+            let result = job.finished().await;
+            let Some(g) = g.upgrade() else { return };
+            let imp = g.imp();
+            if !matches!(&*imp.searching.borrow(), Some(s) if s.job.is(&job)) {
+                return; // a newer search, or a new table
+            }
+            imp.searching.take();
+            if std::env::var_os("BRICKS_TIMINGS").is_some() {
+                eprintln!("find: {result:?} in {:?}", started.elapsed());
+            }
+            match result {
+                Ok(Ok(Some((row, col)))) => {
+                    let cell = grid::Cell { row, col };
+                    imp.selection.set(Selection::at(cell));
+                    g.scroll_to((Some(row), Some(col)));
+                    g.queue_draw();
+                    done(Found::Cell);
+                }
+                Ok(Ok(None)) => done(Found::Nothing),
+                _ => {}
+            }
+        });
     }
 
     /// Some rows are hidden by filters (FILT-1).
@@ -2077,6 +2180,9 @@ impl GridView {
             old.job.cancel();
         }
         if let Some(old) = imp.filtering.take() {
+            old.job.cancel();
+        }
+        if let Some(old) = imp.searching.take() {
             old.job.cancel();
         }
         imp.pending_filters.take(); // a save gives them back with `restore_filters`

@@ -480,8 +480,10 @@ fn build_window(
         1,
         1,
     );
+    let find = FindBar::new(&grid);
+    layout.attach(&find.root, 0, 2, 2, 1);
     let bar = StatusBar::new();
-    layout.attach(&bar.root, 0, 2, 2, 1);
+    layout.attach(&bar.root, 0, 3, 2, 1);
 
     let window = gtk::ApplicationWindow::builder()
         .application(app)
@@ -556,11 +558,12 @@ fn build_window(
     // its own text undo, and the grid lets Esc through when no editor is open.
     let keys = gtk::EventControllerKey::new();
     keys.connect_key_pressed({
-        let (window, grid, save, session) = (
+        let (window, grid, save, session, find) = (
             window.downgrade(),
             grid.downgrade(),
             save.clone(),
             session.clone(),
+            find.clone(),
         );
         move |_, key, _, mods| {
             use gtk::gdk::{Key, ModifierType};
@@ -581,6 +584,10 @@ fn build_window(
             }
             let shift = mods.contains(ModifierType::SHIFT_MASK);
             match key {
+                Key::f | Key::F if !shift => {
+                    grid.finish_editing();
+                    find.open();
+                }
                 Key::s | Key::S => {
                     grid.finish_editing(); // save what was typed, as Calc does
                     if shift || session.path.borrow().is_none() {
@@ -1181,6 +1188,112 @@ fn suggested_name(name: &str, untitled: bool, delimiter: u8) -> String {
             path.with_extension(ext).to_string_lossy().into_owned()
         }
         _ => name.to_owned(),
+    }
+}
+
+/// The find bar (SRCH-1), over the status bar: Ctrl+F opens it on the text field, Enter
+/// finds the next match from the cursor, and Esc closes it. Searches the whole file or the
+/// cursor's column, with or without matching case.
+#[derive(Clone)]
+struct FindBar {
+    root: gtk::Revealer,
+    entry: gtk::SearchEntry,
+}
+
+impl FindBar {
+    fn new(grid: &GridView) -> Self {
+        let entry = gtk::SearchEntry::builder()
+            .placeholder_text("Find")
+            .hexpand(true)
+            .build();
+        let case = gtk::CheckButton::with_label("Match case");
+        let scope = gtk::DropDown::from_strings(&["Whole file", "Current column"]);
+        let note = gtk::Label::new(None);
+        note.add_css_class("dim-label");
+        let close = gtk::Button::from_icon_name("window-close-symbolic");
+        close.add_css_class("flat");
+        close.set_tooltip_text(Some("Close (Esc)"));
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        row.set_margin_start(6);
+        row.set_margin_end(6);
+        row.set_margin_top(4);
+        row.set_margin_bottom(4);
+        for w in [
+            entry.upcast_ref::<gtk::Widget>(),
+            case.upcast_ref(),
+            scope.upcast_ref(),
+            note.upcast_ref(),
+            close.upcast_ref(),
+        ] {
+            row.append(w);
+        }
+        let root = gtk::Revealer::builder()
+            .child(&row)
+            .transition_type(gtk::RevealerTransitionType::SlideUp)
+            .build();
+        let bar = Self { root, entry };
+        bar.entry.connect_activate({
+            let (grid, case, scope, note) = (
+                grid.downgrade(),
+                case.downgrade(),
+                scope.downgrade(),
+                note.downgrade(),
+            );
+            move |entry| {
+                let (Some(grid), Some(case), Some(scope)) =
+                    (grid.upgrade(), case.upgrade(), scope.upgrade())
+                else {
+                    return;
+                };
+                let note = note.clone();
+                grid.find_next(
+                    &entry.text(),
+                    case.is_active(),
+                    scope.selected() == 1,
+                    move |found| {
+                        if let Some(n) = note.upgrade() {
+                            n.set_text(match found {
+                                grid_view::Found::Cell => "",
+                                grid_view::Found::Nothing => "No matches",
+                                grid_view::Found::NotReady => "Wait for indexing to finish",
+                            });
+                        }
+                    },
+                );
+            }
+        });
+        // Editing the text clears an old "No matches".
+        bar.entry.connect_search_changed({
+            let note = note.downgrade();
+            move |_| {
+                if let Some(n) = note.upgrade() {
+                    n.set_text("");
+                }
+            }
+        });
+        bar.entry.connect_stop_search({
+            let (bar, grid) = (bar.clone(), grid.downgrade());
+            move |_| bar.close(grid.upgrade().as_ref())
+        });
+        close.connect_clicked({
+            let (bar, grid) = (bar.clone(), grid.downgrade());
+            move |_| bar.close(grid.upgrade().as_ref())
+        });
+        bar
+    }
+
+    fn open(&self) {
+        self.root.set_reveal_child(true);
+        self.entry.grab_focus();
+        self.entry.select_region(0, -1);
+    }
+
+    fn close(&self, grid: Option<&GridView>) {
+        self.root.set_reveal_child(false);
+        if let Some(g) = grid {
+            g.cancel_job();
+            g.grab_focus();
+        }
     }
 }
 

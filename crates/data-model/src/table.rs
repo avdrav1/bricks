@@ -461,7 +461,7 @@ impl CsvTable {
 
     /// Positions of table rows `rows`, as ranges of consecutive positions.
     #[allow(clippy::single_range_in_vec_init)] // one range of positions, not a list of them
-    fn view_ranges(&self, rows: Range<Row>) -> Vec<Range<u64>> {
+    pub(crate) fn view_ranges(&self, rows: Range<Row>) -> Vec<Range<u64>> {
         match &self.visible {
             None => vec![rows.start + self.first_row()..rows.end.saturating_add(self.first_row())],
             Some(v) => {
