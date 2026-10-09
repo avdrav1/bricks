@@ -83,3 +83,8 @@ python3 spikes/dec-4/run.py
   - **Cancel:** the sort phase can't pause, so once cancelled its comparator unwinds with a private payload (`resume_unwind`, no panic message), which rayon's sort survives without losing elements. Cancels land in 2–38 ms in every phase (`jobs/tests/cancel_1gb.rs`).
   - **Undo:** a sort is one `Edit::Reorder` whose inverse is the previous order. From file order or a run order, that is a few bytes; only a sort of an already-sorted table holds 4 B/row (76 MiB at 19.1M), and that clears older history past CMD-2's 50 MB budget. The step just taken always stays.
   - **Peak memory at 19.1M rows:** keys 460 MB, plus the old order, each row's position, and the new order at 76 MB each, all transient.
+- **As built in FILT-1 (2026-10-09):**
+  - **Bitmaps:** each column filter is a `RowSet`, one bit per file row, from one parallel pass in file order (65,536 rows a task), plus the inserted rows that failed. No rank index: the view below takes its place.
+  - **The view:** `CsvTable::visible` holds the positions (in the current order) of the rows every filter passes, 4 B per row shown. Table row numbers go through it, so `row_count`, `row_id`, `read_rows`, `cell_value`, `clear_cells`, `row_of`, `copy_range`, and `paste` all act on the rows shown. Save, sort, and type inference work on every row.
+  - **Rebuilding the view:** this runs on the UI thread whenever the filters or the row order change. The filters fold into one bitmap first. In a run order it visits only the set bits; a sorted order tests one bit per row. At 19.1M rows that is 47 ms after a sort, the only case not well under a frame.
+  - Two filters on 1 GB take 0.37 s together. Cancels land within 8 ms.

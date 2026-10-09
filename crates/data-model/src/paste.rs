@@ -19,6 +19,8 @@ pub enum PasteError {
     TooLarge(u64),
     /// The paste needs rows added at the end, which waits for indexing to finish.
     NotIndexed,
+    /// The paste needs rows added at the end, which a filter rules out (FILT-1).
+    Filtered,
 }
 
 /// TSV the way spreadsheets put it on the clipboard: rows end at `\n`, `\r\n`, or `\r`,
@@ -106,6 +108,9 @@ impl CsvTable {
         if end > rows {
             if !self.is_complete() {
                 return Err(PasteError::NotIndexed);
+            }
+            if self.is_filtered() {
+                return Err(PasteError::Filtered);
             }
             let insert = self
                 .insert_rows(rows, end - rows)

@@ -572,7 +572,7 @@ fn build_window(
                     r.job.cancel();
                     return glib::Propagation::Stop;
                 }
-                if grid.cancel_sort() {
+                if grid.cancel_job() {
                     return glib::Propagation::Stop;
                 }
             }
@@ -1232,12 +1232,13 @@ impl StatusBar {
     fn update(&self, grid: &GridView, choice: DelimiterChoice, save: &SaveState) -> status::Status {
         let shown = status::status(&status::Facts {
             rows: grid.row_count(),
+            of: grid.unfiltered_row_count(),
             indexing: grid.index_progress(),
             delimiter: grid.delimiter(),
             detected: choice == DelimiterChoice::Auto,
             encoding: grid.encoding(),
             edits: grid.edit_count(),
-            sorting: grid.sort_progress(),
+            job: grid.job_progress(),
             save: match save {
                 SaveState::Idle => status::SaveView::Idle,
                 SaveState::Saving(r) if r.progress.is_checking() => status::SaveView::Checking,

@@ -261,7 +261,7 @@ impl RowMap {
 }
 
 /// High bit of a packed id: an inserted row, numbered by the low 31 bits.
-const PACKED_INSERTED: u32 = 1 << 31;
+pub(crate) const PACKED_INSERTED: u32 = 1 << 31;
 
 /// A row id in 4 bytes, for sorted orders: source rows and inserted rows below 2^31.
 pub(crate) fn pack(id: RowId) -> Option<u32> {

@@ -6,8 +6,9 @@ use crate::status::ClipView;
 use commands::{Batch, ClearCells, Reshape, SetCell, UndoStack};
 use csv_engine::RowIndex as _;
 use data_model::{
-    parse_tsv, CellRef, ColId, ColumnTypes, Copied, CsvTable, DelimiterChoice, Edit, PasteError,
-    RereadError, RowId, SaveJob, SaveJobError, SortError, SortOrder, TableSource, PASTE_MAX_CELLS,
+    parse_tsv, CellRef, ColId, ColumnTypes, Compare, Copied, CsvTable, DelimiterChoice, Edit,
+    Filter, FilterError, PasteError, RereadError, RowId, RowSet, SaveJob, SaveJobError, SortError,
+    SortOrder, TableSource, Test, PASTE_MAX_CELLS,
 };
 use grid::{Bounds, GridCache, Key, Mods, Selection, Sizes, Viewport};
 use gtk::{gdk, gio, glib, graphene, pango, prelude::*, subclass::prelude::*};
@@ -22,6 +23,8 @@ use std::time::{Duration, Instant};
 pub const ROW_H: f64 = 22.0;
 pub const COL_W: f64 = 120.0;
 pub const HEADER_H: f64 = 24.0;
+/// The filter button (FILT-1) at the right end of each column header.
+const FILTER_W: f64 = 16.0;
 /// Rows loaded above and below the visible ones.
 const BUFFER_ROWS: u64 = 100;
 const PAD: f64 = 4.0;
@@ -41,6 +44,15 @@ pub struct CopyJob {
 /// A sort running on the job pool (SORT-1): its result, and file rows read so far.
 pub struct SortJob {
     job: jobs::Job<Result<Option<Edit>, SortError>>,
+    done: Arc<AtomicU64>,
+    rows: u64,
+}
+
+/// A filter evaluated on the job pool (FILT-1): the filter, its result, and file rows
+/// tested so far.
+pub struct FilterJob {
+    filter: Filter,
+    job: jobs::Job<Result<RowSet, FilterError>>,
     done: Arc<AtomicU64>,
     rows: u64,
 }
@@ -117,6 +129,10 @@ mod imp {
         pub inferring: RefCell<Option<jobs::Job<Option<ColumnTypes>>>>,
         /// The sort running (SORT-1), if any. Edits wait for it, as for a save.
         pub sorting: RefCell<Option<SortJob>>,
+        /// The filter being evaluated (FILT-1), if any. Edits wait for it.
+        pub filtering: RefCell<Option<FilterJob>>,
+        /// A column's filter settings, open under its header button.
+        pub filter_popover: RefCell<Option<gtk::Popover>>,
     }
 
     #[glib::object_subclass]
@@ -133,6 +149,9 @@ mod imp {
             }
             if let Some(menu) = self.menu.take() {
                 menu.unparent();
+            }
+            if let Some(popover) = self.filter_popover.take() {
+                popover.unparent();
             }
         }
     }
@@ -177,6 +196,9 @@ mod imp {
             // GTK4: a widget that parents a popover must position it on every allocation.
             if let Some(menu) = self.menu.borrow().as_ref() {
                 menu.present();
+            }
+            if let Some(popover) = self.filter_popover.borrow().as_ref() {
+                popover.present();
             }
         }
 
@@ -327,7 +349,8 @@ mod imp {
             for c in visible_cols {
                 let (x, cw) = (rh_w + cols.pos(c), cols.size(c));
                 snapshot.append_color(&line, &rect(x + cw - 1.0, 0.0, 1.0, HEADER_H));
-                snapshot.push_clip(&rect(x, 0.0, cw - 1.0, HEADER_H));
+                // The title stops short of the filter button.
+                snapshot.push_clip(&rect(x, 0.0, (cw - 1.0 - FILTER_W).max(0.0), HEADER_H));
                 column_name(c as u32, &mut buf);
                 match titles.get(c as usize) {
                     Some(title) => {
@@ -337,6 +360,14 @@ mod imp {
                     None => text_at(&buf, x + PAD, 4.0),
                 }
                 snapshot.pop();
+                let filtered = gdk::RGBA::new(0.21, 0.52, 0.89, 1.0);
+                let on = table.filter_on(c as u32).is_some();
+                text_in(
+                    "▾",
+                    x + cw - FILTER_W,
+                    3.0,
+                    if on { &filtered } else { &dim },
+                );
             }
             snapshot.pop();
 
@@ -739,6 +770,19 @@ impl GridView {
             imp.drag
                 .set(Some((Drag::Resize { edge, from, start }, x, y)));
             return;
+        }
+        // The filter button at the right of a column header (FILT-1).
+        if y < HEADER_H && x >= imp.row_header_w.get() {
+            let rh_w = imp.row_header_w.get();
+            let button = self.with_viewports(|_, cols| {
+                let c = cols.at(x - rh_w)?;
+                let right = rh_w + cols.pos(c) + cols.size(c);
+                (x >= right - FILTER_W && x < right - 4.0).then_some((c as u32, right))
+            });
+            if let Some((col, right)) = button {
+                self.filter_menu(col, right - FILTER_W / 2.0);
+                return;
+            }
         }
         let b = self.bounds();
         if b.rows == 0 || b.cols == 0 {
@@ -1175,6 +1219,9 @@ impl GridView {
         let Some((first, count)) = self.selected_rows() else {
             return;
         };
+        if self.refused_while_filtered() {
+            return;
+        }
         let at = if below { first + count } else { first };
         let edit = self
             .imp()
@@ -1190,6 +1237,9 @@ impl GridView {
         let Some((first, count)) = self.selected_rows() else {
             return;
         };
+        if self.refused_while_filtered() {
+            return;
+        }
         let edit = self
             .imp()
             .table
@@ -1197,6 +1247,17 @@ impl GridView {
             .as_ref()
             .and_then(|t| t.delete_rows(first, count.min(t.row_count().saturating_sub(first))));
         self.reshape(edit);
+    }
+
+    /// Rows can't be inserted or deleted while filtered (FILT-1): say so, and `true`.
+    fn refused_while_filtered(&self) -> bool {
+        let filtered = self.is_filtered();
+        if filtered {
+            self.imp()
+                .clip_note
+                .set(Some((ClipView::Filtered, Instant::now())));
+        }
+        filtered
     }
 
     /// The rows the selection spans (first, count). `None` for whole columns: Ctrl+-
@@ -1460,6 +1521,7 @@ impl GridView {
                     max: PASTE_MAX_CELLS,
                 },
                 Err(PasteError::NotIndexed) => ClipView::PasteNeedsIndex,
+                Err(PasteError::Filtered) => ClipView::Filtered,
             }
         };
         imp.clip_note.set(Some((note, Instant::now())));
@@ -1606,25 +1668,236 @@ impl GridView {
         });
     }
 
-    /// Esc: stop a running sort; the rows stay as they were. Whether one was running.
-    pub fn cancel_sort(&self) -> bool {
-        let sorting = self.imp().sorting.borrow();
+    /// Esc: stop a running sort or filter; the rows stay as they were. Whether one was.
+    pub fn cancel_job(&self) -> bool {
+        let imp = self.imp();
+        let (sorting, filtering) = (imp.sorting.borrow(), imp.filtering.borrow());
         if let Some(s) = sorting.as_ref() {
             s.job.cancel();
         }
-        sorting.is_some()
+        if let Some(f) = filtering.as_ref() {
+            f.job.cancel();
+        }
+        sorting.is_some() || filtering.is_some()
     }
 
-    /// Share of the file a running sort has read (0..=1), for the status bar.
-    pub fn sort_progress(&self) -> Option<f64> {
-        let sorting = self.imp().sorting.borrow();
-        let s = sorting.as_ref()?;
-        Some(s.done.load(Ordering::Relaxed) as f64 / s.rows.max(1) as f64)
+    /// A running sort or filter, and the share of the file it has read (0..=1), for the
+    /// status bar.
+    pub fn job_progress(&self) -> Option<(&'static str, f64)> {
+        let imp = self.imp();
+        let share =
+            |done: &AtomicU64, rows: u64| done.load(Ordering::Relaxed) as f64 / rows.max(1) as f64;
+        if let Some(s) = imp.sorting.borrow().as_ref() {
+            return Some(("Sorting", share(&s.done, s.rows)));
+        }
+        let filtering = imp.filtering.borrow();
+        let f = filtering.as_ref()?;
+        Some(("Filtering", share(&f.done, f.rows)))
     }
 
-    /// A save or a sort is running: the table must not change under it.
+    /// A save, sort, or filter is running: the table must not change under it.
     pub fn busy(&self) -> bool {
-        self.imp().saving.get() || self.imp().sorting.borrow().is_some()
+        let imp = self.imp();
+        imp.saving.get() || imp.sorting.borrow().is_some() || imp.filtering.borrow().is_some()
+    }
+
+    /// Some rows are hidden by filters (FILT-1).
+    pub fn is_filtered(&self) -> bool {
+        self.imp()
+            .table
+            .borrow()
+            .as_ref()
+            .is_some_and(|t| t.is_filtered())
+    }
+
+    /// While filtered, the rows there are in all: the "y" in "x of y rows".
+    pub fn unfiltered_row_count(&self) -> Option<u64> {
+        let table = self.imp().table.borrow();
+        let t = table.as_ref().filter(|t| t.is_filtered())?;
+        Some(t.unfiltered_row_count())
+    }
+
+    /// The filter settings of column `col` (FILT-1), in a popover under its header button
+    /// at `x`: a condition, a value, Apply, and Clear when the column is filtered.
+    fn filter_menu(&self, col: u32, x: f64) {
+        let imp = self.imp();
+        if let Some(old) = imp.filter_popover.take() {
+            old.unparent();
+        }
+        let current = imp
+            .table
+            .borrow()
+            .as_ref()
+            .and_then(|t| t.filter_on(col).map(|f| f.test.clone()));
+        let conditions = gtk::DropDown::from_strings(&CONDITIONS.map(|(name, _)| name));
+        let value = gtk::Entry::builder()
+            .placeholder_text("Value")
+            .activates_default(true)
+            .build();
+        if let Some(test) = &current {
+            let (i, text) = condition_of(test);
+            conditions.set_selected(i as u32);
+            value.set_text(&text);
+        }
+        let needs_value =
+            |i: u32| !matches!(CONDITIONS[i as usize].1, Kind::Empty | Kind::NonEmpty);
+        value.set_sensitive(needs_value(conditions.selected()));
+        conditions.connect_selected_notify({
+            let value = value.downgrade();
+            move |dd| {
+                if let Some(v) = value.upgrade() {
+                    v.set_sensitive(needs_value(dd.selected()));
+                }
+            }
+        });
+        let apply = gtk::Button::with_label("Apply");
+        apply.add_css_class("suggested-action");
+        let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        buttons.set_halign(gtk::Align::End);
+        if current.is_some() {
+            let clear = gtk::Button::with_label("Clear");
+            clear.connect_clicked({
+                let g = self.downgrade();
+                move |_| {
+                    if let Some(g) = g.upgrade() {
+                        g.clear_column_filter(col);
+                    }
+                }
+            });
+            buttons.append(&clear);
+        }
+        buttons.append(&apply);
+        let form = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        form.set_margin_top(6);
+        form.set_margin_bottom(6);
+        form.set_margin_start(6);
+        form.set_margin_end(6);
+        let mut title = String::new();
+        column_name(col, &mut title);
+        form.append(&gtk::Label::new(Some(&format!(
+            "Show rows where column {title}"
+        ))));
+        form.append(&conditions);
+        form.append(&value);
+        form.append(&buttons);
+        let popover = gtk::Popover::new();
+        popover.set_child(Some(&form));
+        popover.set_default_widget(Some(&apply));
+        popover.set_parent(self);
+        popover.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, HEADER_H as i32, 1, 1)));
+        popover.connect_closed({
+            let g = self.downgrade();
+            move |p| {
+                let Some(g) = g.upgrade() else { return };
+                let current = matches!(&*g.imp().filter_popover.borrow(), Some(q) if q == p);
+                if current {
+                    g.imp().filter_popover.take();
+                }
+                p.unparent();
+                g.grab_focus();
+            }
+        });
+        apply.connect_clicked({
+            let (g, conditions, value) =
+                (self.downgrade(), conditions.downgrade(), value.downgrade());
+            move |_| {
+                let (Some(g), Some(conditions), Some(value)) =
+                    (g.upgrade(), conditions.upgrade(), value.upgrade())
+                else {
+                    return;
+                };
+                match test_of(conditions.selected() as usize, &value.text()) {
+                    Some(test) => {
+                        value.remove_css_class("error");
+                        g.apply_filter(col, test);
+                    }
+                    None => value.add_css_class("error"), // not a number
+                }
+            }
+        });
+        imp.filter_popover.replace(Some(popover.clone()));
+        popover.popup();
+        value.grab_focus();
+    }
+
+    /// Evaluate `test` on column `col` on the job pool and show the rows that pass, with
+    /// the other columns' filters. Waits for indexing; Esc cancels.
+    fn apply_filter(&self, col: u32, test: Test) {
+        let imp = self.imp();
+        self.close_filter_menu();
+        if self.busy() || imp.editing.get().is_some() {
+            return;
+        }
+        let (snapshot, filter, rows) = match imp.table.borrow().as_ref() {
+            Some(t) if t.is_complete() => {
+                let filter = Filter {
+                    col: t.col_id(col),
+                    test,
+                };
+                (t.snapshot(), filter, t.index().row_count())
+            }
+            _ => return,
+        };
+        let done = Arc::new(AtomicU64::new(0));
+        let started = Instant::now();
+        let job = jobs::spawn({
+            let (done, filter) = (done.clone(), filter.clone());
+            move |cancel| snapshot.filter_rows(&filter, cancel.flag(), &done)
+        });
+        imp.filtering.replace(Some(FilterJob {
+            filter,
+            job: job.clone(),
+            done,
+            rows,
+        }));
+        let g = self.downgrade();
+        glib::spawn_future_local(async move {
+            let result = job.finished().await;
+            let Some(g) = g.upgrade() else { return };
+            let imp = g.imp();
+            let current = matches!(&*imp.filtering.borrow(), Some(f) if f.job.is(&job));
+            if std::env::var_os("BRICKS_TIMINGS").is_some() {
+                eprintln!(
+                    "filter on column {col}: {:?} in {:?}{}",
+                    result.as_ref().map(|r| r.as_ref().map(|_| ())),
+                    started.elapsed(),
+                    if current { "" } else { " (dropped)" }
+                );
+            }
+            if !current {
+                return;
+            }
+            let Some(running) = imp.filtering.take() else {
+                return;
+            };
+            let Ok(Ok(rows)) = result else { return };
+            if let Some(t) = imp.table.borrow_mut().as_mut() {
+                t.set_filter(running.filter, rows);
+            }
+            g.after_change(None);
+        });
+    }
+
+    /// Show column `col`'s rows again, as far as the other filters allow.
+    fn clear_column_filter(&self, col: u32) {
+        let imp = self.imp();
+        self.close_filter_menu();
+        if self.busy() {
+            return;
+        }
+        if let Some(t) = imp.table.borrow_mut().as_mut() {
+            t.clear_filter(col);
+        }
+        self.after_change(None);
+    }
+
+    /// Close the filter popover. Its `closed` handler takes it out of `filter_popover`, so
+    /// no borrow of that may be held here.
+    fn close_filter_menu(&self) {
+        let popover = self.imp().filter_popover.borrow().clone();
+        if let Some(p) = popover {
+            p.popdown();
+        }
     }
 
     /// Snapshot for a background save (SAVE-1).
@@ -1742,10 +2015,15 @@ impl GridView {
         if let Some(old) = imp.inferring.take() {
             old.cancel();
         }
-        // A sort of the old table can't apply to this one.
+        // A sort or filter of the old table can't apply to this one; its filters went
+        // with it.
         if let Some(old) = imp.sorting.take() {
             old.job.cancel();
         }
+        if let Some(old) = imp.filtering.take() {
+            old.job.cancel();
+        }
+        self.close_filter_menu();
         imp.undo.replace(Some(UndoStack::default()));
         imp.cache.borrow_mut().reset();
         imp.titles.take();
@@ -1881,9 +2159,65 @@ impl GridView {
     }
 }
 
-/// Rows shown for `table`: its rows, plus the editable edge row once indexing is done.
+/// Rows shown for `table`: its rows, plus the editable edge row once indexing is done
+/// (not while filtered: rows can't be added then, FILT-1).
 fn shown_rows(table: &CsvTable) -> u64 {
-    table.row_count() + u64::from(table.is_complete())
+    table.row_count() + u64::from(table.is_complete() && !table.is_filtered())
+}
+
+/// What a filter condition in the popover needs (FILT-1).
+#[derive(Clone, Copy, PartialEq)]
+enum Kind {
+    Equals,
+    Contains,
+    NotContains,
+    Empty,
+    NonEmpty,
+    Number(Compare),
+}
+
+/// The filter popover's conditions, in list order.
+const CONDITIONS: [(&str, Kind); 11] = [
+    ("equals", Kind::Equals),
+    ("contains", Kind::Contains),
+    ("does not contain", Kind::NotContains),
+    ("is empty", Kind::Empty),
+    ("is not empty", Kind::NonEmpty),
+    ("= (number)", Kind::Number(Compare::Eq)),
+    ("≠ (number)", Kind::Number(Compare::Ne)),
+    ("< (number)", Kind::Number(Compare::Lt)),
+    ("≤ (number)", Kind::Number(Compare::Le)),
+    ("> (number)", Kind::Number(Compare::Gt)),
+    ("≥ (number)", Kind::Number(Compare::Ge)),
+];
+
+/// The test for condition `i` with `text`; `None` when a number condition's text is not
+/// a number.
+fn test_of(i: usize, text: &str) -> Option<Test> {
+    Some(match CONDITIONS[i].1 {
+        Kind::Equals => Test::Equals(text.to_owned()),
+        Kind::Contains => Test::Contains(text.to_owned()),
+        Kind::NotContains => Test::NotContains(text.to_owned()),
+        Kind::Empty => Test::Empty,
+        Kind::NonEmpty => Test::NonEmpty,
+        Kind::Number(c) => {
+            Test::Number(c, text.trim().parse().ok().filter(|v: &f64| v.is_finite())?)
+        }
+    })
+}
+
+/// The popover's condition and text for a filter already on a column.
+fn condition_of(test: &Test) -> (usize, String) {
+    let (kind, text) = match test {
+        Test::Equals(s) => (Kind::Equals, s.clone()),
+        Test::Contains(s) => (Kind::Contains, s.clone()),
+        Test::NotContains(s) => (Kind::NotContains, s.clone()),
+        Test::Empty => (Kind::Empty, String::new()),
+        Test::NonEmpty => (Kind::NonEmpty, String::new()),
+        Test::Number(c, v) => (Kind::Number(*c), v.to_string()),
+    };
+    let i = CONDITIONS.iter().position(|(_, k)| *k == kind).unwrap_or(0);
+    (i, text)
 }
 
 /// What a mouse drag stretches the selection over (GRID-4): cells, or whole rows/columns

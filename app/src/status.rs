@@ -37,12 +37,16 @@ pub enum ClipView {
     },
     /// A paste that needs rows added before indexing has finished.
     PasteNeedsIndex,
+    /// Rows can't be inserted, deleted, or pasted past the end while filtered (FILT-1).
+    Filtered,
 }
 
 /// Everything the status bar shows.
 #[derive(Debug, Clone, Copy)]
 pub struct Facts<'a> {
     pub rows: u64,
+    /// While filtered, the rows there are in all: "x of y rows" (FILT-1).
+    pub of: Option<u64>,
     /// Share of the file indexed so far (0..=1); `None` once indexing is complete.
     pub indexing: Option<f64>,
     pub delimiter: u8,
@@ -50,8 +54,8 @@ pub struct Facts<'a> {
     pub detected: bool,
     pub encoding: Encoding,
     pub edits: usize,
-    /// Share of the file a running sort has read (0..=1).
-    pub sorting: Option<f64>,
+    /// A running sort or filter ("Sorting", "Filtering") and its share done (0..=1).
+    pub job: Option<(&'a str, f64)>,
     pub save: SaveView<'a>,
     pub file_changed: bool,
     pub clip: ClipView,
@@ -60,7 +64,8 @@ pub struct Facts<'a> {
 /// The three parts of the status bar, left to right.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Status {
-    /// "1,898,604 rows", plus "indexing 43%" while the count still grows.
+    /// "1,898,604 rows" ("14,392 of 1,898,604 rows" while filtered), plus "indexing 43%"
+    /// while the count still grows.
     pub rows: String,
     /// Unsaved edits, saving progress or result, and a changed-on-disk warning.
     pub save: String,
@@ -69,20 +74,25 @@ pub struct Status {
 }
 
 pub fn status(f: &Facts) -> Status {
-    let mut rows = format!(
-        "{} {}",
-        group_digits(f.rows),
-        if f.rows == 1 { "row" } else { "rows" }
-    );
+    let noun = |n: u64| if n == 1 { "row" } else { "rows" };
+    let mut rows = match f.of {
+        Some(all) => format!(
+            "{} of {} {}",
+            group_digits(f.rows),
+            group_digits(all),
+            noun(all)
+        ),
+        None => format!("{} {}", group_digits(f.rows), noun(f.rows)),
+    };
     if let Some(done) = f.indexing {
         let pct = (done.clamp(0.0, 1.0) * 100.0).floor();
         rows.push_str(&format!(" · indexing {pct:.0}%"));
     }
 
     let mut save = Vec::new();
-    if let Some(done) = f.sorting {
+    if let Some((what, done)) = f.job {
         let pct = (done.clamp(0.0, 1.0) * 100.0).floor();
-        save.push(format!("Sorting {pct:.0}%"));
+        save.push(format!("{what} {pct:.0}%"));
     }
     let cells = |n: u64| format!("{} cell{}", group_digits(n), if n == 1 { "" } else { "s" });
     match f.clip {
@@ -108,6 +118,7 @@ pub fn status(f: &Facts) -> Status {
         ClipView::PasteNeedsIndex => {
             save.push("Paste past the last row once indexing finishes".to_owned())
         }
+        ClipView::Filtered => save.push("Clear the filters to add or delete rows".to_owned()),
     }
     let edits = || {
         format!(
@@ -197,12 +208,13 @@ mod tests {
     fn facts() -> Facts<'static> {
         Facts {
             rows: 1_898_604,
+            of: None,
             indexing: None,
             delimiter: b',',
             detected: true,
             encoding: Encoding::UTF8,
             edits: 0,
-            sorting: None,
+            job: None,
             save: SaveView::Idle,
             file_changed: false,
             clip: ClipView::Idle,
@@ -220,6 +232,8 @@ mod tests {
         assert_eq!(status(&f).rows, "1,898,604 rows");
         f.rows = 1;
         assert_eq!(status(&f).rows, "1 row");
+        f.of = Some(1_898_604);
+        assert_eq!(status(&f).rows, "1 of 1,898,604 rows", "while filtered");
     }
 
     #[test]
@@ -253,12 +267,12 @@ mod tests {
         f.edits = 2;
         f.clip = ClipView::Copying(0.456);
         assert_eq!(status(&f).save, "Copying 45% · 2 unsaved edits");
-        f.sorting = Some(0.5);
+        f.job = Some(("Sorting", 0.5));
         assert_eq!(
             status(&f).save,
             "Sorting 50% · Copying 45% · 2 unsaved edits"
         );
-        f.sorting = None;
+        f.job = None;
         f.clip = ClipView::Copied {
             cells: 1,
             text_only: false,

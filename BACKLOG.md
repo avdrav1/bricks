@@ -62,7 +62,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | TYPE-2 | M3 | P1 | todo | TYPE-1 | Show inferred type in header; allow override | Override changes sort and filter only |
 | SORT-1 | M3 | P0 | done | TYPE-1, DEC-4, CMD-1, ENG-8 | Type-aware sort, ascending and descending | 2M-row numeric sort under 3 s; stable; undoable |
 | SORT-2 | M3 | P0 | done | SORT-1, ENG-7 | Sort moves whole rows and honors the header | Header row never moves |
-| FILT-1 | M3 | P0 | todo | TYPE-1, DEC-4 | Per-column filter from header dropdown | Exact, contains, not contains, empty, non-empty, numeric compare |
+| FILT-1 | M3 | P0 | done | TYPE-1, DEC-4 | Per-column filter from header dropdown | Exact, contains, not contains, empty, non-empty, numeric compare |
 | FILT-2 | M3 | P0 | todo | FILT-1 | Combine filters across columns (AND) | Status bar shows "x of y rows" |
 | FILT-3 | M3 | P0 | todo | FILT-1, SAVE-1 | Saving with an active filter keeps hidden rows | Test confirms on-disk row count unchanged |
 | FILT-4 | M3 | P1 | todo | FILT-2, CLIP-2 | Edits and paste respect the filtered view | Paste into a filtered range touches visible rows only |
@@ -80,6 +80,36 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 ## Notes
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
+
+- **2026-10-09 FILT-1:** per-column filter from a header dropdown. Four user decisions: a ▾ on every column title (highlighted when that column is filtered); text conditions ignore case; a filter is evaluated when applied, so an edited row stays shown until it is applied again; and row inserts and deletes are refused while filtered, with a status note.
+  - `data_model::Filter { col: ColId, test: Test }`, where `Test` is `Equals` (whole cell), `Contains`, `NotContains`, `Empty`, `NonEmpty`, or `Number(Compare, f64)` with `=` `≠` `<` `≤` `>` `≥`. Number tests take only cells TYPE-1 reads as numbers (`00123` is a code, not 123); any other cell fails them, `≠` included.
+  - `CsvTable::filter_rows` evaluates a filter into a `RowSet` (a bitmap over file rows, plus the inserted rows that failed) on a snapshot. `set_filter` replaces any filter on that column and combines the rest with AND; `clear_filter`, `filter_on`, and `is_filtered` round it out. The table keeps the positions shown (ADR 0004 "As built"): reads, edits, clears, copies, and pastes reach shown rows only, while save, sort, and inference see every row. The header row is never filtered out; with the header off, the first row is data and is tested like the rest.
+  - Refused while filtered: `insert_rows` and `delete_rows` (`None`), and a paste that would add rows (`PasteError::Filtered`). The status says "Clear the filters to add or delete rows", and the editable edge row is hidden.
+  - App: each column header's ▾ opens a popover (`Show rows where column C`, a condition list, a value, Clear when filtered, Apply or Enter). The value field flags a number condition whose value is not a number. Applying runs as a job (`Filtering N%`, Esc cancels, edits wait). The status shows `x of y rows`. A save or delimiter change opens a new table, which drops the filters.
+  - **Bug found and fixed in the smoke test:** closing the popover from Apply panicked with "RefCell already borrowed", because its `closed` handler takes it out of the cell that `popdown` was called through. `GridView::close_filter_menu` now clones the popover out first.
+  - **Speed fixed:** rebuilding the view after a sort of a filtered 19.1M-row table took 183–207 ms on the UI thread. Folding the filters into one bitmap and visiting set bits takes it to 47 ms.
+  - Proof:
+    - `commands/tests/filter.rs`:
+      - Every condition on a small file, with the header always kept.
+      - Two columns AND; a new filter on a column replaces its old one.
+      - An edit, a copy (`2\tboston\n6\tBoston`), a paste, and a clear each reach shown rows only, and the save writes every row.
+      - An edited row stays until the filter is reapplied.
+      - A sort while filtered sorts hidden rows too, keeps the filter, and undoes.
+      - The header row is tested as data once the header is off.
+      - Insert, delete, and a growing paste are refused, and a cancel returns nothing.
+    - Unit tests cover case folding, substring edges, and every number comparison against codes, blanks, and words.
+    - `commands/tests/filter_1gb.rs` (ignored): city = Portland, then revenue > 50,000, on 19.1M rows in 0.37 s (8 cores: 0.78 s; target 3 s). The 2,725,768 and 1,362,719 rows shown match a plain scan of the file. The view after a sort rebuilds in 47 ms.
+    - `jobs/tests/cancel_1gb.rs`: filter cancels land within 8 ms.
+  - Smoke test via Broadway on the 1 GB file:
+    - City ▾ → `portland` → Enter: `2,725,768 of 19,094,579 rows`, all Portland, with C's ▾ highlighted.
+    - Revenue ▾ → `> (number)` 50000: `1,362,719 of 19,094,579 rows`.
+    - Right-click → Delete Rows: refused with the note, rows unchanged.
+    - City ▾ reopens prefilled; Clear: `9,545,622 of 19,094,579 rows`, with C's ▾ dim again.
+  - FILT-2's AND across columns, and its "x of y rows" status, are built and asserted here, so FILT-2 needs its own proof only.
+  - Follow-ups (not fixed):
+    - A save or delimiter change drops the filters, because the reopened table starts with none. FILT-3 (save with an active filter) can keep them.
+    - Row numbers in the gutter count shown rows (1, 2, 3…), not file rows.
+    - The 47 ms view rebuild after a sort or its undo at 19.1M rows is a one-frame hitch on the UI thread.
 
 - **2026-10-09 SORT-2:** sort moves whole rows and honors the header. The sort already kept the header row in place (SORT-1); this story proves it and closes one gap.
   - `commands/tests/sort_header.rs`:

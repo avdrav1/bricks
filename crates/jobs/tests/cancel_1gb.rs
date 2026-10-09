@@ -10,7 +10,8 @@
 
 use csv_engine::{Dialect, IndexError, RowIndex, Source, SparseRowIndex};
 use data_model::{
-    CellRef, CsvTable, DelimiterChoice, Edit, SaveProgress, SortError, SortOrder, TableSource,
+    CellRef, CsvTable, DelimiterChoice, Edit, Filter, FilterError, SaveProgress, SortError,
+    SortOrder, TableSource, Test,
 };
 use file_format::{save_csv, SaveError, TEMP_SUFFIX};
 use jobs::{Job, Stopped};
@@ -219,6 +220,33 @@ fn sorting_cancels_within_200ms() {
             "{point}: sorted anyway"
         );
         times.push((format!("sort of every row at {point}"), took));
+    }
+    check(&times);
+}
+
+#[test]
+#[ignore = "needs corpus/rows_1024mb.csv; run with --release --ignored"]
+fn filtering_cancels_within_200ms() {
+    let table = open(&corpus());
+    let rows = table.index().row_count();
+    let filter = Filter {
+        col: table.col_id(2),
+        test: Test::Contains("port".into()),
+    };
+    let mut times = Vec::new();
+    for pct in [0, 10, 50, 90] {
+        let (snapshot, filter) = (table.snapshot(), filter.clone());
+        let done = Arc::new(AtomicU64::new(0));
+        let job = jobs::spawn({
+            let done = done.clone();
+            move |cancel| snapshot.filter_rows(&filter, cancel.flag(), &done)
+        });
+        let (took, out) = cancel_when(&job, || done.load(Ordering::Relaxed) * 100 >= rows * pct);
+        assert!(
+            matches!(out, None | Some(Err(FilterError::Cancelled))),
+            "at {pct}%: filtered anyway"
+        );
+        times.push((format!("filter of every row at {pct}%"), took));
     }
     check(&times);
 }

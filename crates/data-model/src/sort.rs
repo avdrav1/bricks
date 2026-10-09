@@ -18,12 +18,11 @@
 
 use crate::infer::{instant, value_type};
 use crate::rowmap::{unpack, RowOrder};
-use crate::{CellRef, Col, ColId, CsvTable, Edit, InferredType, RowId};
-use csv_engine::{split_fields, Field, RowIndex};
+use crate::{CellRef, Col, ColId, CsvTable, Edit, InferredType};
+use csv_engine::RowIndex;
 use rayon::prelude::*;
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::ops::Range;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Arc;
@@ -46,7 +45,6 @@ pub enum SortError {
 
 /// File rows keyed per task, and between cancel checks.
 const CHUNK: u64 = 65_536;
-const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
 
 /// Classes in ascending order.
 const TYPED: u8 = 0;
@@ -304,39 +302,6 @@ impl CsvTable {
         });
         for (slot, (_, k)) in group.iter_mut().zip(whole) {
             *slot = k;
-        }
-    }
-
-    /// The text of file row `row` (at `span`) in column `col`, edits and clears included.
-    fn file_cell<'a>(
-        &'a self,
-        row: u64,
-        span: &Range<u64>,
-        col: ColId,
-        fields: &mut Vec<Field>,
-    ) -> Cow<'a, str> {
-        if let Some(v) = self.overlay.get(CellRef {
-            row: RowId::source(row),
-            col,
-        }) {
-            return Cow::Borrowed(v);
-        }
-        if col.is_inserted() || self.cleared.at(row).is_some_and(|c| c.contains(col)) {
-            return Cow::Borrowed("");
-        }
-        let bytes = self.index.source().bytes();
-        let mut line = &bytes[span.start as usize..span.end as usize];
-        if span.start == 0 {
-            line = line.strip_prefix(UTF8_BOM).unwrap_or(line);
-        }
-        split_fields(line, &self.dialect, fields);
-        match fields
-            .get(col.0 as usize)
-            .map(|f| f.value(line, self.dialect.quote))
-        {
-            None => Cow::Borrowed(""),
-            Some(Cow::Borrowed(b)) => String::from_utf8_lossy(b),
-            Some(Cow::Owned(v)) => Cow::Owned(String::from_utf8_lossy(&v).into_owned()),
         }
     }
 }

@@ -12,7 +12,7 @@
 //!   (or with a space). `true`/`false`/`yes`/`no` in any case are Boolean.
 //! - Integer and Decimal values together make Decimal; Date and DateTime make DateTime.
 
-use crate::{ColId, CsvTable, InferredType, RowBlock, TableSource};
+use crate::{ColId, CsvTable, InferredType, RowBlock};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Rows sampled from the top of the table.
@@ -224,7 +224,7 @@ impl CsvTable {
     /// cells as shown (edits included). Run it once the table is indexed, off the UI thread
     /// (on a snapshot); `None` once `cancel` is set.
     pub fn infer_types(&mut self, cancel: &AtomicBool) -> Option<ColumnTypes> {
-        let rows = self.row_count();
+        let rows = self.unfiltered_row_count();
         let head = rows.min(SAMPLE_HEAD);
         let rest = rows - head;
         let spread = rest.min(SAMPLE_SPREAD);
@@ -242,7 +242,7 @@ impl CsvTable {
             if (n as u64).is_multiple_of(CANCEL_EVERY) && cancel.load(Ordering::Relaxed) {
                 return None;
             }
-            self.read_rows(r..r + 1, &mut block);
+            self.read_unfiltered(r..r + 1, &mut block);
             let cells = block.cells_in_row(r);
             if found.len() < cells as usize {
                 found.resize(cells as usize, None);

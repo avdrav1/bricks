@@ -3,6 +3,7 @@
 
 use crate::cleared::Cleared;
 use crate::colmap::ColMap;
+use crate::filter::{Filter, RowSet};
 use crate::rowmap::{RowMap, RowOrder, Run};
 use crate::{CellRef, Col, ColId, ColSet, Edit, EditOverlay, InferredType, Row, RowId};
 use csv_engine::{
@@ -180,6 +181,11 @@ pub struct CsvTable {
     pub(crate) cleared: Cleared,
     /// Inferred column types (TYPE-1), by column identity; empty until inferred.
     pub(crate) types: HashMap<ColId, InferredType>,
+    /// Column filters (FILT-1) and the rows each passed.
+    pub(crate) filters: Vec<(Filter, Arc<RowSet>)>,
+    /// While filtered: positions of the rows shown, in order (the header excluded).
+    /// Table rows count through it; `None` shows every row.
+    pub(crate) visible: Option<Arc<Vec<u32>>>,
     spans: Vec<Range<u64>>,
     fields: Vec<Field>,
 }
@@ -207,6 +213,8 @@ impl CsvTable {
             next_inserted_col: 0,
             cleared: Cleared::default(),
             types: HashMap::new(),
+            filters: Vec::new(),
+            visible: None,
             spans: Vec::new(),
             fields: Vec::new(),
         }
@@ -227,6 +235,8 @@ impl CsvTable {
             next_inserted_col: self.next_inserted_col,
             cleared: self.cleared.clone(),
             types: self.types.clone(),
+            filters: self.filters.clone(),
+            visible: self.visible.clone(),
             spans: Vec::new(),
             fields: Vec::new(),
         }
@@ -314,6 +324,7 @@ impl CsvTable {
             self.types.clear();
         }
         self.dialect.has_header = on;
+        self.update_view();
     }
 
     /// Position of table row 0 among all rows: past the header row, if there is one.
@@ -322,7 +333,7 @@ impl CsvTable {
     }
 
     /// Rows in file order plus inserts minus deletes, the header row included.
-    fn total_rows(&self) -> u64 {
+    pub(crate) fn total_rows(&self) -> u64 {
         self.rows
             .as_ref()
             .map_or_else(|| self.index.row_count(), RowOrder::len)
@@ -400,16 +411,23 @@ impl CsvTable {
                 ColSet::new((start..end).map(|c| self.col_id(c)).collect(), None)
             }
         };
-        let positions = rows.start + self.first_row()..rows.end + self.first_row();
+        let ranges = self.view_ranges(rows);
         let rows = match &self.rows {
-            // A clear is a set of rows: sorted ones go back to file order, so a whole
-            // column stays one run however the rows are shown.
-            Some(order @ RowOrder::Sorted(_)) => merge_runs(order.runs_in(positions)),
-            Some(order) => order.runs_in(positions),
-            None => vec![Run {
-                first: RowId::source(positions.start),
-                len: positions.end - positions.start,
-            }],
+            // A clear is a set of rows: shown in another order or with rows hidden
+            // between, they go back to file order, so a whole column stays one run.
+            Some(order) if self.visible.is_some() || matches!(order, RowOrder::Sorted(_)) => {
+                merge_runs(ranges.into_iter().flat_map(|r| order.runs_in(r)).collect())
+            }
+            Some(order) => ranges.into_iter().flat_map(|r| order.runs_in(r)).collect(),
+            None => merge_runs(
+                ranges
+                    .into_iter()
+                    .map(|r| Run {
+                        first: RowId::source(r.start),
+                        len: r.end - r.start,
+                    })
+                    .collect(),
+            ),
         };
         Some(Edit::ClearCells { rows, cols })
     }
@@ -430,7 +448,35 @@ impl CsvTable {
 
     /// Identity of the row shown at `row` (< `row_count()`).
     pub fn row_id(&self, row: Row) -> RowId {
-        self.id_at(row + self.first_row())
+        self.id_at(self.pos(row))
+    }
+
+    /// Position among all rows (header and hidden rows included) of table row `row`.
+    fn pos(&self, row: Row) -> u64 {
+        match &self.visible {
+            Some(v) => u64::from(v[row as usize]),
+            None => row + self.first_row(),
+        }
+    }
+
+    /// Positions of table rows `rows`, as ranges of consecutive positions.
+    #[allow(clippy::single_range_in_vec_init)] // one range of positions, not a list of them
+    fn view_ranges(&self, rows: Range<Row>) -> Vec<Range<u64>> {
+        match &self.visible {
+            None => vec![rows.start + self.first_row()..rows.end.saturating_add(self.first_row())],
+            Some(v) => {
+                let end = (rows.end as usize).min(v.len());
+                let mut out: Vec<Range<u64>> = Vec::new();
+                for &p in &v[(rows.start as usize).min(end)..end] {
+                    let p = u64::from(p);
+                    match out.last_mut() {
+                        Some(r) if r.end == p => r.end += 1,
+                        _ => out.push(p..p + 1),
+                    }
+                }
+                out
+            }
+        }
     }
 
     /// Unsaved changes: edited cells, plus rows inserted and source rows deleted, plus one
@@ -453,10 +499,10 @@ impl CsvTable {
     }
 
     /// An edit inserting `count` empty rows before table row `row` (at the end when
-    /// `row == row_count()`). `None` until the whole file is indexed: the row order is
-    /// fixed only then.
+    /// `row == row_count()`). `None` until the whole file is indexed (the row order is
+    /// fixed only then), and while filtered (FILT-1).
     pub fn insert_rows(&mut self, row: Row, count: u64) -> Option<Edit> {
-        if !self.index.is_complete() || count == 0 || row > self.row_count() {
+        if !self.index.is_complete() || self.is_filtered() || count == 0 || row > self.row_count() {
             return None;
         }
         let first = RowId::inserted(self.next_inserted);
@@ -468,10 +514,10 @@ impl CsvTable {
     }
 
     /// An edit deleting `count` table rows from `row` on. `None` until the whole file is
-    /// indexed, or when the rows don't exist.
+    /// indexed, while filtered (FILT-1), or when the rows don't exist.
     pub fn delete_rows(&self, row: Row, count: u64) -> Option<Edit> {
         let end = row.checked_add(count)?;
-        if !self.index.is_complete() || count == 0 || end > self.row_count() {
+        if !self.index.is_complete() || self.is_filtered() || count == 0 || end > self.row_count() {
             return None;
         }
         Some(Edit::DeleteRows {
@@ -498,6 +544,20 @@ impl CsvTable {
     /// # }
     /// ```
     pub fn apply(&mut self, edit: Edit) -> Edit {
+        let inverse = self.apply_edit(edit);
+        // Rows moved, came, or went: the filtered view follows (FILT-1).
+        if self.is_filtered()
+            && matches!(
+                inverse,
+                Edit::InsertRows { .. } | Edit::DeleteRows { .. } | Edit::Reorder(_)
+            )
+        {
+            self.update_view();
+        }
+        inverse
+    }
+
+    fn apply_edit(&mut self, edit: Edit) -> Edit {
         match edit {
             Edit::Cell { at, value } => {
                 let before = match value {
@@ -587,13 +647,17 @@ impl CsvTable {
         })
     }
 
-    /// Where row `id` is shown, if it is one of the table's rows (the header row is not).
+    /// Where row `id` is shown, if it is one of the table's rows (not the header row, nor
+    /// a row a filter hides).
     pub fn row_of(&self, id: RowId) -> Option<Row> {
         let k = match &self.rows {
             Some(m) => m.position(id)?,
             None => id.0,
         };
-        let row = k.checked_sub(self.first_row())?;
+        let row = match &self.visible {
+            Some(v) => v.binary_search(&u32::try_from(k).ok()?).ok()? as u64,
+            None => k.checked_sub(self.first_row())?,
+        };
         (row < self.row_count()).then_some(row)
     }
 
@@ -604,11 +668,10 @@ impl CsvTable {
     /// Full text of one cell: the edit if there is one, else the source field. `None` when
     /// the row or the column does not exist. Invalid UTF-8 in the source shows as U+FFFD.
     pub fn cell_value(&self, row: Row, col: Col) -> Option<Cow<'_, str>> {
-        let k = row + self.first_row();
-        if k >= self.total_rows() {
+        if row >= self.row_count() {
             return None;
         }
-        self.cell_of(self.id_at(k), self.col_id(col))
+        self.cell_of(self.id_at(self.pos(row)), self.col_id(col))
     }
 
     pub(crate) fn cell_of(&self, row: RowId, col: ColId) -> Option<Cow<'_, str>> {
@@ -759,7 +822,10 @@ fn merge_runs(mut runs: Vec<Run>) -> Vec<Run> {
 }
 impl TableSource for CsvTable {
     fn row_count(&self) -> u64 {
-        self.total_rows().saturating_sub(self.first_row())
+        match &self.visible {
+            Some(v) => v.len() as u64,
+            None => self.unfiltered_row_count(),
+        }
     }
 
     fn is_complete(&self) -> bool {
@@ -768,8 +834,15 @@ impl TableSource for CsvTable {
 
     fn read_rows(&mut self, rows: Range<u64>, out: &mut RowBlock) {
         out.reset(rows.start);
-        let first = self.first_row();
-        let positions = rows.start + first..rows.end.saturating_add(first);
+        for positions in self.view_ranges(rows) {
+            self.read_positions(positions, out);
+        }
+    }
+}
+
+impl CsvTable {
+    /// Append the rows at `positions` (among all rows, header and hidden ones included).
+    fn read_positions(&mut self, positions: Range<u64>, out: &mut RowBlock) {
         // Out of `self` while reading, so the read paths can use the field buffer.
         let cols = self.cols.take();
         match self.rows.as_ref().map(|m| {
@@ -790,6 +863,46 @@ impl TableSource for CsvTable {
             }
         }
         self.cols = cols;
+    }
+
+    /// Table rows `rows` as if no filter were on (type inference samples them all).
+    pub(crate) fn read_unfiltered(&mut self, rows: Range<Row>, out: &mut RowBlock) {
+        out.reset(rows.start);
+        let first = self.first_row();
+        self.read_positions(rows.start + first..rows.end.saturating_add(first), out);
+    }
+
+    /// The text of file row `row` (at `span`) in column `col`, edits and clears included.
+    pub(crate) fn file_cell<'a>(
+        &'a self,
+        row: u64,
+        span: &Range<u64>,
+        col: ColId,
+        fields: &mut Vec<Field>,
+    ) -> Cow<'a, str> {
+        if let Some(v) = self.overlay.get(CellRef {
+            row: RowId::source(row),
+            col,
+        }) {
+            return Cow::Borrowed(v);
+        }
+        if col.is_inserted() || self.cleared.at(row).is_some_and(|c| c.contains(col)) {
+            return Cow::Borrowed("");
+        }
+        let bytes = self.index.source().bytes();
+        let mut line = &bytes[span.start as usize..span.end as usize];
+        if span.start == 0 {
+            line = line.strip_prefix(UTF8_BOM).unwrap_or(line);
+        }
+        split_fields(line, &self.dialect, fields);
+        match fields
+            .get(col.0 as usize)
+            .map(|f| f.value(line, self.dialect.quote))
+        {
+            None => Cow::Borrowed(""),
+            Some(Cow::Borrowed(b)) => String::from_utf8_lossy(b),
+            Some(Cow::Owned(v)) => Cow::Owned(String::from_utf8_lossy(&v).into_owned()),
+        }
     }
 }
 
