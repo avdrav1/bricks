@@ -22,6 +22,7 @@
 
 mod editor;
 mod grid_view;
+mod recent;
 mod status;
 
 use csv_engine::{Charset, Encoding, IndexError};
@@ -123,7 +124,13 @@ fn main() -> glib::ExitCode {
     // so its first rows show as early as possible (BENCH-1 times this path).
     let opened = match &args.file {
         Some(path) => match open_session(path) {
-            Ok(opened) => Some(opened),
+            Ok(opened) => {
+                // Benchmarks and tests open corpus files: they stay off the list.
+                if args.bench.is_none() {
+                    remember(path);
+                }
+                Some(opened)
+            }
             Err(e) => {
                 eprintln!("spreadsheet: cannot open {}: {e}", path.display());
                 return glib::ExitCode::FAILURE;
@@ -143,7 +150,22 @@ fn main() -> glib::ExitCode {
         let new = gtk::gio::ActionEntry::builder("new")
             .activate(|app: &gtk::Application, _, _| new_window(app))
             .build();
-        app.add_action_entries([open, new]);
+        let open_recent = gtk::gio::ActionEntry::builder("open-recent")
+            .parameter_type(Some(glib::VariantTy::STRING))
+            .activate(|app: &gtk::Application, _, param| {
+                if let Some(path) = param.and_then(|p| p.str()) {
+                    open_window(app, Path::new(path), app.active_window().as_ref());
+                }
+            })
+            .build();
+        let clear_recent = gtk::gio::ActionEntry::builder("clear-recent")
+            .activate(|_: &gtk::Application, _, _| {
+                if let Err(e) = recent::Recent::load().clear() {
+                    eprintln!("spreadsheet: cannot clear recent files: {e}");
+                }
+            })
+            .build();
+        app.add_action_entries([open, new, open_recent, clear_recent]);
         app.set_accels_for_action("app.open", &["<Control>o"]);
         app.set_accels_for_action("app.new", &["<Control>n"]);
     });
@@ -202,7 +224,8 @@ fn close_start_window(app: &gtk::Application) {
     }
 }
 
-/// Shown when the app starts without a file: buttons that open a file or start a new one.
+/// Shown when the app starts without a file: buttons that open a file or start a new one,
+/// and the recent files (APP-4).
 fn start_window(app: &gtk::Application) {
     let heading = gtk::Label::new(Some("Open a CSV file"));
     heading.add_css_class("title-2");
@@ -226,6 +249,16 @@ fn start_window(app: &gtk::Application) {
     page.append(&heading);
     page.append(&open);
     page.append(&new);
+    let files = recent::Recent::load().files().to_vec();
+    if !files.is_empty() {
+        let title = gtk::Label::new(Some("Recent"));
+        title.add_css_class("heading");
+        title.set_margin_top(12);
+        page.append(&title);
+        for file in files {
+            page.append(&recent_button(app, &file));
+        }
+    }
     page.append(&hint);
     let window = gtk::ApplicationWindow::builder()
         .application(app)
@@ -238,6 +271,68 @@ fn start_window(app: &gtk::Application) {
     window.set_titlebar(Some(&gtk::HeaderBar::new()));
     window.present();
     open.grab_focus();
+}
+
+/// A recent file on the start window: its name and folder; it goes away if the file
+/// can't be opened any more.
+fn recent_button(app: &gtk::Application, file: &Path) -> gtk::Button {
+    let (name, dir) = recent::label(file);
+    let text = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    text.append(&gtk::Label::new(Some(&name)));
+    let folder = gtk::Label::new(Some(&dir));
+    folder.add_css_class("dim-label");
+    text.append(&folder);
+    let button = gtk::Button::builder()
+        .child(&text)
+        .tooltip_text(file.display().to_string())
+        .css_classes(["flat"])
+        .build();
+    button.connect_clicked({
+        let (app, file) = (app.clone(), file.to_owned());
+        move |b| {
+            let window = b.root().and_downcast::<gtk::Window>();
+            if !open_window(&app, &file, window.as_ref()) {
+                b.set_visible(false);
+            }
+        }
+    });
+    button
+}
+
+/// The recent files menu in a window's header bar (APP-4), read again each time it opens.
+fn recent_menu() -> gtk::MenuButton {
+    let button = gtk::MenuButton::builder()
+        .icon_name("pan-down-symbolic")
+        .tooltip_text("Recent files")
+        .build();
+    button.set_create_popup_func(|button| {
+        let menu = gtk::gio::Menu::new();
+        let files = gtk::gio::Menu::new();
+        for file in recent::Recent::load().files() {
+            // A path that isn't UTF-8 can't travel in the action's string.
+            let Some(path) = file.to_str() else { continue };
+            let (name, dir) = recent::label(file);
+            let item = gtk::gio::MenuItem::new(Some(&format!("{name}  ({dir})")), None);
+            item.set_action_and_target_value(Some("app.open-recent"), Some(&path.to_variant()));
+            files.append_item(&item);
+        }
+        if files.n_items() == 0 {
+            files.append(Some("No recent files"), Some("app.none"));
+        }
+        menu.append_section(None, &files);
+        let clear = gtk::gio::Menu::new();
+        clear.append(Some("Clear Recent Files"), Some("app.clear-recent"));
+        menu.append_section(None, &clear);
+        button.set_menu_model(Some(&menu));
+    });
+    button
+}
+
+/// Put `path` at the top of the recent files; a failure only costs the list.
+fn remember(path: &Path) {
+    if let Err(e) = recent::Recent::load().add(path) {
+        eprintln!("spreadsheet: cannot update recent files: {e}");
+    }
 }
 
 const START_WINDOW: &str = "start";
@@ -276,7 +371,9 @@ fn choose_and_open(app: &gtk::Application) {
     glib::spawn_future_local(async move {
         match dialog.open_future(parent.as_ref()).await {
             Ok(file) => match file.path() {
-                Some(path) => open_window(&app, &path, parent.as_ref()),
+                Some(path) => {
+                    open_window(&app, &path, parent.as_ref());
+                }
                 None => alert(
                     parent.as_ref(),
                     &format!("Cannot open {}", file.uri()),
@@ -294,22 +391,29 @@ fn choose_and_open(app: &gtk::Application) {
 }
 
 /// Show `path` in a window: its existing one, or a new one. The start window closes once
-/// a file is open.
-fn open_window(app: &gtk::Application, path: &Path, parent: Option<&gtk::Window>) {
+/// a file is open. A file that can't be opened leaves the recent files. Whether it opened.
+fn open_window(app: &gtk::Application, path: &Path, parent: Option<&gtk::Window>) -> bool {
     if let Some(window) = window_for(path) {
         window.present();
-        return;
+        remember(path);
+        return true;
     }
     match open_session(path) {
         Ok((session, table)) => {
+            remember(path);
             build_window(app, &session, table, None);
             close_start_window(app);
+            true
         }
-        Err(e) => alert(
-            parent,
-            &format!("Cannot open {}", path.display()),
-            &e.to_string(),
-        ),
+        Err(e) => {
+            let _ = recent::Recent::load().remove(path);
+            alert(
+                parent,
+                &format!("Cannot open {}", path.display()),
+                &e.to_string(),
+            );
+            false
+        }
     }
 }
 
@@ -527,6 +631,7 @@ fn build_window(
     });
     let header = gtk::HeaderBar::new();
     header.pack_start(&open);
+    header.pack_start(&recent_menu());
     header.pack_start(&new);
     header.pack_start(&save_as_button);
     header.pack_end(&delimiter);
@@ -990,6 +1095,7 @@ fn finish_save(
         Err(jobs::Stopped::Panicked) => Err("the save stopped unexpectedly".to_owned()),
     };
     if let (Ok(_), Some(t)) = (&result, target) {
+        remember(&t.path);
         session.path.replace(Some(t.path));
         session.encoding.set(Some(t.encoding));
         session.choice.set(DelimiterChoice::Fixed(t.delimiter));

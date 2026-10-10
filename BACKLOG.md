@@ -69,7 +69,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | SRCH-1 | M3 | P0 | done | ENG-8 | Find bar (Ctrl+F): whole file or current column, case toggle | First hit in 1 GB under 1 s, off the UI thread |
 | SRCH-2 | M3 | P0 | done | SRCH-1 | Next/previous result; hit count streams in | New keystroke cancels the running search |
 | SRCH-3 | M3 | P0 | done | SRCH-2, CMD-1 | Find and replace; replace all | Replace all on 100k hits undoes as one step |
-| APP-4 | M4 | P0 | todo | APP-1 | Recent files menu | Last 10 files survive restart |
+| APP-4 | M4 | P0 | done | APP-1 | Recent files menu | Last 10 files survive restart |
 | APP-5 | M4 | P0 | todo | APP-1 | Drag and drop to open | Works on Wayland and X11 |
 | APP-6 | M4 | P0 | todo | DEC-1 | Follow system dark/light theme; high-DPI | No blurry text at 1.5x and 2x |
 | APP-7 | M4 | P1 | todo | CMD-2 | Crash recovery via periodic overlay journal | Relaunch after crash offers to restore edits |
@@ -82,6 +82,21 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-10 APP-4:** recent files: the last 10 files opened or saved, newest first, kept across restarts.
+  - `app/src/recent.rs` (no GTK): one absolute path per line in `$XDG_STATE_HOME/spreadsheet/recent` (default `~/.local/state/spreadsheet/recent`), raw bytes, so any file name works except one with a newline.
+    - Each change reads the file again first, because every launch is its own process (`NON_UNIQUE`), then writes a temporary file and renames it over the list.
+    - Opening a file again moves it to the top, once.
+  - Recorded: files opened from the dialog, the list, or the command line, and the target of a Save As. Runs with a `--bench-*` flag are left off, so tests and `cargo bench` don't fill the list with corpus files.
+  - UI:
+    - The start window lists them under "Recent" (name, then the folder with `~` for home; the full path as tooltip).
+    - Each window's header has a ▾ menu next to Open (`app.open-recent` with the path, read again each time it opens), plus "Clear Recent Files".
+    - A file that can't be opened shows the error and leaves the list. A path that isn't UTF-8 stays on the start window but can't go in the menu (action targets are strings).
+  - Acceptance: `recent::tests::the_last_ten_files_survive_a_restart`. 12 files added, then a fresh load reads the newest 10 in order; opening one again moves it to the top without a duplicate.
+    - Also tested: two windows' writes merge; remove and clear; relative and odd names; labels.
+  - Smoke test via Broadway with `XDG_STATE_HOME` in /tmp:
+    - Launches with alpha.csv, then beta.csv, wrote "beta, alpha". A launch with no file showed both on the start window.
+    - Clicking alpha opened it and moved it to the top. The header ▾ listed alpha, beta, and Clear Recent Files.
+    - With beta.csv deleted, choosing it showed "Cannot open /tmp/app4/beta.csv: No such file or directory" and left only alpha on the list.
 - **2026-10-10 decision:** no AUR (user decision: it is dead). M4 ships a curl installer instead: `curl -fsSL <site>/install.sh | sh` on the Cloudflare download site.
   - It reads `latest.json`, downloads the tarball, and checks its sha256. It installs per user, without sudo: the binary in `~/.local/bin`, the .desktop file and icon in `~/.local/share`, and the text/csv default via `xdg-mime`.
   - Rerunning it updates; `--uninstall` removes it. It can't install GTK 4, so it prints the distro's install command when GTK 4 is missing.
