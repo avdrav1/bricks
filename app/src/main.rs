@@ -243,7 +243,9 @@ fn start_window(app: &gtk::Application) {
     new.add_css_class("pill");
     new.set_halign(gtk::Align::Center);
     new.set_action_name(Some("app.new"));
-    let hint = gtk::Label::new(Some("Ctrl+O, Ctrl+N, or run: spreadsheet FILE.csv"));
+    let hint = gtk::Label::new(Some(
+        "Ctrl+O, Ctrl+N, drop a file here, or run: spreadsheet FILE.csv",
+    ));
     hint.add_css_class("dim-label");
     let page = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
@@ -273,6 +275,7 @@ fn start_window(app: &gtk::Application) {
         .child(&page)
         .build();
     window.set_widget_name(START_WINDOW);
+    accept_file_drops(app, &window);
     window.set_titlebar(Some(&gtk::HeaderBar::new()));
     window.present();
     open.grab_focus();
@@ -393,6 +396,47 @@ fn choose_and_open(app: &gtk::Application) {
             ),
         }
     });
+}
+
+/// Drag and drop to open (APP-5): files dropped on a window open as Open does, each in
+/// its own window, or brought forward if already open. GTK hands over a file list from
+/// both Wayland and X11 drags (it reads `text/uri-list` too). The windows open after the
+/// drop is done: opening one closes the start window, which may be the drop's target.
+fn accept_file_drops(app: &gtk::Application, window: &gtk::ApplicationWindow) {
+    let target = gtk::DropTarget::new(
+        gtk::gdk::FileList::static_type(),
+        gtk::gdk::DragAction::COPY,
+    );
+    target.connect_drop({
+        let (app, window) = (app.clone(), window.downgrade());
+        move |_, value, _, _| {
+            let Ok(files) = value.get::<gtk::gdk::FileList>() else {
+                return false;
+            };
+            let files = files.files();
+            if files.is_empty() {
+                return false;
+            }
+            let (app, window) = (app.clone(), window.clone());
+            glib::idle_add_local_once(move || {
+                let parent = window.upgrade().map(|w| w.upcast::<gtk::Window>());
+                for file in files {
+                    match file.path() {
+                        Some(path) => {
+                            open_window(&app, &path, parent.as_ref());
+                        }
+                        None => alert(
+                            parent.as_ref(),
+                            &format!("Cannot open {}", file.uri()),
+                            "Only local files can be opened.",
+                        ),
+                    }
+                }
+            });
+            true
+        }
+    });
+    window.add_controller(target);
 }
 
 /// Show `path` in a window: its existing one, or a new one. The start window closes once
@@ -610,6 +654,7 @@ fn build_window(
         .child(&layout)
         .build();
     OPEN_WINDOWS.with_borrow_mut(|open| open.push((session.clone(), window.downgrade())));
+    accept_file_drops(app, &window);
     let delimiter = delimiter_dropdown(session, &grid);
     let open = gtk::Button::from_icon_name("document-open-symbolic");
     open.set_tooltip_text(Some("Open… (Ctrl+O)"));

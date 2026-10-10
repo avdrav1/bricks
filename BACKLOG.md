@@ -70,7 +70,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | SRCH-2 | M3 | P0 | done | SRCH-1 | Next/previous result; hit count streams in | New keystroke cancels the running search |
 | SRCH-3 | M3 | P0 | done | SRCH-2, CMD-1 | Find and replace; replace all | Replace all on 100k hits undoes as one step |
 | APP-4 | M4 | P0 | done | APP-1 | Recent files menu | Last 10 files survive restart |
-| APP-5 | M4 | P0 | todo | APP-1 | Drag and drop to open | Works on Wayland and X11 |
+| APP-5 | M4 | P0 | done | APP-1 | Drag and drop to open | Works on Wayland and X11 |
 | APP-6 | M4 | P0 | todo | DEC-1 | Follow system dark/light theme; high-DPI | No blurry text at 1.5x and 2x |
 | APP-7 | M4 | P1 | todo | CMD-2 | Crash recovery via periodic overlay journal | Relaunch after crash offers to restore edits |
 | APP-8 | M4 | P1 | todo | ENG-3 | Clear errors for malformed files | Dialog shows line number and offending text |
@@ -82,6 +82,14 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-10 APP-5:** drag and drop to open. Files dropped on the start window or any file window open as Open does: each in its own window (or brought forward if already open), recorded in recent files; a non-local URI or an unreadable file shows the usual error.
+  - `accept_file_drops` adds a `gtk::DropTarget` for `gdk::FileList` (GTK fills it from `text/uri-list` on both Wayland and X11) to every window. The windows open from an idle callback after the drop completes, because opening a file closes the start window, which may be the drop's own target. The start window's hint mentions dropping.
+  - Acceptance: `scripts/check_drop.sh`. In an Arch container, headless sway (Wayland) and Xvfb (X11) each run the app on its start window, with a GTK drag-source window (`scripts/dnd_helpers.py source`) offering a file as `text/uri-list`, as file managers do.
+    - The pointer is real input to each display server: the wlr-virtual-pointer protocol via pywayland on sway, XTEST via xdotool on X11.
+    - It drags first.csv onto the start window, then second.csv onto first.csv's window. Both displays end with windows titled first.csv and second.csv, and recent files "second, first".
+    - Negative control: the release binary built before this story fails the same check on both (the start window stays).
+  - Container note: Arch's sway binary carries the `cap_sys_nice` file capability, so the container needs `--cap-add SYS_NICE` to exec it.
+  - Not tested: a drag from a real file manager (Nautilus, Dolphin). They offer the same `text/uri-list`, plus a portal format for Flatpak senders, which GTK also reads.
 - **2026-10-10 decision:** Flatpak (PKG-2) is deferred; the curl installer is the M4 distribution (user decision). PKG-2 stays P2 and todo, so it doesn't hold the M4 gate.
   - The work is parked, unmerged, on branch `story/pkg-2-flatpak` (ea4b959). Its manifest builds, installs, and runs in Flathub's own CI image (GNOME 51), checked by `scripts/check_flatpak.sh`.
   - Before a submission it needs: an app ID on a domain we control (or `io.github.<user>.<repo>`), a homepage URL, hosted screenshots, and either a Flathub exception for home-folder access or a move to portals.
