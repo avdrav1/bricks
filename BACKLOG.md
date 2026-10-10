@@ -75,13 +75,30 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | APP-7 | M4 | P1 | todo | CMD-2 | Crash recovery via periodic overlay journal | Relaunch after crash offers to restore edits |
 | APP-8 | M4 | P1 | todo | ENG-3 | Clear errors for malformed files | Dialog shows line number and offending text |
 | PKG-3 | M4 | P0 | done | - | Portable release build: link against Ubuntu 24.04's glibc (build in a container) | The release binary starts on clean Arch, Ubuntu 24.04, and Fedora |
-| PKG-1 | M4 | P0 | todo | APP-1, PKG-3 | curl installer (per user, no sudo): `install.sh` on the download site; .desktop file, icon, text/csv association; `--uninstall` | Piping `install.sh` from the site into `sh` installs on clean Arch, Ubuntu 24.04, Fedora; checksum verified; double-click opens CSVs; prints the distro's GTK 4 install command if missing |
+| PKG-1 | M4 | P0 | done | APP-1, PKG-3 | curl installer (per user, no sudo): `install.sh` on the download site; .desktop file, icon, text/csv association; `--uninstall` | Piping `install.sh` from the site into `sh` installs on clean Arch, Ubuntu 24.04, Fedora; checksum verified; double-click opens CSVs; prints the distro's GTK 4 install command if missing |
 | PKG-2 | M4 | P2 | todo | PKG-1 | Flatpak manifest | Builds on Flathub CI |
 
 ## Notes
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-10 PKG-1:** curl installer. `curl -fsSL <page>/install.sh | sh` installs or updates for the user, without sudo; `| sh -s -- --uninstall` removes it.
+  - `site/install.sh` (POSIX sh, since it is piped into `sh`): reads `latest.json` from the download bucket (`ship.sh site` fills in `DOWNLOAD_BASE_URL`; `SPREADSHEET_DOWNLOAD_URL` overrides it for tests). It downloads with curl or wget, checks the sha256, and installs nothing on a mismatch.
+    - The binary goes to `~/.local/bin` by copy and rename, so a running copy isn't written into. The icon (new `packaging/spreadsheet.svg`, now in the tarball) goes to `~/.local/share/icons/hicolor/scalable/apps`.
+    - The desktop entry goes to `~/.local/share/applications`, with `Exec=` the absolute path, so a launcher starts it even when `~/.local/bin` isn't on its PATH.
+  - `text/csv` and `text/tab-separated-values` defaults go into `~/.config/mimeapps.list` directly (`xdg-mime` isn't always installed).
+    - Every other line and section stays. Uninstall removes only the entries naming `spreadsheet.desktop`, so another app's default for CSV survives.
+    - Two bugs found while reviewing before the container runs: uninstall dropped every CSV default, and the function reused the `tmp` variable the download's cleanup trap needed.
+  - Then it runs `spreadsheet --version`. If the loader can't find GTK 4, it says so with the distro's command from `/etc/os-release` (`pacman -S gtk4`, `apt install libgtk-4-1`, `dnf install gtk4`, `zypper install libgtk-4-1`, else generic) and exits 2. It also says when `~/.local/bin` isn't on PATH.
+  - Acceptance: `scripts/check_install.sh` (also run by `ship.sh verify`). A throwaway site on localhost serves the tarball, a tampered copy, and latest.json; Arch, Ubuntu 24.04, and Fedora containers run as a normal user:
+    - Without GTK: installs, then prints the right package command; exit 2. With a tampered tarball: "checksum mismatch … nothing installed", and nothing is.
+    - With GTK, and another app's `image/png` and `text/csv` defaults already there: installs; `gio mime text/csv` says spreadsheet.desktop.
+    - `gio open /tmp/t.csv`, which is what a file manager's double-click calls, starts the app on the file: its recent-files list (APP-4) then holds `/tmp/t.csv`.
+    - Reinstall updates. Uninstall leaves no binary or desktop entry and keeps the other app's `image/png` default.
+    - All three ok. `VERBOSE=1` and `ONLY=<distro>` help when one fails.
+  - Also changed: the download page shows the curl command for its own address, plus the uninstall line, and the AUR sentence is gone. The README has an Install section.
+  - The ship-it skill now checks after deploy that the live `install.sh` names the download URL.
+  - Not yet proven: the M4 gate asks for VMs with a desktop and a real double-click in a file manager. Containers prove the same path (`gio open` uses the same defaults a file manager does) but not a file manager itself.
 - **2026-10-10 PKG-3:** the release binary is built in an Ubuntu 24.04 container and checked on clean Arch, Ubuntu 24.04, and Fedora.
   - `packaging/build.Dockerfile`: Ubuntu 24.04 (glibc 2.39, GTK 4.14, the oldest we support), `libgtk-4-dev`, and stable Rust with the components `rust-toolchain.toml` names.
     - `scripts/ship.sh build` runs cargo in it as the calling user, with its own `CARGO_HOME` and target dir under `target/container`, so host builds are untouched.

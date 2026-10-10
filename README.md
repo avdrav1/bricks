@@ -2,9 +2,20 @@
 
 A fast, lightweight spreadsheet for Linux, written in Rust. V0.1 goal: open, browse, edit, sort, filter, search, and save ~1 GB CSV files faster than LibreOffice Calc.
 
+## Install
+
+For your user, without sudo (x86_64 Linux with GTK 4.14 or newer: Arch, Ubuntu 24.04, Fedora, and newer):
+
+```sh
+curl -fsSL https://<download page>/install.sh | sh                    # install or update
+curl -fsSL https://<download page>/install.sh | sh -s -- --uninstall  # remove
+```
+
+It puts `spreadsheet` in `~/.local/bin`, adds it to the app menu, and makes it the default for CSV and TSV files. The download is checked against the release's sha256 first.
+
 ## Start here
 
-1. Install Rust stable (`rustup`), Python 3, GTK 4.14+ dev files (`gtk4` on Arch, `libgtk-4-dev` on Debian/Ubuntu), and Node (for `npx wrangler` when shipping).
+1. Install Rust stable (`rustup`), Python 3, GTK 4.14+ dev files (`gtk4` on Arch, `libgtk-4-dev` on Debian/Ubuntu), Docker (release builds and checks), and Node (for `npx wrangler` when shipping).
 2. `cargo test --workspace` should pass on a fresh clone.
 3. Paste the product spec into `docs/SPEC.md`.
 4. `python3 scripts/gen_corpus.py` builds test files in `corpus/` (about 5 GB at full size; use `--max-mb 100` to start small).

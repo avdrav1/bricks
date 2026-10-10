@@ -63,7 +63,7 @@ build)
   rm -rf "dist/$NAME"; mkdir -p "dist/$NAME"
   cp "target/container/$TARGET/release/$APP" "dist/$NAME/"
   strip "dist/$NAME/$APP" || true
-  cp packaging/$APP.desktop README.md "dist/$NAME/"
+  cp packaging/$APP.desktop packaging/$APP.svg README.md "dist/$NAME/"
   cp LICENSE* "dist/$NAME/" 2>/dev/null || true
   tar -C dist -czf "$TAR" "$NAME"
   (cd dist && sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256")
@@ -76,6 +76,7 @@ JSON
 verify)
   [ -x "dist/$NAME/$APP" ] || { echo "run build first"; exit 1; }
   scripts/check_release.sh "dist/$NAME/$APP"
+  scripts/check_install.sh "$TAR"
   ;;
 upload)
   need CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID R2_BUCKET
@@ -89,6 +90,9 @@ site)
   need CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CF_PAGES_PROJECT
   [ -f dist/latest.json ] || { echo "run build first"; exit 1; }
   rm -rf dist/site; cp -r site dist/site; cp dist/latest.json dist/site/
+  # The installer reads latest.json from the bucket (PKG-1).
+  need DOWNLOAD_BASE_URL
+  sed -i "s|@DOWNLOAD_BASE_URL@|$DOWNLOAD_BASE_URL|" dist/site/install.sh
   run wr pages deploy dist/site --project-name "$CF_PAGES_PROJECT" --branch main --commit-dirty=true
   ;;
 tag)

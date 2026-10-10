@@ -63,15 +63,20 @@
   </div>
   <section class="install" id="install">
     <h2>Install</h2>
-    <pre id="cmd">tar xf spreadsheet-*-x86_64-linux.tar.gz
-./spreadsheet-*-x86_64-linux/spreadsheet</pre>
-    <p>Arch Linux package coming to the AUR. Verify your download with the published sha256.</p>
+    <p>For your user, no sudo: the app, its menu entry, and CSV files opening with it. Run it again to update.</p>
+    <pre id="cmd">curl -fsSL https://this-site/install.sh | sh</pre>
+    <p>It needs GTK 4, which GNOME desktops have; otherwise the installer says how to get it. Or download the tarball above and check it against the published sha256. To remove it:</p>
+    <pre id="uninstall">curl -fsSL https://this-site/install.sh | sh -s -- --uninstall</pre>
   </section>
 </main>
 <footer class="status" aria-live="polite">
   <span id="ver">Loading release</span><span id="size"></span><span id="sha"></span><span>x86_64 Linux</span>
 </footer>
 <script>
+  // The install command names this page's own address.
+  const script = location.origin + "/install.sh";
+  document.getElementById("cmd").textContent = "curl -fsSL " + script + " | sh";
+  document.getElementById("uninstall").textContent = "curl -fsSL " + script + " | sh -s -- --uninstall";
   fetch("latest.json", { cache: "no-store" })
     .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
     .then(rel => {

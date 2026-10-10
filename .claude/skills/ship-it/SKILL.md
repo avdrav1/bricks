@@ -86,7 +86,9 @@ Then verify, and report each check:
 
 - `curl -fsSI $DOWNLOAD_BASE_URL/releases/vX.Y.Z/<name>.tar.gz` returns 200.
 - `curl -fsS <pages URL from wrangler output>/latest.json` shows the new version.
+- `curl -fsS <pages URL>/install.sh | grep -c "$DOWNLOAD_BASE_URL"` is 1 (the deploy filled in the download URL).
 - Downloaded tarball matches the sha256.
+- Optionally, on this machine: `curl -fsSL <pages URL>/install.sh | sh` reports the new version.
 
 If upload succeeds but the site deploy fails, the old page still points at the old version; rerun `site` alone after fixing. If a step fails mid-way, do not delete uploaded objects; report what landed.
 
