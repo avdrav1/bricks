@@ -3,5 +3,6 @@
 /corpus
 /spikes/*/target
 .env.ship
+.wrangler/
 *.swp
 __pycache__/
