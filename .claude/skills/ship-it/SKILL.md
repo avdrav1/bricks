@@ -100,7 +100,7 @@ Shipped vX.Y.Z
 Download: <url>  (N MB, sha256 <first 12 chars>)
 Page: <pages url>
 Stories: <IDs>
-Not done: <push pending | AUR update pending | none>
+Not done: <push pending | none>
 ```
 
-For AUR (story PKG-1 and later), print the new `pkgver` and `sha256sums` for `packaging/aur/PKGBUILD` and let the user publish it; do not push to the AUR.
+The download page also serves `install.sh` (story PKG-1), which reads `latest.json`, so a site deploy is all a new version needs; nothing goes to a package registry.

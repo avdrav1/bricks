@@ -4,7 +4,7 @@ Oct 5, 2026 · @Avniel Dravid
 
 ## How this plan works
 
-V0.1 ships at the end of M3; the AUR release follows at the end of M4. Each milestone closes with a gate tied to the benchmark suite, and nothing moves forward until the gate passes.
+V0.1 ships at the end of M3; the curl-installer release (per user, on Arch, Ubuntu 24.04, and Fedora) follows at the end of M4. Each milestone closes with a gate tied to the benchmark suite, and nothing moves forward until the gate passes.
 
 **Sequencing rules**
 

@@ -14,7 +14,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 - [x] M1: viewer passes the LibreOffice navigation checklist; first rows of 1 GB in under 500 ms
 - [x] M2: editor round-trips edits, paste, inserts, and undo on 1 GB without full rewrites before save
 - [x] M3: all V0.1 benchmarks in docs/BENCHMARKS.md pass on reference hardware (V0.1 release)
-- [ ] M4: AUR package installs on a clean Arch VM and opens CSVs by double-click
+- [ ] M4: `curl -fsSL <site>/install.sh | sh` installs per user on clean Arch, Ubuntu 24.04, and Fedora VMs, and double-clicking a CSV opens it
 
 ## Stories
 
@@ -74,13 +74,18 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | APP-6 | M4 | P0 | todo | DEC-1 | Follow system dark/light theme; high-DPI | No blurry text at 1.5x and 2x |
 | APP-7 | M4 | P1 | todo | CMD-2 | Crash recovery via periodic overlay journal | Relaunch after crash offers to restore edits |
 | APP-8 | M4 | P1 | todo | ENG-3 | Clear errors for malformed files | Dialog shows line number and offending text |
-| PKG-1 | M4 | P0 | todo | APP-1 | AUR package, .desktop file, text/csv MIME association | `yay -S` installs; double-click opens CSVs |
+| PKG-3 | M4 | P0 | todo | - | Portable release build: link against Ubuntu 24.04's glibc (build in a container) | The release binary starts on clean Arch, Ubuntu 24.04, and Fedora |
+| PKG-1 | M4 | P0 | todo | APP-1, PKG-3 | curl installer (per user, no sudo): `install.sh` on the download site; .desktop file, icon, text/csv association; `--uninstall` | Piping `install.sh` from the site into `sh` installs on clean Arch, Ubuntu 24.04, Fedora; checksum verified; double-click opens CSVs; prints the distro's GTK 4 install command if missing |
 | PKG-2 | M4 | P2 | todo | PKG-1 | Flatpak manifest | Builds on Flathub CI |
 
 ## Notes
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-10 decision:** no AUR (user decision: it is dead). M4 ships a curl installer instead: `curl -fsSL <site>/install.sh | sh` on the Cloudflare download site.
+  - It reads `latest.json`, downloads the tarball, and checks its sha256. It installs per user, without sudo: the binary in `~/.local/bin`, the .desktop file and icon in `~/.local/share`, and the text/csv default via `xdg-mime`.
+  - Rerunning it updates; `--uninstall` removes it. It can't install GTK 4, so it prints the distro's install command when GTK 4 is missing.
+  - The gate needs clean Arch, Ubuntu 24.04, and Fedora VMs (user decision). New story PKG-3 builds the release against Ubuntu 24.04's glibc, since a binary built on Arch won't start on Ubuntu. PKG-1 is now the installer and depends on it.
 - **2026-10-10 FILT-4:** edits and paste respect the filtered view, and the FILT-1 refusals are gone.
   - Typing, Delete, copy, and paste already reached only the rows shown (FILT-1). This story proves paste and lifts the refusals.
   - Decided with the user:

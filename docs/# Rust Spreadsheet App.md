@@ -636,7 +636,7 @@ Initial priorities:
 
 Likely first distribution:
 
-- Arch/AUR package
+- curl installer (`curl -fsSL <site>/install.sh | sh`), per user, for Arch, Ubuntu, and Fedora (the AUR was dropped on 2026-10-10)
 
 Future distribution:
 
@@ -803,7 +803,7 @@ Add:
 - crash recovery
 - better errors
 - packaging
-- AUR distribution
+- curl installer distribution
 
 ---
 

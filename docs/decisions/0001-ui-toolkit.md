@@ -93,5 +93,5 @@ Both toolkits meet the frame-time and latency bar at 1M and 10M rows in a normal
 
 - **Easy:** native dialogs, menus, IME, accessibility, and theming come from the toolkit. Text renders correctly for any script the system has fonts for.
 - **Hard:** frames that redraw every cell are bound by Pango shaping at about 5 µs per fresh cell. At 3800x2080 with every cell new, GTK hits 30 fps. GRID-1/GRID-2 need a plan for fast scrollbar drags on large windows. Options: reuse per-row render nodes across frames, fill cells progressively within a frame budget, or a cheaper text path for ASCII-only cells. That is a GRID-1 implementation concern, not a blocker for this decision.
-- **CI:** CI needs `libgtk-4-dev` (Ubuntu 24.04 ships 4.14, which matches the `v4_14` feature) and adds GTK to the AUR package's runtime dependencies.
+- **CI:** CI needs `libgtk-4-dev` (Ubuntu 24.04 ships 4.14, which matches the `v4_14` feature). GTK 4 is a runtime dependency the curl installer checks for (PKG-1; the AUR package was dropped on 2026-10-10).
 - **Revisit if:** GRID-1 cannot hold 60 fps for scrolling at 2M rows on a maximized 4K window after node reuse, or gtk4-rs friction (subclassing, lifetimes in signal closures) measurably slows feature work in M1.
