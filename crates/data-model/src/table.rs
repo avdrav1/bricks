@@ -514,31 +514,42 @@ impl CsvTable {
         self.overlay.len() + rows as usize + sorted + cols + self.cleared.len()
     }
 
-    /// An edit inserting `count` empty rows before table row `row` (at the end when
-    /// `row == row_count()`). `None` until the whole file is indexed (the row order is
-    /// fixed only then), and while filtered (FILT-1).
+    /// An edit inserting `count` empty rows before table row `row`, or at the end of the
+    /// file when `row == row_count()`. While filtered (FILT-4) "before table row `row`"
+    /// means before that shown row, and the new rows stay shown until a filter is applied
+    /// again. `None` until the whole file is indexed (the row order is fixed only then).
     pub fn insert_rows(&mut self, row: Row, count: u64) -> Option<Edit> {
-        if !self.index.is_complete() || self.is_filtered() || count == 0 || row > self.row_count() {
+        if !self.index.is_complete() || count == 0 || row > self.row_count() {
             return None;
         }
+        let at = if row < self.row_count() {
+            self.pos(row)
+        } else {
+            self.total_rows()
+        };
         let first = RowId::inserted(self.next_inserted);
         self.next_inserted += count;
         Some(Edit::InsertRows {
-            at: row + self.first_row(),
+            at,
             rows: vec![Run { first, len: count }],
         })
     }
 
-    /// An edit deleting `count` table rows from `row` on. `None` until the whole file is
-    /// indexed, while filtered (FILT-1), or when the rows don't exist.
+    /// An edit deleting `count` table rows from `row` on: while filtered, only those
+    /// shown, as one step, and the hidden rows between them stay (FILT-4). `None` until
+    /// the whole file is indexed, or when the rows don't exist.
     pub fn delete_rows(&self, row: Row, count: u64) -> Option<Edit> {
         let end = row.checked_add(count)?;
-        if !self.index.is_complete() || self.is_filtered() || count == 0 || end > self.row_count() {
+        if !self.index.is_complete() || count == 0 || end > self.row_count() {
             return None;
         }
-        Some(Edit::DeleteRows {
-            at: row + self.first_row(),
-            count,
+        let ranges = self.view_ranges(row..end);
+        Some(match ranges.as_slice() {
+            [one] => Edit::DeleteRows {
+                at: one.start,
+                count: one.end - one.start,
+            },
+            _ => Edit::DeleteRowRanges(ranges),
         })
     }
 
@@ -566,7 +577,11 @@ impl CsvTable {
         if self.is_filtered()
             && matches!(
                 inverse,
-                Edit::InsertRows { .. } | Edit::DeleteRows { .. } | Edit::Reorder(_)
+                Edit::InsertRows { .. }
+                    | Edit::DeleteRows { .. }
+                    | Edit::InsertRowRanges(_)
+                    | Edit::DeleteRowRanges(_)
+                    | Edit::Reorder(_)
             )
         {
             self.update_view();
@@ -593,6 +608,17 @@ impl CsvTable {
                 at,
                 rows: self.row_map().remove(at, count),
             },
+            Edit::DeleteRowRanges(ranges) => {
+                Edit::InsertRowRanges(self.row_map().remove_ranges(&ranges))
+            }
+            Edit::InsertRowRanges(parts) => {
+                let ranges = parts
+                    .iter()
+                    .map(|(at, runs)| *at..*at + runs.iter().map(|r| r.len).sum::<u64>())
+                    .collect();
+                self.row_map().insert_ranges(&parts);
+                Edit::DeleteRowRanges(ranges)
+            }
             Edit::InsertCols { at, cols } => {
                 let count = cols.len() as Col;
                 self.cols

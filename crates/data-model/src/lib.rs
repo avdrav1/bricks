@@ -108,6 +108,12 @@ pub enum Edit {
     /// Take `count` rows out from position `at`. Their ids, and so their edits, are kept
     /// in the inverse, so undo brings them back as they were.
     DeleteRows { at: u64, count: u64 },
+    /// Take out the rows at these positions (ascending, apart) as one step: the rows shown
+    /// under a filter, with hidden rows between them (FILT-4). Build it with
+    /// [`CsvTable::delete_rows`].
+    DeleteRowRanges(Vec<Range<u64>>),
+    /// Undo of [`Edit::DeleteRowRanges`]: rows back at the positions they had, ascending.
+    InsertRowRanges(Vec<(u64, Vec<Run>)>),
     /// Show these columns, in order, from column `at` on; later columns move right.
     InsertCols { at: Col, cols: Vec<ColId> },
     /// Take `count` columns out from column `at`; the inverse keeps their ids.
@@ -162,6 +168,14 @@ impl Edit {
             Self::InsertRows { rows, .. } => rows.capacity() * std::mem::size_of::<Run>(),
             Self::InsertCols { cols, .. } => cols.capacity() * std::mem::size_of::<ColId>(),
             Self::DeleteRows { .. } | Self::DeleteCols { .. } => 0,
+            Self::DeleteRowRanges(ranges) => ranges.capacity() * std::mem::size_of::<Range<u64>>(),
+            Self::InsertRowRanges(parts) => {
+                parts.capacity() * std::mem::size_of::<(u64, Vec<Run>)>()
+                    + parts
+                        .iter()
+                        .map(|(_, r)| r.capacity() * std::mem::size_of::<Run>())
+                        .sum::<usize>()
+            }
             Self::ClearCells { rows, cols } => {
                 rows.capacity() * std::mem::size_of::<Run>() + cols.heap_bytes()
             }

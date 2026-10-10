@@ -1183,10 +1183,6 @@ impl GridView {
                             undo.execute(Box::new(Batch::new("Edit cell", edits, at)), table);
                             grew = true;
                         }
-                        // No row to type into while every row is filtered out (FILT-2).
-                        Err(PasteError::Filtered) => imp
-                            .clip_note
-                            .set(Some((ClipView::Filtered, Instant::now()))),
                         _ => {}
                     }
                 } else if table.cell_value(row, col).as_deref() != Some(text.as_str()) {
@@ -1299,9 +1295,6 @@ impl GridView {
         let Some((first, count)) = self.selected_rows() else {
             return;
         };
-        if self.refused_while_filtered() {
-            return;
-        }
         let at = if below { first + count } else { first };
         let edit = self
             .imp()
@@ -1317,9 +1310,6 @@ impl GridView {
         let Some((first, count)) = self.selected_rows() else {
             return;
         };
-        if self.refused_while_filtered() {
-            return;
-        }
         let edit = self
             .imp()
             .table
@@ -1327,17 +1317,6 @@ impl GridView {
             .as_ref()
             .and_then(|t| t.delete_rows(first, count.min(t.row_count().saturating_sub(first))));
         self.reshape(edit);
-    }
-
-    /// Rows can't be inserted or deleted while filtered (FILT-1): say so, and `true`.
-    fn refused_while_filtered(&self) -> bool {
-        let filtered = self.is_filtered();
-        if filtered {
-            self.imp()
-                .clip_note
-                .set(Some((ClipView::Filtered, Instant::now())));
-        }
-        filtered
     }
 
     /// The rows the selection spans (first, count). `None` for whole columns: Ctrl+-
@@ -1601,7 +1580,6 @@ impl GridView {
                     max: PASTE_MAX_CELLS,
                 },
                 Err(PasteError::NotIndexed) => ClipView::PasteNeedsIndex,
-                Err(PasteError::Filtered) => ClipView::Filtered,
             }
         };
         imp.clip_note.set(Some((note, Instant::now())));
@@ -2676,10 +2654,10 @@ impl GridView {
     }
 }
 
-/// Rows shown for `table`: its rows, plus the editable edge row once indexing is done
-/// (not while filtered: rows can't be added then, FILT-1).
+/// Rows shown for `table`: its rows, plus the editable edge row once indexing is done.
+/// Typing there adds a row at the end of the file, filtered or not (FILT-4).
 fn shown_rows(table: &CsvTable) -> u64 {
-    table.row_count() + u64::from(table.is_complete() && !table.is_filtered())
+    table.row_count() + u64::from(table.is_complete())
 }
 
 /// What the popover calls an inferred type: "Automatic (whole numbers)".

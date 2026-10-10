@@ -22,7 +22,7 @@ impl Reshape {
     pub fn new(edit: Edit, cursor: CellRef) -> Self {
         let label = match edit {
             Edit::InsertRows { .. } => "Insert rows",
-            Edit::DeleteRows { .. } => "Delete rows",
+            Edit::DeleteRows { .. } | Edit::DeleteRowRanges(_) => "Delete rows",
             Edit::InsertCols { .. } => "Insert columns",
             _ => "Delete columns",
         };
@@ -36,16 +36,24 @@ impl Reshape {
 
     fn swap(&mut self, table: &mut CsvTable) {
         let edit = std::mem::replace(&mut self.edit, Edit::none());
-        self.focus = match &edit {
-            Edit::InsertRows { rows, .. } => rows.first().map(|r| CellRef {
-                row: r.first,
-                ..self.cursor
-            }),
-            Edit::InsertCols { cols, .. } => {
-                cols.first().map(|&col| CellRef { col, ..self.cursor })
-            }
-            _ => None,
-        };
+        self.focus =
+            match &edit {
+                Edit::InsertRows { rows, .. } => rows.first().map(|r| CellRef {
+                    row: r.first,
+                    ..self.cursor
+                }),
+                Edit::InsertRowRanges(parts) => parts
+                    .first()
+                    .and_then(|(_, runs)| runs.first())
+                    .map(|r| CellRef {
+                        row: r.first,
+                        ..self.cursor
+                    }),
+                Edit::InsertCols { cols, .. } => {
+                    cols.first().map(|&col| CellRef { col, ..self.cursor })
+                }
+                _ => None,
+            };
         self.edit = table.apply(edit);
     }
 }

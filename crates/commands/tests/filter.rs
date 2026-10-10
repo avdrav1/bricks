@@ -4,8 +4,8 @@
 
 use commands::{Batch, ClearCells, SetCell, UndoStack};
 use data_model::{
-    CellRef, Compare, CsvTable, DelimiterChoice, Filter, FilterError, PasteError, RowBlock,
-    SaveProgress, SortOrder, TableSource, Test,
+    CellRef, Compare, CsvTable, DelimiterChoice, Filter, FilterError, RowBlock, SaveProgress,
+    SortOrder, TableSource, Test,
 };
 use std::sync::atomic::{AtomicBool, AtomicU64};
 
@@ -173,13 +173,6 @@ fn edits_clears_copies_and_pastes_reach_the_rows_shown() {
     let edits = t.paste(0, 0, &cells).unwrap();
     undo.execute(Box::new(Batch::new("Paste", edits, at(&t, 0, 0))), &mut t);
     assert_eq!(ids(&mut t), ["p", "q"]);
-    let three = vec![vec!["x".to_owned()]; 3];
-    assert_eq!(
-        t.paste(0, 0, &three),
-        Err(PasteError::Filtered),
-        "no rows added"
-    );
-    assert!(t.insert_rows(0, 1).is_none() && t.delete_rows(0, 1).is_none());
 
     let clear = t.clear_cells(0..2, 1..2).unwrap();
     undo.execute(Box::new(ClearCells::new(clear, at(&t, 0, 0))), &mut t);

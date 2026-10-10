@@ -104,3 +104,53 @@ fn two_column_filter_on_1gb() {
         assert!(one + two < Duration::from_secs(3), "{:?}", one + two);
     }
 }
+
+/// FILT-4 at scale: deleting every row a filter shows (1,362,719 rows, hidden ones between
+/// them), in file order and in a sorted order, and undoing it. All of it runs on the UI
+/// thread: the edit, the change of order, and the view following it.
+#[test]
+#[ignore = "needs corpus/rows_1024mb.csv; run with --release --ignored"]
+fn deleting_the_rows_shown_on_1gb() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus/rows_1024mb.csv");
+    let mut t = CsvTable::open(&path, DelimiterChoice::Auto).unwrap();
+    t.index().build(&AtomicBool::new(false)).unwrap();
+    let types = t.infer_types(&AtomicBool::new(false)).unwrap();
+    t.set_types(types);
+    let all = t.row_count();
+    for sorted in [false, true] {
+        if sorted {
+            let edit = t
+                .snapshot()
+                .sort_rows(
+                    4,
+                    SortOrder::Ascending,
+                    &AtomicBool::new(false),
+                    &AtomicU64::new(0),
+                )
+                .unwrap()
+                .unwrap();
+            t.apply(edit);
+        }
+        apply(&mut t, 2, Test::Equals("Portland".into()));
+        apply(&mut t, 3, Test::Number(Compare::Gt, 50_000.0));
+        let shown = t.row_count();
+        let start = Instant::now();
+        let edit = t.delete_rows(0, shown).unwrap();
+        let back = t.apply(edit);
+        let deleted = start.elapsed();
+        assert_eq!(t.row_count(), 0);
+        assert_eq!(t.unfiltered_row_count(), all - shown);
+        let start = Instant::now();
+        t.apply(back);
+        let undone = start.elapsed();
+        assert_eq!((t.row_count(), t.unfiltered_row_count()), (shown, all));
+        eprintln!(
+            "{}: delete {shown} shown rows {:.0} ms, undo {:.0} ms",
+            if sorted { "sorted" } else { "file order" },
+            ms(deleted),
+            ms(undone)
+        );
+        t.clear_filter(2);
+        t.clear_filter(3);
+    }
+}

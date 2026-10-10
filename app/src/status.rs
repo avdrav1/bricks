@@ -37,8 +37,6 @@ pub enum ClipView {
     },
     /// A paste that needs rows added before indexing has finished.
     PasteNeedsIndex,
-    /// Rows can't be inserted, deleted, or pasted past the end while filtered (FILT-1).
-    Filtered,
 }
 
 /// Everything the status bar shows.
@@ -118,7 +116,6 @@ pub fn status(f: &Facts) -> Status {
         ClipView::PasteNeedsIndex => {
             save.push("Paste past the last row once indexing finishes".to_owned())
         }
-        ClipView::Filtered => save.push("Clear the filters to add or delete rows".to_owned()),
     }
     let edits = || {
         format!(

@@ -173,14 +173,20 @@ impl RowMap {
     }
 
     fn node(&mut self, run: Run) -> u32 {
+        self.node_below(run, u64::MAX)
+    }
+
+    /// A node with a random priority no higher than `cap`.
+    fn node_below(&mut self, run: Run, cap: u64) -> u32 {
         // splitmix64: priorities only need to look random.
         self.seed = self.seed.wrapping_add(0x9E37_79B9_7F4A_7C15);
         let mut z = self.seed;
         z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
         z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^= z >> 31;
         let node = Node {
             run,
-            prio: z ^ (z >> 31),
+            prio: if cap == u64::MAX { z } else { z % (cap + 1) },
             l: NIL,
             r: NIL,
             sum: run.len,
@@ -253,7 +259,11 @@ impl RowMap {
             self.nodes[t as usize].run = x;
             self.nodes[t as usize].r = NIL;
             self.update(t);
-            let ny = self.node(y);
+            // The new half goes where `t` was, under `t`'s ancestors: a priority above
+            // `t`'s would break the heap order there and, split after split, let the tree
+            // grow into a chain (FILT-4 found it: depth n/11 after many deletes).
+            let cap = self.nodes[t as usize].prio;
+            let ny = self.node_below(y, cap);
             let rt = self.merge(ny, r);
             (t, rt)
         }
@@ -402,6 +412,68 @@ impl RowOrder {
         }
     }
 
+    /// Take out the rows at positions `ranges` (ascending, apart), as one step: each
+    /// range's rows as runs, with the position it started at. A sorted order is rebuilt
+    /// in one pass, however many ranges (FILT-4: the rows shown under a filter).
+    pub fn remove_ranges(&mut self, ranges: &[std::ops::Range<u64>]) -> Vec<(u64, Vec<Run>)> {
+        match self {
+            Self::Runs(m) => {
+                let mut out: Vec<(u64, Vec<Run>)> = ranges
+                    .iter()
+                    .rev()
+                    .map(|r| (r.start, m.remove(r.start, r.end - r.start)))
+                    .collect();
+                out.reverse();
+                out
+            }
+            Self::Sorted(ids) => {
+                let ids = Arc::make_mut(ids);
+                let mut out = Vec::with_capacity(ranges.len());
+                let mut kept = 0;
+                let mut next = 0;
+                for r in ranges {
+                    let (start, end) = (r.start as usize, r.end as usize);
+                    ids.copy_within(next..start, kept);
+                    kept += start - next;
+                    out.push((r.start, coalesce(&ids[start..end]).collect()));
+                    next = end;
+                }
+                let len = ids.len();
+                ids.copy_within(next..len, kept);
+                ids.truncate(kept + (len - next));
+                out
+            }
+        }
+    }
+
+    /// Put back what [`Self::remove_ranges`] took: runs at the positions they had,
+    /// ascending, as one step.
+    pub fn insert_ranges(&mut self, parts: &[(u64, Vec<Run>)]) {
+        match self {
+            Self::Runs(m) => {
+                for (at, runs) in parts {
+                    m.insert(*at, runs);
+                }
+            }
+            Self::Sorted(ids) => {
+                let added: u64 = parts.iter().flat_map(|(_, r)| r).map(|r| r.len).sum();
+                let mut out = Vec::with_capacity(ids.len() + added as usize);
+                let mut src = ids.iter().copied();
+                for (at, runs) in parts {
+                    out.extend(src.by_ref().take(*at as usize - out.len()));
+                    for r in runs {
+                        out.extend(
+                            (0..r.len)
+                                .map(|i| pack(RowId(r.first.0 + i)).expect("a sorted row id")),
+                        );
+                    }
+                }
+                out.extend(src);
+                *ids = Arc::new(out);
+            }
+        }
+    }
+
     /// Heap the order holds.
     pub fn heap_bytes(&self) -> usize {
         match self {
@@ -466,6 +538,85 @@ mod tests {
             .flat_map(|r| r.first.0..r.first.0 + r.len)
             .collect();
         assert_eq!(window, flat[mid as usize..mid as usize + 10]);
+    }
+
+    /// FILT-4: many ranges out and back in one step, as runs and as a sorted order,
+    /// against a flat vector.
+    #[test]
+    fn ranges_come_out_and_go_back_in_both_kinds_of_order() {
+        let ranges = [1..3, 5..6, 7..10, 12..13];
+        let flat: Vec<u64> = (0..15).collect();
+        let left: Vec<u64> = flat
+            .iter()
+            .copied()
+            .filter(|k| !ranges.iter().any(|r| r.contains(k)))
+            .collect();
+        let ids = |o: &RowOrder| -> Vec<u64> { (0..o.len()).map(|k| o.get(k).0).collect() };
+        let sorted = RowOrder::Sorted(Arc::new((0..15).map(|k| pack(RowId(k)).unwrap()).collect()));
+        for mut order in [RowOrder::Runs(RowMap::new(run(0, 15))), sorted] {
+            let gone = order.remove_ranges(&ranges);
+            assert_eq!(ids(&order), left);
+            let took: Vec<(u64, Vec<u64>)> = gone
+                .iter()
+                .map(|(at, runs)| {
+                    (
+                        *at,
+                        runs.iter()
+                            .flat_map(|r| r.first.0..r.first.0 + r.len)
+                            .collect(),
+                    )
+                })
+                .collect();
+            assert_eq!(
+                took,
+                [
+                    (1, vec![1, 2]),
+                    (5, vec![5]),
+                    (7, vec![7, 8, 9]),
+                    (12, vec![12])
+                ]
+            );
+            order.insert_ranges(&gone);
+            assert_eq!(ids(&order), flat);
+        }
+    }
+
+    /// The tree stays shallow however many runs splits make: cutting a run must not give
+    /// the new half a priority above its new ancestors (it once did, and 40,000
+    /// single-row deletes made the tree 3,669 deep: slow, then a stack overflow).
+    #[test]
+    fn the_tree_stays_shallow_through_many_splits() {
+        fn depth(m: &RowMap, t: u32) -> usize {
+            let mut deepest = 0;
+            let mut stack = vec![(t, 1)];
+            while let Some((t, d)) = stack.pop() {
+                if t != NIL {
+                    deepest = deepest.max(d);
+                    let n = &m.nodes[t as usize];
+                    stack.extend([(n.l, d + 1), (n.r, d + 1)]);
+                }
+            }
+            deepest
+        }
+        let n = 200_000u64;
+        let mut order = RowOrder::Runs(RowMap::new(run(0, n)));
+        let every_other: Vec<_> = (0..n / 2).map(|i| 2 * i..2 * i + 1).collect();
+        let gone = order.remove_ranges(&every_other);
+        let RowOrder::Runs(m) = &order else {
+            unreachable!()
+        };
+        assert!(
+            depth(m, m.root) < 120,
+            "{} runs, depth {}",
+            n / 2,
+            depth(m, m.root)
+        );
+        order.insert_ranges(&gone);
+        let RowOrder::Runs(m) = &order else {
+            unreachable!()
+        };
+        assert!(depth(m, m.root) < 120, "depth {}", depth(m, m.root));
+        assert_eq!(order.len(), n);
     }
 
     #[test]

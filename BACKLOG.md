@@ -65,7 +65,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | FILT-1 | M3 | P0 | done | TYPE-1, DEC-4 | Per-column filter from header dropdown | Exact, contains, not contains, empty, non-empty, numeric compare |
 | FILT-2 | M3 | P0 | done | FILT-1 | Combine filters across columns (AND) | Status bar shows "x of y rows" |
 | FILT-3 | M3 | P0 | done | FILT-1, SAVE-1 | Saving with an active filter keeps hidden rows | Test confirms on-disk row count unchanged |
-| FILT-4 | M3 | P1 | todo | FILT-2, CLIP-2 | Edits and paste respect the filtered view | Paste into a filtered range touches visible rows only |
+| FILT-4 | M3 | P1 | done | FILT-2, CLIP-2 | Edits and paste respect the filtered view | Paste into a filtered range touches visible rows only |
 | SRCH-1 | M3 | P0 | done | ENG-8 | Find bar (Ctrl+F): whole file or current column, case toggle | First hit in 1 GB under 1 s, off the UI thread |
 | SRCH-2 | M3 | P0 | done | SRCH-1 | Next/previous result; hit count streams in | New keystroke cancels the running search |
 | SRCH-3 | M3 | P0 | done | SRCH-2, CMD-1 | Find and replace; replace all | Replace all on 100k hits undoes as one step |
@@ -81,6 +81,33 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-10 FILT-4:** edits and paste respect the filtered view, and the FILT-1 refusals are gone.
+  - Typing, Delete, copy, and paste already reached only the rows shown (FILT-1). This story proves paste and lifts the refusals.
+  - Decided with the user:
+    - A paste that runs past the last row shown adds rows at the end of the file, as when unfiltered. They pass every filter until it is applied again, so they stay shown.
+    - Deleting rows while filtered deletes only the selected rows shown, as one undo step; hidden rows between them stay. Inserting puts empty rows next to the row shown, and they stay shown too. Excel and Calc behave this way.
+  - Data model:
+    - `CsvTable::insert_rows(row, n)` puts rows before shown row `row`'s position, or at the end of the file when `row == row_count()`.
+    - `delete_rows(row, n)` maps the shown rows to positions (`view_ranges`). One range is a plain `Edit::DeleteRows`. Several are the new `Edit::DeleteRowRanges(Vec<Range>)`, whose inverse is `Edit::InsertRowRanges(Vec<(at, runs)>)`.
+    - `RowOrder::remove_ranges`/`insert_ranges` take all the ranges in one step: one copy pass for a sorted order (a delete per range would copy the whole permutation each time), one treap remove per range for runs. `Reshape` labels and focuses the new variants.
+  - Removed: `PasteError::Filtered`, `ClipView::Filtered` and its status message, `GridView::refused_while_filtered`, and the filtered-only refusal in `insert_rows`/`delete_rows`.
+    - The grid's edge row (type below the last row to add one) is back while filtered. `shown_rows` had dropped it; the smoke test found that.
+  - **Bug fixed from EDIT-3 (row-map treap):** cutting a run in `split` gave the new right half a fresh random priority. That could outrank the ancestors it lands under, which breaks the heap order. Split after split, the tree became a chain: depth 7,230 for 80,000 runs, quadratic time, then a stack overflow when deleting the 1.36M rows shown in the 1 GB file.
+    - The new half now draws a priority at or below the split node's (`node_below`). The same 80,000 runs: depth 47, 9 ms instead of 4.1 s.
+    - `the_tree_stays_shallow_through_many_splits` (200,000 runs, depth < 120) would have failed before the fix.
+    - `insert_1gb` is unchanged (insert and delete at row 1M in 0.03 ms).
+  - Acceptance: `commands/tests/filter_edits.rs` `paste_into_a_filtered_range_touches_visible_rows_only`. A 3×2 paste over Denver rows 1, 3, and 5 changes those rows only; rows 2, 4, and 6 are saved unchanged, and undo restores the file byte for byte.
+    - Also tested: a paste past the end adds rows at the end of the file, shown, and one undo removes them.
+    - Deleting all shown rows is one step with hidden rows kept, in file order and in a sorted order; undo puts them back in place. Neighbours with nothing hidden between them are a plain `DeleteRows`.
+    - Inserting puts rows next to the row shown and at the end.
+    - `RowOrder` ranges round-trip against a flat vector.
+    - The old FILT-1 assertions that pastes, inserts, and deletes are refused are gone.
+  - 1 GB (`commands/tests/filter_1gb.rs` `deleting_the_rows_shown_on_1gb`, ignored): deleting the 1,362,719 rows shown (Portland, revenue > 50,000) takes 352 ms in file order (undo 505 ms) and 95 ms sorted (undo 100 ms), on the UI thread.
+  - Smoke test via Broadway on a /tmp copy of the 10 MB file, filtered to Denver (27,431 of 193,311):
+    - Rows 3–5 (ids 3, 10, 15, with hidden rows between them) deleted with Ctrl+- (27,428 of 193,308); Ctrl+Z brought them back.
+    - Ctrl++ inserted an empty row, shown above id 3.
+    - On a fresh copy, typing 999999 into the edge row added a shown row. After Ctrl+S, `diff` showed only `999999,,,,,,,` appended at the end of the file. The filter, applied again on the reopened file, then hid it (city is empty), as filters do.
+  - Follow-up: deleting or undoing a million shown rows in file order takes 0.35–0.5 s on the UI thread (one treap operation per range). It could move to a job, or the runs could be rebuilt in one pass like the sorted order.
 - **2026-10-09 TYPE-2:** each header shows its column's type, and the user can override it.
   - Decided with the user:
     - The type shows as a dim tag right of the title, left of ▾: 123, 1.5, abc, date, T/F. It is blue when overridden, and narrow columns drop it before the button.
