@@ -3,6 +3,7 @@
 //! Layers (spec section 16), each kept separate:
 //! source (csv-engine) -> overlay (edits) -> view (sort/filter) -> grid.
 
+mod check;
 mod cleared;
 mod colmap;
 mod copy;
@@ -16,6 +17,7 @@ mod search;
 mod sort;
 mod table;
 
+pub use check::{Problem, ProblemKind, Problems};
 pub use cleared::ColSet;
 pub use copy::{Copied, HTML_MAX_CELLS};
 pub use filter::{Compare, Filter, FilterError, RowSet, Test};

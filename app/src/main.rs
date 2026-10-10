@@ -23,6 +23,7 @@
 mod crash;
 mod editor;
 mod grid_view;
+mod malformed;
 mod recent;
 mod recovery;
 mod status;
@@ -129,7 +130,10 @@ fn main() -> glib::ExitCode {
         }
     }
     // A file named on the command line is mapped and indexing before the toolkit starts,
-    // so its first rows show as early as possible (BENCH-1 times this path).
+    // so its first rows show as early as possible (BENCH-1 times this path). One that
+    // can't be opened is said so on the start window (a file manager's launch has no
+    // terminal to print to); benchmarks just fail.
+    let mut failed = None;
     let opened = match &args.file {
         Some(path) => match open_session(path) {
             Ok(opened) => {
@@ -141,7 +145,11 @@ fn main() -> glib::ExitCode {
             }
             Err(e) => {
                 eprintln!("spreadsheet: cannot open {}: {e}", path.display());
-                return glib::ExitCode::FAILURE;
+                if args.bench.is_some() {
+                    return glib::ExitCode::FAILURE;
+                }
+                failed = Some((format!("Cannot open {}", path.display()), e.to_string()));
+                None
             }
         },
         None => None,
@@ -178,10 +186,15 @@ fn main() -> glib::ExitCode {
         app.set_accels_for_action("app.open", &["<Control>o"]);
         app.set_accels_for_action("app.new", &["<Control>n"]);
     });
-    let (opened, bench) = (RefCell::new(opened), args.bench);
+    let (opened, failed, bench) = (RefCell::new(opened), RefCell::new(failed), args.bench);
     app.connect_activate(move |app| match opened.take() {
         Some((session, table)) => build_window(app, &session, table, bench.clone()),
-        None if app.windows().is_empty() => start_window(app),
+        None if app.windows().is_empty() => {
+            let window = start_window(app);
+            if let Some((message, detail)) = failed.take() {
+                alert(Some(window.upcast_ref()), &message, &detail);
+            }
+        }
         None => {}
     });
     app.run_with_args::<&str>(&[])
@@ -191,6 +204,7 @@ fn main() -> glib::ExitCode {
 fn open_session(path: &Path) -> std::io::Result<(Rc<Session>, CsvTable)> {
     let session = Rc::new(Session::new(Some(path.to_owned())));
     let table = session.open()?;
+    malformed::refuse_binary(&table)?;
     Ok((session, table))
 }
 
@@ -235,7 +249,7 @@ fn close_start_window(app: &gtk::Application) {
 
 /// Shown when the app starts without a file: buttons that open a file or start a new one,
 /// and the recent files (APP-4).
-fn start_window(app: &gtk::Application) {
+fn start_window(app: &gtk::Application) -> gtk::ApplicationWindow {
     let heading = gtk::Label::new(Some("Open a CSV file"));
     heading.add_css_class("title-2");
     let open = gtk::Button::with_label("Open…");
@@ -291,6 +305,7 @@ fn start_window(app: &gtk::Application) {
     window.set_default_widget(Some(&first));
     GtkWindowExt::set_focus(&window, Some(&first));
     window.present();
+    window
 }
 
 /// A recent file on the start window: its name and folder; it goes away if the file
@@ -504,6 +519,8 @@ struct Session {
     identity: Cell<Option<(u64, u64)>>,
     /// A crashed session's edits to put back once the file is indexed (APP-7).
     restore: RefCell<Option<crash::Pending>>,
+    /// The reading (delimiter, encoding) the malformed-file check last ran on (APP-8).
+    checked: Cell<Option<(u8, Encoding)>>,
 }
 
 impl Session {
@@ -516,6 +533,7 @@ impl Session {
             indexing: RefCell::new(None),
             identity: Cell::new(None),
             restore: RefCell::new(None),
+            checked: Cell::new(None),
         }
     }
 
@@ -908,6 +926,9 @@ fn build_window(
             if let Some(j) = &journal {
                 crash::journal_tick(&grid, &session, j);
                 crash::pending_tick(&window, &grid, &session);
+            }
+            if session.restore.borrow().is_none() {
+                malformed::tick(&window, &grid, &session);
             }
             if complete && !was_complete && std::env::var_os("BRICKS_TIMINGS").is_some() {
                 eprintln!(

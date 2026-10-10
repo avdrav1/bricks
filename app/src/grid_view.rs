@@ -2616,6 +2616,27 @@ impl GridView {
         self.imp().table.borrow().as_ref().map(CsvTable::snapshot)
     }
 
+    /// Put the cursor on file row `file_row` (0 is the file's first line), wherever a
+    /// sort put it (APP-8: a malformed line). False if it isn't shown: the header row, or
+    /// a row a filter hides.
+    pub fn go_to_file_row(&self, file_row: u64) -> bool {
+        let imp = self.imp();
+        let row = imp
+            .table
+            .borrow()
+            .as_ref()
+            .and_then(|t| t.row_of(data_model::RowId::source(file_row)));
+        let Some(row) = row else {
+            return false;
+        };
+        let cell = grid::Cell { row, col: 0 };
+        imp.selection.set(Selection::at(cell));
+        self.scroll_to((Some(row), Some(0)));
+        self.grab_focus();
+        self.queue_draw();
+        true
+    }
+
     /// Put back unsaved edits from a crash (APP-7) as one undoable step, "Restore unsaved
     /// edits". The file must be fully indexed; refused if they don't fit it.
     pub fn restore_edits(&self, state: EditState) -> Result<(), JournalError> {

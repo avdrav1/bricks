@@ -73,7 +73,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | APP-5 | M4 | P0 | done | APP-1 | Drag and drop to open | Works on Wayland and X11 |
 | APP-6 | M4 | P0 | done | DEC-1 | Follow system dark/light theme; high-DPI | No blurry text at 1.5x and 2x |
 | APP-7 | M4 | P1 | done | CMD-2 | Crash recovery via periodic overlay journal | Relaunch after crash offers to restore edits |
-| APP-8 | M4 | P1 | todo | ENG-3 | Clear errors for malformed files | Dialog shows line number and offending text |
+| APP-8 | M4 | P1 | done | ENG-3 | Clear errors for malformed files | Dialog shows line number and offending text |
 | PKG-3 | M4 | P0 | done | - | Portable release build: link against Ubuntu 24.04's glibc (build in a container) | The release binary starts on clean Arch, Ubuntu 24.04, and Fedora |
 | PKG-1 | M4 | P0 | done | APP-1, PKG-3 | curl installer (per user, no sudo): `install.sh` on the download site; .desktop file, icon, text/csv association; `--uninstall` | Piping `install.sh` from the site into `sh` installs on clean Arch, Ubuntu 24.04, Fedora; checksum verified; double-click opens CSVs; prints the distro's GTK 4 install command if missing |
 | PKG-2 | M4 | P2 | todo | PKG-1 | Flatpak manifest | Builds on Flathub CI |
@@ -82,6 +82,32 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-10 APP-8:** clear errors for malformed files. A dialog names the line and shows its text.
+  - Decided with the user: report a quote that never closes, text after a closing quote (`"ab"c`), and binary data. A file with quote problems opens as read, then warns; a binary file is refused.
+  - `data-model/src/check.rs`: `CsvTable::check_file` runs once a reading is indexed, on the job pool, with cancel. It parses rows by the same RFC 4180 rules as the index.
+    - Only rows holding a quote or a zero byte are parsed (one `memchr2` per 65,536-row chunk). A clean 1 GB file takes 83 ms (`checking_1gb`, ignored, release).
+    - Results come in file order: the first 5 problems with line number, file row and excerpt, plus a total count. Line numbers count every newline, so they match a text editor even after quoted newlines.
+    - Excerpts run from the line's start, are cut at 60 characters, and show control characters escaped (`\0`, `\t`, `\x03`).
+  - `CsvTable::binary_at_start` looks for a zero byte in the first 64 KiB. `open_session` refuses such files with "Cannot open …: It holds binary data, not text. Line 1 has a zero byte: “PK\x03\x04\0\0…”". Re-reads (save, delimiter change) don't refuse.
+  - `app/src/malformed.rs` shows the dialog: "“x.csv” has malformed lines", the first 3 problems as "Line 70,002: text follows a closing quote:" with the line's text under it, then "…and 4 more problems", and "The file is shown as read. Rows you don't edit are saved unchanged."
+    - Buttons: Go to Line N (`GridView::go_to_file_row`, which follows sorts and filters) and Close (the default).
+    - It runs once per window for each delimiter and encoding. A save re-reads the file and keeps unedited rows byte for byte, so it would only repeat itself. A delimiter change checks again.
+    - It waits while APP-7's restore offer is pending.
+  - Fixed along the way: a file named on the command line that couldn't be opened printed to stderr and exited with no window, so a file manager's double-click showed nothing. The start window now opens with the "Cannot open" dialog. Benchmark runs still exit with failure.
+  - Acceptance: `scripts/check_malformed.sh`, in an Arch container under headless sway. It reads the dialogs' text through the accessibility tree (`scripts/a11y_helpers.py`, AT-SPI), as GTK shows it. 12 checks pass:
+    1. An unclosed quote after a quoted newline: "Line 5" and `3,"Lee, K,never closed`.
+    2. 200k rows with 7 bad lines across chunks: lines 12, 70,002 and 70,003 listed, "…and 4 more problems". Go to Line 12, then typing and Ctrl+S, changes line 12 and nothing else. Saving doesn't ask again.
+    3. A zip-like file is refused with the line and the bytes, on the start window.
+    4. A well-formed file opens with no dialog.
+  - Negative control: the APP-7 binary fails 9 of the 12 checks. The 3 it passes check for things that must not happen.
+  - Data tests (`data-model/tests/malformed.rs`):
+    - All 13 nasty-corpus files are clean (odd but well-formed).
+    - Lines are placed after quoted newlines.
+    - 7 problems in 200k rows are counted, with the first 5 kept in order across chunks.
+    - A zero byte is found at the start and past the sample.
+    - A cancelled check gives nothing.
+    - Unit tests cover escaped quotes, a quote inside an unquoted field, empty quoted fields, a BOM before a quote, and excerpt cutting and escaping.
+  - Not covered: rows with more fields than the header (ragged) are valid CSV for this app and aren't reported. Problems in the part of a file after an unclosed quote can't be seen, because the quote swallows it.
 - **2026-10-10 APP-7:** crash recovery. After a crash, a relaunch offers the unsaved edits back.
   - Decided with the user:
     - The journal is written 5 seconds after the oldest unwritten change, so at most every 5 s while editing goes on.
