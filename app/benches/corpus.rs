@@ -8,13 +8,16 @@
 //! Numbers count toward gates only on the reference box named in the doc.
 
 use csv_engine::{Dialect, RowIndex, Source, SparseRowIndex};
-use data_model::{CellRef, ColId, CsvTable, Edit};
+use data_model::{
+    CellRef, ColId, Compare, CsvTable, DelimiterChoice, Edit, Filter, Query, SearchProgress,
+    SortOrder, Step, TableSource, Test,
+};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
@@ -126,6 +129,108 @@ fn first_frame_ms(file: &Path, cold: bool) -> Result<(f64, String), String> {
     Ok((median(times), opened))
 }
 
+/// Find, sort, and filter on the 1 GB table, each as the app runs it on a snapshot on the
+/// job pool (SRCH-1, SORT-1, FILT-2). Median of [`RUNS`]; page cache warm.
+fn table_jobs(big: &Path) -> Vec<(&'static str, Measured)> {
+    let no = AtomicBool::new(false);
+    let mut t = CsvTable::open(big, DelimiterChoice::Auto).unwrap();
+    t.index().build(&no).unwrap();
+    let types = t.infer_types(&no).unwrap();
+    t.set_types(types);
+    let timed = |f: &mut dyn FnMut()| {
+        median(
+            (0..RUNS)
+                .map(|_| {
+                    let start = Instant::now();
+                    f();
+                    start.elapsed().as_secs_f64()
+                })
+                .collect(),
+        )
+    };
+
+    // Find: the first match from the top, counting every match as the app does; the
+    // slowest of a value near the end, one not there, and one in 2.7M cells.
+    let mut find = Vec::new();
+    for text in ["19094000", "Zanzibar", "portland"] {
+        let q = Query {
+            text: text.into(),
+            match_case: false,
+            col: None,
+        };
+        let s = timed(&mut || {
+            let mut snap = t.snapshot();
+            let m = snap.search(&q, &no, &SearchProgress::default()).unwrap();
+            m.step(&mut snap, (0, 0), Step::Here, None, &no).unwrap();
+        });
+        find.push((text, s));
+    }
+    let worst = find.iter().map(|(_, s)| *s).fold(0.0, f64::max);
+    let detail: Vec<String> = find
+        .iter()
+        .map(|(q, s)| format!("{q} {:.0} ms", s * 1e3))
+        .collect();
+
+    // Sort: the score column (decimals) of every row, and of the first 2M rows.
+    let sort = |t: &CsvTable| {
+        t.snapshot()
+            .sort_rows(4, SortOrder::Ascending, &no, &AtomicU64::new(0))
+            .unwrap();
+    };
+    let all = t.row_count();
+    let full = timed(&mut || sort(&t));
+    let mut small = t.snapshot();
+    let cut = small.delete_rows(2_000_000, all - 2_000_000).unwrap();
+    small.apply(cut);
+    let two_m = timed(&mut || sort(&small));
+    drop(small);
+
+    // Two-column filter: city = Portland, then revenue > 50,000.
+    let mut shown = 0;
+    let filter = timed(&mut || {
+        let mut s = t.snapshot();
+        for (col, test) in [
+            (2, Test::Equals("Portland".into())),
+            (3, Test::Number(Compare::Gt, 50_000.0)),
+        ] {
+            let f = Filter {
+                col: s.col_id(col),
+                test,
+            };
+            let rows = s
+                .snapshot()
+                .filter_rows(&f, &no, &AtomicU64::new(0))
+                .unwrap();
+            s.set_filter(f, rows);
+        }
+        shown = s.row_count();
+    });
+
+    vec![
+        (
+            "Find first match",
+            ok(
+                format!("{:.0} ms slowest ({})", worst * 1e3, detail.join(", ")),
+                worst < 1.0,
+            ),
+        ),
+        (
+            "Sort numeric column",
+            ok(
+                format!("{full:.2} s for {all} rows, {:.0} ms at 2M", two_m * 1e3),
+                full < 10.0 && two_m < 3.0,
+            ),
+        ),
+        (
+            "Two-column filter",
+            ok(
+                format!("{filter:.2} s: Portland, then revenue > 50,000 ({shown} rows)"),
+                filter < 3.0,
+            ),
+        ),
+    ]
+}
+
 fn measure_all(corpus: &Path) -> HashMap<&'static str, Measured> {
     let mut m = HashMap::new();
     let big = corpus.join("rows_1024mb.csv");
@@ -185,17 +290,8 @@ fn measure_all(corpus: &Path) -> HashMap<&'static str, Measured> {
         ok(format!("{s:.2} s incl. fsync and verify"), s < 15.0),
     );
 
-    for name in [
-        "Find first match",
-        "Sort numeric column",
-        "Two-column filter",
-    ] {
-        let story = match name {
-            "Find first match" => "SRCH-1",
-            "Sort numeric column" => "SORT-1",
-            _ => "FILT-2",
-        };
-        m.insert(name, note(format!("not built yet ({story})")));
+    for (name, measured) in table_jobs(&big) {
+        m.insert(name, measured);
     }
 
     let gui = [

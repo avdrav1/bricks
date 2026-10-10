@@ -4,16 +4,16 @@ Reference box: 16 GB RAM, 8-core x86_64, NVMe SSD, Arch Linux on Wayland. Number
 
 Corpus: `python3 scripts/gen_corpus.py` (the 1 GB file is 19.1M rows).
 
-Run `cargo bench` to measure every row and print this table with Latest filled in (`app/benches/corpus.rs`). Rows that open a window need a graphical session; CI prints them as skipped. Latest below: `cargo bench` on 2026-10-06, Ryzen 9 5900 (24 threads), 126 GiB RAM, NVMe btrfs, Hyprland. This is not the reference box.
+Run `cargo bench` to measure every row and print this table with Latest filled in (`app/benches/corpus.rs`). Rows that open a window need a graphical session; CI prints them as skipped. Latest below: `cargo bench` on 2026-10-10, Ryzen 9 5900 (24 threads), 126 GiB RAM, NVMe btrfs, Hyprland. This is not the reference box. "8 cores" is the same run under `systemd-run --user --scope -p MemoryMax=16G taskset -c 0-7`, an approximation of the reference box.
 
 | Benchmark (1 GB unless noted) | Target | Latest | LibreOffice |
 | --- | --- | --- | --- |
-| Cold start to empty window | < 300 ms | 245 ms (median of 3) | |
-| Open to first rows visible | < 500 ms | 259 ms, cold cache (median of 3) | |
-| Full index complete | < 10 s | 0.62 s cold, single thread | |
-| Scroll frame time p99 | < 16 ms | 1.8 ms frame CPU p99; 60.0 fps, 0 of 600 frames late; 1906×1048 px grid | |
-| Peak RAM after open | < 1.5x file size | 1.13x (1158 MiB peak RSS incl. mapped file pages; 28 MiB anonymous) | |
-| Find first match | < 1 s | 0.17–0.21 s for any query (the whole file is counted each time): an id near the end 183 ms, no match 170 ms, `portland` (2,725,768 cells) 204 ms, match case 83 ms (`search_1gb`, 23-thread pool). Sorted by score: 335–512 ms (the walk and the count read rows out of file order). In the app: 241 ms to "1 of 2,725,768"; next/previous through the counted matches 0.05–1.3 ms. Cancel within 10 ms, also on a keystroke (`find_typing`) (SRCH-1/SRCH-2, 2026-10-09, same Ryzen box) | |
-| Sort numeric column | < 10 s (< 3 s at 2M rows) | 0.90 s for 19.1M rows, 144 ms at 2M (`sort_1gb`, 23-thread pool); 1.13 s and 170 ms on 8 cores (`taskset -c 0-7`). Saving the sorted file: 3.7 s (SORT-1, 2026-10-09, same Ryzen box) | |
-| Two-column filter | < 3 s | 0.37 s: city = Portland (2,725,768 rows) then revenue > 50,000 (1,362,719 rows), 0.17 s + 0.20 s (`filter_1gb`, 23-thread pool); 0.78 s on 8 cores (FILT-1, 2026-10-09, same Ryzen box) | |
-| Save with 1,000 edits | < 15 s | 0.90–0.95 s incl. fsync and verify (`save_perf`, NVMe, 3 runs); 0.77 s in the app with the UI scrolling at 60 fps, main loop p99 1.1 ms late (`save_responsive`, tmpfs; ENG-8, 2026-10-09, same Ryzen box) | |
+| Cold start to empty window | < 300 ms | 267 ms (median of 3); 8 cores: 292 ms | |
+| Open to first rows visible | < 500 ms | 314 ms, cold cache (median of 3); 8 cores: 310 ms | |
+| Full index complete | < 10 s | 0.39 s cold, single thread; 8 cores: 0.41 s | |
+| Scroll frame time p99 | < 16 ms | 2.8 ms frame CPU p99; 60.0 fps, 0 of 600 frames late; 1887×960 px grid. 8 cores: 3.0 ms p99. Two of five scroll runs that day each had one multi-second gap between frames (fps 6.9 and 17.8) while frame CPU stayed under 6 ms; the other three ran at 59.7–60.0 fps. Likely the compositor pausing a hidden window; watch it on the reference box | |
+| Peak RAM after open | < 1.5x file size | 1.14x (1164 MiB peak RSS incl. mapped file pages; 31 MiB anonymous) | |
+| Find first match | < 1 s | 224 ms slowest of an id near the end (187 ms), no match (182 ms), and `portland` (2,725,768 cells, 224 ms); 8 cores: 178 ms. On a sorted table: 335–512 ms (`search_1gb`). Cancel within 10 ms, also on a keystroke (`find_typing`) | |
+| Sort numeric column | < 10 s (< 3 s at 2M rows) | 0.82 s for 19.1M rows, 128 ms at 2M; 8 cores: 1.02 s and 149 ms. Saving the sorted file: 3.7 s (SORT-1) | |
+| Two-column filter | < 3 s | 0.34 s: city = Portland, then revenue > 50,000 (1,362,719 rows); 8 cores: 0.55 s | |
+| Save with 1,000 edits | < 15 s | 0.92 s incl. fsync and verify; 8 cores: 0.93 s. In the app with the UI scrolling at 60 fps: 0.77 s, main loop p99 1.1 ms late (`save_responsive`, ENG-8) | |
