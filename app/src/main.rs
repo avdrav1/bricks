@@ -1,6 +1,6 @@
 //! Application shell: windows, menus, dialogs, OS integration. Toolkit: GTK4 (ADR 0001).
 //!
-//! Usage: `spreadsheet [FILE.csv] [--bench-scroll FRAMES | --bench-jump ROW [--jumps N] | --bench-save EDITS | --bench-find TEXT]`
+//! Usage: `spreadsheet [FILE.csv] [--version] [--bench-scroll FRAMES | --bench-jump ROW [--jumps N] | --bench-save EDITS | --bench-find TEXT]`
 //!
 //! Without a file it shows a start window; Ctrl+O or an Open button picks one through the
 //! desktop's file dialog (xdg-desktop-portal via `gtk::FileDialog`, APP-1), and Ctrl+N or
@@ -77,6 +77,11 @@ fn parse_args() -> Result<Args, String> {
                 })
             }
             "--jumps" => jumps = number(&a, &mut it)?.max(1) as u32,
+            // For the installer and release checks (PKG-1, PKG-3).
+            "--version" => {
+                println!("spreadsheet {}", env!("CARGO_PKG_VERSION"));
+                std::process::exit(0);
+            }
             "--bench-open" => bench = Some(Bench::Open),
             "--bench-status" => bench = Some(Bench::Status),
             "--bench-find" => {
@@ -105,7 +110,7 @@ fn main() -> glib::ExitCode {
     let args = match parse_args() {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("spreadsheet: {e}\nusage: spreadsheet [FILE.csv] [--bench-scroll FRAMES | --bench-jump ROW [--jumps N] | --bench-save EDITS | --bench-find TEXT]");
+            eprintln!("spreadsheet: {e}\nusage: spreadsheet [FILE.csv] [--version] [--bench-scroll FRAMES | --bench-jump ROW [--jumps N] | --bench-save EDITS | --bench-find TEXT]");
             return glib::ExitCode::from(2);
         }
     };

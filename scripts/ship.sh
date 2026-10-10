@@ -4,7 +4,8 @@
 #
 #   scripts/ship.sh preflight          checks only, changes nothing
 #   scripts/ship.sh bump patch|minor|major|X.Y.Z
-#   scripts/ship.sh build              release binary + tarball + latest.json in dist/
+#   scripts/ship.sh build              release binary (built in Ubuntu 24.04) + tarball + latest.json in dist/
+#   scripts/ship.sh verify             the binary starts on clean Arch, Ubuntu 24.04, and Fedora
 #   scripts/ship.sh upload [--dry-run] tarball, checksum, latest.json -> Cloudflare R2
 #   scripts/ship.sh site   [--dry-run] download page -> Cloudflare Pages
 #   scripts/ship.sh tag                annotated git tag vX.Y.Z (local only)
@@ -19,6 +20,7 @@ V=$(version)
 NAME="$APP-$V-x86_64-linux"
 TAR="dist/$NAME.tar.gz"
 DRY=false; [ "${2:-}" = "--dry-run" ] && DRY=true
+BUILD_IMAGE=spreadsheet-build:ubuntu-24.04
 need() { for v in "$@"; do [ -n "${!v:-}" ] || { echo "missing env: $v (see .env.ship.example)"; exit 1; }; done; }
 run() { if $DRY; then echo "[dry-run] $*"; else "$@"; fi; }
 wr() { npx --yes wrangler@4 "$@"; }
@@ -33,6 +35,7 @@ preflight)
   cargo clippy --workspace --all-targets -- -D warnings || { echo "FAIL clippy"; fail=1; }
   cargo test --workspace || { echo "FAIL tests"; fail=1; }
   command -v npx >/dev/null || { echo "FAIL npx not found (needed for wrangler)"; fail=1; }
+  docker info >/dev/null 2>&1 || { echo "FAIL docker not usable (the release builds in a container)"; fail=1; }
   for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID R2_BUCKET CF_PAGES_PROJECT DOWNLOAD_BASE_URL; do
     [ -n "${!v:-}" ] || { echo "FAIL env $v not set"; fail=1; }
   done
@@ -51,9 +54,14 @@ bump)
   ;;
 build)
   need DOWNLOAD_BASE_URL
-  cargo build --release --locked -p $APP --target $TARGET
+  # Built in Ubuntu 24.04 so it runs on that and anything newer (PKG-3); its own target
+  # dir, so the host's builds stay as they are.
+  docker build -q -t "$BUILD_IMAGE" -f packaging/build.Dockerfile packaging >/dev/null
+  docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/src" -w /src \
+    -e CARGO_HOME=/src/target/container/cargo -e CARGO_TARGET_DIR=/src/target/container \
+    "$BUILD_IMAGE" cargo build --release --locked -p $APP --target $TARGET
   rm -rf "dist/$NAME"; mkdir -p "dist/$NAME"
-  cp "target/$TARGET/release/$APP" "dist/$NAME/"
+  cp "target/container/$TARGET/release/$APP" "dist/$NAME/"
   strip "dist/$NAME/$APP" || true
   cp packaging/$APP.desktop README.md "dist/$NAME/"
   cp LICENSE* "dist/$NAME/" 2>/dev/null || true
@@ -64,6 +72,10 @@ build)
 {"version":"$V","date":"$(date -u +%Y-%m-%d)","url":"$DOWNLOAD_BASE_URL/releases/v$V/$NAME.tar.gz","sha256":"$sha","bytes":$size}
 JSON
   echo "built $TAR ($size bytes, sha256 $sha)"
+  ;;
+verify)
+  [ -x "dist/$NAME/$APP" ] || { echo "run build first"; exit 1; }
+  scripts/check_release.sh "dist/$NAME/$APP"
   ;;
 upload)
   need CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID R2_BUCKET
@@ -83,5 +95,5 @@ tag)
   git tag -a "v$V" -m "v$V"
   echo "tagged v$V locally; push with: git push origin main v$V"
   ;;
-*) sed -n '2,12p' "$0"; exit 1 ;;
+*) sed -n '2,13p' "$0"; exit 1 ;;
 esac

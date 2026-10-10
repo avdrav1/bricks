@@ -74,7 +74,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | APP-6 | M4 | P0 | todo | DEC-1 | Follow system dark/light theme; high-DPI | No blurry text at 1.5x and 2x |
 | APP-7 | M4 | P1 | todo | CMD-2 | Crash recovery via periodic overlay journal | Relaunch after crash offers to restore edits |
 | APP-8 | M4 | P1 | todo | ENG-3 | Clear errors for malformed files | Dialog shows line number and offending text |
-| PKG-3 | M4 | P0 | todo | - | Portable release build: link against Ubuntu 24.04's glibc (build in a container) | The release binary starts on clean Arch, Ubuntu 24.04, and Fedora |
+| PKG-3 | M4 | P0 | done | - | Portable release build: link against Ubuntu 24.04's glibc (build in a container) | The release binary starts on clean Arch, Ubuntu 24.04, and Fedora |
 | PKG-1 | M4 | P0 | todo | APP-1, PKG-3 | curl installer (per user, no sudo): `install.sh` on the download site; .desktop file, icon, text/csv association; `--uninstall` | Piping `install.sh` from the site into `sh` installs on clean Arch, Ubuntu 24.04, Fedora; checksum verified; double-click opens CSVs; prints the distro's GTK 4 install command if missing |
 | PKG-2 | M4 | P2 | todo | PKG-1 | Flatpak manifest | Builds on Flathub CI |
 
@@ -82,6 +82,16 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-10 PKG-3:** the release binary is built in an Ubuntu 24.04 container and checked on clean Arch, Ubuntu 24.04, and Fedora.
+  - `packaging/build.Dockerfile`: Ubuntu 24.04 (glibc 2.39, GTK 4.14, the oldest we support), `libgtk-4-dev`, and stable Rust with the components `rust-toolchain.toml` names.
+    - `scripts/ship.sh build` runs cargo in it as the calling user, with its own `CARGO_HOME` and target dir under `target/container`, so host builds are untouched.
+    - Preflight now checks for docker. `ship.sh` was mode 644 in git although the ship-it skill runs it directly; it is executable now.
+  - Acceptance: `scripts/ship.sh verify` (`scripts/check_release.sh`). For each distro a fresh container installs only GTK 4's runtime from its own packages (`gtk4`; `libgtk-4-1` and `libgtk-4-bin` on Ubuntu). The binary then opens a CSV under Broadway with `--bench-open` and must print its first frame and quit. That loads every linked library and draws a window.
+    - It also fails if any glibc symbol is newer than 2.39.
+    - Result: Arch, Ubuntu 24.04, and Fedora all ok; the newest glibc symbol is GLIBC_2.34; tarball 873 KB.
+  - Finding: a binary built on this Arch host passes the same check today. Rust's std targets old glibc symbols, and gtk-rs's `v4_14` feature keeps to GTK 4.14's API. My replan note said otherwise, and is corrected.
+    - The container makes it a guarantee rather than luck: a newer toolchain or a -sys crate can't raise the floor unnoticed, and `verify` would catch it if they did.
+  - `--version` added (`spreadsheet 0.0.1`) for the installer and the skill's build check. `packaging/aur/PKGBUILD` removed (no AUR).
 - **2026-10-10 APP-4:** recent files: the last 10 files opened or saved, newest first, kept across restarts.
   - `app/src/recent.rs` (no GTK): one absolute path per line in `$XDG_STATE_HOME/spreadsheet/recent` (default `~/.local/state/spreadsheet/recent`), raw bytes, so any file name works except one with a newline.
     - Each change reads the file again first, because every launch is its own process (`NON_UNIQUE`), then writes a temporary file and renames it over the list.
@@ -100,7 +110,7 @@ Story notes, decisions made mid-story, and follow-ups go here, newest first.
 - **2026-10-10 decision:** no AUR (user decision: it is dead). M4 ships a curl installer instead: `curl -fsSL <site>/install.sh | sh` on the Cloudflare download site.
   - It reads `latest.json`, downloads the tarball, and checks its sha256. It installs per user, without sudo: the binary in `~/.local/bin`, the .desktop file and icon in `~/.local/share`, and the text/csv default via `xdg-mime`.
   - Rerunning it updates; `--uninstall` removes it. It can't install GTK 4, so it prints the distro's install command when GTK 4 is missing.
-  - The gate needs clean Arch, Ubuntu 24.04, and Fedora VMs (user decision). New story PKG-3 builds the release against Ubuntu 24.04's glibc, since a binary built on Arch won't start on Ubuntu. PKG-1 is now the installer and depends on it.
+  - The gate needs clean Arch, Ubuntu 24.04, and Fedora VMs (user decision). New story PKG-3 builds the release against Ubuntu 24.04's libraries, so it starts on the oldest system we support. PKG-1 is now the installer and depends on it.
 - **2026-10-10 FILT-4:** edits and paste respect the filtered view, and the FILT-1 refusals are gone.
   - Typing, Delete, copy, and paste already reached only the rows shown (FILT-1). This story proves paste and lifts the refusals.
   - Decided with the user:

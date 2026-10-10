@@ -49,10 +49,11 @@ Write the release notes into `CHANGELOG.md` under `## vX.Y.Z (YYYY-MM-DD)`, one 
 ## 3. Build
 
 ```sh
-scripts/ship.sh build
+scripts/ship.sh build    # compiles in an Ubuntu 24.04 container (needs docker)
+scripts/ship.sh verify   # starts the binary on clean Arch, Ubuntu 24.04, and Fedora
 ```
 
-Check the output: tarball exists, size is plausible, and the binary runs: `dist/<name>/spreadsheet --version` or a smoke launch. Report size and sha256.
+Check the output: tarball exists, size is plausible, `dist/<name>/spreadsheet --version` prints the new version, and `verify` ends with `RELEASE OK`. Stop on any FAIL. Report size and sha256.
 
 ## 4. Dry run, then confirm
 
