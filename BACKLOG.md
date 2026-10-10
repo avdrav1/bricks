@@ -13,7 +13,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 - [x] M0: a 1 GB CSV opens, scrolls smoothly, takes one edit, and saves safely
 - [x] M1: viewer passes the LibreOffice navigation checklist; first rows of 1 GB in under 500 ms
 - [x] M2: editor round-trips edits, paste, inserts, and undo on 1 GB without full rewrites before save
-- [ ] M3: all V0.1 benchmarks in docs/BENCHMARKS.md pass on reference hardware (V0.1 release)
+- [x] M3: all V0.1 benchmarks in docs/BENCHMARKS.md pass on reference hardware (V0.1 release)
 - [ ] M4: AUR package installs on a clean Arch VM and opens CSVs by double-click
 
 ## Stories
