@@ -72,7 +72,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | APP-4 | M4 | P0 | done | APP-1 | Recent files menu | Last 10 files survive restart |
 | APP-5 | M4 | P0 | done | APP-1 | Drag and drop to open | Works on Wayland and X11 |
 | APP-6 | M4 | P0 | done | DEC-1 | Follow system dark/light theme; high-DPI | No blurry text at 1.5x and 2x |
-| APP-7 | M4 | P1 | todo | CMD-2 | Crash recovery via periodic overlay journal | Relaunch after crash offers to restore edits |
+| APP-7 | M4 | P1 | done | CMD-2 | Crash recovery via periodic overlay journal | Relaunch after crash offers to restore edits |
 | APP-8 | M4 | P1 | todo | ENG-3 | Clear errors for malformed files | Dialog shows line number and offending text |
 | PKG-3 | M4 | P0 | done | - | Portable release build: link against Ubuntu 24.04's glibc (build in a container) | The release binary starts on clean Arch, Ubuntu 24.04, and Fedora |
 | PKG-1 | M4 | P0 | done | APP-1, PKG-3 | curl installer (per user, no sudo): `install.sh` on the download site; .desktop file, icon, text/csv association; `--uninstall` | Piping `install.sh` from the site into `sh` installs on clean Arch, Ubuntu 24.04, Fedora; checksum verified; double-click opens CSVs; prints the distro's GTK 4 install command if missing |
@@ -82,6 +82,42 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-10 APP-7:** crash recovery. After a crash, a relaunch offers the unsaved edits back.
+  - Decided with the user:
+    - The journal is written 5 seconds after the oldest unwritten change, so at most every 5 s while editing goes on.
+    - Recovery is offered both on the start window and when the file is reopened.
+    - Untitled tables are recoverable too.
+  - What is journaled: the table's edit state, not the undo history (its memory budget trims old steps). That is the cell edits, the row order (sorts, inserted and deleted rows), the column order, cleared blocks, and the insert counters (`data_model::EditState`).
+  - `data-model/src/journal.rs` holds the binary format: magic `BRICKSJ1`, a header, the state, and an FNV-1a hash of the rest.
+    - Header: file path (none if untitled), file size and modification time, delimiter, header row, encoding, time, count of unsaved edits, rows, writer's pid.
+    - Writing is deterministic: edits are sorted, and the row order goes in one write.
+    - Reading refuses bad magic, a bad checksum, impossible counts, short or trailing bytes, and non-UTF-8 values.
+  - `CsvTable::restore_edit` checks the state against the file before it goes in: rows and columns must exist, rows may appear once in the order, and cleared blocks must lie within the file. It needs the file fully indexed.
+    - The state goes back as `Edit::Restore`, whose inverse is the state before, so a restore is one undo step.
+    - Insert counters only grow, so new rows after an undone restore can't reuse ids.
+  - `app/src/recovery.rs` (no GTK) keeps journals in `$XDG_STATE_HOME/spreadsheet/recovery/<pid>-<n>.journal`, written atomically (temporary file, fsync, rename).
+    - Each process holds `owner-<pid>.lock` locked (`File::lock`) while it runs. A journal whose owner's lock can be taken belongs to a process that died; another running instance's journals are left alone. Lock files go with their process's last journal.
+  - `app/src/crash.rs`:
+    - The status tick writes the window's journal on the job pool.
+    - The journal is deleted when nothing is unsaved (saved or all undone) and when the window closes. So one still there after the process ended means it crashed (or was killed).
+    - Benchmark runs neither write journals nor offer them.
+  - The offer comes once the file is indexed.
+    - The file must have the size and modification time it had when the journal was written. If not: "“x.csv” changed after the crash", Keep for Later (default) or Discard.
+    - The file is re-read with the journal's delimiter and encoding if they differ, and its header row set as then.
+    - Reopening asks "Restore unsaved edits?" (Discard / Restore; Esc keeps it for next time). The start window's "Unsaved edits from a crash" list restores at once; its first Restore button is the window's default and focus.
+    - The journal is read on the job pool; the restore goes in as "Restore unsaved edits".
+  - Acceptance: `scripts/check_recovery.sh`, in an Arch container under headless sway, with real key presses (`wtype`) and a real crash (`kill -9` after the journal is written). All four scenarios pass:
+    1. Start window: crash; relaunch without a file; Enter (on Restore); Ctrl+S. The file holds the edit and no journal is left.
+    2. Reopen: crash; relaunch on the file; the dialog; Enter; Ctrl+S. The file holds the edit.
+    3. Changed file: crash; append a line; relaunch. The edits stay off it, and the journal is kept.
+    4. Untitled: Ctrl+N, type, crash, restore. The crashed journal goes, and the restored window journals the value again.
+  - Harness finding: with no real keyboard, each `wtype` call adds a virtual one. Focus arrived with the key in the same 4 ms (seen in `WAYLAND_DEBUG`), and GTK dropped it, so `keys()` pauses 400 ms before and after.
+  - Data tests (`commands/tests/journal.rs`): every kind of edit journaled, read into a fresh table, and restored saves the same bytes. One undo takes it all back and redo re-applies it, with fresh ids afterwards. Journals are deterministic.
+    - Damaged (flipped byte), cut short, trailing bytes, not a journal, and a 5-row journal on a 2-row file are all refused with nothing applied. An untitled table round-trips.
+    - `app` unit tests: only gone processes' journals count as crashed; a failed write leaves the earlier journal whole.
+  - 1 GB, sorted (the biggest journal: 19.1M-row order): 76.4 MB, written in 107 ms and read in 94 ms on the job pool; checked and applied in 71 ms on the UI thread (`a_sorted_1gb_table_journals_and_restores`, ignored).
+  - Fixed along the way: the start window focused Open by calling `grab_focus` before the window existed. Enter now acts on the window's default widget (Restore after a crash, else Open).
+  - Not covered: a journal is per window, so two windows on the same file in different processes keep two journals, and both are offered. Filters, type overrides, and the undo history are not journaled; a restore is one step.
 - **2026-10-10 APP-6:** follow the desktop's dark/light preference, live; crisp text at 1.5x and 2x.
   - The grid already took its colors from the theme's foreground color, so it follows whatever GTK shows. The gap was GTK itself: before 4.20 it reads only the theme name. Desktops that signal dark mode only through the settings portal's `org.freedesktop.appearance color-scheme` (GNOME 42+ defaults, KDE, wlroots desktops via xdg-desktop-portal-gtk) left it light.
   - `app/src/theme.rs`: at startup, read `color-scheme` from the portal (`ReadOne`, falling back to `Read` for older portals), and follow `SettingChanged`. 1 is dark; 0 and 2 are light.

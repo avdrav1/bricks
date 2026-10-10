@@ -60,6 +60,11 @@ impl ColSet {
     pub fn heap_bytes(&self) -> usize {
         self.ids.capacity() * std::mem::size_of::<ColId>()
     }
+
+    /// The listed ids and `rest`, for the recovery journal (APP-7).
+    pub(crate) fn parts(&self) -> (&[ColId], Option<Col>) {
+        (&self.ids, self.rest)
+    }
 }
 
 /// File rows `rows` with the columns cleared in all of them.
@@ -86,7 +91,7 @@ struct Block {
 }
 
 /// Every clear still in effect, oldest first, and their flattened segments.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct Cleared {
     blocks: Vec<Block>,
     segments: Arc<Vec<Segment>>,
@@ -115,6 +120,11 @@ impl Cleared {
     /// Clears in effect.
     pub fn len(&self) -> usize {
         self.blocks.len()
+    }
+
+    /// Each clear in effect, oldest first: its file rows and columns.
+    pub(crate) fn blocks(&self) -> impl Iterator<Item = (&[Range<u64>], &ColSet)> {
+        self.blocks.iter().map(|b| (&b.rows[..], &b.cols))
     }
 
     pub fn segments(&self) -> &Arc<Vec<Segment>> {

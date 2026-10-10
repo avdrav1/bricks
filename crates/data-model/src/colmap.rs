@@ -24,6 +24,17 @@ impl Default for ColMap {
 }
 
 impl ColMap {
+    /// The explicit ids and `tail`, for the recovery journal (APP-7).
+    pub(crate) fn parts(&self) -> (&[ColId], Col) {
+        (&self.explicit, self.tail)
+    }
+
+    pub(crate) fn from_parts(explicit: Vec<ColId>, tail: Col) -> Self {
+        Self { explicit, tail }
+    }
+}
+
+impl ColMap {
     pub fn get(&self, pos: Col) -> ColId {
         match self.explicit.get(pos as usize) {
             Some(&id) => id,

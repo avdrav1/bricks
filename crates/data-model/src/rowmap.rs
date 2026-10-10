@@ -316,6 +316,16 @@ pub enum RowOrder {
 }
 
 impl RowOrder {
+    /// A run order of these runs, in order (the recovery journal, APP-7).
+    pub(crate) fn from_runs(runs: &[Run]) -> Self {
+        let mut m = RowMap::new(Run {
+            first: RowId(0),
+            len: 0,
+        });
+        m.insert(0, runs);
+        Self::Runs(m)
+    }
+
     pub fn len(&self) -> u64 {
         match self {
             Self::Runs(m) => m.len(),

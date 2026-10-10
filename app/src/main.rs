@@ -20,9 +20,11 @@
 //! - `--bench-find TEXT` (SRCH-2) types TEXT into the find bar a character at a time and
 //!   prints each keystroke, search start, and result (`FIND …`).
 
+mod crash;
 mod editor;
 mod grid_view;
 mod recent;
+mod recovery;
 mod status;
 mod theme;
 
@@ -258,6 +260,11 @@ fn start_window(app: &gtk::Application) {
     page.append(&heading);
     page.append(&open);
     page.append(&new);
+    // Unsaved changes from a crash (APP-7) come first: putting them back is likely next.
+    let restore = crash::start_section(app).map(|(section, restore)| {
+        page.append(&section);
+        restore
+    });
     let files = recent::Recent::load().files().to_vec();
     if !files.is_empty() {
         let title = gtk::Label::new(Some("Recent"));
@@ -279,8 +286,11 @@ fn start_window(app: &gtk::Application) {
     window.set_widget_name(START_WINDOW);
     accept_file_drops(app, &window);
     window.set_titlebar(Some(&gtk::HeaderBar::new()));
+    // Enter acts on it: Restore after a crash, else Open.
+    let first = restore.unwrap_or(open);
+    window.set_default_widget(Some(&first));
+    GtkWindowExt::set_focus(&window, Some(&first));
     window.present();
-    open.grab_focus();
 }
 
 /// A recent file on the start window: its name and folder; it goes away if the file
@@ -489,6 +499,11 @@ struct Session {
     header: Cell<Option<bool>>,
     /// The running index build; cancelled when a newer reading replaces it.
     indexing: RefCell<Option<jobs::Job<Result<(), IndexError>>>>,
+    /// The file's size and modification time when last read (APP-7): a crash journal
+    /// records them, and its edits only go back onto the same bytes.
+    identity: Cell<Option<(u64, u64)>>,
+    /// A crashed session's edits to put back once the file is indexed (APP-7).
+    restore: RefCell<Option<crash::Pending>>,
 }
 
 impl Session {
@@ -499,6 +514,8 @@ impl Session {
             encoding: Cell::new(None),
             header: Cell::new(None),
             indexing: RefCell::new(None),
+            identity: Cell::new(None),
+            restore: RefCell::new(None),
         }
     }
 
@@ -525,6 +542,7 @@ impl Session {
             Some(encoding) => CsvTable::open_as(&path, self.choice.get(), encoding)?,
             None => CsvTable::open(&path, self.choice.get())?,
         };
+        self.identity.set(recovery::identity(&path));
         self.apply_header(&mut table);
         self.index(&table);
         Ok(table)
@@ -656,6 +674,24 @@ fn build_window(
         .child(&layout)
         .build();
     OPEN_WINDOWS.with_borrow_mut(|open| open.push((session.clone(), window.downgrade())));
+    // Crash recovery (APP-7), except in benchmarks, which measure the app alone: journal
+    // the unsaved edits, and offer back a crashed session's for this file.
+    let journal = bench.is_none().then(crash::Journal::new);
+    if let Some(j) = &journal {
+        window.connect_destroy({
+            let j = j.clone();
+            move |_| crash::closed(&j)
+        });
+        let path = session.path.borrow().clone();
+        if session.restore.borrow().is_none() {
+            if let Some(c) = path.as_deref().and_then(crash::crashed_for) {
+                session.restore.replace(Some(crash::Pending {
+                    crashed: c,
+                    ask: true,
+                }));
+            }
+        }
+    }
     accept_file_drops(app, &window);
     let delimiter = delimiter_dropdown(session, &grid);
     let open = gtk::Button::from_icon_name("document-open-symbolic");
@@ -841,13 +877,14 @@ fn build_window(
     let (mut was_complete, mut generation) = (false, 0);
     let status_bench = matches!(bench, Some(Bench::Status));
     let mut tick = {
-        let (grid, window, session, app, save, find) = (
+        let (grid, window, session, app, save, find, journal) = (
             grid.downgrade(),
             window.downgrade(),
             session.clone(),
             app.clone(),
             save.clone(),
             find.clone(),
+            journal.clone(),
         );
         move || {
             let (Some(grid), Some(window)) = (grid.upgrade(), window.upgrade()) else {
@@ -867,6 +904,10 @@ fn build_window(
             if complete && !was_complete {
                 grid.infer_types();
                 grid.apply_pending_filters(); // the filters a save had on (FILT-3)
+            }
+            if let Some(j) = &journal {
+                crash::journal_tick(&grid, &session, j);
+                crash::pending_tick(&window, &grid, &session);
             }
             if complete && !was_complete && std::env::var_os("BRICKS_TIMINGS").is_some() {
                 eprintln!(

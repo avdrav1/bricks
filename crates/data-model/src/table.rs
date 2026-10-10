@@ -178,12 +178,12 @@ pub struct CsvTable {
     /// `None` while it is still file order.
     pub(crate) rows: Option<RowOrder>,
     /// Inserted rows so far: the next inserted row's number.
-    next_inserted: u64,
+    pub(crate) next_inserted: u64,
     /// Column order once columns were inserted or deleted (EDIT-4); `None` while it is
     /// still file order.
     pub(crate) cols: Option<ColMap>,
     /// Inserted columns so far: the next inserted column's number.
-    next_inserted_col: u32,
+    pub(crate) next_inserted_col: u32,
     /// Cells cleared in blocks (EDIT-5).
     pub(crate) cleared: Cleared,
     /// Inferred column types (TYPE-1), by column identity; empty until inferred.
@@ -495,6 +495,12 @@ impl CsvTable {
         }
     }
 
+    /// Changes whenever what the table shows changes (edits, the header row, filters):
+    /// the recovery journal (APP-7) is written again only when it moved.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
     /// Unsaved changes: edited cells, plus rows inserted and source rows deleted, plus one
     /// for a sorted row order (SORT-1).
     pub fn changes(&self) -> usize {
@@ -582,6 +588,7 @@ impl CsvTable {
                     | Edit::InsertRowRanges(_)
                     | Edit::DeleteRowRanges(_)
                     | Edit::Reorder(_)
+                    | Edit::Restore(_)
             )
         {
             self.update_view();
@@ -661,6 +668,11 @@ impl CsvTable {
                 // Undone last-first, so a cell listed twice gets its first value back.
                 before.reverse();
                 Edit::Cells(before)
+            }
+            Edit::Restore(state) => {
+                let before = self.take_edit_state();
+                self.put_edit_state(*state);
+                Edit::Restore(Box::new(before))
             }
             Edit::Reorder(order) => {
                 debug_assert_eq!(

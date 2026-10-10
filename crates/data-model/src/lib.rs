@@ -8,6 +8,7 @@ mod colmap;
 mod copy;
 mod filter;
 mod infer;
+mod journal;
 mod paste;
 mod rowmap;
 mod save;
@@ -19,6 +20,7 @@ pub use cleared::ColSet;
 pub use copy::{Copied, HTML_MAX_CELLS};
 pub use filter::{Compare, Filter, FilterError, RowSet, Test};
 pub use infer::{value_type, ColumnTypes, SAMPLE_HEAD, SAMPLE_SPREAD};
+pub use journal::{read_journal, read_journal_header, EditState, JournalError, JournalHeader};
 pub use paste::{parse_tsv, PasteError, PASTE_MAX_CELLS};
 pub use rowmap::{RowOrder, Run};
 pub use save::{SaveJob, SaveJobError, SaveProgress, SaveStats};
@@ -134,6 +136,9 @@ pub enum Edit {
     /// Show every row in this order, the header row included (`None`: file order). The
     /// inverse holds the order before. Build it with [`CsvTable::sort_rows`] (SORT-1).
     Reorder(Option<RowOrder>),
+    /// Put back a whole edit state (APP-7: unsaved edits after a crash); the inverse holds
+    /// the state before. Build it with [`CsvTable::restore_edit`].
+    Restore(Box<EditState>),
 }
 
 impl Edit {
@@ -193,6 +198,7 @@ impl Edit {
                         .sum::<usize>()
             }
             Self::Reorder(order) => order.as_ref().map_or(0, RowOrder::heap_bytes),
+            Self::Restore(state) => state.heap_bytes(),
         }
     }
 }
@@ -211,7 +217,7 @@ pub enum InferredType {
 /// Sparse cell edits layered over the source file (spec section 17, ADR 0003). Values are
 /// raw text exactly as entered. Grouped by row so reading a row costs one lookup, and
 /// rows without edits cost nothing.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct EditOverlay {
     rows: HashMap<RowId, BTreeMap<ColId, Box<str>>>,
     cells: usize,

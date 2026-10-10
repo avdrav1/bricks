@@ -7,9 +7,9 @@ use commands::{Batch, ClearCells, Reshape, SetCell, UndoStack};
 use csv_engine::RowIndex as _;
 use data_model::{
     parse_tsv, CellRef, ColId, ColumnTypes, Compare, Copied, CsvTable, DelimiterChoice, Edit,
-    Filter, FilterError, Hit, InferredType, Matches, PasteError, Query, ReplaceError, RereadError,
-    RowId, RowSet, SaveJob, SaveJobError, SearchError, SearchProgress, SortError, SortOrder, Step,
-    TableSource, Test, PASTE_MAX_CELLS,
+    EditState, Filter, FilterError, Hit, InferredType, JournalError, Matches, PasteError, Query,
+    ReplaceError, RereadError, RowId, RowSet, SaveJob, SaveJobError, SearchError, SearchProgress,
+    SortError, SortOrder, Step, TableSource, Test, PASTE_MAX_CELLS,
 };
 use grid::{Bounds, GridCache, Key, Mods, Selection, Sizes, Viewport};
 use gtk::{gdk, gio, glib, graphene, pango, prelude::*, subclass::prelude::*};
@@ -2600,6 +2600,48 @@ impl GridView {
             .borrow()
             .as_ref()
             .is_some_and(|t| t.is_complete())
+    }
+
+    /// Changes whenever what the table shows changes (APP-7's journal follows it).
+    pub fn revision(&self) -> u64 {
+        self.imp()
+            .table
+            .borrow()
+            .as_ref()
+            .map_or(0, |t| t.revision())
+    }
+
+    /// The table as it is now, for a job (APP-7 writes its journal from one).
+    pub fn snapshot(&self) -> Option<CsvTable> {
+        self.imp().table.borrow().as_ref().map(CsvTable::snapshot)
+    }
+
+    /// Put back unsaved edits from a crash (APP-7) as one undoable step, "Restore unsaved
+    /// edits". The file must be fully indexed; refused if they don't fit it.
+    pub fn restore_edits(&self, state: EditState) -> Result<(), JournalError> {
+        let imp = self.imp();
+        if self.busy() {
+            return Err(JournalError::Mismatch("another job is running"));
+        }
+        {
+            let mut table = imp.table.borrow_mut();
+            let mut undo = imp.undo.borrow_mut();
+            let (Some(table), Some(undo)) = (table.as_mut(), undo.as_mut()) else {
+                return Ok(());
+            };
+            let edit = table.restore_edit(state)?;
+            // The first file row and column; an untitled table has no rows to name yet.
+            let focus = CellRef {
+                row: RowId::source(0),
+                col: ColId::source(0),
+            };
+            undo.execute(
+                Box::new(Batch::new("Restore unsaved edits", vec![edit], focus)),
+                table,
+            );
+        }
+        self.after_change(None);
+        Ok(())
     }
 
     /// Share of the file indexed so far (0..=1), or `None` once indexing is complete.
