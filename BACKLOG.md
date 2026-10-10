@@ -82,6 +82,9 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-10 decision:** Flatpak (PKG-2) is deferred; the curl installer is the M4 distribution (user decision). PKG-2 stays P2 and todo, so it doesn't hold the M4 gate.
+  - The work is parked, unmerged, on branch `story/pkg-2-flatpak` (ea4b959). Its manifest builds, installs, and runs in Flathub's own CI image (GNOME 51), checked by `scripts/check_flatpak.sh`.
+  - Before a submission it needs: an app ID on a domain we control (or `io.github.<user>.<repo>`), a homepage URL, hosted screenshots, and either a Flathub exception for home-folder access or a move to portals.
 - **2026-10-10 PKG-1:** curl installer. `curl -fsSL <page>/install.sh | sh` installs or updates for the user, without sudo; `| sh -s -- --uninstall` removes it.
   - `site/install.sh` (POSIX sh, since it is piped into `sh`): reads `latest.json` from the download bucket (`ship.sh site` fills in `DOWNLOAD_BASE_URL`; `SPREADSHEET_DOWNLOAD_URL` overrides it for tests). It downloads with curl or wget, checks the sha256, and installs nothing on a mismatch.
     - The binary goes to `~/.local/bin` by copy and rename, so a running copy isn't written into. The icon (new `packaging/spreadsheet.svg`, now in the tarball) goes to `~/.local/share/icons/hicolor/scalable/apps`.
