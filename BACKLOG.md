@@ -71,7 +71,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | SRCH-3 | M3 | P0 | done | SRCH-2, CMD-1 | Find and replace; replace all | Replace all on 100k hits undoes as one step |
 | APP-4 | M4 | P0 | done | APP-1 | Recent files menu | Last 10 files survive restart |
 | APP-5 | M4 | P0 | done | APP-1 | Drag and drop to open | Works on Wayland and X11 |
-| APP-6 | M4 | P0 | todo | DEC-1 | Follow system dark/light theme; high-DPI | No blurry text at 1.5x and 2x |
+| APP-6 | M4 | P0 | done | DEC-1 | Follow system dark/light theme; high-DPI | No blurry text at 1.5x and 2x |
 | APP-7 | M4 | P1 | todo | CMD-2 | Crash recovery via periodic overlay journal | Relaunch after crash offers to restore edits |
 | APP-8 | M4 | P1 | todo | ENG-3 | Clear errors for malformed files | Dialog shows line number and offending text |
 | PKG-3 | M4 | P0 | done | - | Portable release build: link against Ubuntu 24.04's glibc (build in a container) | The release binary starts on clean Arch, Ubuntu 24.04, and Fedora |
@@ -82,6 +82,21 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-10 APP-6:** follow the desktop's dark/light preference, live; crisp text at 1.5x and 2x.
+  - The grid already took its colors from the theme's foreground color, so it follows whatever GTK shows. The gap was GTK itself: before 4.20 it reads only the theme name. Desktops that signal dark mode only through the settings portal's `org.freedesktop.appearance color-scheme` (GNOME 42+ defaults, KDE, wlroots desktops via xdg-desktop-portal-gtk) left it light.
+  - `app/src/theme.rs`: at startup, read `color-scheme` from the portal (`ReadOne`, falling back to `Read` for older portals), and follow `SettingChanged`. 1 is dark; 0 and 2 are light.
+    - Apply it through `gtk-interface-color-scheme` when GTK has it (4.20+, found by name at run time since the app builds against 4.14's API), else `gtk-application-prefer-dark-theme`. Setting the old switch on GTK 4.24 printed a deprecation warning on every launch.
+    - The D-Bus proxy lives in a thread-local for the app's life: the first version dropped it, which silently ended live updates (the check caught it).
+  - High-DPI needed no code change: GTK renders the grid's own drawing (Pango layouts in snapshots) at the output's scale. This story proves it.
+  - Acceptance: `scripts/check_look.sh`, in Arch (GTK 4.2x, the new setting) and Ubuntu 24.04 (GTK 4.14, the old switch) containers.
+    - Theme: a stand-in settings portal (`scripts/look_helpers.py portal`) says dark, then light, then dark again while the app runs. Screenshots measure grid background and text: 0.18 and 1.00, then 1.00 and 0.00, then 0.18 and 1.00, on both distros.
+    - Scale: headless sway switches its output 1x, 1.5x, 2x live with the app open; Xvfb runs at `GDK_SCALE` 1 and 2. Measure: of the pixels half-way to ink, the share that is solid ink. Text must be at least 95% as crisp as at 1x, and at least twice as crisp as a 1x screenshot scaled up (what a blurry window looks like); 1x itself must measure as text (>= 0.3).
+    - Results: Arch 1.5x 0.65, 2x 0.75, X11 2x 0.74 (1x 0.48 to 0.51; scaled-up 1x 0.03 to 0.09). Ubuntu with the GL renderer: 0.65, 0.72, 0.70 (1x 0.41; scaled-up 0.03 to 0.12). Two runs gave the same numbers.
+    - Negative control: the binary built before this story stayed light when the portal said dark.
+    - The check also fails if the app prints any GTK warning.
+  - Smoke on this desktop (Hyprland; portal `color-scheme` = 1), through Broadway: the app came up dark even with `GTK_THEME=Adwaita` forcing the light theme name.
+  - Known limit, GTK's: Ubuntu 24.04's GTK 4.14 on a system without a GPU falls back to the cairo renderer, which draws 1.5x at 2x for the compositor to shrink. Text there measured 0.32 to 0.42 (1x 0.41 to 0.46): softer, as in every GTK 4.14 app. With any GPU (GL or Vulkan renderer) it is crisp. Newer GTK (Arch) is crisp even in software.
+  - Container note: Ubuntu's sway 1.9 refuses to start when the host has the Nvidia kernel module loaded, so it runs with `--unsupported-gpu` (the headless software output never uses a GPU).
 - **2026-10-10 APP-5:** drag and drop to open. Files dropped on the start window or any file window open as Open does: each in its own window (or brought forward if already open), recorded in recent files; a non-local URI or an unreadable file shows the usual error.
   - `accept_file_drops` adds a `gtk::DropTarget` for `gdk::FileList` (GTK fills it from `text/uri-list` on both Wayland and X11) to every window. The windows open from an idle callback after the drop completes, because opening a file closes the start window, which may be the drop's own target. The start window's hint mentions dropping.
   - Acceptance: `scripts/check_drop.sh`. In an Arch container, headless sway (Wayland) and Xvfb (X11) each run the app on its start window, with a GTK drag-source window (`scripts/dnd_helpers.py source`) offering a file as `text/uri-list`, as file managers do.

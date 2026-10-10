@@ -24,6 +24,7 @@ mod editor;
 mod grid_view;
 mod recent;
 mod status;
+mod theme;
 
 use csv_engine::{Charset, Encoding, IndexError};
 use data_model::{CsvTable, DelimiterChoice, RereadError, SaveProgress, SaveStats, Step};
@@ -149,6 +150,7 @@ fn main() -> glib::ExitCode {
         .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
         .build();
     app.connect_startup(|app| {
+        theme::follow_color_scheme();
         let open = gtk::gio::ActionEntry::builder("open")
             .activate(|app: &gtk::Application, _, _| choose_and_open(app))
             .build();
