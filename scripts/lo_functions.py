@@ -21,6 +21,7 @@ Usage: python3 scripts/lo_functions.py            (re-record the fixture)
        python3 scripts/lo_functions.py --try F...  (print results of ad-hoc formulas)
 Needs LibreOffice with Python UNO.
 """
+import os
 import re
 import subprocess
 import sys
@@ -30,7 +31,7 @@ from pathlib import Path
 
 import uno
 
-PORT = 2099
+PORT = int(os.environ.get("LO_PORT", "2099"))  # set it to run several at once
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "crates/formula/tests/data"
 NUMBER = re.compile(r"^[+-]?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$")

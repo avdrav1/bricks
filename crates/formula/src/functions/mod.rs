@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 mod math;
+pub(crate) mod wildcard;
 
 /// A function's result, or why evaluation stopped.
 pub type Outcome = Result<Value, Interrupt>;
@@ -61,6 +62,25 @@ fn add(
     );
 }
 
+/// [`add`] for a function whose result can change without any cell changing.
+pub(crate) fn add_volatile(
+    m: &mut Registry,
+    name: &'static str,
+    min: usize,
+    max: Option<usize>,
+    call: fn(&[Expr], &mut dyn Context) -> Outcome,
+) {
+    m.insert(
+        name,
+        Function {
+            min,
+            max,
+            volatile: true,
+            call,
+        },
+    );
+}
+
 fn register(m: &mut Registry) {
     add(m, "ROW", 0, Some(1), row);
     add(m, "COLUMN", 0, Some(1), column);
@@ -100,6 +120,12 @@ pub(crate) fn each_value(
         }
     }
     Ok(())
+}
+
+/// An argument's value as a scalar (implicit intersection for references, the top-left
+/// element of an array); a missing argument is Empty.
+pub(crate) fn scalar(arg: &Expr, ctx: &mut dyn Context) -> Outcome {
+    Ok(evaluate(arg, ctx)?.scalar().clone())
 }
 
 /// `ROW()`: the formula's own row; `ROW(ref)`: the reference's first row (1-based).
