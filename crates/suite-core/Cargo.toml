@@ -1,0 +1,16 @@
+[package]
+name = "suite-core"
+description = "Application-independent primitives shared by Bricks, Slate, and Frame"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+# `cargo bench` runs only apps/bricks/benches/corpus.rs (BENCH-1).
+bench = false

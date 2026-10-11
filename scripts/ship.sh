@@ -14,7 +14,7 @@ cd "$(dirname "$0")/.."
 
 [ -f .env.ship ] && set -a && . ./.env.ship && set +a
 APP=bricks
-ID=dev.bricks.Bricks  # desktop entry and icon names, as the app ID (APP_ID in app/src/main.rs)
+ID=dev.bricks.Bricks  # desktop entry and icon names, as the app ID (APP_ID in apps/bricks/src/main.rs)
 TARGET=x86_64-unknown-linux-gnu
 version() { sed -n '/^\[workspace.package\]/,/^\[/{s/^version = "\(.*\)"/\1/p}' Cargo.toml; }
 V=$(version)
@@ -33,7 +33,7 @@ preflight)
   b=$(git branch --show-current); [ "$b" = main ] || { echo "FAIL on branch $b, not main"; fail=1; }
   git rev-parse "v$V" >/dev/null 2>&1 && { echo "FAIL tag v$V already exists; bump first"; fail=1; }
   cargo fmt --all --check || { echo "FAIL fmt"; fail=1; }
-  cargo clippy --workspace --all-targets -- -D warnings || { echo "FAIL clippy"; fail=1; }
+  cargo clippy --workspace --all-targets --all-features -- -D warnings || { echo "FAIL clippy"; fail=1; }
   cargo test --workspace || { echo "FAIL tests"; fail=1; }
   command -v npx >/dev/null || { echo "FAIL npx not found (needed for wrangler)"; fail=1; }
   docker info >/dev/null 2>&1 || { echo "FAIL docker not usable (the release builds in a container)"; fail=1; }
@@ -64,7 +64,7 @@ build)
   rm -rf "dist/$NAME"; mkdir -p "dist/$NAME"
   cp "target/container/$TARGET/release/$APP" "dist/$NAME/"
   strip "dist/$NAME/$APP" || true
-  cp packaging/$ID.desktop packaging/$ID.svg README.md "dist/$NAME/"
+  cp packaging/$ID.desktop packaging/$ID.svg apps/bricks/README.md "dist/$NAME/"
   cp LICENSE* "dist/$NAME/" 2>/dev/null || true
   tar -C dist -czf "$TAR" "$NAME"
   (cd dist && sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256")

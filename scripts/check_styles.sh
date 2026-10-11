@@ -24,7 +24,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 bin=$(realpath "${1:-target/release/bricks}")
 [ -x "$bin" ] || { echo "no binary at $bin (cargo build --release -p bricks)"; exit 1; }
-fixture=$(realpath crates/xlsx/tests/data/fixture.xlsx)
+fixture=$(realpath apps/bricks/crates/xlsx/tests/data/fixture.xlsx)
 
 shots=()
 if [ -n "${SHOTS:-}" ]; then mkdir -p "$SHOTS"; shots=(-v "$(realpath "$SHOTS"):/shots"); fi

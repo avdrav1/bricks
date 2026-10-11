@@ -1,17 +1,28 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/csv-engine",
-    "crates/formula",
-    "crates/data-model",
-    "crates/grid",
-    "crates/commands",
-    "crates/file-format",
-    "crates/jobs",
-    "crates/xlsx",
-    "app",
+    # Applications
+    "apps/bricks",
+    "apps/slate",
+    "apps/frame",
+    # Shared suite infrastructure
+    "crates/suite-core",
+    "crates/suite-ui",
+    "crates/suite-platform",
+    "crates/suite-file",
+    # Bricks-only crates
+    "apps/bricks/crates/csv-engine",
+    "apps/bricks/crates/formula",
+    "apps/bricks/crates/data-model",
+    "apps/bricks/crates/grid",
+    "apps/bricks/crates/commands",
+    "apps/bricks/crates/file-format",
+    "apps/bricks/crates/jobs",
+    "apps/bricks/crates/xlsx",
 ]
 
+# `version` is Bricks' release version (scripts/ship.sh bumps it); Bricks and its crates
+# inherit it. Slate, Frame, and the suite-* crates set their own.
 [workspace.package]
 version = "0.2.0"
 edition = "2021"
@@ -20,14 +31,23 @@ repository = "https://github.com/avdrav1/bricks"
 rust-version = "1.92"
 
 [workspace.dependencies]
-csv-engine = { path = "crates/csv-engine" }
-data-model = { path = "crates/data-model" }
-formula = { path = "crates/formula" }
-grid = { path = "crates/grid" }
-commands = { path = "crates/commands" }
-file-format = { path = "crates/file-format" }
-jobs = { path = "crates/jobs" }
-xlsx = { path = "crates/xlsx" }
+# Shared suite crates
+suite-core = { path = "crates/suite-core" }
+suite-ui = { path = "crates/suite-ui" }
+suite-platform = { path = "crates/suite-platform" }
+suite-file = { path = "crates/suite-file" }
+# Bricks crates
+csv-engine = { path = "apps/bricks/crates/csv-engine" }
+data-model = { path = "apps/bricks/crates/data-model" }
+formula = { path = "apps/bricks/crates/formula" }
+grid = { path = "apps/bricks/crates/grid" }
+commands = { path = "apps/bricks/crates/commands" }
+file-format = { path = "apps/bricks/crates/file-format" }
+jobs = { path = "apps/bricks/crates/jobs" }
+xlsx = { path = "apps/bricks/crates/xlsx" }
+# Every app logs through these.
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "ansi", "std"] }
 
 [workspace.lints.rust]
 unsafe_code = "warn"

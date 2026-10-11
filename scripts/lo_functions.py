@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Record formula results from LibreOffice Calc (FML-2, FML-5..8).
 
-Reads crates/formula/tests/data/cases.tsv (columns: group, formula, inputs, excel, why) and
-writes crates/formula/tests/data/cases-libreoffice.tsv (columns: group, formula, inputs,
+Reads apps/bricks/crates/formula/tests/data/cases.tsv (columns: group, formula, inputs, excel, why) and
+writes apps/bricks/crates/formula/tests/data/cases-libreoffice.tsv (columns: group, formula, inputs,
 kind, result, excel, why).
 
 - `formula` is written as Bricks reads it (with `,` between arguments); this script turns
@@ -33,7 +33,7 @@ import uno
 
 PORT = int(os.environ.get("LO_PORT", "2099"))  # set it to run several at once
 ROOT = Path(__file__).resolve().parent.parent
-DATA = ROOT / "crates/formula/tests/data"
+DATA = ROOT / "apps/bricks/crates/formula/tests/data"
 NUMBER = re.compile(r"^[+-]?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$")
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?)?$")
 ERRORS = {

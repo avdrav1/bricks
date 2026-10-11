@@ -13,12 +13,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgtk-4-dev
       - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - run: cargo test --workspace
       - run: python3 -m unittest discover -s scripts
       - run: python3 scripts/backlog.py status
   bench:
-    # Prints the docs/BENCHMARKS.md table. Runner numbers are informational: gates use the
+    # Prints the apps/bricks/docs/BENCHMARKS.md table. Runner numbers are informational: gates use the
     # reference box, and rows that open a window are skipped (no display).
     runs-on: ubuntu-latest
     steps:

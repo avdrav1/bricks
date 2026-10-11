@@ -13,7 +13,7 @@ booleans as 1.0/0.0), the text for text and errors. `formula` is Excel syntax wi
 LibreOffice's API grammar (`$Data.B2`, `;` between arguments) turned into `Data!B2` and
 `,`, with spaces removed outside strings.
 
-The fixture (crates/xlsx/tests/data/fixture.xlsx) has three sheets:
+The fixture (apps/bricks/crates/xlsx/tests/data/fixture.xlsx) has three sheets:
 - Data: a header row and 50 rows of integers, decimals, zero-padded codes stored as text,
   dates, TRUE/FALSE, a sparse column with gaps, an empty row, and =1/0; plus a bold cell, a
   comment, and a chart (content Bricks drops, for XLSX-2).

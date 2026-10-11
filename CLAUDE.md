@@ -1,6 +1,12 @@
 # CLAUDE.md
 
-Bricks: a fast, lightweight Linux spreadsheet in Rust (command `bricks`). V0.1 is the best large-CSV editor on Linux; Excel compatibility comes later. Product spec: `docs/SPEC.md`. Work queue: `BACKLOG.md`.
+A Linux-native office suite in Rust: one Cargo workspace, three apps. Suite architecture: `docs/architecture/overview.md`; suite ADRs: `docs/adr/`.
+
+- **Bricks** (`apps/bricks`, command `bricks`): a fast, lightweight spreadsheet. V0.1 is the best large-CSV editor on Linux; Excel compatibility comes later. Product spec: `apps/bricks/docs/SPEC.md`. Work queue: `BACKLOG.md`.
+- **Slate** (`apps/slate`, command `slate`): word processor. Scaffold only.
+- **Frame** (`apps/frame`, command `frame`; working name): presentation app. Scaffold only.
+
+Everything below about stories, invariants, crates, benchmarks, and ADRs is Bricks' unless it says otherwise.
 
 ## How we work
 
@@ -20,7 +26,23 @@ Bricks: a fast, lightweight Linux spreadsheet in Rust (command `bricks`). V0.1 i
 7. **Filters never drop rows on save.** Sorting changes row order; filtering changes only the view.
 8. **Non-goals stay out:** charts, pivots, macros, scripting, plugins, collaboration. Formulas, multiple sheets, XLSX (ADRs 0006-0008), and cell styles (ADRs 0009-0010) are in scope from M5. Bricks keeps the charts, pivots, and macros it can't edit when it saves.
 
+## Suite rules
+
+- Shared crates live in `crates/suite-*`; each app's own crates live under `apps/<app>/crates/`.
+- `suite-core` depends on nothing in the workspace; `suite-ui`, `suite-platform`, and `suite-file` may depend only on `suite-core`. No shared crate depends on an app or an app's crates, or on a GUI toolkit until the suite picks one.
+- Code becomes shared only when at least two apps genuinely need it. Share infrastructure, not product models.
+- Suite-wide decisions go in `docs/adr/NNNN-title.md`.
+
 ## Crates
+
+| Crate | Owns |
+| --- | --- |
+| `suite-core` | `AppKind` and other app-independent primitives |
+| `suite-ui` | UI conventions shared by the apps |
+| `suite-platform` | OS integration (Linux) |
+| `suite-file` | format-independent file infrastructure (document names) |
+
+Bricks' crates, in `apps/bricks/crates/`:
 
 | Crate | Owns |
 | --- | --- |
@@ -32,14 +54,15 @@ Bricks: a fast, lightweight Linux spreadsheet in Rust (command `bricks`). V0.1 i
 | `commands` | `Command` trait, undo/redo |
 | `file-format` | atomic save |
 | `jobs` | background jobs: shared pool, cancel tokens, results to the UI loop (ADR 0005) |
-| `app` | windows, menus, dialogs, OS integration (toolkit set by DEC-1) |
+| `bricks` (`apps/bricks`) | windows, menus, dialogs, OS integration (toolkit set by DEC-1) |
 
 ## Commands
 
 ```sh
 cargo fmt --all
-cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace
+cargo run -p bricks                      # or -p slate, -p frame
 cargo test --release --workspace -- --ignored  # perf acceptance tests (timing asserted in release only)
 python3 scripts/gen_corpus.py            # builds corpus/ (gitignored)
 python3 scripts/fetch_delimiter_sample.py  # 50 real-world files into corpus/realworld/ (ENG-4 test)
@@ -50,14 +73,14 @@ python3 scripts/lo_xlsx.py fixture|dump FILE  # LibreOffice fixture workbook and
 cargo run --release -p xlsx --example gen_corpus_xlsx  # corpus/rows_1m.xlsx (BENCH-2)
 cargo run --release -p xlsx --example gen_corpus_xlsx -- --styled   # corpus/styled_1m.xlsx (STYLE-3, BENCH-3)
 python3 -m unittest discover -s scripts  # script tests (corpus generator)
-cargo bench                              # prints the docs/BENCHMARKS.md table (needs corpus/)
+cargo bench                              # prints the apps/bricks/docs/BENCHMARKS.md table (needs corpus/)
 python3 scripts/backlog.py next|status   # backlog helper
 ```
 
 ## Performance
 
-Targets live in `docs/BENCHMARKS.md` and assume the reference box listed there. Report measured numbers in every perf-related commit. A change that regresses a benchmark more than 10% needs a note in BACKLOG.md.
+Targets live in `apps/bricks/docs/BENCHMARKS.md` and assume the reference box listed there. Report measured numbers in every perf-related commit. A change that regresses a benchmark more than 10% needs a note in BACKLOG.md.
 
 ## Decisions
 
-Architecture decisions go in `docs/decisions/NNNN-title.md` using `0000-template.md`. Read the relevant ADR before touching that area. Spikes live in `spikes/<story-id>/` and are throwaway.
+Bricks' architecture decisions go in `apps/bricks/docs/decisions/NNNN-title.md` using `0000-template.md`; suite-wide ones in `docs/adr/`. Read the relevant ADR before touching that area. Spikes live in `spikes/<story-id>/` and are throwaway.
