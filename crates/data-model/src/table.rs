@@ -6,8 +6,8 @@ use crate::colmap::ColMap;
 use crate::filter::{Filter, RowSet};
 use crate::rowmap::{RowMap, RowOrder, Run};
 use crate::{
-    CellRef, Col, ColId, ColSet, Computed, Edit, EditOverlay, FormulaCells, InferredType, Row,
-    RowId,
+    CellRef, Col, ColId, ColSet, Computed, Edit, EditOverlay, FileLayout, FileStyles, FormulaCells,
+    InferredType, Row, RowId,
 };
 use csv_engine::{
     detect_dialect, detect_header, open_text, open_text_as, split_fields, Dialect, Encoding, Field,
@@ -254,6 +254,10 @@ pub struct CsvTable {
     /// Formula results on a snapshot for a job (FML-3, ADR 0007); `None` on the UI's
     /// table.
     pub(crate) computed: Option<Arc<Computed>>,
+    /// Cell styles and sheet layout read from the file (STYLE-1, ADR 0009); shared by
+    /// snapshots.
+    pub(crate) file_styles: Arc<FileStyles>,
+    pub(crate) layout: Arc<FileLayout>,
     spans: Vec<Range<u64>>,
     fields: Vec<Field>,
 }
@@ -289,6 +293,8 @@ impl CsvTable {
             fields: Vec::new(),
             formulas: Arc::new(FormulaCells::incomplete()),
             computed: None,
+            file_styles: Arc::default(),
+            layout: Arc::default(),
         }
     }
 
@@ -315,6 +321,8 @@ impl CsvTable {
             fields: Vec::new(),
             formulas: self.formulas.clone(),
             computed: self.computed.clone(),
+            file_styles: self.file_styles.clone(),
+            layout: self.layout.clone(),
         }
     }
 

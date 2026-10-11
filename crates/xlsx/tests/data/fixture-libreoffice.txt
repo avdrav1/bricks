@@ -332,3 +332,64 @@ A10	formula:value	250.5	Data!B11*2
 A1	text	Summary	
 A2	formula:value	138.0	AVERAGE('Q1 Sales'!A1:A10)
 A3	formula:text	หนึ่งบาทถ้วน	BAHTTEXT(1)
+== Styles
+A1	text	Styled title	
+I1	text	hidden column	
+A2	text	kind	
+B2	text	a	
+C2	text	b	
+D2	text	c	
+E2	text	d	
+F2	text	e	
+G2	text	f	
+H2	text	g	
+A3	text	fonts	
+B3	text	italic	
+C3	text	underline	
+D3	text	double underline	
+E3	text	strike	
+F3	text	serif 14	
+G3	text	red	
+H3	text	bold blue	
+A4	text	fills	
+B4	text	fill 0	
+C4	text	fill 1	
+D4	text	fill 2	
+E4	text	fill 3	
+A5	text	borders	
+B5	text	border 0	
+C5	text	border 1	
+D5	text	border 2	
+E5	text	border 3	
+F5	text	border 4	
+G5	text	border 5	
+H5	text	border 6	
+A6	text	align	
+B6	text	left	
+C6	text	center	
+D6	text	right	
+E6	text	top	
+F6	text	middle	
+G6	text	a long text that wraps inside its cell	
+H6	text	rotated	
+A7	text	indent	
+B7	text	indented	
+A8	text	formats	
+B8	value	1234.5	
+C8	value	3703.5	
+B9	value	0.125	
+C9	value	0.375	
+B10	value	-1234.0	
+C10	value	-3702.0	
+B11	value	-12.5	
+C11	value	-37.5	
+B12	value	46000.0	
+C12	value	138000.0	
+B13	value	46000.0	
+C13	value	138000.0	
+B14	value	123456.0	
+C14	value	370368.0	
+B15	value	0.75	
+C15	value	2.25	
+A16	text	hidden row	
+A18	text	example	

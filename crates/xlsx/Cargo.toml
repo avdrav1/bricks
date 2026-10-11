@@ -13,6 +13,7 @@ data-model.workspace = true
 file-format.workspace = true
 formula.workspace = true
 memchr = "2.8.3"
+quick-xml = "0.41"
 rust_xlsxwriter = { version = "0.99", features = ["constant_memory"] }
 zip = { version = "8", default-features = false, features = ["deflate"] }
 

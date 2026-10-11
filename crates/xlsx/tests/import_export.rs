@@ -144,7 +144,7 @@ fn fixture_imports_as_libreoffice_reads_it() {
         vec![("Rates".to_string(), "Data!$C$2:$C$51".to_string())]
     );
     let indices: Vec<u32> = imported.sheets.iter().map(|s| s.index).collect();
-    assert_eq!(indices, [0, 1, 2]);
+    assert_eq!(indices, [0, 1, 2, 3]);
 
     let mut book = workbook(imported);
     let mut formulas = 0;

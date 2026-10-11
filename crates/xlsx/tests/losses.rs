@@ -20,6 +20,9 @@ fn the_fixture_names_its_formatting_chart_comment_and_merged_cells() {
             (Loss::Charts, 1),
             (Loss::Comments, 1),
             (Loss::MergedCells, 1),
+            (Loss::ConditionalFormatting, 1),
+            (Loss::DataValidation, 1),
+            (Loss::Hyperlinks, 1),
         ],
     };
     assert_eq!(scan(&fixture()).unwrap(), expected);
@@ -27,7 +30,8 @@ fn the_fixture_names_its_formatting_chart_comment_and_merged_cells() {
     assert_eq!(imported.losses, expected);
     assert_eq!(
         expected.sentence(),
-        "cell formatting, 1 chart, comments, merged cells"
+        "cell formatting, 1 chart, comments, merged cells, conditional formatting, \
+         data validation, hyperlinks"
     );
 }
 

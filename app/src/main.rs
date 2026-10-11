@@ -230,7 +230,7 @@ fn open_session(path: &Path) -> std::io::Result<(Rc<Session>, Workbook)> {
     }
 }
 
-/// The workbook an import read, its sheets' formula cells known.
+/// The workbook an import read, its sheets' formula cells and styles known.
 fn workbook_of(imported: Imported) -> Workbook {
     let sheets = imported
         .sheets
@@ -241,7 +241,9 @@ fn workbook_of(imported: Imported) -> Workbook {
             (s.name, table, Origin::Xlsx(s.index), s.cached)
         })
         .collect();
-    Workbook::from_sheets(sheets, imported.names)
+    let mut book = Workbook::from_sheets(sheets, imported.names);
+    book.set_styles(imported.styles);
+    book
 }
 
 /// Show the workbook `session`'s import reads once it is done (XLSX-1); until then the

@@ -4,7 +4,7 @@
 
 use crate::calc::Calc;
 use crate::table::next_revision;
-use crate::{CellRef, CsvTable, Edit};
+use crate::{CellRef, CsvTable, Edit, StylePool};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -103,6 +103,8 @@ pub struct Workbook {
     /// the fraction. Set by the app; data-model has no clock.
     pub(crate) now: f64,
     pub(crate) calc: Calc,
+    /// Every sheet's styles live in this one pool (ADR 0009).
+    styles: Arc<StylePool>,
 }
 
 impl Default for Workbook {
@@ -143,6 +145,7 @@ impl Workbook {
             layout_revision: next_revision(),
             now: 0.0,
             calc: Calc::default(),
+            styles: Arc::default(),
         };
         book.mark_saved();
         book
@@ -150,6 +153,16 @@ impl Workbook {
 
     pub fn sheets(&self) -> &[Sheet] {
         &self.sheets
+    }
+
+    /// The workbook's style pool (ADR 0009).
+    pub fn styles(&self) -> &Arc<StylePool> {
+        &self.styles
+    }
+
+    /// The pool read from the file (STYLE-1).
+    pub fn set_styles(&mut self, styles: StylePool) {
+        self.styles = Arc::new(styles);
     }
 
     pub fn sheet(&self, id: SheetId) -> Option<&Sheet> {
@@ -210,6 +223,7 @@ impl Workbook {
             layout_revision: self.layout_revision,
             now: self.now,
             calc: Calc::default(),
+            styles: self.styles.clone(),
         }
     }
 

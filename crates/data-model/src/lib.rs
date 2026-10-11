@@ -19,6 +19,7 @@ mod rowmap;
 mod save;
 mod search;
 mod sort;
+mod style;
 mod table;
 mod workbook;
 
@@ -42,6 +43,11 @@ pub use search::{
     Hit, Matches, Query, ReplaceError, SearchError, SearchProgress, Step, REPLACE_MAX_CELLS,
 };
 pub use sort::{SortError, SortOrder};
+pub use style::{
+    apply_tint, Align, Baseline, Border, CellArea, ColSpec, Color, Edge, FileCounts, FileLayout,
+    FileStyles, FileStylesBuilder, Fill, Font, HAlign, LineStyle, Pattern, RowSpec, StyleId,
+    StylePool, Tint, Underline, VAlign, Xf, DEFAULT_PALETTE, DEFAULT_THEME,
+};
 pub use table::{CsvTable, DelimiterChoice, RereadError, RowBlock, TableSource, MAX_DISPLAY_BYTES};
 pub use workbook::{BookEdit, CachedResults, Origin, Sheet, SheetId, Workbook};
 

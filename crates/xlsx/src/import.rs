@@ -3,11 +3,14 @@
 //! is its formula (`=SUM(A1:A3)`); the result the file stored is kept beside it.
 
 use crate::losses::{self, Losses};
+use crate::package;
 use calamine::{
     CellErrorType, Data, DataRef, Dimensions, ExcelDateTime, Reader, SheetType, Xlsx, XlsxError,
 };
 use csv_engine::{encode_field, Dialect, IndexError, LineEnding, Source, SparseRowIndex};
-use data_model::{is_formula, CachedResults, CellRef, ColId, CsvTable, FormulaCells, RowId};
+use data_model::{
+    is_formula, CachedResults, CellRef, ColId, CsvTable, FormulaCells, RowId, StylePool,
+};
 use formula::scalar::{civil_from_serial, serial_from_civil};
 use formula::ErrorKind;
 use std::fmt;
@@ -61,6 +64,9 @@ pub struct Imported {
     pub names: Vec<(String, String)>,
     /// The content the workbook holds that a save would drop.
     pub losses: Losses,
+    /// Every style record of the workbook (ADR 0009); each sheet's table carries its
+    /// cells' styles into this pool.
+    pub styles: StylePool,
 }
 
 #[derive(Debug)]
@@ -121,9 +127,41 @@ pub fn import(path: &Path, cancel: &AtomicBool, progress: &Progress) -> Result<I
         .filter(|s| s.typ == SheetType::WorkSheet)
         .map(|s| s.name.clone())
         .collect();
+    let mut zip = package::open(path)?;
+    let parts = package::parts(&mut zip)?;
+    let styles = match &parts.styles {
+        Some(p) => package::read_part(&mut zip, p)?,
+        None => None,
+    };
+    let theme = match &parts.theme {
+        Some(p) => package::read_part(&mut zip, p)?,
+        None => None,
+    };
+    let styles = crate::styles::read_pool(styles.as_deref(), theme.as_deref())?;
     let mut sheets = Vec::with_capacity(worksheets.len());
     for (index, name) in worksheets.into_iter().enumerate() {
-        let (table, formulas, cached) = import_sheet(&mut book, &name, cancel, progress)?;
+        let part = parts
+            .worksheets
+            .iter()
+            .find(|p| p.name == name)
+            .map(|p| p.part.clone());
+        // Styles and layout are read beside the values, from a second handle on the file.
+        let (copied, layout) = std::thread::scope(|scope| {
+            let layout = part.map(|part| {
+                scope.spawn(move || {
+                    let mut zip = package::open(path)?;
+                    crate::layout::read_layout(&mut zip, &part, cancel)
+                })
+            });
+            let copied = import_sheet(&mut book, &name, cancel, progress);
+            let layout = layout.map(|h| h.join().expect("the layout pass doesn't panic"));
+            (copied, layout)
+        });
+        let (mut table, formulas, cached) = copied?;
+        if let Some(layout) = layout {
+            let (cell_styles, layout) = layout?;
+            table.set_file_styles(cell_styles, layout);
+        }
         sheets.push(ImportedSheet {
             name,
             index: index as u32,
@@ -137,6 +175,7 @@ pub fn import(path: &Path, cancel: &AtomicBool, progress: &Progress) -> Result<I
         sheets,
         names,
         losses,
+        styles,
     })
 }
 

@@ -1,0 +1,702 @@
+== Data
+A1	font=Arial|10|b||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B1	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C1	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D1	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+E1	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F1	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G1	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H1	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A2	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B2	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C2	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D2	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E2	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F2	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G2	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H2	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A3	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B3	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C3	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D3	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E3	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F3	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G3	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H3	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A4	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B4	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C4	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D4	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E4	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F4	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G4	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H4	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A5	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B5	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C5	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D5	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E5	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F5	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G5	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H5	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A6	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B6	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C6	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D6	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E6	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F6	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G6	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H6	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A7	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B7	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C7	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D7	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E7	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F7	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G7	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H7	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A8	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B8	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C8	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D8	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E8	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F8	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G8	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H8	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A9	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B9	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C9	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D9	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E9	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F9	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G9	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H9	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A10	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B10	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C10	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D10	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E10	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F10	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G10	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H10	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A11	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B11	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C11	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D11	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E11	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F11	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G11	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H11	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A12	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B12	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C12	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D12	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E12	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F12	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G12	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H12	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A13	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B13	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C13	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D13	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E13	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F13	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G13	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H13	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A14	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B14	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C14	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D14	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E14	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F14	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G14	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H14	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A15	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B15	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C15	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D15	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E15	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F15	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G15	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H15	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A16	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B16	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C16	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D16	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E16	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F16	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G16	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H16	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A17	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B17	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C17	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D17	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E17	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F17	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G17	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H17	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A18	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B18	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C18	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D18	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E18	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F18	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G18	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H18	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A19	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B19	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C19	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D19	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E19	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F19	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G19	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H19	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A20	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B20	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C20	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D20	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E20	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F20	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G20	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H20	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A21	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B21	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C21	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D21	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E21	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F21	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G21	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H21	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A22	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B22	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C22	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D22	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E22	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F22	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G22	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H22	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A23	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B23	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C23	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D23	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E23	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F23	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G23	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H23	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A24	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B24	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C24	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D24	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E24	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F24	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G24	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H24	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A25	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B25	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C25	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D25	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E25	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F25	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G25	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H25	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A26	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B26	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C26	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D26	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E26	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F26	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G26	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H26	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A27	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B27	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C27	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D27	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E27	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F27	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G27	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H27	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A28	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B28	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C28	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D28	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E28	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F28	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G28	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H28	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A29	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B29	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C29	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D29	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E29	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F29	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G29	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H29	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A30	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B30	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C30	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D30	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E30	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F30	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G30	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H30	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A31	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B31	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C31	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D31	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+E31	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F31	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G31	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H31	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A32	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B32	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C32	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D32	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E32	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F32	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G32	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H32	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A33	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B33	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C33	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D33	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E33	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F33	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G33	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H33	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A34	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B34	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C34	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D34	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E34	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F34	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G34	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H34	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A35	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B35	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C35	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D35	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E35	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F35	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G35	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H35	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A36	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B36	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C36	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D36	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E36	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F36	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G36	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H36	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A37	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B37	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C37	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D37	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E37	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F37	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G37	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H37	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A38	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B38	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C38	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D38	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E38	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F38	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G38	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H38	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A39	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B39	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C39	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D39	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E39	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F39	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G39	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H39	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A40	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B40	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C40	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D40	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E40	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F40	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G40	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H40	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A41	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B41	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C41	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D41	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E41	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F41	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G41	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H41	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A42	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B42	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C42	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D42	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E42	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F42	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G42	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H42	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A43	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B43	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C43	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D43	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E43	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F43	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G43	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H43	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A44	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B44	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C44	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D44	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E44	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F44	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G44	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H44	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A45	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B45	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C45	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D45	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E45	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F45	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G45	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H45	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A46	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B46	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C46	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D46	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E46	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F46	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G46	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H46	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A47	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B47	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C47	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D47	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E47	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F47	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G47	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H47	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A48	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B48	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C48	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D48	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E48	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F48	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G48	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H48	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A49	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B49	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C49	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D49	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E49	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F49	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G49	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H49	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A50	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B50	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C50	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D50	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E50	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F50	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G50	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H50	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A51	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B51	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C51	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D51	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=@
+E51	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F51	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G51	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H51	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+col A 2258 0
+col B 2258 0
+col C 2258 0
+col D 2258 0
+col E 2258 0
+col F 2258 0
+col G 2258 0
+col H 2258 0
+row 1 452 0
+row 2 452 0
+row 3 452 0
+row 4 452 0
+row 5 452 0
+row 6 452 0
+row 7 452 0
+row 8 452 0
+row 9 452 0
+row 10 452 0
+row 11 452 0
+row 12 452 0
+row 13 452 0
+row 14 452 0
+row 15 452 0
+row 16 452 0
+row 17 452 0
+row 18 452 0
+row 19 452 0
+row 20 452 0
+row 21 452 0
+row 22 452 0
+row 23 452 0
+row 24 452 0
+row 25 452 0
+row 26 452 0
+row 27 452 0
+row 28 452 0
+row 29 452 0
+row 30 452 0
+row 31 452 0
+row 32 452 0
+row 33 452 0
+row 34 452 0
+row 35 452 0
+row 36 452 0
+row 37 452 0
+row 38 452 0
+row 39 452 0
+row 40 452 0
+row 41 452 0
+row 42 452 0
+row 43 452 0
+row 44 452 0
+row 45 452 0
+row 46 452 0
+row 47 452 0
+row 48 452 0
+row 49 452 0
+row 50 452 0
+row 51 452 0
+== Q1 Sales
+A1	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B1	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A2	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B2	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A3	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B3	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A4	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B4	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A5	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B5	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A6	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B6	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A7	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B7	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A8	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B8	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A9	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B9	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A10	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B10	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+col A 2258 0
+col B 2258 0
+row 1 452 0
+row 2 452 0
+row 3 452 0
+row 4 452 0
+row 5 452 0
+row 6 452 0
+row 7 452 0
+row 8 452 0
+row 9 452 0
+row 10 452 0
+== Summary
+A1	font=Arial|10|b||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A2	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A3	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+merge A1:B1
+col A 2258 0
+row 1 452 0
+row 2 452 0
+row 3 452 0
+== Styles
+A1	font=Arial|16|b||u0|s0|auto	fill=none	border=-,-,-,-	align=CENTER|3||0|0	fmt=General
+B1	font=Arial|16|b||u0|s0|auto	fill=none	border=-,-,-,-	align=CENTER|3||0|0	fmt=General
+C1	font=Arial|16|b||u0|s0|auto	fill=none	border=-,-,-,-	align=CENTER|3||0|0	fmt=General
+D1	font=Arial|16|b||u0|s0|auto	fill=none	border=-,-,-,-	align=CENTER|3||0|0	fmt=General
+E1	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F1	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G1	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H1	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+I1	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A2	font=Arial|10|b||u0|s0|auto	fill=FFFF00	border=-,0:62:000000,-,-	align=STANDARD|3||0|0	fmt=General
+B2	font=Arial|10|b||u0|s0|auto	fill=FFFF00	border=-,0:62:000000,-,-	align=STANDARD|3||0|0	fmt=General
+C2	font=Arial|10|b||u0|s0|auto	fill=FFFF00	border=-,0:62:000000,-,-	align=STANDARD|3||0|0	fmt=General
+D2	font=Arial|10|b||u0|s0|auto	fill=FFFF00	border=-,0:62:000000,-,-	align=STANDARD|3||0|0	fmt=General
+E2	font=Arial|10|b||u0|s0|auto	fill=FFFF00	border=-,0:62:000000,-,-	align=STANDARD|3||0|0	fmt=General
+F2	font=Arial|10|b||u0|s0|auto	fill=FFFF00	border=-,0:62:000000,-,-	align=STANDARD|3||0|0	fmt=General
+G2	font=Arial|10|b||u0|s0|auto	fill=FFFF00	border=-,0:62:000000,-,-	align=STANDARD|3||0|0	fmt=General
+H2	font=Arial|10|b||u0|s0|auto	fill=FFFF00	border=-,0:62:000000,-,-	align=STANDARD|3||0|0	fmt=General
+I2	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A3	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B3	font=Arial|10||i|u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C3	font=Arial|10|||u1|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D3	font=Arial|10|||u2|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+E3	font=Arial|10|||u0|s1|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F3	font=DejaVu Serif|14|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G3	font=Arial|10|||u0|s0|C00000	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H3	font=Arial|10|b||u0|s0|0070C0	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+I3	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A4	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B4	font=Arial|10|||u0|s0|auto	fill=C4FEBB	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C4	font=Arial|10|||u0|s0|auto	fill=127A02	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D4	font=Arial|10|||u0|s0|auto	fill=E9706D	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+E4	font=Arial|10|||u0|s0|FFFFFF	fill=305496	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F4	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G4	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H4	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+I4	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A5	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B5	font=Arial|10|||u0|s0|auto	fill=none	border=0:26:000000,0:26:000000,0:26:000000,0:26:000000	align=STANDARD|3||0|0	fmt=General
+C5	font=Arial|10|||u0|s0|auto	fill=none	border=0:62:000000,0:62:000000,0:62:000000,0:62:000000	align=STANDARD|3||0|0	fmt=General
+D5	font=Arial|10|||u0|s0|auto	fill=none	border=0:88:000000,0:88:000000,0:88:000000,0:88:000000	align=STANDARD|3||0|0	fmt=General
+E5	font=Arial|10|||u0|s0|auto	fill=none	border=14:26:000000,14:26:000000,14:26:000000,14:26:000000	align=STANDARD|3||0|0	fmt=General
+F5	font=Arial|10|||u0|s0|auto	fill=none	border=1:26:000000,1:26:000000,1:26:000000,1:26:000000	align=STANDARD|3||0|0	fmt=General
+G5	font=Arial|10|||u0|s0|auto	fill=none	border=16:26:000000,16:26:000000,16:26:000000,16:26:000000	align=STANDARD|3||0|0	fmt=General
+H5	font=Arial|10|||u0|s0|auto	fill=none	border=0:26:FF0000,0:26:FF0000,0:26:FF0000,0:26:FF0000	align=STANDARD|3||0|0	fmt=General
+I5	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A6	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B6	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=LEFT|3||0|0	fmt=General
+C6	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=CENTER|3||0|0	fmt=General
+D6	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=RIGHT|3||0|0	fmt=General
+E6	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|1||0|0	fmt=General
+F6	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|2||0|0	fmt=General
+G6	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3|wrap|0|0	fmt=General
+H6	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||4500|0	fmt=General
+I6	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A7	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B7	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=LEFT|3||0|593	fmt=General
+C7	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D7	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+E7	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F7	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G7	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H7	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+I7	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A8	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B8	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=#,##0.00
+C8	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D8	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+E8	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F8	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G8	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H8	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+I8	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A9	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B9	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=0.00%
+C9	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D9	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+E9	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F9	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G9	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H9	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+I9	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A10	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B10	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=_(* #,##0_);_(* \(#,##0\);_(* -??_);_(@_)
+C10	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D10	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+E10	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F10	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G10	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H10	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+I10	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A11	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B11	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=[RED]0.00;[BLUE]-0.00
+C11	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D11	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+E11	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F11	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G11	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H11	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+I11	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A12	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B12	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=YYYY-MM-DD
+C12	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D12	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+E12	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F12	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G12	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H12	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+I12	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A13	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B13	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=MMM D", "YYYY
+C13	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D13	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+E13	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F13	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G13	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H13	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+I13	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A14	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B14	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=0.00E+00
+C14	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D14	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+E14	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F14	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G14	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H14	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+I14	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A15	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B15	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=# ?/?
+C15	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D15	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+E15	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F15	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G15	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H15	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+I15	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A16	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B16	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C16	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D16	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+E16	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F16	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G16	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H16	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+I16	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A17	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B17	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C17	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D17	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+E17	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F17	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G17	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H17	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+I17	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+A18	font=Arial|10|||u0|s0|0000FF	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+B18	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+C18	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+D18	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+E18	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+F18	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+G18	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+H18	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+I18	font=Arial|10|||u0|s0|auto	fill=none	border=-,-,-,-	align=STANDARD|3||0|0	fmt=General
+merge A1:D1
+merge E8:G9
+col A 2258 0
+col B 3000 0
+col C 2258 0
+col D 2258 0
+col E 2258 0
+col F 2258 0
+col G 5001 0
+col H 2258 0
+col I 2258 1
+row 1 695 0
+row 2 452 0
+row 3 612 0
+row 4 452 0
+row 5 452 0
+row 6 1499 0
+row 7 452 0
+row 8 452 0
+row 9 452 0
+row 10 452 0
+row 11 452 0
+row 12 452 0
+row 13 452 0
+row 14 452 0
+row 15 452 0
+row 16 452 1
+row 17 452 0
+row 18 452 0
