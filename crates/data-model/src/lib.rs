@@ -3,11 +3,14 @@
 //! Layers (spec section 16), each kept separate:
 //! source (csv-engine) -> overlay (edits) -> view (sort/filter) -> grid.
 
+mod calc;
 mod check;
 mod cleared;
 mod colmap;
+mod computed;
 mod copy;
 mod filter;
+mod formulas;
 mod infer;
 mod journal;
 mod paste;
@@ -16,11 +19,15 @@ mod save;
 mod search;
 mod sort;
 mod table;
+mod workbook;
 
+pub use calc::{Budget, ShownSheet, PENDING, UI_BUDGET};
 pub use check::{Problem, ProblemKind, Problems};
 pub use cleared::ColSet;
+pub use computed::Computed;
 pub use copy::{Copied, HTML_MAX_CELLS};
 pub use filter::{Compare, Filter, FilterError, RowSet, Test};
+pub use formulas::{is_formula, FormulaCells, RowPositions};
 pub use infer::{value_type, ColumnTypes, SAMPLE_HEAD, SAMPLE_SPREAD};
 pub use journal::{read_journal, read_journal_header, EditState, JournalError, JournalHeader};
 pub use paste::{parse_tsv, PasteError, PASTE_MAX_CELLS};
@@ -31,6 +38,7 @@ pub use search::{
 };
 pub use sort::{SortError, SortOrder};
 pub use table::{CsvTable, DelimiterChoice, RereadError, RowBlock, TableSource, MAX_DISPLAY_BYTES};
+pub use workbook::{BookEdit, CachedResults, Origin, Sheet, SheetId, Workbook};
 
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;

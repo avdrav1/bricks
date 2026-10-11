@@ -5,7 +5,10 @@ use crate::cleared::Cleared;
 use crate::colmap::ColMap;
 use crate::filter::{Filter, RowSet};
 use crate::rowmap::{RowMap, RowOrder, Run};
-use crate::{CellRef, Col, ColId, ColSet, Edit, EditOverlay, InferredType, Row, RowId};
+use crate::{
+    CellRef, Col, ColId, ColSet, Computed, Edit, EditOverlay, FormulaCells, InferredType, Row,
+    RowId,
+};
 use csv_engine::{
     detect_dialect, detect_header, open_text, open_text_as, split_fields, Dialect, Encoding, Field,
     RowIndex, Source, SparseRowIndex, DETECT_SAMPLE_BYTES,
@@ -153,6 +156,54 @@ impl RowBlock {
     pub fn heap_bytes(&self) -> usize {
         self.text.capacity() + self.cell_ends.capacity() * 4 + self.row_ends.capacity() * 4
     }
+
+    /// Whether any cell's text passes `test`.
+    pub fn any_cell(&self, mut test: impl FnMut(&str) -> bool) -> bool {
+        let mut start = 0;
+        self.cell_ends.iter().any(|&end| {
+            let hit = test(&self.text[start..end as usize]);
+            start = end as usize;
+            hit
+        })
+    }
+
+    /// Replace cells' text in one pass: `f(row, col, text)` returns the new text, or `None`
+    /// to keep it. Unless the block is [`Self::full_text`], new text past
+    /// [`MAX_DISPLAY_BYTES`] is cut as [`Self::push_cell`] cuts it.
+    pub fn map_cells(&mut self, mut f: impl FnMut(u64, u32, &str) -> Option<String>) {
+        let mut text = String::with_capacity(self.text.len());
+        let mut ends = Vec::with_capacity(self.cell_ends.len());
+        let mut cell = 0usize;
+        let mut start = 0usize;
+        for (r, &row_end) in self.row_ends.iter().enumerate() {
+            let row = self.first_row + r as u64;
+            let mut col = 0u32;
+            while cell < row_end as usize {
+                let end = self.cell_ends[cell] as usize;
+                let old = &self.text[start..end];
+                match f(row, col, old) {
+                    None => text.push_str(old),
+                    Some(new) => {
+                        let mut cut = if self.full {
+                            new.len()
+                        } else {
+                            new.len().min(MAX_DISPLAY_BYTES)
+                        };
+                        while !new.is_char_boundary(cut) {
+                            cut -= 1;
+                        }
+                        text.push_str(&new[..cut]);
+                    }
+                }
+                ends.push(text.len() as u32);
+                start = end;
+                cell += 1;
+                col += 1;
+            }
+        }
+        self.text = text;
+        self.cell_ends = ends;
+    }
 }
 
 /// A table the grid can read. Row numbers are physical file rows until the row map
@@ -198,6 +249,11 @@ pub struct CsvTable {
     /// Changes when what the table shows changes (edits, the header row, filters); unique
     /// across tables, so a replaced table never repeats one. Snapshots share it.
     pub(crate) revision: u64,
+    /// The file's formula cells (FML-3), from [`Self::scan_formulas`]; shared by snapshots.
+    pub(crate) formulas: Arc<FormulaCells>,
+    /// Formula results on a snapshot for a job (FML-3, ADR 0007); `None` on the UI's
+    /// table.
+    pub(crate) computed: Option<Arc<Computed>>,
     spans: Vec<Range<u64>>,
     fields: Vec<Field>,
 }
@@ -231,6 +287,8 @@ impl CsvTable {
             revision: next_revision(),
             spans: Vec::new(),
             fields: Vec::new(),
+            formulas: Arc::new(FormulaCells::incomplete()),
+            computed: None,
         }
     }
 
@@ -255,6 +313,8 @@ impl CsvTable {
             revision: self.revision,
             spans: Vec::new(),
             fields: Vec::new(),
+            formulas: self.formulas.clone(),
+            computed: self.computed.clone(),
         }
     }
 
@@ -266,7 +326,9 @@ impl CsvTable {
         index
             .build(&std::sync::atomic::AtomicBool::new(false))
             .expect("an empty source indexes at once");
-        Self::new(index, dialect)
+        let mut table = Self::new(index, dialect);
+        table.formulas = Arc::new(FormulaCells::default());
+        table
     }
 
     /// Open `path` as `encoding` rather than detecting it: the encoding a Save As wrote
@@ -349,14 +411,14 @@ impl CsvTable {
     }
 
     /// Rows in file order plus inserts minus deletes, the header row included.
-    pub(crate) fn total_rows(&self) -> u64 {
+    pub fn total_rows(&self) -> u64 {
         self.rows
             .as_ref()
             .map_or_else(|| self.index.row_count(), RowOrder::len)
     }
 
     /// Id of the row at position `k` among all rows (< `total_rows()`).
-    pub(crate) fn id_at(&self, k: u64) -> RowId {
+    pub fn id_at(&self, k: u64) -> RowId {
         self.rows.as_ref().map_or(RowId::source(k), |m| m.get(k))
     }
 
@@ -468,7 +530,7 @@ impl CsvTable {
     }
 
     /// Position among all rows (header and hidden rows included) of table row `row`.
-    fn pos(&self, row: Row) -> u64 {
+    pub(crate) fn pos(&self, row: Row) -> u64 {
         match &self.visible {
             Some(v) => u64::from(v[row as usize]),
             None => row + self.first_row(),
@@ -753,6 +815,19 @@ impl CsvTable {
         })
     }
 
+    /// The text a cell shows: a formula's result when the table has [`Computed`] results
+    /// (a job's snapshot), else its raw text.
+    pub(crate) fn shown_of(&self, row: RowId, col: ColId) -> Option<Cow<'_, str>> {
+        if let Some(v) = self
+            .computed
+            .as_ref()
+            .and_then(|c| c.get(CellRef { row, col }))
+        {
+            return Some(Cow::Borrowed(v));
+        }
+        self.cell_of(row, col)
+    }
+
     /// Append source rows `file_rows` (with their edits) to `out`.
     fn read_source(&mut self, file_rows: Range<u64>, out: &mut RowBlock, cols: Option<&ColMap>) {
         if self
@@ -770,7 +845,9 @@ impl CsvTable {
                 line = line.strip_prefix(UTF8_BOM).unwrap_or(line);
             }
             split_fields(line, &self.dialect, &mut self.fields);
-            let edits = self.overlay.row(RowId::source(file_row));
+            let file_id = RowId::source(file_row);
+            let edits = self.overlay.row(file_id);
+            let results = self.computed.as_ref().and_then(|c| c.row(file_id));
             let cleared = self.cleared.at(file_row);
             // `value` borrows unless the field has `""` escapes to undo.
             let value = |id: ColId, f: &Field| match cleared {
@@ -778,7 +855,7 @@ impl CsvTable {
                 _ => f.value(line, quote),
             };
             match (cols, edits) {
-                (None, None) if cleared.is_none() => self
+                (None, None) if cleared.is_none() && results.is_none() => self
                     .fields
                     .iter()
                     .for_each(|f| out.push_cell(&f.value(line, quote))),
@@ -788,6 +865,10 @@ impl CsvTable {
                         .map_or(0, |c| c.0 as usize + 1);
                     for c in 0..self.fields.len().max(last_edit) {
                         let id = ColId::source(c as Col);
+                        if let Some(v) = results.and_then(|r| r.get(&id)) {
+                            out.push_cell(v.as_bytes());
+                            continue;
+                        }
                         match (edits.and_then(|e| e.get(&id)), self.fields.get(c)) {
                             (Some(v), _) => out.push_cell(v.as_bytes()),
                             (None, Some(f)) => out.push_cell(&value(id, f)),
@@ -806,6 +887,10 @@ impl CsvTable {
                         let field = (!id.is_inserted())
                             .then(|| self.fields.get(id.0 as usize))
                             .flatten();
+                        if let Some(v) = results.and_then(|r| r.get(&id)) {
+                            out.push_cell(v.as_bytes());
+                            continue;
+                        }
                         match (edits.and_then(|e| e.get(&id)), field) {
                             (Some(v), _) => out.push_cell(v.as_bytes()),
                             (None, Some(f)) => out.push_cell(&value(id, f)),
@@ -822,18 +907,23 @@ impl CsvTable {
     fn read_inserted(&self, run: Run, out: &mut RowBlock, cols: Option<&ColMap>) {
         for id in run.first.0..run.first.0 + run.len {
             if let Some(edits) = self.overlay.row(RowId(id)) {
+                let results = self.computed.as_ref().and_then(|c| c.row(RowId(id)));
+                let shown = |col: ColId| {
+                    results
+                        .and_then(|r| r.get(&col))
+                        .or_else(|| edits.get(&col))
+                        .map_or(&b""[..], |v| v.as_bytes())
+                };
                 match cols {
                     None => {
                         let width = edits.keys().next_back().map_or(0, |c| c.0 + 1);
                         for c in 0..width {
-                            let v = edits.get(&ColId::source(c));
-                            out.push_cell(v.map_or(&b""[..], |v| v.as_bytes()));
+                            out.push_cell(shown(ColId::source(c)));
                         }
                     }
                     Some(map) => {
                         for pos in 0..map.width_with(0, edits.keys().copied()) {
-                            let v = edits.get(&map.get(pos));
-                            out.push_cell(v.map_or(&b""[..], |v| v.as_bytes()));
+                            out.push_cell(shown(map.get(pos)));
                         }
                     }
                 }
@@ -897,7 +987,7 @@ impl TableSource for CsvTable {
 
 impl CsvTable {
     /// Append the rows at `positions` (among all rows, header and hidden ones included).
-    fn read_positions(&mut self, positions: Range<u64>, out: &mut RowBlock) {
+    pub(crate) fn read_positions(&mut self, positions: Range<u64>, out: &mut RowBlock) {
         // Out of `self` while reading, so the read paths can use the field buffer.
         let cols = self.cols.take();
         match self.rows.as_ref().map(|m| {
@@ -935,10 +1025,14 @@ impl CsvTable {
         col: ColId,
         fields: &mut Vec<Field>,
     ) -> Cow<'a, str> {
-        if let Some(v) = self.overlay.get(CellRef {
+        let at = CellRef {
             row: RowId::source(row),
             col,
-        }) {
+        };
+        if let Some(v) = self.computed.as_ref().and_then(|c| c.get(at)) {
+            return Cow::Borrowed(v);
+        }
+        if let Some(v) = self.overlay.get(at) {
             return Cow::Borrowed(v);
         }
         if col.is_inserted() || self.cleared.at(row).is_some_and(|c| c.contains(col)) {

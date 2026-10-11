@@ -218,7 +218,7 @@ impl Matches {
         rows.sort_unstable();
         let (plain, edited): (Vec<RowId>, Vec<RowId>) = rows
             .into_iter()
-            .partition(|&id| !id.is_inserted() && table.overlay.row(id).is_none());
+            .partition(|&id| !id.is_inserted() && !table.shows_other_text(id));
 
         // Rows as in the file: their spans a chunk of file rows at a time, in parallel.
         let groups: Vec<&[RowId]> = plain.chunk_by(|a, b| a.0 / CHUNK == b.0 / CHUNK).collect();
@@ -264,7 +264,7 @@ impl Matches {
         let mut scratch = Vec::new();
         for id in edited {
             for col in table.edited_row_cols(self, id, table.overlay.row(id)) {
-                let Some(v) = table.cell_of(id, col) else {
+                let Some(v) = table.shown_of(id, col) else {
                     continue;
                 };
                 if let Some(new) = self.needle.replace(&v, with, &mut scratch) {
@@ -502,8 +502,8 @@ impl CsvTable {
                 let mut shown_found = 0;
                 let mut count = |i: usize| {
                     let row = rows.start + i as u64;
-                    if self.overlay.row(RowId::source(row)).is_some() {
-                        return; // counted from its edits
+                    if self.shows_other_text(RowId::source(row)) {
+                        return; // counted from its edits and results
                     }
                     let n = self.count_in_file_row(m, row, &spans[i], &mut fields, &mut scratch);
                     if n >= u32::from(MANY) {
@@ -626,12 +626,26 @@ impl CsvTable {
     /// from its cells as shown.
     fn count_edited_rows(&self, m: &mut Matches) {
         let mut scratch = Vec::new();
-        for (&id, edits) in self.overlay.iter_rows() {
+        let computed = self
+            .computed
+            .as_deref()
+            .into_iter()
+            .flat_map(|c| c.iter_rows());
+        let rows = self
+            .overlay
+            .iter_rows()
+            .map(|(&id, e)| (id, Some(e)))
+            .chain(
+                computed
+                    .filter(|(id, _)| self.overlay.row(**id).is_none())
+                    .map(|(&id, _)| (id, None)),
+            );
+        for (id, edits) in rows.collect::<Vec<_>>() {
             let n = self
-                .edited_row_cols(m, id, Some(edits))
+                .edited_row_cols(m, id, edits)
                 .into_iter()
                 .filter(|&c| {
-                    self.cell_of(id, c)
+                    self.shown_of(id, c)
                         .is_some_and(|v| m.needle.in_value(v.as_bytes(), &mut scratch))
                 })
                 .count() as u32;

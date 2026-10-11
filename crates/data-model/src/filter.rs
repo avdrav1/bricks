@@ -14,7 +14,7 @@
 
 use crate::infer::value_type;
 use crate::rowmap::{unpack, RowOrder, PACKED_INSERTED};
-use crate::{CellRef, Col, ColId, CsvTable, InferredType, RowId};
+use crate::{Col, ColId, CsvTable, InferredType, RowId};
 use csv_engine::RowIndex;
 use rayon::prelude::*;
 use std::collections::HashSet;
@@ -201,8 +201,8 @@ impl CsvTable {
             order.for_each(|run| {
                 if run.first.is_inserted() {
                     for id in (0..run.len).map(|i| RowId(run.first.0 + i)) {
-                        let raw = self.overlay.get(CellRef { row: id, col }).unwrap_or("");
-                        if !m.matches(raw) {
+                        let raw = self.shown_of(id, col).unwrap_or_default();
+                        if !m.matches(&raw) {
                             hidden_inserted.insert(id);
                         }
                     }

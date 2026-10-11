@@ -18,7 +18,7 @@
 
 use crate::infer::value_type;
 use crate::rowmap::{unpack, RowOrder};
-use crate::{CellRef, Col, ColId, CsvTable, Edit, InferredType};
+use crate::{Col, ColId, CsvTable, Edit, InferredType};
 use csv_engine::RowIndex;
 use formula::scalar::instant;
 use rayon::prelude::*;
@@ -237,11 +237,8 @@ impl CsvTable {
             keys.extend(c);
         }
         for (id, pos) in inserted {
-            let raw = self
-                .overlay
-                .get(CellRef { row: id, col: cid })
-                .unwrap_or("");
-            keys.push(key(raw, ty, pos));
+            let raw = self.shown_of(id, cid).unwrap_or_default();
+            keys.push(key(&raw, ty, pos));
         }
 
         // The sorts can't be paused, so a cancel unwinds out of their comparisons (ENG-8:
@@ -291,7 +288,7 @@ impl CsvTable {
                 stop();
                 let id = unpack(ids[k.pos as usize]);
                 let text = self
-                    .cell_of(id, col)
+                    .shown_of(id, col)
                     .map_or_else(String::new, Cow::into_owned);
                 (text, *k)
             })

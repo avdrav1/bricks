@@ -4,10 +4,12 @@
 //! `#VALUE!` (checked by the evaluator from `min`/`max`); the parser accepts any count.
 
 use crate::ast::{Area, ErrorKind, Expr};
-use crate::eval::{as_reference, Context, Interrupt};
+use crate::eval::{as_reference, bounds, evaluate, Context, Interrupt};
 use crate::value::Value;
 use std::collections::HashMap;
 use std::sync::LazyLock;
+
+mod math;
 
 /// A function's result, or why evaluation stopped.
 pub type Outcome = Result<Value, Interrupt>;
@@ -39,7 +41,7 @@ pub fn is_volatile(name: &str) -> bool {
     FUNCTIONS.get(name).is_some_and(|f| f.volatile)
 }
 
-type Registry = HashMap<&'static str, Function>;
+pub(crate) type Registry = HashMap<&'static str, Function>;
 
 fn add(
     m: &mut Registry,
@@ -64,6 +66,40 @@ fn register(m: &mut Registry) {
     add(m, "COLUMN", 0, Some(1), column);
     add(m, "TRUE", 0, Some(0), |_, _| Ok(Value::Bool(true)));
     add(m, "FALSE", 0, Some(0), |_, _| Ok(Value::Bool(false)));
+    math::register(m);
+}
+
+/// Calls `f` with every value an argument supplies: each non-empty cell of a reference and
+/// each element of an array (`true`: reached through a reference or array), or the
+/// argument's own value (`false`). `f` returns false to stop.
+pub(crate) fn each_value(
+    arg: &Expr,
+    ctx: &mut dyn Context,
+    f: &mut dyn FnMut(&Value, bool) -> bool,
+) -> Result<(), Interrupt> {
+    if let Some(r) = as_reference(arg, ctx) {
+        let (rows, cols) = match bounds(&r, ctx) {
+            Ok(b) => b,
+            Err(e) => {
+                f(&Value::Error(e), false);
+                return Ok(());
+            }
+        };
+        return ctx.area(r.sheet.as_deref(), rows, cols, &mut |_, _, v| f(v, true));
+    }
+    match evaluate(arg, ctx)? {
+        Value::Array(a) => {
+            for v in &a.values {
+                if !f(v, true) {
+                    break;
+                }
+            }
+        }
+        v => {
+            f(&v, false);
+        }
+    }
+    Ok(())
 }
 
 /// `ROW()`: the formula's own row; `ROW(ref)`: the reference's first row (1-based).
