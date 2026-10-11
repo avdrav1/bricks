@@ -28,6 +28,9 @@ const SHEET_COLS: u32 = 16_384;
 
 type Key = (SheetId, CellRef);
 
+/// Cells' values, as a job computes them for [`Workbook::store_values`].
+pub type CellValues = Vec<((SheetId, CellRef), Value)>;
+
 /// Results and parses, valid for one workbook revision.
 #[derive(Default)]
 pub(crate) struct Calc {
@@ -151,7 +154,7 @@ impl Workbook {
         cells: &[(SheetId, CellRef)],
         cancel: Arc<AtomicBool>,
         done: &AtomicU64,
-    ) -> Option<Vec<((SheetId, CellRef), Value)>> {
+    ) -> Option<CellValues> {
         let mut budget = Budget::unlimited(cancel.clone());
         let mut positions: HashMap<SheetId, RowPositions> = HashMap::new();
         let mut out = Vec::with_capacity(cells.len());
@@ -182,7 +185,7 @@ impl Workbook {
 
     /// Keep results a job computed on a snapshot taken at `revision`; ignored if the
     /// workbook changed since.
-    pub fn store_values(&mut self, revision: u64, values: Vec<((SheetId, CellRef), Value)>) {
+    pub fn store_values(&mut self, revision: u64, values: CellValues) {
         if revision != self.revision() {
             return;
         }
@@ -201,7 +204,7 @@ impl Workbook {
     ) -> Option<Computed> {
         let s = self.sheet_mut(sheet)?;
         if !s.table.formulas_scanned() {
-            let found = s.table.scan_formulas(&cancel)?;
+            let found = s.table.scan_formulas(&cancel, &AtomicU64::new(0))?;
             s.table.set_formula_cells(found);
         }
         let cells = s.table.formula_cells_at().expect("scanned just now");

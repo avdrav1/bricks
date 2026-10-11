@@ -31,7 +31,9 @@ mod status;
 mod theme;
 
 use csv_engine::{Charset, Encoding, IndexError};
-use data_model::{CsvTable, DelimiterChoice, RereadError, SaveProgress, SaveStats, Step};
+use data_model::{
+    CsvTable, DelimiterChoice, Origin, RereadError, SaveProgress, SaveStats, Step, Workbook,
+};
 use grid_view::{GridView, ROW_H};
 use gtk::{glib, prelude::*};
 use status::FindNote;
@@ -567,6 +569,21 @@ impl Session {
         Ok(table)
     }
 
+    /// A workbook of `table`, named after the file (Sheet1 while untitled).
+    fn workbook(&self, table: CsvTable) -> Workbook {
+        let path = self.path.borrow();
+        let name = path
+            .as_deref()
+            .and_then(Path::file_stem)
+            .map_or_else(|| "Sheet1".to_owned(), |s| s.to_string_lossy().into_owned());
+        let origin = if path.is_some() {
+            Origin::Csv
+        } else {
+            Origin::New
+        };
+        Workbook::single(name, table, origin)
+    }
+
     /// The user's header choice wins over detection on a fresh reading of the file.
     fn apply_header(&self, table: &mut CsvTable) {
         if let Some(on) = self.header.get() {
@@ -619,7 +636,7 @@ fn delimiter_dropdown(session: &Rc<Session>, grid: &GridView) -> gtk::DropDown {
                     session.choice.set(choice);
                     // Other columns now: the old widths don't belong to them.
                     grid.reset_column_widths();
-                    grid.replace_table(table);
+                    grid.replace_workbook(session.workbook(table));
                 }
                 Err(RereadError::UnsavedEdits(_)) => {
                     let current = DELIMITERS
@@ -662,7 +679,7 @@ fn build_window(
 ) {
     let vadj = gtk::Adjustment::new(0.0, 0.0, 0.0, ROW_H, 0.0, 0.0);
     let hadj = gtk::Adjustment::new(0.0, 0.0, 0.0, 30.0, 0.0, 0.0);
-    let grid = GridView::new(table, &vadj, &hadj);
+    let grid = GridView::new(session.workbook(table), &vadj, &hadj);
 
     let layout = gtk::Grid::new();
     layout.attach(&grid, 0, 0, 1, 1);
@@ -712,6 +729,22 @@ fn build_window(
         }
     }
     accept_file_drops(app, &window);
+    // A typed formula that doesn't parse (FML-4): say where, and keep it in the editor.
+    grid.connect_closure(
+        "formula-error",
+        false,
+        glib::closure_local!(
+            #[weak]
+            window,
+            move |_: GridView, message: String| {
+                alert(
+                    Some(window.upcast_ref()),
+                    "This formula has an error",
+                    &message,
+                );
+            }
+        ),
+    );
     let delimiter = delimiter_dropdown(session, &grid);
     let open = gtk::Button::from_icon_name("document-open-symbolic");
     open.set_tooltip_text(Some("Open… (Ctrl+O)"));
@@ -922,6 +955,7 @@ fn build_window(
             }
             if complete && !was_complete {
                 grid.infer_types();
+                grid.scan_formulas();
                 grid.apply_pending_filters(); // the filters a save had on (FILT-3)
             }
             if let Some(j) = &journal {
@@ -1222,7 +1256,7 @@ fn finish_save(
             // The reopened file has the same columns: the types the user set (TYPE-2) and
             // the filters (FILT-3) come back, types first since filters read them.
             let (types, filters) = (grid.type_overrides(), grid.filters());
-            grid.replace_table(table);
+            grid.replace_workbook(session.workbook(table));
             grid.restore_type_overrides(types);
             grid.restore_filters(filters);
             if std::env::var_os("BRICKS_TIMINGS").is_some() {

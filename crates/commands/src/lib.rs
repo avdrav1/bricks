@@ -9,13 +9,15 @@ mod batch;
 mod clear;
 mod edit;
 mod reshape;
+mod sheet;
 
 pub use batch::Batch;
 pub use clear::ClearCells;
 pub use edit::SetCell;
 pub use reshape::Reshape;
+pub use sheet::{OnSheet, SheetEdit};
 
-use data_model::CellRef;
+use data_model::{CellRef, SheetId};
 use std::collections::VecDeque;
 
 /// Default history size: 1,000 steps (CMD-2).
@@ -31,6 +33,10 @@ pub trait Command<T> {
     fn label(&self) -> &str;
     /// The cell to show after this command runs or is undone, if it changes one.
     fn focus(&self) -> Option<CellRef> {
+        None
+    }
+    /// The sheet to show after this command runs or is undone (ADR 0008).
+    fn sheet(&self) -> Option<SheetId> {
         None
     }
     /// Memory this command holds, itself included: what keeping it in history costs.
@@ -95,6 +101,16 @@ impl<T> UndoStack<T> {
         self.done.push_back(cmd);
         self.trim(false);
         self.done.back().map(|c| &**c)
+    }
+
+    /// The command the next undo reverts.
+    pub fn peek_undo(&self) -> Option<&dyn Command<T>> {
+        self.done.back().map(|c| &**c)
+    }
+
+    /// The command the next redo applies.
+    pub fn peek_redo(&self) -> Option<&dyn Command<T>> {
+        self.undone.back().map(|c| &**c)
     }
 
     /// Steps that can be undone.

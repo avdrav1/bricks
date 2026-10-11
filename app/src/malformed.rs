@@ -40,9 +40,7 @@ pub fn tick(window: &gtk::ApplicationWindow, grid: &GridView, session: &Rc<Sessi
         return;
     }
     session.checked.set(Some(reading));
-    let Some(table) = grid.snapshot() else {
-        return;
-    };
+    let table = grid.snapshot();
     let generation = grid.generation();
     let job = jobs::spawn(move |cancel| table.check_file(cancel.flag()));
     let (window, grid, session) = (window.downgrade(), grid.downgrade(), session.clone());

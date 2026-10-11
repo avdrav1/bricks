@@ -6,7 +6,7 @@ use csv_engine::{split_fields, RowIndex};
 use rayon::prelude::*;
 use std::borrow::Cow;
 use std::ops::Range;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 /// File rows per task, and between cancel checks.
@@ -215,9 +215,10 @@ impl CsvTable {
     }
 
     /// Find the file's formula cells: one parallel pass in file order, after indexing;
-    /// rows without a `=` byte are not parsed. Run it on a snapshot on the job pool.
-    /// `None` once `cancel` is set, or if the file isn't indexed.
-    pub fn scan_formulas(&self, cancel: &AtomicBool) -> Option<FormulaCells> {
+    /// rows without a `=` byte are not parsed. Run it on a snapshot on the job pool;
+    /// `done` counts file rows scanned. `None` once `cancel` is set, or if the file isn't
+    /// indexed.
+    pub fn scan_formulas(&self, cancel: &AtomicBool, done: &AtomicU64) -> Option<FormulaCells> {
         if !self.index.is_complete() {
             return None;
         }
@@ -259,6 +260,7 @@ impl CsvTable {
                         }
                     }
                 }
+                done.fetch_add(rows.end - rows.start, Ordering::Relaxed);
                 Some(out)
             })
             .collect();

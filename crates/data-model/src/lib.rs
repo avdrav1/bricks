@@ -21,7 +21,7 @@ mod sort;
 mod table;
 mod workbook;
 
-pub use calc::{Budget, ShownSheet, PENDING, UI_BUDGET};
+pub use calc::{Budget, CellValues, ShownSheet, PENDING, UI_BUDGET};
 pub use check::{Problem, ProblemKind, Problems};
 pub use cleared::ColSet;
 pub use computed::Computed;

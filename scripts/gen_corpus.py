@@ -33,6 +33,18 @@ def sized(path, mb, rng):
     print(f"{path.name}: {i:,} rows")
 
 
+def formulas(path, rows=1_000_000, seed=7):
+    """FML-4's scroll benchmark: `total` = qty * price, a running total, and a band."""
+    rng = random.Random(seed)
+    with path.open("w", encoding="ascii", newline="") as f:
+        f.write("id,qty,price,total,running,band\n")
+        for n in range(2, rows + 2):
+            running = "=D2" if n == 2 else f"=E{n - 1}+D{n}"
+            f.write(f"{n - 1},{rng.randint(1, 20)},{rng.randint(1, 100)},=B{n}*C{n},{running},"
+                    f'"=IF(D{n}>500,""high"",""low"")"\n')
+    print(f"{path.name}: {rows:,} rows")
+
+
 def nasty(out):
     files = {
         "quoted_newlines.csv": 'id,note\n1,"line one\nline two"\n2,"has ""quotes"""\n3,plain\n',
@@ -66,4 +78,6 @@ if __name__ == "__main__":
     for mb in (10, 100, 1024, 4096):
         if mb <= args.max_mb:
             sized(args.out / f"rows_{mb}mb.csv", mb, rng)
+    if args.max_mb >= 100:
+        formulas(args.out / "formulas.csv")
     nasty(args.out)

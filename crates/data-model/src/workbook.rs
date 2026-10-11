@@ -71,6 +71,24 @@ pub enum BookEdit {
     Sheets(Vec<(SheetId, Edit)>),
 }
 
+impl BookEdit {
+    /// Heap the edit holds beyond its own size. A removed sheet counts what its edits
+    /// hold, not its file.
+    pub fn heap_bytes(&self) -> usize {
+        match self {
+            BookEdit::Insert { sheet, .. } => {
+                std::mem::size_of::<Sheet>() + sheet.name.capacity() + sheet.table.edit_bytes()
+            }
+            BookEdit::Remove { .. } | BookEdit::Move { .. } => 0,
+            BookEdit::Rename { name, .. } => name.capacity(),
+            BookEdit::Sheets(edits) => {
+                edits.capacity() * std::mem::size_of::<(SheetId, Edit)>()
+                    + edits.iter().map(|(_, e)| e.heap_bytes()).sum::<usize>()
+            }
+        }
+    }
+}
+
 pub struct Workbook {
     sheets: Vec<Sheet>,
     active: SheetId,
@@ -227,12 +245,15 @@ impl Workbook {
     }
 
     /// Set the clock `TODAY()` and `NOW()` read (local serial date and time). A new
-    /// value drops cached results, so volatile formulas show the new time.
-    pub fn set_now(&mut self, now: f64) {
-        if now != self.now {
-            self.now = now;
-            self.calc = Calc::default();
+    /// value drops cached results, so volatile formulas show the new time. Whether it
+    /// changed.
+    pub fn set_now(&mut self, now: f64) -> bool {
+        if now == self.now {
+            return false;
         }
+        self.now = now;
+        self.calc = Calc::default();
+        true
     }
 
     /// A new sheet with a fresh id, for [`BookEdit::Insert`].

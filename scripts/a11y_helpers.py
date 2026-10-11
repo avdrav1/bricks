@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Read and press what the app shows, through the accessibility tree (AT-SPI).
 
-    a11y_helpers.py text          every name and text in the app's windows, one per line
+    a11y_helpers.py text          every name, description, and text in the app's windows,
+                                  one per line
     a11y_helpers.py press LABEL   activate the button labelled LABEL
 
 Used by scripts/check_malformed.sh (APP-8) to read dialog text exactly as GTK shows it.
@@ -30,6 +31,8 @@ def app():
 def walk(node, depth=0):
     if node is None or depth > 60:
         return
+    # Fresh values: descriptions change as the cursor moves (FML-4).
+    node.clear_cache()
     yield node
     for i in range(node.get_child_count()):
         yield from walk(node.get_child_at_index(i), depth + 1)
@@ -39,6 +42,10 @@ def texts(node):
     name = node.get_name()
     if name:
         yield name
+    # The grid's description names the cursor cell and what it shows (FML-4).
+    description = node.get_description()
+    if description:
+        yield description
     text = node.get_text_iface()
     if text is not None:
         content = Atspi.Text.get_text(text, 0, Atspi.Text.get_character_count(text))

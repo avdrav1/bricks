@@ -529,6 +529,12 @@ impl CsvTable {
         self.id_at(self.pos(row))
     }
 
+    /// Position among all rows (header and hidden rows included) of table row `row`: its
+    /// row in references, from 0 (ADR 0006).
+    pub fn position(&self, row: Row) -> u64 {
+        self.pos(row)
+    }
+
     /// Position among all rows (header and hidden rows included) of table row `row`.
     pub(crate) fn pos(&self, row: Row) -> u64 {
         match &self.visible {
@@ -561,6 +567,27 @@ impl CsvTable {
     /// the recovery journal (APP-7) is written again only when it moved.
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// Memory the edits hold (not the file or its index): what keeping a removed sheet in
+    /// undo history costs.
+    pub fn edit_bytes(&self) -> usize {
+        let cells: usize = self
+            .overlay
+            .iter_rows()
+            .map(|(_, cols)| {
+                cols.values()
+                    .map(|v| v.len() + std::mem::size_of::<(ColId, Box<str>)>())
+                    .sum::<usize>()
+            })
+            .sum();
+        cells
+            + self.rows.as_ref().map_or(0, RowOrder::heap_bytes)
+            + self
+                .cleared
+                .blocks()
+                .map(|(rows, cols)| std::mem::size_of_val(rows) + cols.heap_bytes())
+                .sum::<usize>()
     }
 
     /// Unsaved changes: edited cells, plus rows inserted and source rows deleted, plus one

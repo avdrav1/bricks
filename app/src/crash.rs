@@ -86,9 +86,7 @@ pub fn journal_tick(grid: &GridView, session: &Session, j: &Rc<RefCell<Journal>>
     if s.first.get_or_insert_with(Instant::now).elapsed() < WRITE_AFTER {
         return;
     }
-    let Some(snapshot) = grid.snapshot() else {
-        return;
-    };
+    let snapshot = grid.snapshot();
     let (file_size, file_mtime_ns) = session.identity.get().unwrap_or((0, 0));
     let header = JournalHeader {
         path: session.path.borrow().clone(),
@@ -188,7 +186,7 @@ pub fn pending_tick(window: &gtk::ApplicationWindow, grid: &GridView, session: &
             match session.open() {
                 Ok(table) => {
                     grid.reset_column_widths();
-                    grid.replace_table(table);
+                    grid.replace_workbook(session.workbook(table));
                     session.restore.replace(Some(p)); // again once this reading is indexed
                 }
                 Err(e) => alert(

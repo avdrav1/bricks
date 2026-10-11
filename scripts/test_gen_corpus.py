@@ -1,4 +1,5 @@
 """Tests for gen_corpus.py. Run: python3 -m unittest discover -s scripts"""
+import csv
 import hashlib
 import subprocess
 import sys
@@ -84,6 +85,24 @@ class NastySet(unittest.TestCase):
             "ragged.csv", "semicolon.csv", "tab.tsv", "utf16le.csv",
         }
         self.assertEqual({p.name for p in self.dir.iterdir()}, expected)
+
+
+class FormulaFile(unittest.TestCase):
+    def test_each_row_refers_to_its_own_row(self):
+        sys.path.insert(0, str(SCRIPT.parent))
+        import gen_corpus
+
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "formulas.csv"
+            gen_corpus.formulas(path, rows=3)
+            with path.open(newline="") as f:
+                rows = list(csv.reader(f))
+        self.assertEqual(rows[0], ["id", "qty", "price", "total", "running", "band"])
+        self.assertEqual(len(rows), 4)
+        for n, row in enumerate(rows[1:], start=2):
+            self.assertEqual(row[3], f"=B{n}*C{n}")
+            self.assertEqual(row[4], "=D2" if n == 2 else f"=E{n - 1}+D{n}")
+            self.assertEqual(row[5], f'=IF(D{n}>500,"high","low")')
 
 
 if __name__ == "__main__":

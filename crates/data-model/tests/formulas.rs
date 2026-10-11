@@ -22,7 +22,9 @@ fn table(path: &Path) -> CsvTable {
     let index = SparseRowIndex::new(Arc::new(Source::open(path).unwrap()), &Dialect::default());
     index.build(&AtomicBool::new(false)).unwrap();
     let mut t = CsvTable::new(index, Dialect::default());
-    let found = t.scan_formulas(&AtomicBool::new(false)).unwrap();
+    let found = t
+        .scan_formulas(&AtomicBool::new(false), &AtomicU64::new(0))
+        .unwrap();
     t.set_formula_cells(found);
     t
 }
@@ -168,7 +170,9 @@ fn scan_finds_exactly_the_formula_cells() {
     for file in &files {
         let mut t = CsvTable::open(file, DelimiterChoice::Auto).unwrap();
         t.index().build(&AtomicBool::new(false)).unwrap();
-        let found = t.scan_formulas(&AtomicBool::new(false)).unwrap();
+        let found = t
+            .scan_formulas(&AtomicBool::new(false), &AtomicU64::new(0))
+            .unwrap();
         let mut naive = Vec::new();
         let mut block = RowBlock::full_text();
         t.read_all(0..t.total_rows(), &mut block);

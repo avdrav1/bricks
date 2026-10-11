@@ -3,18 +3,19 @@
 use crate::editor::{self, Action, ClipCommand, Mode, ShapeCommand, Start};
 use crate::status::ClipView;
 
-use commands::{Batch, ClearCells, Reshape, SetCell, UndoStack};
+use commands::{Batch, ClearCells, Command, OnSheet, Reshape, SetCell, UndoStack};
 use csv_engine::RowIndex as _;
 use data_model::{
-    parse_tsv, CellRef, ColId, ColumnTypes, Compare, Copied, CsvTable, DelimiterChoice, Edit,
-    EditState, Filter, FilterError, Hit, InferredType, JournalError, Matches, PasteError, Query,
-    ReplaceError, RereadError, RowId, RowSet, SaveJob, SaveJobError, SearchError, SearchProgress,
-    SortError, SortOrder, Step, TableSource, Test, PASTE_MAX_CELLS,
+    is_formula, parse_tsv, Budget, CellRef, CellValues, ColId, ColumnTypes, Compare, Copied,
+    CsvTable, DelimiterChoice, Edit, EditState, Filter, FilterError, FormulaCells, Hit,
+    InferredType, JournalError, Matches, PasteError, Query, ReplaceError, RereadError, RowId,
+    RowSet, SaveJob, SaveJobError, SearchError, SearchProgress, SheetId, ShownSheet, SortError,
+    SortOrder, Step, TableSource, Test, Workbook, PASTE_MAX_CELLS, UI_BUDGET,
 };
 use formula::column_name;
 use grid::{Bounds, GridCache, Key, Mods, Selection, Sizes, Viewport};
 use gtk::{gdk, gio, glib, graphene, pango, prelude::*, subclass::prelude::*};
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -55,6 +56,23 @@ pub struct SortJob {
 pub struct FilterJob {
     filters: Vec<Filter>,
     job: jobs::Job<Result<Vec<RowSet>, FilterError>>,
+    done: Arc<AtomicU64>,
+    rows: u64,
+}
+
+/// Formula results computed on the job pool (FML-4) for cells the UI's budget didn't
+/// reach: the cells, and how many are done.
+pub struct CalcJob {
+    job: jobs::Job<Option<CellValues>>,
+    done: Arc<AtomicU64>,
+    total: u64,
+    /// The workbook revision the job's snapshot has.
+    revision: u64,
+}
+
+/// The scan for a sheet's formula cells on the job pool (FML-4).
+pub struct ScanJob {
+    job: jobs::Job<Option<FormulaCells>>,
     done: Arc<AtomicU64>,
     rows: u64,
 }
@@ -128,7 +146,8 @@ mod imp {
 
     #[derive(Default)]
     pub struct GridView {
-        pub table: RefCell<Option<CsvTable>>,
+        /// The sheets this window shows (ADR 0008).
+        pub book: RefCell<Workbook>,
         pub cache: RefCell<GridCache>,
         pub vadj: RefCell<Option<gtk::Adjustment>>,
         pub hadj: RefCell<Option<gtk::Adjustment>>,
@@ -141,7 +160,7 @@ mod imp {
         /// Top row of the last frame drawn with its text loaded; `None` before then.
         pub painted_top: Cell<Option<u64>>,
         /// Every edit goes through here as a command (invariant 5).
-        pub undo: RefCell<Option<UndoStack<CsvTable>>>,
+        pub undo: RefCell<UndoStack<Workbook>>,
         /// The in-cell editor (EDIT-2): an entry laid over its cell, made on first use.
         pub editor: RefCell<Option<gtk::Entry>>,
         /// Cell the editor is open on, and how the edit started.
@@ -193,6 +212,11 @@ mod imp {
         pub pending_filters: RefCell<Vec<(u32, Test)>>,
         /// A column's filter settings, open under its header button.
         pub filter_popover: RefCell<Option<gtk::Popover>>,
+        /// Formula results being computed (FML-4), if any.
+        pub calculating: RefCell<Option<CalcJob>>,
+        /// The scan for the active sheet's formula cells (FML-4), if running: the job,
+        /// file rows scanned, and rows in all.
+        pub scanning: RefCell<Option<ScanJob>>,
     }
 
     #[glib::object_subclass]
@@ -200,9 +224,30 @@ mod imp {
         const NAME: &'static str = "BricksGridView";
         type Type = super::GridView;
         type ParentType = gtk::Widget;
+
+        fn class_init(klass: &mut Self::Class) {
+            // A grid (ARIA) can carry a description: the cursor cell and what it shows
+            // (FML-4). The default generic role can't.
+            klass.set_accessible_role(gtk::AccessibleRole::Grid);
+        }
     }
 
     impl ObjectImpl for GridView {
+        fn signals() -> &'static [glib::subclass::Signal] {
+            static SIGNALS: std::sync::OnceLock<Vec<glib::subclass::Signal>> =
+                std::sync::OnceLock::new();
+            SIGNALS.get_or_init(|| {
+                vec![
+                    // A typed formula doesn't parse: the message says where (FML-4).
+                    glib::subclass::Signal::builder("formula-error")
+                        .param_types([String::static_type()])
+                        .build(),
+                    // The cell cursor or the selected range moved (FML-9's formula bar).
+                    glib::subclass::Signal::builder("cursor-changed").build(),
+                ]
+            })
+        }
+
         fn dispose(&self) {
             if let Some(entry) = self.editor.take() {
                 entry.unparent();
@@ -269,8 +314,7 @@ mod imp {
             else {
                 return;
             };
-            let mut table = self.table.borrow_mut();
-            let Some(table) = table.as_mut() else { return };
+            let mut book = self.book.borrow_mut();
             let mut cache = self.cache.borrow_mut();
             let (w, h) = (obj.width() as f64, obj.height() as f64);
             let rh_w = self.row_header_w.get();
@@ -281,10 +325,15 @@ mod imp {
                 scroll: vadj.value(),
                 extent: body_h,
                 sizes: &sizing.rows,
-                count: shown_rows(table),
+                count: shown_rows(book.active()),
             };
             let visible = rows.visible(0);
-            cache.ensure(visible.clone(), BUFFER_ROWS, table);
+            // Formula cells show their results (FML-4); those over the frame's budget wait
+            // for a job.
+            let mut shown = ShownSheet::new(&mut book);
+            cache.ensure(visible.clone(), BUFFER_ROWS, &mut shown);
+            let pending = shown.into_pending();
+            let table = book.active();
             self.painted_top
                 .set(cache.cell(visible.start, 0).map(|_| visible.start));
             let cols = Viewport {
@@ -381,11 +430,12 @@ mod imp {
             let mark = gdk::RGBA::new(accent.red(), accent.green(), accent.blue(), 0.25);
             snapshot.append_color(&mark, &rect(0.0, y0, rh_w, y1 - y0));
             snapshot.push_clip(&rect(0.0, HEADER_H, rh_w, body_h));
+            // File row numbers, as references count them (ADR 0006): the header row is 1.
             for r in visible {
                 let y = HEADER_H + rows.pos(r);
                 snapshot.append_color(&line, &rect(0.0, y + rows.size(r) - 1.0, rh_w, 1.0));
                 buf.clear();
-                let _ = write!(buf, "{}", r + 1);
+                let _ = write!(buf, "{}", row_number(table, r));
                 text_at(&buf, PAD + 2.0, y + 3.0);
             }
             snapshot.pop();
@@ -395,6 +445,12 @@ mod imp {
             snapshot.append_color(&mark, &rect(x0, 0.0, x1 - x0, HEADER_H));
             snapshot.append_color(&line, &rect(0.0, HEADER_H - 1.0, w, 1.0));
             snapshot.append_color(&line, &rect(rh_w - 1.0, 0.0, 1.0, h));
+            if table.has_header() {
+                // The header row is row 1: its number sits in the corner, over the titles'
+                // row of the gutter.
+                let w = f64::from(self.layout("1").pixel_size().0);
+                text_in("1", ((rh_w - w) / 2.0).max(0.0), 4.0, &dim);
+            }
             snapshot.push_clip(&rect(rh_w, 0.0, body_w, HEADER_H));
             // Row 0 is readable once any later row is, or indexing is done.
             let row0_ready = table.row_count() > 0 || table.is_complete();
@@ -448,6 +504,9 @@ mod imp {
             }
             drop(buf);
             self.end_frame();
+            drop(cache);
+            drop(book);
+            obj.calc_pending(pending);
         }
     }
 }
@@ -459,14 +518,13 @@ glib::wrapper! {
 }
 
 impl GridView {
-    pub fn new(table: CsvTable, vadj: &gtk::Adjustment, hadj: &gtk::Adjustment) -> Self {
+    pub fn new(book: Workbook, vadj: &gtk::Adjustment, hadj: &gtk::Adjustment) -> Self {
         let g: Self = glib::Object::new();
         let imp = g.imp();
-        imp.table.replace(Some(table));
+        imp.book.replace(book);
         imp.vadj.replace(Some(vadj.clone()));
         imp.hadj.replace(Some(hadj.clone()));
         imp.row_header_w.set(64.0);
-        imp.undo.replace(Some(UndoStack::default()));
         let click = gtk::GestureClick::new();
         click.connect_pressed({
             let g = g.downgrade();
@@ -643,14 +701,14 @@ impl GridView {
             if (old.rows, old.cols) != (b.rows, b.cols) {
                 let mut sel = imp.selection.get();
                 sel.grow(old, b);
-                imp.selection.set(sel);
+                self.set_selection(sel);
             }
         }
         // A reopened file can have fewer rows than the cursor's (a header detected where
         // there was none); once its row count is final, bring the cursor back in.
         let cur = imp.selection.get().cursor();
         if b.rows > 0 && cur.row >= b.rows && self.is_complete() {
-            imp.selection.set(Selection::at(grid::Cell {
+            self.set_selection(Selection::at(grid::Cell {
                 row: b.rows - 1,
                 col: cur.col,
             }));
@@ -662,7 +720,7 @@ impl GridView {
     /// than reach every filtered column (FILT-2: a filter hiding every row stays clearable).
     fn col_count(&self) -> u32 {
         let imp = self.imp();
-        let min = imp.table.borrow().as_ref().map_or(0, |t| t.min_width());
+        let min = self.table().min_width();
         imp.cache.borrow().col_count().max(min)
     }
 
@@ -756,13 +814,15 @@ impl GridView {
             })
         });
         // A column title sits after the dimmed letter (see `snapshot`).
-        let title = imp.table.borrow().as_ref().and_then(|t| {
-            let title = t.header_cell(c)?;
-            let mut letter = String::new();
-            column_name(c, &mut letter);
-            let w = |s: &str| f64::from(imp.layout(s).pixel_size().0);
-            Some(w(&letter) + 6.0 + w(&title))
-        });
+        let title = {
+            let t = self.table();
+            t.header_cell(c).map(|title| {
+                let mut letter = String::new();
+                column_name(c, &mut letter);
+                let w = |s: &str| f64::from(imp.layout(s).pixel_size().0);
+                w(&letter) + 6.0 + w(&title)
+            })
+        };
         let width = match (widest, title) {
             (None, None) => COL_W,
             (a, b) => {
@@ -790,22 +850,18 @@ impl GridView {
     /// Give column `col` a width, remembered by its identity.
     fn set_col_width(&self, col: u32, width: f64) {
         let imp = self.imp();
-        let id = imp.table.borrow().as_ref().map(|t| t.col_id(col));
-        if let Some(id) = id {
-            imp.col_widths.borrow_mut().insert(id, width);
-        }
+        let id = self.table().col_id(col);
+        imp.col_widths.borrow_mut().insert(id, width);
         imp.sizing.borrow_mut().cols.set(u64::from(col), width);
     }
 
     /// Give row `row` a height, remembered by its identity.
     fn set_row_height(&self, row: u64, height: f64) {
         let imp = self.imp();
-        let id = imp
-            .table
-            .borrow()
-            .as_ref()
-            .filter(|t| row < t.row_count())
-            .map(|t| t.row_id(row));
+        let id = {
+            let t = self.table();
+            (row < t.row_count()).then(|| t.row_id(row))
+        };
         if let Some(id) = id {
             imp.row_heights.borrow_mut().insert(id, height);
         }
@@ -816,8 +872,7 @@ impl GridView {
     /// shown (deleted) are kept for an undo.
     fn refit_sizes(&self) {
         let imp = self.imp();
-        let table = imp.table.borrow();
-        let Some(table) = table.as_ref() else { return };
+        let table = self.table();
         let mut sizing = imp.sizing.borrow_mut();
         sizing.rows.clear();
         sizing.cols.clear();
@@ -888,7 +943,7 @@ impl GridView {
                 Some(Drag::Cells)
             }
         };
-        imp.selection.set(sel);
+        self.set_selection(sel);
         imp.drag.set(kind.map(|k| (k, x, y)));
         self.queue_draw();
     }
@@ -962,7 +1017,7 @@ impl GridView {
             Drag::Resize { .. } => return,
         }
         if sel != imp.selection.get() {
-            imp.selection.set(sel);
+            self.set_selection(sel);
             self.queue_draw();
         }
     }
@@ -985,7 +1040,7 @@ impl GridView {
         };
         let mut sel = imp.selection.get();
         sel.press(key, mods, within);
-        imp.selection.set(sel);
+        self.set_selection(sel);
         // Paging scrolls the view by a page as well, like Calc.
         if let (Key::PageUp | Key::PageDown, Some(vadj)) = (key, imp.vadj.borrow().as_ref()) {
             let step = bounds.page_rows as f64 * ROW_H;
@@ -1028,7 +1083,7 @@ impl GridView {
         }) else {
             return;
         };
-        self.imp().selection.set(Selection::at(cell));
+        self.set_selection(Selection::at(cell));
         let value = self.cell_text(cell);
         self.open_editor(cell, &value, Mode::Editing);
     }
@@ -1048,11 +1103,9 @@ impl GridView {
     }
 
     fn cell_text(&self, cell: grid::Cell) -> String {
-        self.imp()
-            .table
-            .borrow()
-            .as_ref()
-            .and_then(|t| t.cell_value(cell.row, cell.col).map(|v| v.into_owned()))
+        self.table()
+            .cell_value(cell.row, cell.col)
+            .map(|v| v.into_owned())
             .unwrap_or_default()
     }
 
@@ -1127,8 +1180,9 @@ impl GridView {
                 };
                 match editor::while_editing(key, state, mode) {
                     Action::Commit(key, mods) => {
-                        g.commit_edit();
-                        g.press(key, mods);
+                        if g.commit_edit(true) {
+                            g.press(key, mods);
+                        }
                     }
                     Action::Cancel => g.close_editor(),
                     Action::Pass => return glib::Propagation::Proceed,
@@ -1143,7 +1197,8 @@ impl GridView {
             let g = self.downgrade();
             move |_| {
                 if let Some(g) = g.upgrade() {
-                    g.commit_edit();
+                    // Quietly: a formula with an error stays in the editor to be fixed.
+                    g.commit_edit(false);
                 }
             }
         });
@@ -1153,14 +1208,17 @@ impl GridView {
 
     /// Commit an open edit, if any; for Ctrl+S, which saves what was typed (as Calc does).
     pub fn finish_editing(&self) {
-        self.commit_edit();
+        self.commit_edit(true);
     }
 
     /// Apply the editor's text to its cell as an undoable command, then close the editor.
-    fn commit_edit(&self) {
+    /// A formula that doesn't parse is refused: the editor stays open and, if `report`,
+    /// `formula-error` says where it fails. Whether the edit was applied (or there was
+    /// none open).
+    fn commit_edit(&self, report: bool) -> bool {
         let imp = self.imp();
         let Some((row, col, _)) = imp.editing.get() else {
-            return;
+            return true;
         };
         let text = imp
             .editor
@@ -1168,32 +1226,44 @@ impl GridView {
             .as_ref()
             .map(|e| e.text().to_string())
             .unwrap_or_default();
+        if is_formula(&text) {
+            if let Err(e) = formula::parse(&text[1..]) {
+                if report {
+                    let message = format!("Formula error at character {}: {}", e.at + 2, e.message);
+                    self.emit_by_name::<()>("formula-error", &[&message]);
+                }
+                return false;
+            }
+        }
         let text_empty = text.is_empty();
         let mut grew = false;
-        {
-            let mut table = imp.table.borrow_mut();
-            if let (Some(table), Some(undo)) = (table.as_mut(), imp.undo.borrow_mut().as_mut()) {
-                if row >= table.row_count() {
-                    // The edge row (SAVE-2): add the row and set the cell, as one step.
-                    match table.paste(row, col, &[vec![text]]) {
-                        Ok(edits) if !edits.is_empty() => {
-                            let at = CellRef {
-                                row: table.row_id(row.min(table.row_count().saturating_sub(1))),
-                                col: table.col_id(col),
-                            };
-                            undo.execute(Box::new(Batch::new("Edit cell", edits, at)), table);
-                            grew = true;
-                        }
-                        _ => {}
+        let cmd: Option<Box<dyn Command<CsvTable>>> = {
+            let mut table = self.table_mut();
+            if row >= table.row_count() {
+                // The edge row (SAVE-2): add the row and set the cell, as one step.
+                match table.paste(row, col, &[vec![text]]) {
+                    Ok(edits) if !edits.is_empty() => {
+                        let at = CellRef {
+                            row: table.row_id(row.min(table.row_count().saturating_sub(1))),
+                            col: table.col_id(col),
+                        };
+                        grew = true;
+                        Some(Box::new(Batch::new("Edit cell", edits, at)))
                     }
-                } else if table.cell_value(row, col).as_deref() != Some(text.as_str()) {
-                    let at = CellRef {
-                        row: table.row_id(row),
-                        col: table.col_id(col),
-                    };
-                    undo.execute(Box::new(SetCell::new(at, text)), table);
+                    _ => None,
                 }
+            } else if table.cell_value(row, col).as_deref() != Some(text.as_str()) {
+                let at = CellRef {
+                    row: table.row_id(row),
+                    col: table.col_id(col),
+                };
+                Some(Box::new(SetCell::new(at, text)))
+            } else {
+                None
             }
+        };
+        if let Some(cmd) = cmd {
+            self.execute(cmd);
         }
         let mut cache = imp.cache.borrow_mut();
         cache.invalidate();
@@ -1207,6 +1277,8 @@ impl GridView {
             self.update_adjustments();
         }
         self.close_editor();
+        self.update_description();
+        true
     }
 
     /// Close the editor without touching the cell (Esc), and give the grid the focus back.
@@ -1240,16 +1312,14 @@ impl GridView {
             return false;
         }
         let focus = {
-            let (mut table, mut undo) = (imp.table.borrow_mut(), imp.undo.borrow_mut());
-            let (Some(table), Some(undo)) = (table.as_mut(), undo.as_mut()) else {
-                return false;
-            };
+            let (mut book, mut undo) = (imp.book.borrow_mut(), imp.undo.borrow_mut());
             let cmd = if back {
-                undo.undo(table)
+                undo.undo(&mut book)
             } else {
-                undo.redo(table)
+                undo.redo(&mut book)
             };
             let Some(cmd) = cmd else { return false };
+            let table = book.active();
             cmd.focus().and_then(|at| {
                 let row = table.row_of(at.row)?;
                 let col = table.col_of(at.col)?;
@@ -1277,9 +1347,10 @@ impl GridView {
                 row: cursor.row.min(b.rows.saturating_sub(1)),
                 col: cursor.col,
             };
-            imp.selection.set(Selection::at(cell));
+            self.set_selection(Selection::at(cell));
             self.scroll_to((Some(cell.row), Some(cell.col)));
         }
+        self.update_description();
         self.queue_draw();
     }
 
@@ -1297,12 +1368,11 @@ impl GridView {
             return;
         };
         let at = if below { first + count } else { first };
-        let edit = self
-            .imp()
-            .table
-            .borrow_mut()
-            .as_mut()
-            .and_then(|t| t.insert_rows(at.min(t.row_count()), count));
+        let edit = {
+            let mut t = self.table_mut();
+            let rows = t.row_count();
+            t.insert_rows(at.min(rows), count)
+        };
         self.reshape(edit);
     }
 
@@ -1311,12 +1381,10 @@ impl GridView {
         let Some((first, count)) = self.selected_rows() else {
             return;
         };
-        let edit = self
-            .imp()
-            .table
-            .borrow()
-            .as_ref()
-            .and_then(|t| t.delete_rows(first, count.min(t.row_count().saturating_sub(first))));
+        let edit = {
+            let t = self.table();
+            t.delete_rows(first, count.min(t.row_count().saturating_sub(first)))
+        };
         self.reshape(edit);
     }
 
@@ -1344,12 +1412,7 @@ impl GridView {
     fn insert_cols(&self, right: bool) {
         let (first, count) = self.selected_cols();
         let at = if right { first + count } else { first };
-        let edit = self
-            .imp()
-            .table
-            .borrow_mut()
-            .as_mut()
-            .and_then(|t| t.insert_cols(at, count));
+        let edit = self.table_mut().insert_cols(at, count);
         self.reshape(edit);
     }
 
@@ -1358,12 +1421,7 @@ impl GridView {
         let (first, count) = self.selected_cols();
         // Not the empty edge column: there is nothing there to delete.
         let count = count.min(self.col_count().saturating_sub(first));
-        let edit = self
-            .imp()
-            .table
-            .borrow()
-            .as_ref()
-            .and_then(|t| t.delete_cols(first, count));
+        let edit = self.table().delete_cols(first, count);
         self.reshape(edit);
     }
 
@@ -1382,22 +1440,19 @@ impl GridView {
         if self.busy() || imp.editing.get().is_some() {
             return;
         }
-        {
-            let (mut table, mut undo) = (imp.table.borrow_mut(), imp.undo.borrow_mut());
-            let (Some(table), Some(undo)) = (table.as_mut(), undo.as_mut()) else {
-                return;
-            };
+        let cursor = {
+            let table = self.table();
             let cur = imp.selection.get().cursor();
-            let cursor = CellRef {
+            CellRef {
                 row: if cur.row < table.row_count() {
                     table.row_id(cur.row)
                 } else {
                     RowId::source(0)
                 },
                 col: table.col_id(cur.col),
-            };
-            undo.execute(Box::new(Reshape::new(edit, cursor)), table);
-        }
+            }
+        };
+        self.execute(Box::new(Reshape::new(edit, cursor)));
         self.after_change(None);
     }
 
@@ -1411,11 +1466,8 @@ impl GridView {
         }
         let sel = imp.selection.get();
         let (tl, br) = sel.range();
-        {
-            let (mut table, mut undo) = (imp.table.borrow_mut(), imp.undo.borrow_mut());
-            let (Some(table), Some(undo)) = (table.as_mut(), undo.as_mut()) else {
-                return;
-            };
+        let (edit, cursor) = {
+            let table = self.table();
             let rows = match sel.whole_columns() {
                 Some(_) if !table.is_complete() => return,
                 Some(_) => tl.row..table.row_count(),
@@ -1432,8 +1484,9 @@ impl GridView {
                 row: table.row_id(cur.row),
                 col: table.col_id(cur.col),
             };
-            undo.execute(Box::new(ClearCells::new(edit, cursor)), table);
-        }
+            (edit, cursor)
+        };
+        self.execute(Box::new(ClearCells::new(edit, cursor)));
         imp.cache.borrow_mut().invalidate();
         imp.titles.take();
         self.queue_draw();
@@ -1452,8 +1505,7 @@ impl GridView {
         let sel = imp.selection.get();
         let (tl, br) = sel.range();
         let (mut snapshot, rows) = {
-            let table = imp.table.borrow();
-            let Some(table) = table.as_ref() else { return };
+            let table = self.table();
             let rows = match sel.whole_columns() {
                 Some(_) if !table.is_complete() => return,
                 Some(_) => tl.row..table.row_count(),
@@ -1544,7 +1596,7 @@ impl GridView {
     /// Paste `text` (TSV) with its top-left at `cell`, as one undoable step (the save
     /// benchmark's edits, SAVE-3).
     pub fn paste_at(&self, cell: grid::Cell, text: &str) {
-        self.imp().selection.set(Selection::at(cell));
+        self.set_selection(Selection::at(cell));
         self.paste_text(text);
     }
 
@@ -1559,30 +1611,34 @@ impl GridView {
             return;
         }
         let (tl, _) = imp.selection.get().range();
-        let note = {
-            let (mut table, mut undo) = (imp.table.borrow_mut(), imp.undo.borrow_mut());
-            let (Some(table), Some(undo)) = (table.as_mut(), undo.as_mut()) else {
-                return;
-            };
+        let (note, cmd) = {
+            let mut table = self.table_mut();
             let at = tl.row.min(table.row_count());
             match table.paste(at, tl.col, &cells) {
                 Ok(edits) => {
-                    if !edits.is_empty() {
+                    let cmd = (!edits.is_empty()).then(|| {
                         let focus = CellRef {
                             row: table.row_id(at.min(table.row_count().saturating_sub(1))),
                             col: table.col_id(tl.col),
                         };
-                        undo.execute(Box::new(Batch::new("Paste", edits, focus)), table);
-                    }
-                    ClipView::Pasted(cells.iter().map(|r| r.len() as u64).sum())
+                        Batch::new("Paste", edits, focus)
+                    });
+                    let pasted = cells.iter().map(|r| r.len() as u64).sum();
+                    (ClipView::Pasted(pasted), cmd)
                 }
-                Err(PasteError::TooLarge(n)) => ClipView::PasteTooLarge {
-                    cells: n,
-                    max: PASTE_MAX_CELLS,
-                },
-                Err(PasteError::NotIndexed) => ClipView::PasteNeedsIndex,
+                Err(PasteError::TooLarge(n)) => (
+                    ClipView::PasteTooLarge {
+                        cells: n,
+                        max: PASTE_MAX_CELLS,
+                    },
+                    None,
+                ),
+                Err(PasteError::NotIndexed) => (ClipView::PasteNeedsIndex, None),
             }
         };
+        if let Some(cmd) = cmd {
+            self.execute(Box::new(cmd));
+        }
         imp.clip_note.set(Some((note, Instant::now())));
         if !matches!(note, ClipView::Pasted(_)) {
             return;
@@ -1597,7 +1653,7 @@ impl GridView {
             row: anchor.row + cells.len() as u64 - 1,
             col: anchor.col + width - 1,
         });
-        imp.selection.set(sel);
+        self.set_selection(sel);
         self.queue_draw();
     }
 
@@ -1677,9 +1733,12 @@ impl GridView {
             return;
         }
         let col = imp.selection.get().cursor().col;
-        let (snapshot, rows) = match imp.table.borrow().as_ref() {
-            Some(t) if t.is_complete() => (t.snapshot(), t.index().row_count()),
-            _ => return,
+        let (snapshot, rows) = {
+            let t = self.table();
+            if !t.is_complete() {
+                return;
+            }
+            (t.snapshot(), t.index().row_count())
         };
         let done = Arc::new(AtomicU64::new(0));
         let started = Instant::now();
@@ -1712,17 +1771,14 @@ impl GridView {
             }
             imp.sorting.take();
             let Ok(Ok(Some(edit))) = result else { return };
-            {
-                let (mut table, mut undo) = (imp.table.borrow_mut(), imp.undo.borrow_mut());
-                let (Some(table), Some(undo)) = (table.as_mut(), undo.as_mut()) else {
-                    return;
-                };
-                let focus = CellRef {
+            let focus = {
+                let table = g.table();
+                CellRef {
                     row: table.row_id(0),
                     col: table.col_id(col),
-                };
-                undo.execute(Box::new(Batch::new("Sort", vec![edit], focus)), table);
-            }
+                }
+            };
+            g.execute(Box::new(Batch::new("Sort", vec![edit], focus)));
             g.after_change(None);
         });
     }
@@ -1766,9 +1822,15 @@ impl GridView {
         if let Some(r) = imp.replacing.borrow().as_ref() {
             return Some(("Replacing", share(&r.progress.rows, r.rows)));
         }
-        let searching = imp.searching.borrow();
-        let s = searching.as_ref()?;
-        Some(("Searching", share(&s.progress.rows, s.rows)))
+        if let Some(s) = imp.searching.borrow().as_ref() {
+            return Some(("Searching", share(&s.progress.rows, s.rows)));
+        }
+        if let Some(s) = imp.scanning.borrow().as_ref() {
+            return Some(("Scanning for formulas", share(&s.done, s.rows)));
+        }
+        let calculating = imp.calculating.borrow();
+        let c = calculating.as_ref()?;
+        Some(("Calculating", share(&c.done, c.total)))
     }
 
     /// A save, sort, filter, search, or replace is running: the table must not change
@@ -1818,9 +1880,7 @@ impl GridView {
             let at_hit = hit.filter(|h| (h.row, h.col) == (cur.row, cur.col));
             (m, at_hit)
         });
-        let Some(mut snapshot) = imp.table.borrow().as_ref().map(CsvTable::snapshot) else {
-            return;
-        };
+        let mut snapshot = self.table().snapshot();
         self.cancel_search();
         let progress = Arc::new(SearchProgress::default());
         let counting = known.is_none();
@@ -1873,7 +1933,7 @@ impl GridView {
                         row: h.row,
                         col: h.col,
                     };
-                    imp.selection.set(Selection::at(cell));
+                    g.set_selection(Selection::at(cell));
                     g.scroll_to((Some(h.row), Some(h.col)));
                     g.queue_draw();
                     done(Found::Hit {
@@ -1900,8 +1960,10 @@ impl GridView {
     fn query(&self, text: &str, match_case: bool, column_only: bool) -> Option<(Query, u64)> {
         let imp = self.imp();
         let cur = imp.selection.get().cursor();
-        let table = imp.table.borrow();
-        let t = table.as_ref().filter(|t| t.is_complete())?;
+        let t = self.table();
+        if !t.is_complete() {
+            return None;
+        }
         let query = Query {
             text: text.to_owned(),
             match_case,
@@ -1913,12 +1975,11 @@ impl GridView {
     /// The last search's matches, if they are for `query` and still describe the table.
     fn known_matches(&self, query: &Query) -> Option<Searched> {
         let imp = self.imp();
-        let table = imp.table.borrow();
-        let t = table.as_ref()?;
+        let t = self.table();
         imp.found
             .borrow()
             .as_ref()
-            .filter(|(m, _)| m.query() == query && m.is_current(t))
+            .filter(|(m, _)| m.query() == query && m.is_current(&t))
             .cloned()
     }
 
@@ -1947,19 +2008,19 @@ impl GridView {
         let Some((matches, _)) = on_match else {
             return self.find(text, match_case, column_only, Step::Here, done);
         };
-        {
-            let mut table = imp.table.borrow_mut();
-            let mut undo = imp.undo.borrow_mut();
-            if let (Some(table), Some(undo)) = (table.as_mut(), undo.as_mut()) {
-                let value = table.cell_value(cur.row, cur.col).unwrap_or_default();
-                if let Some(new) = matches.replace_in(&value, with) {
-                    let at = CellRef {
-                        row: table.row_id(cur.row),
-                        col: table.col_id(cur.col),
-                    };
-                    undo.execute(Box::new(SetCell::new(at, new)), table);
-                }
-            }
+        let cmd = {
+            let table = self.table();
+            let value = table.cell_value(cur.row, cur.col).unwrap_or_default();
+            matches.replace_in(&value, with).map(|new| {
+                let at = CellRef {
+                    row: table.row_id(cur.row),
+                    col: table.col_id(cur.col),
+                };
+                SetCell::new(at, new)
+            })
+        };
+        if let Some(cmd) = cmd {
+            self.execute(Box::new(cmd));
         }
         self.after_change(None);
         self.find(text, match_case, column_only, Step::Next, done);
@@ -1985,9 +2046,7 @@ impl GridView {
         };
         let known = self.known_matches(&query).map(|(m, _)| m);
         self.cancel_search();
-        let Some(mut snapshot) = imp.table.borrow().as_ref().map(CsvTable::snapshot) else {
-            return;
-        };
+        let mut snapshot = self.table().snapshot();
         let progress = Arc::new(SearchProgress::default());
         let with = with.to_owned();
         let started = Instant::now();
@@ -2031,17 +2090,9 @@ impl GridView {
             };
             let built = started.elapsed();
             {
-                let mut table = imp.table.borrow_mut();
-                let mut undo = imp.undo.borrow_mut();
-                let (Some(table), Some(undo)) = (table.as_mut(), undo.as_mut()) else {
-                    return;
-                };
                 let Edit::Cells(list) = &edit else { return };
                 let focus = list[0].0;
-                undo.execute(
-                    Box::new(Batch::new("Replace all", vec![edit], focus)),
-                    table,
-                );
+                g.execute(Box::new(Batch::new("Replace all", vec![edit], focus)));
             }
             if std::env::var_os("BRICKS_TIMINGS").is_some() {
                 eprintln!(
@@ -2063,18 +2114,13 @@ impl GridView {
 
     /// Some rows are hidden by filters (FILT-1).
     pub fn is_filtered(&self) -> bool {
-        self.imp()
-            .table
-            .borrow()
-            .as_ref()
-            .is_some_and(|t| t.is_filtered())
+        self.table().is_filtered()
     }
 
     /// While filtered, the rows there are in all: the "y" in "x of y rows".
     pub fn unfiltered_row_count(&self) -> Option<u64> {
-        let table = self.imp().table.borrow();
-        let t = table.as_ref().filter(|t| t.is_filtered())?;
-        Some(t.unfiltered_row_count())
+        let t = self.table();
+        t.is_filtered().then(|| t.unfiltered_row_count())
     }
 
     /// The settings of column `col` (FILT-1, TYPE-2), in a popover under its header button
@@ -2086,13 +2132,13 @@ impl GridView {
         if let Some(old) = imp.filter_popover.take() {
             old.unparent();
         }
-        let (current, inferred, set) = match imp.table.borrow().as_ref() {
-            Some(t) => (
+        let (current, inferred, set) = {
+            let t = self.table();
+            (
                 t.filter_on(col).map(|f| f.test.clone()),
                 t.inferred_type(col),
                 t.type_override(col),
-            ),
-            None => (None, None, None),
+            )
         };
         // A number filter already on keeps its conditions listed whatever the type.
         let number_filter = matches!(current, Some(Test::Number(..)));
@@ -2238,19 +2284,20 @@ impl GridView {
         if filters.is_empty() || self.busy() || imp.editing.get().is_some() {
             return;
         }
-        let (snapshot, filters, rows) = match imp.table.borrow().as_ref() {
-            Some(t) if t.is_complete() => {
-                let filters: Vec<Filter> = filters
-                    .into_iter()
-                    .map(|(col, test)| Filter {
-                        col: t.col_id(col),
-                        test,
-                    })
-                    .collect();
-                let rows = t.index().row_count() * filters.len() as u64;
-                (t.snapshot(), filters, rows)
+        let (snapshot, filters, rows) = {
+            let t = self.table();
+            if !t.is_complete() {
+                return;
             }
-            _ => return,
+            let filters: Vec<Filter> = filters
+                .into_iter()
+                .map(|(col, test)| Filter {
+                    col: t.col_id(col),
+                    test,
+                })
+                .collect();
+            let rows = t.index().row_count() * filters.len() as u64;
+            (t.snapshot(), filters, rows)
         };
         let done = Arc::new(AtomicU64::new(0));
         let started = Instant::now();
@@ -2290,7 +2337,8 @@ impl GridView {
                 return;
             };
             let Ok(Ok(sets)) = result else { return };
-            if let Some(t) = imp.table.borrow_mut().as_mut() {
+            {
+                let mut t = g.table_mut();
                 for (filter, rows) in running.filters.into_iter().zip(sets) {
                     t.set_filter(filter, rows);
                 }
@@ -2303,10 +2351,8 @@ impl GridView {
     /// filter read it; a number filter on the column is applied again, since which cells
     /// are numbers may have changed. Not undoable, like filters.
     pub fn set_column_type(&self, col: u32, ty: Option<InferredType>) {
-        let imp = self.imp();
         let refilter = {
-            let mut table = imp.table.borrow_mut();
-            let Some(t) = table.as_mut() else { return };
+            let mut t = self.table_mut();
             t.set_type_override(col, ty);
             t.filter_on(col)
                 .map(|f| f.test.clone())
@@ -2321,10 +2367,7 @@ impl GridView {
     /// The types the user set, by column position, to set again on the table a save
     /// reopens (TYPE-2).
     pub fn type_overrides(&self) -> Vec<(u32, InferredType)> {
-        let table = self.imp().table.borrow();
-        let Some(t) = table.as_ref() else {
-            return Vec::new();
-        };
+        let t = self.table();
         (0..t.min_width())
             .filter_map(|c| t.type_override(c).map(|ty| (c, ty)))
             .collect()
@@ -2332,7 +2375,8 @@ impl GridView {
 
     /// Set types from [`Self::type_overrides`] again.
     pub fn restore_type_overrides(&self, types: Vec<(u32, InferredType)>) {
-        if let Some(t) = self.imp().table.borrow_mut().as_mut() {
+        {
+            let mut t = self.table_mut();
             for (c, ty) in types {
                 t.set_type_override(c, Some(ty));
             }
@@ -2343,10 +2387,7 @@ impl GridView {
     /// The filters on, by column position and test, to apply again to the table a save
     /// reopens (FILT-3).
     pub fn filters(&self) -> Vec<(u32, Test)> {
-        let table = self.imp().table.borrow();
-        let Some(t) = table.as_ref() else {
-            return Vec::new();
-        };
+        let t = self.table();
         (0..t.min_width())
             .filter_map(|c| t.filter_on(c).map(|f| (c, f.test.clone())))
             .collect()
@@ -2370,14 +2411,11 @@ impl GridView {
 
     /// Show column `col`'s rows again, as far as the other filters allow.
     fn clear_column_filter(&self, col: u32) {
-        let imp = self.imp();
         self.close_filter_menu();
         if self.busy() {
             return;
         }
-        if let Some(t) = imp.table.borrow_mut().as_mut() {
-            t.clear_filter(col);
-        }
+        self.table_mut().clear_filter(col);
         self.after_change(None);
     }
 
@@ -2392,11 +2430,7 @@ impl GridView {
 
     /// Snapshot for a background save (SAVE-1).
     pub fn save_job(&self) -> Result<SaveJob, SaveJobError> {
-        self.imp()
-            .table
-            .borrow()
-            .as_ref()
-            .map_or(Err(SaveJobError::NotIndexed), |t| t.save_job())
+        self.table().save_job()
     }
 
     pub fn set_saving(&self, saving: bool) {
@@ -2405,11 +2439,7 @@ impl GridView {
 
     /// The first row is shown as column titles rather than data (ENG-7).
     pub fn has_header(&self) -> bool {
-        self.imp()
-            .table
-            .borrow()
-            .as_ref()
-            .is_some_and(|t| t.has_header())
+        self.table().has_header()
     }
 
     /// Flip "first row is header". Rows shift by one: cached rows reload, and row
@@ -2421,9 +2451,7 @@ impl GridView {
         if let Some(s) = imp.sorting.take() {
             s.job.cancel();
         }
-        if let Some(t) = imp.table.borrow_mut().as_mut() {
-            t.set_header(on);
-        }
+        self.table_mut().set_header(on);
         imp.cache.borrow_mut().invalidate();
         imp.titles.take();
         self.refit_sizes();
@@ -2436,9 +2464,12 @@ impl GridView {
     /// new table makes a running one moot.
     pub fn infer_types(&self) {
         let imp = self.imp();
-        let mut snapshot = match imp.table.borrow().as_ref() {
-            Some(t) if t.is_complete() => t.snapshot(),
-            _ => return,
+        let mut snapshot = {
+            let t = self.table();
+            if !t.is_complete() {
+                return;
+            }
+            t.snapshot()
         };
         let started = Instant::now();
         let job = jobs::spawn(move |cancel| snapshot.infer_types(cancel.flag()));
@@ -2461,9 +2492,46 @@ impl GridView {
                     started.elapsed()
                 );
             }
-            if let Some(table) = imp.table.borrow_mut().as_mut() {
-                table.set_types(types);
-            };
+            g.table_mut().set_types(types);
+        });
+    }
+
+    /// Find the active sheet's formula cells (FML-4) on the job pool from a snapshot, once
+    /// its file is indexed; a new workbook makes a running scan moot.
+    pub fn scan_formulas(&self) {
+        let imp = self.imp();
+        let (snapshot, rows) = {
+            let t = self.table();
+            if !t.is_complete() || t.formulas_scanned() {
+                return;
+            }
+            (t.snapshot(), t.index().row_count())
+        };
+        let done = Arc::new(AtomicU64::new(0));
+        let job = jobs::spawn({
+            let done = done.clone();
+            move |cancel| snapshot.scan_formulas(cancel.flag(), &done)
+        });
+        let old = imp.scanning.replace(Some(ScanJob {
+            job: job.clone(),
+            done,
+            rows,
+        }));
+        if let Some(old) = old {
+            old.job.cancel();
+        }
+        let g = self.downgrade();
+        glib::spawn_future_local(async move {
+            let found = job.finished().await.ok().flatten();
+            let Some(g) = g.upgrade() else { return };
+            let imp = g.imp();
+            if !matches!(&*imp.scanning.borrow(), Some(s) if s.job.is(&job)) {
+                return;
+            }
+            imp.scanning.take();
+            if let Some(found) = found {
+                g.table_mut().set_formula_cells(found);
+            }
         });
     }
 
@@ -2474,32 +2542,38 @@ impl GridView {
         imp.sizing.borrow_mut().cols.clear();
     }
 
-    /// Show a freshly opened table (the file just saved). Its edits are on disk now, so the
-    /// undo history, which refers to the old overlay, starts over. Rows and columns get
-    /// new identities in the new file, so the remembered sizes move over by position.
-    pub fn replace_table(&self, table: CsvTable) {
+    /// Show a freshly opened workbook (the file just saved, or read again). Its edits are
+    /// on disk now, so the undo history, which refers to the old overlays, starts over.
+    /// Rows and columns get new identities in the new file, so the active sheet's
+    /// remembered sizes move over by position.
+    pub fn replace_workbook(&self, book: Workbook) {
         let imp = self.imp();
         let (heights, widths) = {
             let sizing = imp.sizing.borrow();
-            let old = imp.table.borrow();
+            let old = self.table();
             let heights: Vec<(u64, f64)> = (imp.row_heights.borrow().keys())
-                .filter_map(|&id| old.as_ref()?.row_of(id))
+                .filter_map(|&id| old.row_of(id))
                 .map(|r| (r, sizing.rows.size(r)))
                 .collect();
             let widths: Vec<(u32, f64)> = (imp.col_widths.borrow().keys())
-                .filter_map(|&id| old.as_ref()?.col_of(id))
+                .filter_map(|&id| old.col_of(id))
                 .map(|c| (c, sizing.cols.size(u64::from(c))))
                 .collect();
             (heights, widths)
         };
         // Unmapping a big file and freeing its index takes a while (0.2 s for 1 GB, SAVE-3):
         // a worker does it, not the UI thread.
-        if let Some(old) = imp.table.replace(Some(table)) {
-            let _ = std::thread::Builder::new()
-                .name("drop-table".into())
-                .spawn(move || drop(old));
-        }
+        let old = imp.book.replace(book);
+        let _ = std::thread::Builder::new()
+            .name("drop-table".into())
+            .spawn(move || drop(old));
         imp.generation.set(imp.generation.get() + 1);
+        if let Some(old) = imp.calculating.take() {
+            old.job.cancel();
+        }
+        if let Some(old) = imp.scanning.take() {
+            old.job.cancel();
+        }
         // Types of the old table don't belong to the new one; the status tick infers them
         // again once it is indexed.
         if let Some(old) = imp.inferring.take() {
@@ -2520,21 +2594,18 @@ impl GridView {
         imp.found.take();
         imp.pending_filters.take(); // a save gives them back with `restore_filters`
         self.close_filter_menu();
-        imp.undo.replace(Some(UndoStack::default()));
+        imp.undo.replace(UndoStack::default());
         imp.cache.borrow_mut().reset();
         imp.titles.take();
         imp.row_heights.borrow_mut().clear();
         imp.col_widths.borrow_mut().clear();
         // Rows of the new file appear as indexing reaches them; heights past what is
         // indexed now land on their positions' source ids all the same.
+        let first = u64::from(self.table().has_header());
         for (r, h) in heights {
-            let id = imp.table.borrow().as_ref().map(|t| {
-                let first = u64::from(t.has_header());
-                RowId::source(r + first)
-            });
-            if let Some(id) = id {
-                imp.row_heights.borrow_mut().insert(id, h);
-            }
+            imp.row_heights
+                .borrow_mut()
+                .insert(RowId::source(r + first), h);
         }
         for (c, w) in widths {
             imp.col_widths.borrow_mut().insert(ColId::source(c), w);
@@ -2543,95 +2614,204 @@ impl GridView {
         self.update_adjustments();
     }
 
-    /// How many times the table was replaced (`replace_table`) since the window opened.
+    /// How many times the workbook was replaced (`replace_workbook`) since the window
+    /// opened.
     pub fn generation(&self) -> u64 {
         self.imp().generation.get()
     }
 
     /// The open file read with another delimiter (ENG-5); refused with unsaved edits.
     pub fn reread(&self, choice: DelimiterChoice) -> Result<CsvTable, RereadError> {
-        let table = self.imp().table.borrow();
-        table
-            .as_ref()
-            .expect("a GridView always holds a table after new()")
-            .reread(choice)
+        self.table().reread(choice)
     }
 
     pub fn encoding(&self) -> csv_engine::Encoding {
-        self.imp()
-            .table
-            .borrow()
-            .as_ref()
-            .map_or(csv_engine::Encoding::UTF8, |t| t.encoding())
+        self.table().encoding()
     }
 
     pub fn delimiter(&self) -> u8 {
-        self.imp()
-            .table
-            .borrow()
-            .as_ref()
-            .map_or(b',', |t| t.dialect().delimiter)
+        self.table().dialect().delimiter
     }
 
-    /// Unsaved changes: cell edits, plus rows inserted and deleted (EDIT-3).
+    /// Unsaved changes: cell edits, plus rows inserted and deleted (EDIT-3), on every
+    /// sheet, plus sheet changes (ADR 0008).
     pub fn edit_count(&self) -> usize {
-        self.imp()
-            .table
-            .borrow()
-            .as_ref()
-            .map_or(0, |t| t.changes())
+        self.imp().book.borrow().edit_count()
     }
 
     pub fn row_count(&self) -> u64 {
-        self.imp()
-            .table
-            .borrow()
-            .as_ref()
-            .map_or(0, |t| t.row_count())
+        self.table().row_count()
     }
 
     /// Rows the grid shows: the table's, plus the empty edge row once indexing is done.
     fn shown_rows(&self) -> u64 {
-        self.imp().table.borrow().as_ref().map_or(0, shown_rows)
+        shown_rows(&self.table())
     }
 
     pub fn is_complete(&self) -> bool {
-        self.imp()
-            .table
-            .borrow()
-            .as_ref()
-            .is_some_and(|t| t.is_complete())
+        self.table().is_complete()
     }
 
-    /// Changes whenever what the table shows changes (APP-7's journal follows it).
+    /// Changes whenever what the workbook shows changes (APP-7's journal follows it).
     pub fn revision(&self) -> u64 {
-        self.imp()
-            .table
-            .borrow()
-            .as_ref()
-            .map_or(0, |t| t.revision())
+        self.imp().book.borrow().revision()
     }
 
-    /// The table as it is now, for a job (APP-7 writes its journal from one).
-    pub fn snapshot(&self) -> Option<CsvTable> {
-        self.imp().table.borrow().as_ref().map(CsvTable::snapshot)
+    /// The active sheet's table as it is now, for a job (APP-7 writes its journal from
+    /// one).
+    pub fn snapshot(&self) -> CsvTable {
+        self.table().snapshot()
+    }
+
+    /// The whole workbook as it is now, for a job.
+    pub fn workbook_snapshot(&self) -> Workbook {
+        self.imp().book.borrow().snapshot()
+    }
+
+    /// The active sheet's name.
+    pub fn sheet_name(&self) -> String {
+        self.imp().book.borrow().active_sheet().name.clone()
+    }
+
+    /// Set the clock `TODAY()` and `NOW()` read; cells showing results redraw if it
+    /// changed.
+    pub fn set_now(&self, now: f64) {
+        let imp = self.imp();
+        if imp.book.borrow_mut().set_now(now) {
+            imp.cache.borrow_mut().invalidate();
+            self.queue_draw();
+        }
+    }
+
+    /// The active table, read-only. A GridView always holds a workbook with a sheet.
+    fn table(&self) -> Ref<'_, CsvTable> {
+        Ref::map(self.imp().book.borrow(), Workbook::active)
+    }
+
+    fn table_mut(&self) -> RefMut<'_, CsvTable> {
+        RefMut::map(self.imp().book.borrow_mut(), Workbook::active_mut)
+    }
+
+    /// Run a table command on the active sheet as one undoable step (invariant 5).
+    fn execute(&self, cmd: Box<dyn Command<CsvTable>>) {
+        let imp = self.imp();
+        let mut book = imp.book.borrow_mut();
+        let sheet = book.active_id();
+        imp.undo
+            .borrow_mut()
+            .execute(Box::new(OnSheet::new(sheet, cmd)), &mut book);
+    }
+
+    /// Start a job for formula cells the frame's budget didn't reach (FML-4), unless one
+    /// is computing for this revision already; a job for an older revision is cancelled.
+    fn calc_pending(&self, pending: Vec<CellRef>) {
+        let imp = self.imp();
+        let revision = imp.book.borrow().revision();
+        if let Some(running) = imp.calculating.borrow().as_ref() {
+            if running.revision == revision {
+                return;
+            }
+            running.job.cancel();
+        }
+        imp.calculating.take();
+        if pending.is_empty() {
+            return;
+        }
+        let (mut snapshot, sheet) = {
+            let book = imp.book.borrow();
+            (book.snapshot(), book.active_id())
+        };
+        let cells: Vec<(SheetId, CellRef)> = pending.into_iter().map(|c| (sheet, c)).collect();
+        let done = Arc::new(AtomicU64::new(0));
+        let total = cells.len() as u64;
+        let job = jobs::spawn({
+            let done = done.clone();
+            move |cancel| snapshot.evaluate_all(&cells, cancel.shared(), &done)
+        });
+        imp.calculating.replace(Some(CalcJob {
+            job: job.clone(),
+            done,
+            total,
+            revision,
+        }));
+        let g = self.downgrade();
+        glib::spawn_future_local(async move {
+            let values = job.finished().await.ok().flatten();
+            let Some(g) = g.upgrade() else { return };
+            let imp = g.imp();
+            if !matches!(&*imp.calculating.borrow(), Some(c) if c.job.is(&job)) {
+                return;
+            }
+            imp.calculating.take();
+            let Some(values) = values else { return };
+            imp.book.borrow_mut().store_values(revision, values);
+            imp.cache.borrow_mut().invalidate();
+            g.update_description();
+            g.queue_draw();
+        });
+    }
+
+    /// Move the cell cursor or the selected range; `cursor-changed` says so.
+    fn set_selection(&self, sel: Selection) {
+        let imp = self.imp();
+        if imp.selection.replace(sel) != sel {
+            self.emit_by_name::<()>("cursor-changed", &[]);
+            self.update_description();
+        }
+    }
+
+    /// The cursor cell's reference (`B2`, file rows as references count them) and the
+    /// text it shows (a formula's result).
+    pub fn cursor_description(&self) -> String {
+        let imp = self.imp();
+        let cur = imp.selection.get().cursor();
+        let Ok(mut book) = imp.book.try_borrow_mut() else {
+            return String::new();
+        };
+        let mut name = String::new();
+        column_name(cur.col, &mut name);
+        let t = book.active();
+        let number = row_number(t, cur.row);
+        let mut text = format!("{name}{number}: ");
+        if cur.row >= t.row_count() {
+            return text;
+        }
+        let raw = t
+            .cell_value(cur.row, cur.col)
+            .map(|v| v.into_owned())
+            .unwrap_or_default();
+        if !is_formula(&raw) {
+            text.push_str(&raw);
+            return text;
+        }
+        let at = CellRef {
+            row: t.row_id(cur.row),
+            col: t.col_id(cur.col),
+        };
+        let sheet = book.active_id();
+        match book.value_of(sheet, at, &mut Budget::cells(UI_BUDGET)) {
+            Ok(v) => text.push_str(&formula::result_text(&v)),
+            Err(_) => text.push_str(data_model::PENDING),
+        }
+        text
+    }
+
+    /// Screen readers announce the cursor cell and what it shows (FML-4).
+    fn update_description(&self) {
+        let text = self.cursor_description();
+        self.update_property(&[gtk::accessible::Property::Description(&text)]);
     }
 
     /// Put the cursor on file row `file_row` (0 is the file's first line), wherever a
     /// sort put it (APP-8: a malformed line). False if it isn't shown: the header row, or
     /// a row a filter hides.
     pub fn go_to_file_row(&self, file_row: u64) -> bool {
-        let imp = self.imp();
-        let row = imp
-            .table
-            .borrow()
-            .as_ref()
-            .and_then(|t| t.row_of(data_model::RowId::source(file_row)));
+        let row = self.table().row_of(data_model::RowId::source(file_row));
         let Some(row) = row else {
             return false;
         };
         let cell = grid::Cell { row, col: 0 };
-        imp.selection.set(Selection::at(cell));
+        self.set_selection(Selection::at(cell));
         self.scroll_to((Some(row), Some(0)));
         self.grab_focus();
         self.queue_draw();
@@ -2641,46 +2821,37 @@ impl GridView {
     /// Put back unsaved edits from a crash (APP-7) as one undoable step, "Restore unsaved
     /// edits". The file must be fully indexed; refused if they don't fit it.
     pub fn restore_edits(&self, state: EditState) -> Result<(), JournalError> {
-        let imp = self.imp();
         if self.busy() {
             return Err(JournalError::Mismatch("another job is running"));
         }
-        {
-            let mut table = imp.table.borrow_mut();
-            let mut undo = imp.undo.borrow_mut();
-            let (Some(table), Some(undo)) = (table.as_mut(), undo.as_mut()) else {
-                return Ok(());
-            };
-            let edit = table.restore_edit(state)?;
-            // The first file row and column; an untitled table has no rows to name yet.
-            let focus = CellRef {
-                row: RowId::source(0),
-                col: ColId::source(0),
-            };
-            undo.execute(
-                Box::new(Batch::new("Restore unsaved edits", vec![edit], focus)),
-                table,
-            );
-        }
+        let edit = self.table().restore_edit(state)?;
+        // The first file row and column; an untitled table has no rows to name yet.
+        let focus = CellRef {
+            row: RowId::source(0),
+            col: ColId::source(0),
+        };
+        self.execute(Box::new(Batch::new(
+            "Restore unsaved edits",
+            vec![edit],
+            focus,
+        )));
         self.after_change(None);
         Ok(())
     }
 
     /// Share of the file indexed so far (0..=1), or `None` once indexing is complete.
     pub fn index_progress(&self) -> Option<f64> {
-        let table = self.imp().table.borrow();
-        let t = table.as_ref().filter(|t| !t.is_complete())?;
+        let t = self.table();
+        if t.is_complete() {
+            return None;
+        }
         let index = t.index();
         let total = index.source().bytes().len().max(1) as f64;
         Some(index.bytes_indexed() as f64 / total)
     }
 
     pub fn file_changed(&self) -> bool {
-        self.imp()
-            .table
-            .borrow()
-            .as_ref()
-            .is_some_and(|t| t.file_changed())
+        self.table().file_changed()
     }
 
     pub fn cache_bytes(&self) -> usize {
@@ -2696,8 +2867,10 @@ impl GridView {
     pub fn update_adjustments(&self) {
         let imp = self.imp();
         let rows = self.shown_rows();
-        // Room for the widest row number in the current font (digits are tabular).
-        let digits = rows.max(1).ilog10() as i32 + 1;
+        // Room for the widest row number in the current font (digits are tabular): the
+        // edge row's file row number.
+        let widest = self.table().total_rows() + 1;
+        let digits = widest.ilog10() as i32 + 1;
         let digit_w = self.create_pango_layout(Some("0")).pixel_size().0.max(1);
         imp.row_header_w
             .set(f64::from(digits * digit_w) + 3.0 * PAD);
@@ -2715,6 +2888,18 @@ impl GridView {
         }
         drop(sizing);
         self.queue_draw();
+    }
+}
+
+/// The number the row gutter shows for table row `row`: its file row (from 1, the header
+/// row included), as references count rows (ADR 0006). Past the table's rows: the edge
+/// row's.
+fn row_number(table: &CsvTable, row: u64) -> u64 {
+    let n = table.row_count();
+    if row < n {
+        table.position(row) + 1
+    } else {
+        table.total_rows() + (row - n) + 1
     }
 }
 

@@ -33,6 +33,11 @@ impl CancelToken {
     pub fn flag(&self) -> &AtomicBool {
         &self.0
     }
+
+    /// The flag, shared: for work that keeps it (formula evaluation's budget).
+    pub fn shared(&self) -> Arc<AtomicBool> {
+        self.0.clone()
+    }
 }
 
 /// Why a job has no result of its own.
