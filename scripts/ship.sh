@@ -105,7 +105,9 @@ suite-site)
   # Match the name exactly: the table's domains column holds bricks.cronkite.cc.
   if ! wr pages project list --json | python3 -c 'import json, sys
 sys.exit(sys.argv[1] not in [p["Project Name"] for p in json.load(sys.stdin)])' "$CF_SUITE_PAGES_PROJECT"; then
-    run wr pages project create "$CF_SUITE_PAGES_PROJECT" --production-branch main
+    # --force: wrangler 4.149 otherwise hands new projects to Workers and fails on a plain
+    # folder of assets. Like `spreadsheet`, this is a classic Pages project.
+    run wr pages project create "$CF_SUITE_PAGES_PROJECT" --production-branch main --force
   fi
   run wr pages deploy dist/cronkite-site --project-name "$CF_SUITE_PAGES_PROJECT" --branch main --commit-dirty=true
   ;;
