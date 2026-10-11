@@ -46,6 +46,7 @@ graph TD
     frame --> suite-ui
     frame --> suite-platform
     frame --> suite-core
+    frame --> frame-crates["apps/frame/crates/*"]
     suite-ui --> suite-core
 ```
 
@@ -66,7 +67,7 @@ Rules:
 
 ## GUI toolkit
 
-All three apps use GTK 4 through gtk4-rs, GTK 4.14 or newer ([ADR 0002](../adr/0002-gtk4-for-the-suite.md); Bricks' original evaluation is `apps/bricks/docs/decisions/0001-ui-toolkit.md`). `gtk` is declared once in `[workspace.dependencies]`. Apps may depend on it; `suite-ui` and `suite-platform` may once they hold code that needs it; `suite-core`, `suite-file`, and app engine crates never do. Bricks and Slate (its SL0 viewer) use it today; Frame is still a terminal scaffold.
+All three apps use GTK 4 through gtk4-rs, GTK 4.14 or newer ([ADR 0002](../adr/0002-gtk4-for-the-suite.md); Bricks' original evaluation is `apps/bricks/docs/decisions/0001-ui-toolkit.md`). `gtk` is declared once in `[workspace.dependencies]`. Apps may depend on it; `suite-ui` and `suite-platform` may once they hold code that needs it; `suite-core`, `suite-file`, and app engine crates never do. All three use it today: Bricks, Slate (its SL0 viewer), and Frame (its FR0 viewer).
 
 ## Versions and editions
 

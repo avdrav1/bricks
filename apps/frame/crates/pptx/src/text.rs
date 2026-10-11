@@ -504,9 +504,16 @@ fn symbol(c: &str, font: Option<&str>) -> String {
     };
     let ch = c.chars().next().unwrap_or('\u{2022}');
     let mapped = if font.eq_ignore_ascii_case("symbol") {
+        // Symbol's glyphs sit on ASCII and Latin-1 (or the same in U+F020-F0FF): the few
+        // that bullets use, the rest as the character itself.
+        let ch = match u32::from(ch) {
+            v @ 0xF020..=0xF0FF => char::from_u32(v - 0xF000).unwrap_or(ch),
+            _ => ch,
+        };
         match ch {
-            '\u{b7}' | '\u{f0b7}' => '\u{2022}',
+            '\u{b7}' => '\u{2022}',
             '\u{a8}' => '\u{2663}',
+            '-' => '\u{2212}',
             _ => ch,
         }
     } else {
@@ -662,6 +669,8 @@ mod tests {
             <a:p><a:pPr><a:buClr><a:srgbClr val="FF0000"/></a:buClr><a:buSzPct val="50000"/><a:buFont typeface="Wingdings"/><a:buChar char="&#167;"/></a:pPr>
               <a:r><a:rPr sz="2400"><a:latin typeface="+mj-lt"/></a:rPr><a:t>x</a:t></a:r></a:p>
             <a:p><a:pPr><a:buNone/></a:pPr><a:r><a:t>none</a:t></a:r></a:p>
+            <a:p><a:pPr><a:buFont typeface="Symbol"/><a:buChar char="&#xF02D;"/></a:pPr><a:r><a:t>minus</a:t></a:r></a:p>
+            <a:p><a:pPr><a:buFont typeface="Symbol"/><a:buChar char="&#xF0B7;"/></a:pPr><a:r><a:t>dot</a:t></a:r></a:p>
             </p:txBody>"#,
         );
         let b = t.paragraphs[0].bullet.as_ref().unwrap();
@@ -670,6 +679,12 @@ mod tests {
         assert_eq!(b.size, 12.0);
         assert_eq!(b.color.hex(), "FF0000");
         assert!(t.paragraphs[1].bullet.is_none());
+        // Symbol's private-use code points (as LibreOffice writes them) map too.
+        let marks: Vec<&str> = t.paragraphs[2..]
+            .iter()
+            .map(|p| p.bullet.as_ref().unwrap().text.as_str())
+            .collect();
+        assert_eq!(marks, ["\u{2212}", "\u{2022}"]);
     }
 
     #[test]

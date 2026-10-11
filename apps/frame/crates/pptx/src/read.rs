@@ -633,6 +633,10 @@ fn shape(scope: &Scope<'_>, e: &Element, groups: &[Group]) -> Option<Shape> {
         placeholder: ph.map(|p| placeholder_kind(p.attr("type").unwrap_or("obj"))),
         layer: scope.layer,
         text,
+        // A SmartArt drawing part's text box (`dsp:txXfrm`).
+        text_frame: e
+            .child("txXfrm")
+            .map(|x| groups.iter().rev().fold(frame_of(x), |f, g| g.apply(f))),
     })
 }
 

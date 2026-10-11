@@ -339,6 +339,9 @@ version = "0.2.0"
 name = "frame"
 version = "0.1.0"
 dependencies = [
+ "gtk4",
+ "pptx",
+ "presentation-model",
  "suite-core",
  "suite-platform",
  "suite-ui",

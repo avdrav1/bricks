@@ -179,6 +179,9 @@ pub struct Shape {
     pub layer: Layer,
     /// The shape's text, when it has a text body with any paragraph.
     pub text: Option<TextBody>,
+    /// Where the text lays out when that isn't the shape's own box: a SmartArt drawing
+    /// part's `txXfrm` (the top of a circle, ...), group transforms applied.
+    pub text_frame: Option<Frame>,
 }
 
 impl Shape {

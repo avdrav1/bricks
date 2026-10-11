@@ -289,4 +289,11 @@ fn smart_art_draws_from_its_saved_drawing() {
         .all(|s| matches!(&s.kind, ShapeKind::Geometry { preset, .. } if preset == "ellipse")));
     let texts: Vec<String> = parts.iter().map(|s| s.plain_text()).collect();
     assert_eq!(texts, ["abc", "def", "ghi", ""]);
+    // Each part's text sits in its `txXfrm` box, moved with the part: "abc" in the top
+    // of its circle (drawing: circle at 475582,9397, text box at 531971,75183 375920x155067).
+    let (shape, text) = (parts[0].frame, parts[0].text_frame.expect("a text frame"));
+    assert_eq!(
+        (text.x - shape.x, text.y - shape.y, text.cx, text.cy),
+        (531_971 - 475_582, 75_183 - 9_397, 375_920, 155_067)
+    );
 }
