@@ -18,8 +18,11 @@ Run `cargo bench` to measure every row and print this table with Latest filled i
 | Two-column filter | < 3 s | 0.34 s: city = Portland, then revenue > 50,000 (1,362,719 rows); 8 cores: 0.55 s | |
 | Save with 1,000 edits | < 15 s | 0.92 s incl. fsync and verify; 8 cores: 0.93 s. In the app with the UI scrolling at 60 fps: 0.77 s, main loop p99 1.1 ms late (`save_responsive`, ENG-8) | |
 | Open 1,048,576-row XLSX, all sheets ready | < 10 s | 8 cores: 3.69 s from spawn to the imported workbook drawn (median of 3, warm cache), `corpus/rows_1m.xlsx` (1,048,576 rows, 1 sheet); 196 MiB peak RSS | |
-| Save 1,048,576-row workbook as XLSX | < 30 s | 8 cores: 8.19 s incl. fsync (45 MiB file); 7.17 s in an earlier run | |
+| Save 1,048,576-row workbook as XLSX | < 30 s | 8 cores: 6.28 s incl. fsync, one cell edited and the package patched (STYLE-5; BENCH-2 measured a fresh write: 8.19 s) | |
 | Scroll frame time p99, 60 visible formulas | < 16 ms | 8 cores: 2.1 ms frame CPU p99; 59.5 fps, 1 of 600 frames late; 1887×884 px grid on `corpus/formulas.csv` (1M rows, 4 formula columns incl. a running total) | |
 | Recalculate SUM over a 1 GB column | < 5 s | 8 cores: 3.77 s, `=SUM(rows!D:D)` over 19.1M rows (median of 3) | |
 | Running total, 1,000,000 rows | < 5 s | 8 cores: 3.75 s, `formulas.csv` E1000001 on a fresh calculation: every `=E{n-1}+D{n}` and `=B*C` above it (median of 3). 10.98 s before the span cache (BENCH-2) | |
 | 10,000 exact VLOOKUPs into 1,000,000 rows | < 2 s | 8 cores: 0.24 s incl. building the lookup index (median of 3) | |
+| Open 1,048,576-row styled XLSX | < 10 s | 8 cores: 4.12 s from spawn to the imported workbook drawn (median of 3, warm cache), `corpus/styled_1m.xlsx` (`gen_corpus_xlsx --styled`); 296 MiB peak RSS | |
+| Save 1,048,576-row styled XLSX after one edit | < 30 s | 8 cores: 7.67 s incl. fsync: the package patched, the sheet written again with unchanged cells copied (47 MiB) | |
+| Scroll frame time p99, styled sheet | < 16 ms | 8 cores: 11.1 ms frame CPU p99; 59.8 fps, 3 of 600 frames late; 1887×884 px grid. Measured while a release build ran on the same cores; alone (no taskset): 7.51 ms (STYLE-4), 8.88 ms (STYLE-3) | |

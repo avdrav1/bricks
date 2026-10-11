@@ -8,7 +8,8 @@
 //! Numbers count toward gates only on the reference box named in the doc.
 //!
 //! The XLSX and formula rows (BENCH-2) also need `corpus/formulas.csv` (gen_corpus.py) and
-//! `corpus/rows_1m.xlsx` (`cargo run --release -p xlsx --example gen_corpus_xlsx`); without
+//! `corpus/rows_1m.xlsx` (`cargo run --release -p xlsx --example gen_corpus_xlsx`), and the
+//! styled rows (BENCH-3) `corpus/styled_1m.xlsx` (the same with `-- --styled`); without
 //! them those rows say what is missing.
 
 use csv_engine::{Dialect, RowIndex, Source, SparseRowIndex};
@@ -556,6 +557,18 @@ fn measure_all(corpus: &Path) -> HashMap<&'static str, Measured> {
             note(no_xlsx)
         },
     );
+    // The styled corpus (BENCH-3): a bold header on a fill, number formats per column, an
+    // italic coloured column, a bold total row with a fill and a border every 100 rows.
+    let styled = corpus.join("styled_1m.xlsx");
+    let no_styled = "missing corpus/styled_1m.xlsx: run cargo run --release -p xlsx --example gen_corpus_xlsx -- --styled";
+    m.insert(
+        "Save 1,048,576-row styled XLSX after one edit",
+        if styled.exists() {
+            xlsx_save(&styled, corpus)
+        } else {
+            note(no_styled)
+        },
+    );
 
     let gui = [
         "Cold start to empty window",
@@ -564,6 +577,8 @@ fn measure_all(corpus: &Path) -> HashMap<&'static str, Measured> {
         "Peak RAM after open",
         "Open 1,048,576-row XLSX, all sheets ready",
         "Scroll frame time p99, 60 visible formulas",
+        "Open 1,048,576-row styled XLSX",
+        "Scroll frame time p99, styled sheet",
     ];
     if !display {
         for name in gui {
@@ -634,6 +649,19 @@ fn measure_all(corpus: &Path) -> HashMap<&'static str, Measured> {
             note("missing corpus/formulas.csv: run python3 scripts/gen_corpus.py")
         },
     );
+    if styled.exists() {
+        m.insert(gui[6], xlsx_open(&styled).unwrap_or_else(note));
+        m.insert(
+            gui[7],
+            scroll_row(
+                &styled,
+                "styled_1m.xlsx (fills, borders, number formats, a styled total row every 100)",
+            ),
+        );
+    } else {
+        m.insert(gui[6], note(no_styled));
+        m.insert(gui[7], note(no_styled));
+    }
     m
 }
 
