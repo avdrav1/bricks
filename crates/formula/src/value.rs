@@ -114,24 +114,29 @@ pub fn number_text(x: f64) -> String {
 }
 
 /// `YYYY-MM-DD`, or `YYYY-MM-DD HH:MM:SS` when the time (rounded to the second) isn't
-/// midnight.
+/// midnight; a time of day alone (integer part 0, as `TIME` gives) is `HH:MM:SS`.
 pub fn date_text(serial: f64) -> String {
     if !serial.is_finite() || serial.abs() > 1e8 {
         return ErrorKind::Num.text().to_string();
     }
     let total = (serial * 86_400.0).round() as i64;
     let (days, secs) = (total.div_euclid(86_400), total.rem_euclid(86_400));
-    let (y, m, d) = scalar::civil_from_serial(days);
-    let mut out = format!("{y:04}-{m:02}-{d:02}");
-    if secs != 0 {
-        let _ = write!(
-            out,
-            " {:02}:{:02}:{:02}",
-            secs / 3_600,
-            secs / 60 % 60,
-            secs % 60
-        );
+    let mut out = String::with_capacity(19);
+    if days != 0 {
+        let (y, m, d) = scalar::civil_from_serial(days);
+        let _ = write!(out, "{y:04}-{m:02}-{d:02}");
+        if secs == 0 {
+            return out;
+        }
+        out.push(' ');
     }
+    let _ = write!(
+        out,
+        "{:02}:{:02}:{:02}",
+        secs / 3_600,
+        secs / 60 % 60,
+        secs % 60
+    );
     out
 }
 
@@ -158,6 +163,12 @@ mod tests {
             (Value::Date(45_292.0), "2024-01-01"),
             (Value::Date(45_292.5), "2024-01-01 12:00:00"),
             (Value::Date(45_292.0 + 1.0 / 86_400.0 * 0.4), "2024-01-01"),
+            (Value::Date(0.5), "12:00:00"),
+            (Value::Date(0.0), "00:00:00"),
+            (
+                Value::Date(13.0 / 24.0 + 5.0 / 1_440.0 + 7.0 / 86_400.0),
+                "13:05:07",
+            ),
             (Value::Bool(true), "TRUE"),
             (Value::text("x"), "x"),
             (Value::Error(ErrorKind::NA), "#N/A"),

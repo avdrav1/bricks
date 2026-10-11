@@ -1123,3 +1123,138 @@ FML-7	COLUMNS({1,2,3})		value	3.0
 FML-7	COLUMNS(2:2)		value	16384.0		
 FML-7	COLUMNS(A:C)		value	3.0		
 FML-7	COLUMNS(1/0)		error	#DIV/0!		
+FML-8	DATE(2024,1,15)		value	45306.0		
+FML-8	DATE(2024,14,1)		value	45689.0		
+FML-8	DATE(2024,1,0)		value	45291.0		
+FML-8	DATE(2024,-1,1)		value	45231.0		
+FML-8	DATE(2024.9,1.9,1.9)		value	45292.0		
+FML-8	DATE(24,1,1)		value	45292.0		
+FML-8	DATE(1899,12,31)		value	1.0		
+FML-8	DATE("2024",3,1)		value	45352.0		
+FML-8	DATE("a",1,1)		error	#VALUE!		
+FML-8	DATE(-1,1,1)		error	Err:502	error:#NUM!	LibreOffice gives Err:502 (invalid argument); Excel gives #NUM!
+FML-8	DATE(A1,A2,A3)	A1=2024;A2=2;A3=29	value	45351.0		
+FML-8	DATE(2024,1,1)+TIME(12,0,0)		value	45292.5		
+FML-8	TIME(12,30,0)		value	0.5208333333333334		
+FML-8	TIME(25,0,0)		value	0.041666666666666664		
+FML-8	TIME(1,-30,0)		value	0.020833333333333332		
+FML-8	TIME(0,90,30.7)		value	0.06285532407407407		
+FML-8	TIME(-1,0,0)		error	Err:502	error:#NUM!	LibreOffice gives Err:502 (invalid argument); Excel gives #NUM!
+FML-8	TIME("x",0,0)		error	#VALUE!		
+FML-8	YEAR(45292.75)		value	2024.0		
+FML-8	YEAR(A1)	A1=2024-03-05	value	2024.0		
+FML-8	YEAR("2024-03-05")		value	2024.0		
+FML-8	YEAR(0)		value	1899.0		
+FML-8	YEAR("abc")		error	#VALUE!		
+FML-8	YEAR(1/0)		error	#DIV/0!		
+FML-8	MONTH(45351)		value	2.0		
+FML-8	MONTH(0)		value	12.0		
+FML-8	MONTH(-0.5)		value	12.0		
+FML-8	MONTH("x")		error	#VALUE!		
+FML-8	DAY(45351)		value	29.0		
+FML-8	DAY(60)		value	28.0		
+FML-8	DAY(59.99)		value	27.0		
+FML-8	DAY(A1)	A1=2024-02-29T18:00	value	29.0		
+FML-8	DAY(A1)	A1=#N/A	error	#N/A		
+FML-8	HOUR(0.75)		value	18.0		
+FML-8	HOUR(45292.99999999)		value	23.0		
+FML-8	HOUR(-0.5)		value	12.0		
+FML-8	HOUR("12:30")		value	12.0		
+FML-8	HOUR(A1)	A1=2024-01-01T06:30	value	6.0		
+FML-8	HOUR("abc")		error	#VALUE!		
+FML-8	MINUTE(0.5+1/1440*59.5)		value	59.0		
+FML-8	MINUTE(TIME(10,45,59.9))		value	45.0		
+FML-8	MINUTE("6:07:30")		value	7.0		
+FML-8	MINUTE("x")		error	#VALUE!		
+FML-8	SECOND(1/86400*30.6)		value	31.0		
+FML-8	SECOND(1/86400*30.4)		value	30.0		
+FML-8	SECOND(0.99999999)		value	0.0		
+FML-8	SECOND(A1)	A1=2024-01-01T06:30:15	value	15.0		
+FML-8	SECOND(1/0)		error	#DIV/0!		
+FML-8	WEEKDAY(45292)		value	2.0		
+FML-8	WEEKDAY(45292,2)		value	1.0		
+FML-8	WEEKDAY(45292,3)		value	0.0		
+FML-8	WEEKDAY(45298,1)		value	1.0		
+FML-8	WEEKDAY(45292,11)		value	1.0		
+FML-8	WEEKDAY(45292,17)		value	2.0		
+FML-8	WEEKDAY(0)		value	7.0		
+FML-8	WEEKDAY("2024-01-01",2.9)		value	1.0		
+FML-8	WEEKDAY(45292,4)		error	Err:502	error:#NUM!	LibreOffice gives Err:502 (invalid argument); Excel gives #NUM!
+FML-8	WEEKDAY("x")		error	#VALUE!		
+FML-8	WEEKNUM(45292)		value	1.0		
+FML-8	WEEKNUM(45298,1)		value	2.0		
+FML-8	WEEKNUM(45298,2)		value	1.0		
+FML-8	WEEKNUM(44197,21)		value	53.0		
+FML-8	WEEKNUM(45657,21)		value	1.0		
+FML-8	WEEKNUM(45292,12)		value	1.0		
+FML-8	WEEKNUM(-1)		value	52.0		
+FML-8	WEEKNUM(45292,3)		error	Err:502	error:#NUM!	LibreOffice gives Err:502 (invalid argument); Excel gives #NUM!
+FML-8	WEEKNUM("x")		error	#VALUE!		
+FML-8	EDATE(45322,1)		value	45351.0		
+FML-8	EDATE(45322,-1.9)		value	45291.0		
+FML-8	EDATE("2024-01-31",13)		value	45716.0		
+FML-8	EDATE(45350,12)		value	45716.0		
+FML-8	EDATE(-0.5,1)		value	31.0		
+FML-8	EDATE(45322,"a")		error	#VALUE!		
+FML-8	EOMONTH(45292,0)		value	45322.0		
+FML-8	EOMONTH(45292.7,1.5)		value	45351.0		
+FML-8	EOMONTH(45292,-1)		value	45291.0		
+FML-8	EOMONTH(A1,1)	A1=2024-01-15	value	45351.0		
+FML-8	EOMONTH(1/0,1)		error	#DIV/0!		
+FML-8	DATEDIF(45292,45658,"Y")		value	1.0		
+FML-8	DATEDIF(45292,45658,"m")		value	12.0		
+FML-8	DATEDIF(45322,45351,"M")		value	0.0		
+FML-8	DATEDIF(45292,45658,"D")		value	366.0		
+FML-8	DATEDIF(45322,45383,"MD")		value	1.0		
+FML-8	DATEDIF(A1,A2,"md")	A1=2023-01-31;A2=2023-03-01	value	-2.0		
+FML-8	DATEDIF("2024-01-01","2025-06-15","ym")		value	5.0		
+FML-8	DATEDIF(45351,45716,"YD")		value	365.0		
+FML-8	DATEDIF(45292.9,45293.1,"D")		value	1.0		
+FML-8	DATEDIF(45292,45292,"X")		value	0.0		
+FML-8	DATEDIF(45658,45292,"Y")		error	Err:502	error:#NUM!	LibreOffice gives Err:502 (invalid argument); Excel gives #NUM!
+FML-8	DATEDIF(45292,45658,"X")		error	Err:502	error:#NUM!	LibreOffice gives Err:502 (invalid argument); Excel gives #NUM!
+FML-8	DATEVALUE("2024-01-01")		value	45292.0		
+FML-8	DATEVALUE("2024-01-01 12:00")		value	45292.0		
+FML-8	DATEVALUE("1/2/2024")		value	45293.0		
+FML-8	DATEVALUE("Jan 2, 2024")		value	45293.0		
+FML-8	DATEVALUE("5-sep-24")		value	45540.0		
+FML-8	DATEVALUE(" 2024-1-5 ")		value	45296.0		
+FML-8	DATEVALUE("abc")		error	Err:502	error:#VALUE!	LibreOffice gives Err:502 (invalid argument); Excel gives #VALUE!
+FML-8	DATEVALUE(45292)		error	Err:502	error:#VALUE!	LibreOffice gives Err:502 (invalid argument); Excel gives #VALUE!
+FML-8	DATEVALUE("2024-02-30")		error	Err:502	error:#VALUE!	LibreOffice gives Err:502 (invalid argument); Excel gives #VALUE!
+FML-8	DATEVALUE(A1)	A1=#N/A	error	#N/A		
+FML-8	TIMEVALUE("12:30")		value	0.5208333333333334		
+FML-8	TIMEVALUE("6:00 PM")		value	0.75		
+FML-8	TIMEVALUE("12:30:45.5")		value	0.5213599537037037		
+FML-8	TIMEVALUE("2024-01-01 06:00")		value	0.25		
+FML-8	TIMEVALUE("25:00")		value	0.041666666666666664		
+FML-8	TIMEVALUE("abc")		error	Err:502	error:#VALUE!	LibreOffice gives Err:502 (invalid argument); Excel gives #VALUE!
+FML-8	TIMEVALUE("2024-01-01")		error	Err:502	error:#VALUE!	LibreOffice gives Err:502 (invalid argument); Excel gives #VALUE!
+FML-8	NETWORKDAYS(45292,45322)		value	23.0		
+FML-8	NETWORKDAYS(45322,45292)		value	-23.0		
+FML-8	NETWORKDAYS(45292,45322,{45293,45294,45298})		value	21.0		
+FML-8	NETWORKDAYS(45292,45322,A1:A3)	A1=2024-01-02;A2=x;A3=2024-01-06	value	22.0		
+FML-8	NETWORKDAYS(45298,45298)		value	0.0		
+FML-8	NETWORKDAYS(45292.5,45293.9)		value	2.0		
+FML-8	NETWORKDAYS("a",1)		error	#VALUE!		
+FML-8	NETWORKDAYS(45292,45322,A1:A3)	A1=2024-01-02;A3=#N/A	error	#N/A		
+FML-8	NETWORKDAYS(45292,45322,{45293,"x"})		error	#VALUE!		
+FML-8	NETWORKDAYS(A1,A2)	A1=2024-01-01;A2=2024-12-31	value	262.0		
+FML-8	WORKDAY(45292,10)		value	45306.0		
+FML-8	WORKDAY(45292,-10)		value	45278.0		
+FML-8	WORKDAY(45298,0)		value	45298.0		
+FML-8	WORKDAY(45298,1)		value	45299.0		
+FML-8	WORKDAY(45292,10,{45293,45294})		value	45308.0		
+FML-8	WORKDAY(45292,2.9)		value	45294.0		
+FML-8	WORKDAY(45292,1,A1:A3)	A1=2024-01-02;A3=2024-01-03	value	45295.0		
+FML-8	WORKDAY(45292,1,A1:A2)	A1=2024-01-02;A2=x	error	Err:502	error:#VALUE!	LibreOffice gives Err:502 (invalid argument); Excel gives #VALUE!
+FML-8	WORKDAY(45292,"a")		error	#VALUE!		
+FML-8	WORKDAY(45292,1000)		value	46692.0		
+FML-8	WORKDAY(45292,-1000)		value	43892.0		
+FML-8	WORKDAY(45292,300,{45300,45301,45302,45400,45500,45297})		value	45716.0		
+FML-8	WORKDAY(45292,-300,{45200,45201,45100,45000,45290})		value	44867.0		
+FML-8	DAYS(45322,45292)		value	30.0		
+FML-8	DAYS("2024-03-01","2024-02-01")		value	29.0		
+FML-8	DAYS(45292.9,45292.1)		value	0.8000000000029104		
+FML-8	DAYS(A1,A2)	A1=2024-03-01;A2=2024-01-01	value	60.0		
+FML-8	DAYS("a",1)		error	#VALUE!		

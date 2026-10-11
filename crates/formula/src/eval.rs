@@ -286,7 +286,8 @@ pub(crate) fn binary(op: BinaryOp, l: &Value, r: &Value) -> Value {
             }
             let (ld, rd) = (matches!(l, Value::Date(_)), matches!(r, Value::Date(_)));
             match op {
-                Add if ld != rd => Value::Date(n),
+                // A date plus a number or a time (`DATE(...)+TIME(...)`) is a date.
+                Add if ld || rd => Value::Date(n),
                 Sub if ld && !rd => Value::Date(n),
                 _ => Value::Number(n),
             }

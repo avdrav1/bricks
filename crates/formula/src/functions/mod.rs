@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 mod criteria;
+mod dates;
 pub mod format;
 mod info;
 mod logic;
@@ -99,6 +100,7 @@ fn register(m: &mut Registry) {
     info::register(m);
     text::register(m);
     lookup::register(m);
+    dates::register(m);
 }
 
 /// Calls `f` with every value an argument supplies: each non-empty cell of a reference and
