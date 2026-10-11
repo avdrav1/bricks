@@ -91,7 +91,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | SHEET-2 | M5 | P0 | todo | SHEET-1 | References across sheets; renaming a sheet updates them; deleting one gives #REF! | ='Q1 Sales'!B2 shows that cell; renaming the sheet rewrites the reference; deleting it shows #REF!; Ctrl+Z restores both |
 | XLSX-2 | M5 | P0 | todo | XLSX-1 | Warn about workbook content Bricks drops; ask before saving over it | A workbook with formatting, a chart, comments, and merged cells opens with a bar naming them; Ctrl+S over it asks first |
 | FML-5 | M5 | P0 | done | FML-3 | Functions: math, statistics, logic, information | Every case in the function fixture matches LibreOffice |
-| FML-6 | M5 | P0 | todo | FML-3 | Functions: text, including TEXT format codes | Every case in the function fixture matches LibreOffice |
+| FML-6 | M5 | P0 | done | FML-3 | Functions: text, including TEXT format codes | Every case in the function fixture matches LibreOffice |
 | FML-7 | M5 | P0 | todo | FML-3 | Functions: lookup and reference | Every case in the function fixture matches LibreOffice; VLOOKUP over 1,000,000 rows answers in under 1 s |
 | FML-8 | M5 | P0 | todo | FML-3 | Functions: dates and times | Every case in the function fixture matches LibreOffice |
 | FML-9 | M5 | P0 | todo | FML-4 | Formula bar and name box | The bar shows the selected cell's formula; editing it is one undo step; typing C5 or Sheet2!B3 in the name box goes there; a formula with a syntax error is refused with the character |
@@ -104,6 +104,10 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-10 FML-6:** text functions and TEXT format codes (`functions/text.rs`, `functions/format.rs` with `format::format(v, code)`). Built in a parallel worktree from FML-3 and rebased after FML-5.
+  - Bricks follows Excel (fixture overrides): `CONCAT("a",TRUE)` is `aTRUE`; CHAR/CODE use Windows-1252 for 128–159 and Unicode otherwise (LibreOffice on Linux uses UTF-8, so `CHAR(233)` is U+FFFD there); `CHAR(0)` is #VALUE!; REPT stops at Excel's 32,767 characters; `TEXT(1E20,"General")` is `1E+20`; TEXTJOIN needs 3 arguments; LibreOffice's Err:502 for bad counts and positions is #VALUE!.
+  - Bricks follows LibreOffice: FIND/SEARCH with empty find text are #VALUE!; `CODE("")` is 0; CLEAN also removes 127–159; CONCAT() of nothing is ""; `TEXT(12,"#.##")` is `12`; TEXT cuts seconds after 15-digit rounding and writes AM/PM in upper case; `TEXT(-1,"yyyy")` is 1899.
+  - Acceptance: 328 FML-6 rows (130 for TEXT, covering every token) match LibreOffice or their Excel override.
 - **2026-10-10 FML-5:** math, statistics, logic, and information functions (`functions/math.rs`, `stats.rs`, `logic.rs`, `info.rs`, shared `criteria.rs` and `wildcard.rs`). Built in a parallel worktree from FML-3 and rebased after FML-4.
   - Decisions: SUMPRODUCT evaluates element-wise (`SUMPRODUCT((A1:A3>1)*B1:B3)` works). Criteria cover every position of the range, so `""` and `"<>x"` count cells the area never visits. ROUND, INT, TRUNC, CEILING, FLOOR, MROUND, QUOTIENT, and MOD round to 15 significant digits first, as LibreOffice does (`ROUND(2.675,2)` is 2.68).
   - Bricks follows Excel (fixture overrides): booleans in references are skipped by SUM, COUNT, SMALL, and match only boolean criteria; number text and booleans typed as arguments are coerced (`SUM("3",TRUE)` is 4); `ISNUMBER(TRUE)` is FALSE; CEILING/FLOOR are Excel's (LibreOffice's CEILING.XCL/FLOOR.XCL), so `FLOOR(5,0)` is #DIV/0!; LibreOffice's Err:502/504 become #NUM!, #DIV/0!, or #VALUE! as Excel gives them.

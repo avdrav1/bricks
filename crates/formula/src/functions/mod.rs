@@ -10,10 +10,12 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 mod criteria;
+pub mod format;
 mod info;
 mod logic;
 mod math;
 mod stats;
+mod text;
 pub(crate) mod wildcard;
 
 /// A function's result, or why evaluation stopped.
@@ -94,6 +96,7 @@ fn register(m: &mut Registry) {
     stats::register(m);
     logic::register(m);
     info::register(m);
+    text::register(m);
 }
 
 /// Calls `f` with every value an argument supplies: each non-empty cell of a reference and

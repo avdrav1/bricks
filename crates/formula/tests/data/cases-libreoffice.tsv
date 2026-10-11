@@ -649,3 +649,330 @@ FML-5	MODE.SNGL(A1:A3)	A1=1;A2=2;A3=3	error	#VALUE!
 FML-5	MODE.SNGL(A1:A2,#N/A)	A1=1;A2=1	error	#N/A		
 FML-5	STDEV.S(5)		error	#DIV/0!		
 FML-5	VAR.S(A1:A5)	A1=2;A2=4;A3=4;A4=4;A5=5	value	1.2		
+FML-6	CONCAT("a",1,"b")		text	a1b		
+FML-6	CONCAT(A1:B2)	A1=1;B1=x;A2=2024-01-01;B2=2.5	text	1x452922.5		
+FML-6	CONCAT(A1:A3,"-",C1)	A1=a;A3=c;C1=z	text	ac-z		
+FML-6	CONCAT({1,2;3,4})		text	1234		
+FML-6	CONCAT(1/3)		text	0.333333333333333		
+FML-6	CONCAT(A1:B1,1/0)	A1=x	error	#DIV/0!		
+FML-6	CONCAT(A1:A2)	A1=x;A2=#N/A	error	#N/A		
+FML-6	CONCAT("a",TRUE)		text	a1	text:aTRUE	Booleans are their own type, as in Excel; LibreOffice reads TRUE as 1
+FML-6	CONCATENATE("a","b","c")		text	abc		
+FML-6	CONCATENATE(1/3,"x")		text	0.333333333333333x		
+FML-6	CONCATENATE("n=",A1)	A1=42	text	n=42		
+FML-6	CONCATENATE("a",A1:A3)	A1=1;A2=2	text	a1		
+FML-6	CONCATENATE({1,2},"a")		text	1a		
+FML-6	CONCATENATE("a",1/0)		error	#DIV/0!		
+FML-6	CONCATENATE("",A1)		text			
+FML-6	TEXTJOIN("-",TRUE,A1:A3)	A1=a;A3=c	text	a-c		
+FML-6	TEXTJOIN("-",FALSE,A1:A3)	A1=a;A3=c	text	a--c		
+FML-6	TEXTJOIN(", ",TRUE,"",1,"b")		text	1, b		
+FML-6	TEXTJOIN(",",FALSE,"",1,"b")		text	,1,b		
+FML-6	TEXTJOIN(A1:A2,TRUE,1,2,3)	A1=-;A2=+	text	1-2+3		
+FML-6	TEXTJOIN({"-","+"},FALSE,1,2,3,4)		text	1-2+3-4		
+FML-6	TEXTJOIN("-",FALSE,A1:A3,"z")	A2=y	text	-y--z		
+FML-6	TEXTJOIN("",TRUE,{1,2;3,4})		text	1234		
+FML-6	TEXTJOIN("-",TRUE,A1:B2)	A1=1;B1=2;A2=3;B2=4	text	1-2-3-4		
+FML-6	TEXTJOIN("-",TRUE,A1:A3)		text			
+FML-6	TEXTJOIN("-",TRUE,"a",1/0)		error	#DIV/0!		
+FML-6	TEXTJOIN(1/0,TRUE,"a")		error	#DIV/0!		
+FML-6	TEXTJOIN("-","x","a")		error	#VALUE!		
+FML-6	TEXTJOIN("-",1,"a","","b")		text	a-b		
+FML-6	TEXTJOIN("-",TRUE,A1:A2)	A1=x;A2=#N/A	error	#N/A		
+FML-6	TEXTJOIN("-",TRUE)		error	Err:511	error:#VALUE!	TEXTJOIN needs at least one text argument: Excel refuses the formula, Bricks gives #VALUE!; LibreOffice gives Err:511
+FML-6	LEFT("abc")		text	a		
+FML-6	LEFT("abcdef",3)		text	abc		
+FML-6	LEFT("abc",10)		text	abc		
+FML-6	LEFT("abc",0)		text			
+FML-6	LEFT(1234,2)		text	12		
+FML-6	LEFT("héllo",2)		text	hé		
+FML-6	LEFT("abc",1.9)		text	a		
+FML-6	LEFT("abc","2")		text	ab		
+FML-6	LEFT(A1,3)	A1=2024-01-15	text	453		
+FML-6	LEFT(1/0,1)		error	#DIV/0!		
+FML-6	LEFT("abc","x")		error	#VALUE!		
+FML-6	LEFT("abc",-1)		error	Err:502	error:#VALUE!	Excel gives #VALUE! for this argument; LibreOffice's Err:502 has no Excel error value
+FML-6	RIGHT("abc")		text	c		
+FML-6	RIGHT("abcdef",3)		text	def		
+FML-6	RIGHT("héllo",3)		text	llo		
+FML-6	RIGHT("abc",0)		text			
+FML-6	RIGHT("abc",10)		text	abc		
+FML-6	RIGHT(12.5,2)		text	.5		
+FML-6	RIGHT(A1,2)	A1=xyz	text	yz		
+FML-6	RIGHT("abc",1/0)		error	#DIV/0!		
+FML-6	RIGHT("abc",-1)		error	Err:502	error:#VALUE!	Excel gives #VALUE! for this argument; LibreOffice's Err:502 has no Excel error value
+FML-6	MID("abcdef",2,3)		text	bcd		
+FML-6	MID("abcdef",5,10)		text	ef		
+FML-6	MID("abcdef",7,2)		text			
+FML-6	MID("abcdef",1.9,2.9)		text	ab		
+FML-6	MID("héllo",2,1)		text	é		
+FML-6	MID(123456,3,2)		text	34		
+FML-6	MID("abc",1/0,1)		error	#DIV/0!		
+FML-6	MID("abcdef",0,2)		error	Err:502	error:#VALUE!	Excel gives #VALUE! for this argument; LibreOffice's Err:502 has no Excel error value
+FML-6	MID("abcdef",2,-1)		error	Err:502	error:#VALUE!	Excel gives #VALUE! for this argument; LibreOffice's Err:502 has no Excel error value
+FML-6	LEN("héllo")		value	5.0		
+FML-6	LEN("")		value	0.0		
+FML-6	LEN(A1)		value	0.0		
+FML-6	LEN(A1)	A1=2024-01-01	value	5.0		
+FML-6	LEN(1/3)		value	17.0		
+FML-6	LEN(12.5)		value	4.0		
+FML-6	LEN("  a ")		value	4.0		
+FML-6	LEN(1/0)		error	#DIV/0!		
+FML-6	LEN(A1)	A1=#N/A	error	#N/A		
+FML-6	UPPER("abç1")		text	ABÇ1		
+FML-6	UPPER(12)		text	12		
+FML-6	UPPER(A1)	A1=mixed Case	text	MIXED CASE		
+FML-6	UPPER(1/0)		error	#DIV/0!		
+FML-6	LOWER("ÀBC")		text	àbc		
+FML-6	LOWER("Hello World")		text	hello world		
+FML-6	LOWER(A1)		text			
+FML-6	LOWER(A1)	A1=#DIV/0!	error	#DIV/0!		
+FML-6	PROPER("hello wORLD")		text	Hello World		
+FML-6	PROPER("o'neil 2nd x-ray")		text	O'Neil 2Nd X-Ray		
+FML-6	PROPER("éCOLE ÉTÉ")		text	École Été		
+FML-6	PROPER(A1)	A1=abc def	text	Abc Def		
+FML-6	PROPER("")		text			
+FML-6	PROPER(1/0)		error	#DIV/0!		
+FML-6	TRIM("  a   b  ")		text	a b		
+FML-6	LEN(TRIM("   "))		value	0.0		
+FML-6	TRIM(A1)	A1=  x  y	text	x y		
+FML-6	TRIM(12)		text	12		
+FML-6	TRIM(1/0)		error	#DIV/0!		
+FML-6	CLEAN("a"&CHAR(9)&"b"&CHAR(10)&"c")		text	abc		
+FML-6	LEN(CLEAN(CHAR(1)&"x"&CHAR(31)))		value	1.0		
+FML-6	CLEAN("plain text")		text	plain text		
+FML-6	CLEAN(5)		text	5		
+FML-6	CLEAN(1/0)		error	#DIV/0!		
+FML-6	FIND("b","abcb")		value	2.0		
+FML-6	FIND("b","abcb",3)		value	4.0		
+FML-6	FIND("lo","héllo")		value	4.0		
+FML-6	FIND("*","a*c")		value	2.0		
+FML-6	FIND("B","abc")		error	#VALUE!		
+FML-6	FIND("a","abc",0)		error	#VALUE!		
+FML-6	FIND("c","abc",4)		error	#VALUE!		
+FML-6	FIND("","abc")		error	#VALUE!		
+FML-6	FIND(2,12321,3)		value	4.0		
+FML-6	FIND("a",1/0)		error	#DIV/0!		
+FML-6	SEARCH("B","abcb")		value	2.0		
+FML-6	SEARCH("b","abcb",3)		value	4.0		
+FML-6	SEARCH("a*c","xxabbbc")		value	3.0		
+FML-6	SEARCH("b?","abcb",3)		error	#VALUE!		
+FML-6	SEARCH("?c","abc")		value	2.0		
+FML-6	SEARCH("~*","a*c")		value	2.0		
+FML-6	SEARCH("z","abc")		error	#VALUE!		
+FML-6	SEARCH("","abc",2)		error	#VALUE!		
+FML-6	SEARCH("a","abc",4)		error	#VALUE!		
+FML-6	SEARCH("É","café")		value	4.0		
+FML-6	SEARCH(1/0,"a")		error	#DIV/0!		
+FML-6	SUBSTITUTE("aXbXc","X","-")		text	a-b-c		
+FML-6	SUBSTITUTE("aXbXc","X","-",2)		text	aXb-c		
+FML-6	SUBSTITUTE("aXbXc","X","-",3)		text	aXbXc		
+FML-6	SUBSTITUTE("abc","","-")		text	abc		
+FML-6	SUBSTITUTE("aaaa","aa","b")		text	bb		
+FML-6	SUBSTITUTE("aXbx","x","-")		text	aXb-		
+FML-6	SUBSTITUTE(1234,2,9)		text	1934		
+FML-6	SUBSTITUTE("aXbXc","X","-",1.7)		text	a-bXc		
+FML-6	SUBSTITUTE("abc","b","")		text	ac		
+FML-6	SUBSTITUTE(1/0,"a","b")		error	#DIV/0!		
+FML-6	SUBSTITUTE("aXbXc","X","-",0)		error	Err:502	error:#VALUE!	Excel gives #VALUE! for this argument; LibreOffice's Err:502 has no Excel error value
+FML-6	REPLACE("abcdef",2,3,"XY")		text	aXYef		
+FML-6	REPLACE("abc",5,1,"Z")		text	abcZ		
+FML-6	REPLACE("abc",2,0,"Z")		text	aZbc		
+FML-6	REPLACE(12345,2,2,"-")		text	1-45		
+FML-6	REPLACE("héllo",2,1,"e")		text	hello		
+FML-6	REPLACE("abc",1,10,"")		text			
+FML-6	REPLACE("abc",1/0,1,"Z")		error	#DIV/0!		
+FML-6	REPLACE("abc",0,1,"Z")		error	Err:502	error:#VALUE!	Excel gives #VALUE! for this argument; LibreOffice's Err:502 has no Excel error value
+FML-6	REPLACE("abc",1,-1,"Z")		error	Err:502	error:#VALUE!	Excel gives #VALUE! for this argument; LibreOffice's Err:502 has no Excel error value
+FML-6	REPT("ab",3)		text	ababab		
+FML-6	REPT("ab",0)		text			
+FML-6	REPT("ab",2.9)		text	abab		
+FML-6	REPT("",5)		text			
+FML-6	REPT(1,3)		text	111		
+FML-6	LEN(REPT("abcd",8191))		value	32764.0		
+FML-6	REPT("a",1/0)		error	#DIV/0!		
+FML-6	REPT("ab",-1)		error	Err:502	error:#VALUE!	Excel gives #VALUE! for this argument; LibreOffice's Err:502 has no Excel error value
+FML-6	LEN(REPT("abcd",10000))		value	40000.0	error:#VALUE!	Excel's 32,767-character text limit bounds REPT; LibreOffice builds texts up to about 2^28 characters
+FML-6	VALUE("1,234.5")		value	1234.5		
+FML-6	VALUE(" 12 ")		value	12.0		
+FML-6	VALUE("12%")		value	0.12		
+FML-6	VALUE("2024-01-02")		value	45293.0		
+FML-6	VALUE("12:30")		value	0.5208333333333334		
+FML-6	VALUE(5)		value	5.0		
+FML-6	VALUE("$1,000")		value	1000.0		
+FML-6	VALUE("1e3")		value	1000.0		
+FML-6	VALUE("(5)")		value	-5.0		
+FML-6	VALUE(A1)	A1=007	value	7.0		
+FML-6	VALUE(1/0)		error	#DIV/0!		
+FML-6	VALUE("abc")		error	Err:502	error:#VALUE!	Excel gives #VALUE! for this argument; LibreOffice's Err:502 has no Excel error value
+FML-6	VALUE("")		error	Err:502	error:#VALUE!	Excel gives #VALUE! for this argument; LibreOffice's Err:502 has no Excel error value
+FML-6	EXACT("abc","abc")		bool	TRUE		
+FML-6	EXACT("abc","ABC")		bool	FALSE		
+FML-6	EXACT(1,"1")		bool	TRUE		
+FML-6	EXACT("",A1)		bool	TRUE		
+FML-6	EXACT(A1,"x ")	A1=x	bool	FALSE		
+FML-6	EXACT(1/0,1)		error	#DIV/0!		
+FML-6	CHAR(65)		text	A		
+FML-6	CHAR(97)		text	a		
+FML-6	CHAR(32)		text	 		
+FML-6	CHAR(126)		text	~		
+FML-6	CHAR(66.9)		text	B		
+FML-6	CHAR("66")		text	B		
+FML-6	CODE(CHAR(10))		value	10.0		
+FML-6	CHAR(1/0)		error	#DIV/0!		
+FML-6	CHAR("x")		error	#VALUE!		
+FML-6	CHAR(233)		text	�	text:é	LibreOffice on Linux reads CHAR/CODE codes above 127 in the system charset (UTF-8), giving U+FFFD or the first UTF-8 byte; Excel uses Windows-1252
+FML-6	CHAR(169)		text	�	text:©	LibreOffice on Linux reads CHAR/CODE codes above 127 in the system charset (UTF-8), giving U+FFFD or the first UTF-8 byte; Excel uses Windows-1252
+FML-6	CHAR(0)		text	 	error:#VALUE!	Excel accepts 1-255; LibreOffice gives a NUL character
+FML-6	CHAR(256)		error	Err:502	error:#VALUE!	Excel gives #VALUE! for this argument; LibreOffice's Err:502 has no Excel error value
+FML-6	CHAR(-1)		error	Err:502	error:#VALUE!	Excel gives #VALUE! for this argument; LibreOffice's Err:502 has no Excel error value
+FML-6	CODE("A")		value	65.0		
+FML-6	CODE("abc")		value	97.0		
+FML-6	CODE(1)		value	49.0		
+FML-6	CODE(" ")		value	32.0		
+FML-6	CODE("~")		value	126.0		
+FML-6	CODE(A1)	A1=zebra	value	122.0		
+FML-6	CODE("")		value	0.0		
+FML-6	CODE(1/0)		error	#DIV/0!		
+FML-6	CODE("é")		value	195.0	value:233	LibreOffice on Linux reads CHAR/CODE codes above 127 in the system charset (UTF-8), giving U+FFFD or the first UTF-8 byte; Excel uses Windows-1252
+FML-6	CODE("ÿ")		value	195.0	value:255	LibreOffice on Linux reads CHAR/CODE codes above 127 in the system charset (UTF-8), giving U+FFFD or the first UTF-8 byte; Excel uses Windows-1252
+FML-6	T("abc")		text	abc		
+FML-6	T(12)		text			
+FML-6	T(A1)	A1=x	text	x		
+FML-6	T(A1)	A1=5	text			
+FML-6	T(A1)	A1=2024-01-01	text			
+FML-6	T(A1)		text			
+FML-6	T(1/0)		error	#DIV/0!		
+FML-6	T(A1)	A1=#N/A	error	#N/A		
+FML-6	LEN(CLEAN(CHAR(127)&"x"))		value	1.0		
+FML-6	EXACT("a",A1)	A1=#N/A	error	#N/A		
+FML-6	TEXT(1234.567,"0")		text	1235		
+FML-6	TEXT(1234.567,"0.00")		text	1234.57		
+FML-6	TEXT(5,"000")		text	005		
+FML-6	TEXT(5.5,"#")		text	6		
+FML-6	TEXT(0.5,"#")		text	1		
+FML-6	TEXT(0.4,"#")		text			
+FML-6	TEXT(0,"#")		text			
+FML-6	TEXT(0.5,"#.##")		text	.5		
+FML-6	TEXT(12,"#.##")		text	12		
+FML-6	TEXT(12,"0.#")		text	12		
+FML-6	TEXT(1,"0.0#")		text	1.0		
+FML-6	TEXT(1.25,"0.0#")		text	1.25		
+FML-6	TEXT(5,"0#")		text	05		
+FML-6	TEXT(2.5,"0")		text	3		
+FML-6	TEXT(-2.5,"0")		text	-3		
+FML-6	TEXT(0.005,"0.00")		text	0.01		
+FML-6	TEXT(1.005,"0.00")		text	1.01		
+FML-6	TEXT(9.995,"0.00")		text	10.00		
+FML-6	TEXT(1E20,"0")		text	100000000000000000000		
+FML-6	TEXT(0.000123,"0.000000")		text	0.000123		
+FML-6	TEXT(1.5,".00")		text	1.50		
+FML-6	TEXT(1234.567,"#,##0.00")		text	1,234.57		
+FML-6	TEXT(1234567,"#,##0")		text	1,234,567		
+FML-6	TEXT(5,"#,##0")		text	5		
+FML-6	TEXT(0,"#,##0")		text	0		
+FML-6	TEXT(5,"#,000")		text	005		
+FML-6	TEXT(1234,"0,000,000")		text	0,001,234		
+FML-6	TEXT(1234567,"#,")		text	1235		
+FML-6	TEXT(1234567,"0.0,,")		text	1.2		
+FML-6	TEXT(1234,"0.00,")		text	1.23		
+FML-6	TEXT(123456789012345678,"#,##0")		text	123,456,789,012,346,000		
+FML-6	TEXT(1234567.891,"#,##0.000")		text	1,234,567.891		
+FML-6	TEXT(0.5,"0%")		text	50%		
+FML-6	TEXT(0.1234,"0.0%")		text	12.3%		
+FML-6	TEXT(5,"0 %")		text	500 %		
+FML-6	TEXT(5,"%0")		text	%500		
+FML-6	TEXT(-0.25,"0%")		text	-25%		
+FML-6	TEXT(5,"""$""0.00")		text	$5.00		
+FML-6	TEXT(5,"\$0")		text	$5		
+FML-6	TEXT(5,"0"" units""")		text	5 units		
+FML-6	TEXT(12.5,"0.0 ""kg""")		text	12.5 kg		
+FML-6	TEXT(5,"0.00""x""0")		text	5.00x0		
+FML-6	TEXT(12345,"0 0")		text	1234 5		
+FML-6	TEXT(5551234,"000-0000")		text	555-1234		
+FML-6	TEXT(1234.5,"$#,##0.00")		text	$1,234.50		
+FML-6	TEXT(-1234.5,"$#,##0.00")		text	-$1,234.50		
+FML-6	TEXT(5,"€0")		text	€5		
+FML-6	TEXT(5,"(0)")		text	(5)		
+FML-6	TEXT(1234.5,"#,##0.00 ""USD""")		text	1,234.50 USD		
+FML-6	TEXT(-5,"0;(0)")		text	(5)		
+FML-6	TEXT(5,"0;(0)")		text	5		
+FML-6	TEXT(0,"0;(0)")		text	0		
+FML-6	TEXT(-5,"0")		text	-5		
+FML-6	TEXT(-5,"0;0")		text	5		
+FML-6	TEXT(-0.001,"0")		text	0		
+FML-6	TEXT(-0.4,"0;(0)")		text	(0)		
+FML-6	TEXT(-0.001,"0.00")		text	0.00		
+FML-6	TEXT(0,"0;-0;""zero""")		text	zero		
+FML-6	TEXT(-1,"0;-0;""zero""")		text	-1		
+FML-6	TEXT(-0.123,"0.0%;(0.0%)")		text	(12.3%)		
+FML-6	TEXT(5,"0.00;;")		text	5.00		
+FML-6	TEXT(-5,"0.00;;")		text			
+FML-6	TEXT(0,"0.00;;")		text			
+FML-6	TEXT(-5,"0;")		text			
+FML-6	TEXT(0,"0.0;(0.0);-")		text	-		
+FML-6	TEXT(2,"0;-0;""z"";@")		text	2		
+FML-6	TEXT("abc","0;0;0;@""!""")		text	abc!		
+FML-6	TEXT(1/3,"General")		text	0.333333333333333		
+FML-6	TEXT(1234.5,"General")		text	1234.5		
+FML-6	TEXT(-5,"General")		text	-5		
+FML-6	TEXT(-5,"General;(General)")		text	(5)		
+FML-6	TEXT(1E20,"General")		text	1.00000000000000E+20	text:1E+20	Excel's General shows the shortest mantissa; LibreOffice's TEXT pads it to 15 digits
+FML-6	TEXT("abc","@")		text	abc		
+FML-6	TEXT(12,"@")		text	12		
+FML-6	TEXT("abc","""x""@")		text	xabc		
+FML-6	TEXT(A1,"General")	A1=2024-01-15	text	45306		
+FML-6	TEXT("abc","0.00")		text	abc		
+FML-6	TEXT("12","0.00")		text	12.00		
+FML-6	TEXT(A1,"0")		text	0		
+FML-6	TEXT(A1,"0.00")	A1=2024-01-15	text	45306.00		
+FML-6	TEXT(5,A1)	A1=0.0	text	5		
+FML-6	TEXT(5,"")		text			
+FML-6	TEXT(1/0,"0")		error	#DIV/0!		
+FML-6	TEXT(5,1/0)		error	#DIV/0!		
+FML-6	TEXT(A1,"0")	A1=#N/A	error	#N/A		
+FML-6	TEXT(45306.75,"yyyy-mm-dd")		text	2024-01-15		
+FML-6	TEXT(45306.75,"yy/m/d")		text	24/1/15		
+FML-6	TEXT(45306.75,"mmmm d, yyyy")		text	January 15, 2024		
+FML-6	TEXT(45306.75,"mmm")		text	Jan		
+FML-6	TEXT(45306.75,"mm")		text	01		
+FML-6	TEXT(45306.75,"m")		text	1		
+FML-6	TEXT(45306.75,"dddd")		text	Monday		
+FML-6	TEXT(45306.75,"ddd dd")		text	Mon 15		
+FML-6	TEXT(45292,"d/m/yy")		text	1/1/24		
+FML-6	TEXT(45292,"dd")		text	01		
+FML-6	TEXT(45306.75,"d-mmm-yy")		text	15-Jan-24		
+FML-6	TEXT(A1,"dddd")	A1=2024-01-15	text	Monday		
+FML-6	TEXT(A1,"yyyy")	A1=2024-02-29	text	2024		
+FML-6	TEXT("2024-03-05","d/m/yyyy")		text	5/3/2024		
+FML-6	TEXT(45306.75,"YYYY-MM-DD HH:MM")		text	2024-01-15 18:00		
+FML-6	TEXT(45292.5,"Dddd")		text	Monday		
+FML-6	TEXT(45627,"mmmm dddd")		text	December Sunday		
+FML-6	TEXT(60,"yyyy-mm-dd")		text	1900-02-28		
+FML-6	TEXT(61,"yyyy-mm-dd")		text	1900-03-01		
+FML-6	TEXT(0,"yyyy-mm-dd")		text	1899-12-30		
+FML-6	TEXT(-1,"yyyy")		text	1899		
+FML-6	TEXT(45292,"""Day ""d")		text	Day 1		
+FML-6	TEXT(45292,"\D\a\y d")		text	Day 1		
+FML-6	TEXT(A1,"mmm yy")	A1=1999-12-31	text	Dec 99		
+FML-6	TEXT(45306.75,"hh:mm:ss")		text	18:00:00		
+FML-6	TEXT(45306.75,"h:mm AM/PM")		text	6:00 PM		
+FML-6	TEXT(45306.25,"h:mm AM/PM")		text	6:00 AM		
+FML-6	TEXT(45306,"h AM/PM")		text	12 AM		
+FML-6	TEXT(45306.5,"hh AM/PM")		text	12 PM		
+FML-6	TEXT(0.5104166,"h:mm")		text	12:14		
+FML-6	TEXT(0.5104166,"mm:ss")		text	14:59		
+FML-6	TEXT(0.5104166,"h m")		text	12 14		
+FML-6	TEXT(45292.0423611,"h:m:s")		text	1:0:59		
+FML-6	TEXT(45292.0423611,"hh:mm:ss")		text	01:00:59		
+FML-6	TEXT(45292.0423611,"s")		text	59		
+FML-6	TEXT(45292.0423611,"ss")		text	59		
+FML-6	TEXT(45306.99999,"hh:mm:ss")		text	23:59:59		
+FML-6	TEXT(1/3,"hh:mm:ss")		text	08:00:00		
+FML-6	TEXT(45306+1/3,"yyyy-mm-dd hh:mm:ss")		text	2024-01-15 08:00:00		
+FML-6	TEXT(0.5,"h:mm:ss AM/PM")		text	12:00:00 PM		
+FML-6	TEXT(45292.75,"yyyy-mm-dd h:mm am/pm")		text	2024-01-01 6:00 PM		
+FML-6	TEXT(45306.75,"mm/ss")		text	00/00		
+FML-6	TEXT(A1,"hh:mm")	A1=2024-01-15T13:45:30	text	13:45		
+FML-6	TEXT("13:45","h:mm AM/PM")		text	1:45 PM		
+FML-6	LEN(TRIM("a"&CHAR(9)&"  b"))		value	4.0		
