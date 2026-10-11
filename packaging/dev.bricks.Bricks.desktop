@@ -7,4 +7,4 @@ Exec=bricks %f
 Icon=dev.bricks.Bricks
 Terminal=false
 Categories=Office;Spreadsheet;
-MimeType=text/csv;text/tab-separated-values;
+MimeType=text/csv;text/tab-separated-values;application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;application/vnd.ms-excel.sheet.macroEnabled.12;
