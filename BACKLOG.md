@@ -14,7 +14,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 - [x] M1: viewer passes the LibreOffice navigation checklist; first rows of 1 GB in under 500 ms
 - [x] M2: editor round-trips edits, paste, inserts, and undo on 1 GB without full rewrites before save
 - [x] M3: all V0.1 benchmarks in docs/BENCHMARKS.md pass on reference hardware (V0.1 release)
-- [ ] M4: `curl -fsSL https://spreadsheet-6w6.pages.dev/install.sh | sh` installs per user on clean Arch, Ubuntu 24.04, and Fedora VMs, and double-clicking a CSV opens it
+- [ ] M4: `curl -fsSL https://bricks.cronkite.cc/install.sh | sh` installs per user on clean Arch, Ubuntu 24.04, and Fedora VMs, and double-clicking a CSV opens it
 
 ## Stories
 
@@ -212,7 +212,7 @@ Story notes, decisions made mid-story, and follow-ups go here, newest first.
     - Launches with alpha.csv, then beta.csv, wrote "beta, alpha". A launch with no file showed both on the start window.
     - Clicking alpha opened it and moved it to the top. The header ▾ listed alpha, beta, and Clear Recent Files.
     - With beta.csv deleted, choosing it showed "Cannot open /tmp/app4/beta.csv: No such file or directory" and left only alpha on the list.
-- **2026-10-10 decision:** no AUR (user decision: it is dead). M4 ships a curl installer instead: `curl -fsSL https://spreadsheet-6w6.pages.dev/install.sh | sh` on the Cloudflare download site.
+- **2026-10-10 decision:** no AUR (user decision: it is dead). M4 ships a curl installer instead: `curl -fsSL https://bricks.cronkite.cc/install.sh | sh` on the Cloudflare download site.
   - It reads `latest.json`, downloads the tarball, and checks its sha256. It installs per user, without sudo: the binary in `~/.local/bin`, the .desktop file and icon in `~/.local/share`, and the text/csv default via `xdg-mime`.
   - Rerunning it updates; `--uninstall` removes it. It can't install GTK 4, so it prints the distro's install command when GTK 4 is missing.
   - The gate needs clean Arch, Ubuntu 24.04, and Fedora VMs (user decision). New story PKG-3 builds the release against Ubuntu 24.04's libraries, so it starts on the oldest system we support. PKG-1 is now the installer and depends on it.
