@@ -62,6 +62,7 @@ Slate's crates, in `apps/slate/crates/`:
 | Crate | Owns |
 | --- | --- |
 | `document-model` | Slate's document model (ADR 0003): blocks, runs, plain-text reader with encoding and line-ending detection, Markdown reader (`pulldown-cmark`) |
+| `docx` | DOCX reader: `word/document.xml` with styles, numbering, hyperlinks, pictures, and tables into the document model |
 
 ## Commands
 
@@ -77,6 +78,7 @@ python3 scripts/lo_navigation.py         # re-record GRID-3's checklist from Lib
 python3 scripts/lo_functions.py          # re-record formula results from LibreOffice (FML-5..8)
 python3 scripts/lo_formats.py            # re-record number format results from LibreOffice (STYLE-2)
 python3 scripts/lo_xlsx.py fixture|dump FILE  # LibreOffice fixture workbook and dumps (XLSX-*)
+python3 scripts/lo_docx.py fixture|dump FILE  # Slate's LibreOffice fixture document and paragraph dumps (SLATE-3)
 cargo run --release -p xlsx --example gen_corpus_xlsx  # corpus/rows_1m.xlsx (BENCH-2)
 cargo run --release -p xlsx --example gen_corpus_xlsx -- --styled   # corpus/styled_1m.xlsx (STYLE-3, BENCH-3)
 python3 -m unittest discover -s scripts  # script tests (corpus generator, backlog helper)

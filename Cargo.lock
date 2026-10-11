@@ -227,6 +227,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "docx"
+version = "0.1.0"
+dependencies = [
+ "document-model",
+ "quick-xml",
+ "zip",
+]
+
+[[package]]
 name = "either"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
