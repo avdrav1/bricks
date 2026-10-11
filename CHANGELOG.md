@@ -62,3 +62,10 @@ First release: the large-CSV editor (milestones S0 to M3) plus the M4 desktop wo
 - APP-8: Clear errors for malformed files
 - PKG-3: Portable release build: link against Ubuntu 24.04's glibc (build in a container)
 - PKG-1: curl installer (per user, no sudo): `install.sh` on the download site; .desktop file, icon, text/csv association; `--uninstall`
+
+## v0.1.1 (2026-10-10)
+
+The app is now called Bricks: run `bricks`. Installing it replaces v0.1.0 (Spreadsheet) and keeps its recent files.
+
+- PKG-4: Rename the app to Bricks: `bricks` command, window titles, app menu, state folder
+- PKG-1: Download page and installer point at bricks.cronkite.cc and dl.cronkite.cc
