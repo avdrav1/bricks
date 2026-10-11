@@ -16,7 +16,9 @@
 #      leaves the file as it was;
 #   3. Ctrl+S again, Save: the saved sheet2.xml holds <v>42</v>;
 #   4. an edit on two sheets, 6.5 s for the journal, kill -9, relaunch, Restore: both
-#      edits are back.
+#      edits are back;
+#   7. (FML-9) Summary!A3, =BAHTTEXT(1), shows the file's result, and the formula bar
+#      says Bricks doesn't compute BAHTTEXT yet.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -77,6 +79,9 @@ session() {
   shot 4-asked; shown asked
   keys -k Return; sleep 2; shot 4-restored; shown restored
   keys -M ctrl -k Page_Up -m ctrl; shown other
+
+  echo "== 7 cached"
+  keys -M ctrl g -m ctrl -s 300 "Summary!A3" -s 300 -k Return; sleep 1; shot 7-cached; shown
   pkill -x bricks
   swaymsg exit >/dev/null 2>&1 || true
 }
@@ -103,6 +108,8 @@ check "3: and shows it after reading the file back" "3 saved" "^after: A1: 42$"
 check "4: a restore is offered after kill -9" "4 restored" "^asked: Restore unsaved edits\?$"
 check "4: the edit on the active sheet is back" "4 restored" "^restored: A1: second$"
 check "4: and the one on the other sheet" "4 restored" "^other: A1: first$"
+check "7: a function Bricks lacks shows the file's result" "7 cached" "^shown: A3: หนึ่งบาทถ้วน$"
+check "7: and the formula bar says so" "7 cached" "^shown: Result from the file: Bricks doesn.t compute BAHTTEXT yet$"
 if [ $fail = 0 ]; then echo "XLSX OK"; else
   echo "XLSX CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

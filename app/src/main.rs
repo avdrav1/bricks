@@ -22,6 +22,7 @@
 
 mod crash;
 mod editor;
+mod formula_bar;
 mod grid_view;
 mod malformed;
 mod recent;
@@ -870,27 +871,30 @@ fn build_window(
     layout.attach(&losses.root, 0, 0, 2, 1);
     losses.show(&session.losses.borrow());
     session.losses_bar.replace(Some(losses));
-    layout.attach(&grid, 0, 1, 1, 1);
+    // The formula bar and name box (FML-9), over the grid.
+    let formula_bar = formula_bar::FormulaBar::new(&grid);
+    layout.attach(formula_bar.root(), 0, 1, 2, 1);
+    layout.attach(&grid, 0, 2, 1, 1);
     layout.attach(
         &gtk::Scrollbar::new(gtk::Orientation::Vertical, Some(&vadj)),
         1,
-        1,
+        2,
         1,
         1,
     );
     layout.attach(
         &gtk::Scrollbar::new(gtk::Orientation::Horizontal, Some(&hadj)),
         0,
-        2,
+        3,
         1,
         1,
     );
     let find = FindBar::new(&grid);
-    layout.attach(&find.0.root, 0, 3, 2, 1);
+    layout.attach(&find.0.root, 0, 4, 2, 1);
     let tabs = sheets::SheetTabs::new(&grid);
-    layout.attach(tabs.root(), 0, 4, 2, 1);
+    layout.attach(tabs.root(), 0, 5, 2, 1);
     let bar = StatusBar::new();
-    layout.attach(&bar.root, 0, 5, 2, 1);
+    layout.attach(&bar.root, 0, 6, 2, 1);
 
     let window = gtk::ApplicationWindow::builder()
         .application(app)
@@ -920,22 +924,6 @@ fn build_window(
     }
     accept_file_drops(app, &window);
     follow_import(app, &window, &grid, session);
-    // A typed formula that doesn't parse (FML-4): say where, and keep it in the editor.
-    grid.connect_closure(
-        "formula-error",
-        false,
-        glib::closure_local!(
-            #[weak]
-            window,
-            move |_: GridView, message: String| {
-                alert(
-                    Some(window.upcast_ref()),
-                    "This formula has an error",
-                    &message,
-                );
-            }
-        ),
-    );
     // A change refused for its size (SHEET-2): say why.
     grid.connect_closure(
         "refused",
@@ -1014,13 +1002,14 @@ fn build_window(
     // its own text undo, and the grid lets Esc through when no editor is open.
     let keys = gtk::EventControllerKey::new();
     keys.connect_key_pressed({
-        let (window, grid, save, session, find, tabs) = (
+        let (window, grid, save, session, find, tabs, formula_bar) = (
             window.downgrade(),
             grid.downgrade(),
             save.clone(),
             session.clone(),
             find.clone(),
             tabs.clone(),
+            formula_bar.clone(),
         );
         move |_, key, _, mods| {
             use gtk::gdk::{Key, ModifierType};
@@ -1041,6 +1030,15 @@ fn build_window(
                 }
             }
             let shift = mods.contains(ModifierType::SHIFT_MASK);
+            // Ctrl+G or F5: the name box (FML-9).
+            let ctrl = mods.contains(ModifierType::CONTROL_MASK);
+            if (key == Key::F5 && !ctrl && !shift)
+                || (ctrl && !shift && matches!(key, Key::g | Key::G))
+            {
+                grid.finish_editing();
+                formula_bar.focus_name();
+                return glib::Propagation::Stop;
+            }
             // Shift+F11: a new sheet, as in Excel (SHEET-1).
             if key == Key::F11 && shift && !mods.contains(ModifierType::CONTROL_MASK) {
                 grid.add_sheet();

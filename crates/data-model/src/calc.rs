@@ -187,6 +187,23 @@ impl Workbook {
         Some(out)
     }
 
+    /// The functions Bricks doesn't compute that a cell's formula calls, when the cell
+    /// shows the result the file stored for it instead (an unedited XLSX formula); `None`
+    /// for every other cell (FML-9's formula bar says so).
+    pub fn uses_cached(&self, sheet: SheetId, at: CellRef) -> Option<Vec<String>> {
+        let s = self.sheet(sheet)?;
+        if s.table.overlay().get(at).is_some() {
+            return None;
+        }
+        s.cached.get(&at)?;
+        let raw = s.table.cell_of(at.row, at.col)?;
+        if !is_formula(&raw) {
+            return None;
+        }
+        let names = unknown_functions(&parse(&raw[1..]).ok()?);
+        (!names.is_empty()).then_some(names)
+    }
+
     /// Keep results a job computed on a snapshot taken at `revision`; ignored if the
     /// workbook changed since.
     pub fn store_values(&mut self, revision: u64, values: CellValues) {

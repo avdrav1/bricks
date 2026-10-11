@@ -272,6 +272,8 @@ mod imp {
                         .build(),
                     // The cell cursor or the selected range moved (FML-9's formula bar).
                     glib::subclass::Signal::builder("cursor-changed").build(),
+                    // The data or the sheet shown changed (FML-9's formula bar).
+                    glib::subclass::Signal::builder("changed").build(),
                     // A change was refused: a title and why (SHEET-2: too many formulas
                     // to rewrite).
                     glib::subclass::Signal::builder("refused")
@@ -1268,13 +1270,29 @@ impl GridView {
             .as_ref()
             .map(|e| e.text().to_string())
             .unwrap_or_default();
+        if let Err(message) = self.apply_text(row, col, text) {
+            if report {
+                self.emit_by_name::<()>("formula-error", &[&message]);
+            }
+            return false;
+        }
+        self.close_editor();
+        self.update_description();
+        true
+    }
+
+    /// Give cell (`row`, `col`) the raw text `text` as one undoable step (EDIT-2, FML-9):
+    /// the edge row grows the table (SAVE-2). A formula that doesn't parse is refused,
+    /// saying where: "Formula error at character N: …" (counting its `=` as 1).
+    fn apply_text(&self, row: u64, col: u32, text: String) -> Result<(), String> {
+        let imp = self.imp();
         if is_formula(&text) {
             if let Err(e) = formula::parse(&text[1..]) {
-                if report {
-                    let message = format!("Formula error at character {}: {}", e.at + 2, e.message);
-                    self.emit_by_name::<()>("formula-error", &[&message]);
-                }
-                return false;
+                return Err(format!(
+                    "Formula error at character {}: {}",
+                    e.at + 2,
+                    e.message
+                ));
             }
         }
         let text_empty = text.is_empty();
@@ -1318,9 +1336,143 @@ impl GridView {
         if grew {
             self.update_adjustments();
         }
-        self.close_editor();
+        self.emit_by_name::<()>("changed", &[]);
+        self.queue_draw();
+        Ok(())
+    }
+
+    /// The formula bar's Enter (FML-9): the cursor cell gets `text`, as typing it in the
+    /// cell would. A formula that doesn't parse is refused with where it fails.
+    pub fn set_cell_text(&self, text: &str) -> Result<(), String> {
+        if self.busy() {
+            return Err("Wait for the running job to finish".to_owned());
+        }
+        if !self.commit_edit(true) {
+            return Err("Finish the cell being edited first".to_owned());
+        }
+        let cur = self.imp().selection.get().cursor();
+        self.apply_text(cur.row, cur.col, text.to_owned())?;
         self.update_description();
-        true
+        Ok(())
+    }
+
+    /// The cursor cell's raw text: its formula, not its result (FML-9).
+    pub fn cell_raw(&self) -> String {
+        let cur = self.imp().selection.get().cursor();
+        self.cell_text(cur)
+    }
+
+    /// Why the cursor cell shows what it does, when that isn't its formula's result
+    /// (FML-9): a result the file stored, for functions Bricks doesn't compute.
+    pub fn cell_note(&self) -> Option<String> {
+        let cur = self.imp().selection.get().cursor();
+        let book = self.imp().book.borrow();
+        let t = book.active();
+        if cur.row >= t.row_count() {
+            return None;
+        }
+        let at = CellRef {
+            row: t.row_id(cur.row),
+            col: t.col_id(cur.col),
+        };
+        let names = book.uses_cached(book.active_id(), at)?;
+        Some(format!(
+            "Result from the file: Bricks doesn't compute {} yet",
+            names.join(", ")
+        ))
+    }
+
+    /// The selection as the name box shows it (FML-9): `B2`, `B2:D9`, `A:C`, or `2:5`,
+    /// rows as references count them (file rows, from 1).
+    pub fn selection_reference(&self) -> String {
+        let imp = self.imp();
+        let sel = imp.selection.get();
+        let (tl, br) = sel.range();
+        let t = self.table();
+        let row = |r: u64| row_number(&t, r) - 1;
+        let cell = |r: u64, c: u32| formula::CellAddr {
+            row: row(r),
+            col: c,
+            row_abs: false,
+            col_abs: false,
+        };
+        let area = if let Some(cols) = sel.whole_columns() {
+            formula::Area::Cols {
+                first: cols.start,
+                last: cols.end.saturating_sub(1).max(cols.start),
+                first_abs: false,
+                last_abs: false,
+            }
+        } else if sel.is_whole_rows() {
+            formula::Area::Rows {
+                first: row(tl.row),
+                last: row(br.row),
+                first_abs: false,
+                last_abs: false,
+            }
+        } else if tl == br {
+            formula::Area::Cell(cell(tl.row, tl.col))
+        } else {
+            formula::Area::Range(cell(tl.row, tl.col), cell(br.row, br.col))
+        };
+        formula::format_reference(&formula::Reference { sheet: None, area })
+    }
+
+    /// Go to a reference typed in the name box (FML-9): its sheet first if it names one,
+    /// then the cell or area, selected and scrolled to; whole rows and columns select as
+    /// clicking their headers does.
+    pub fn select_reference(&self, r: &formula::Reference) -> Result<(), &'static str> {
+        if let Some(name) = &r.sheet {
+            let id = self
+                .imp()
+                .book
+                .borrow()
+                .sheet_named(name)
+                .map(|s| s.id)
+                .ok_or("No sheet named that")?;
+            if !self.switch_sheet(id) {
+                return Err("Wait for the running job to finish");
+            }
+        }
+        let table_row = |position: u64| -> Result<u64, &'static str> {
+            let t = self.table();
+            if position >= t.total_rows() {
+                // Past the data: the edge row and beyond are rows of their own.
+                return Ok(t.row_count() + (position - t.total_rows()));
+            }
+            t.row_of(t.id_at(position)).ok_or("That row isn't shown")
+        };
+        let b = self.bounds();
+        // Rows stop at the editable edge row; columns are known only as far as rows have
+        // loaded (none just after a sheet switch), so they aren't cut.
+        let cell = |a: &formula::CellAddr| -> Result<grid::Cell, &'static str> {
+            Ok(grid::Cell {
+                row: table_row(a.row)?.min(b.rows.saturating_sub(1)),
+                col: a.col,
+            })
+        };
+        let mut sel = self.imp().selection.get();
+        match &r.area {
+            formula::Area::Cell(a) => sel = Selection::at(cell(a)?),
+            formula::Area::Range(a, z) => {
+                sel = Selection::at(cell(a)?);
+                sel.extend_to(cell(z)?);
+            }
+            formula::Area::Cols { first, last, .. } => {
+                sel.click_col(*first, false, 0, b);
+                sel.click_col(*last, true, 0, b);
+            }
+            formula::Area::Rows { first, last, .. } => {
+                let (first, last) = (table_row(*first)?, table_row(*last)?);
+                sel.click_row(first, false, 0, b);
+                sel.click_row(last, true, 0, b);
+            }
+        }
+        self.set_selection(sel);
+        self.scroll_to(sel.reveal());
+        self.grab_focus();
+        self.queue_draw();
+        Ok(())
     }
 
     /// Close the editor without touching the cell (Esc), and give the grid the focus back.
@@ -1417,6 +1569,7 @@ impl GridView {
             self.scroll_to((Some(cell.row), Some(cell.col)));
         }
         self.update_description();
+        self.emit_by_name::<()>("changed", &[]);
         self.queue_draw();
     }
 
@@ -2962,6 +3115,7 @@ impl GridView {
         }
         self.set_selection(ui.selection);
         self.update_description();
+        self.emit_by_name::<()>("changed", &[]);
         self.queue_draw();
     }
 
