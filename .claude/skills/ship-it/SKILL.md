@@ -108,4 +108,4 @@ Not done: <push pending | none>
 
 The download page also serves `install.sh` (story PKG-1), which reads `latest.json`, so a site deploy is all a new version needs; nothing goes to a package registry.
 
-The suite page at cronkite.cc (`sites/cronkite/`) is not part of a release: it links to Bricks' installer and holds no version. Deploy it only when it changes, with the same yes first: `scripts/ship.sh suite-site --dry-run`, then `scripts/ship.sh suite-site` (Pages project `CF_SUITE_PAGES_PROJECT`). The cronkite.cc custom domain is attached to that project once, in the Cloudflare dashboard.
+The static pages, cronkite.cc (`sites/cronkite/`), slate.cronkite.cc (`sites/slate/`), and frame.cronkite.cc (`sites/frame/`), are not part of a release: they hold no version. Deploy one only when it changes, with the same yes first: `scripts/ship.sh page NAME --dry-run`, then `scripts/ship.sh page NAME`. Each is its own Pages project named NAME, created on first deploy. The deploy adds its custom domains; their DNS records (proxied CNAMEs to the project's pages.dev address) are set once in the Cloudflare dashboard.

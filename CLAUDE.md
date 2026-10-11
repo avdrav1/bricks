@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Cronkite: a Linux-native office suite in Rust: one Cargo workspace, three apps. Repo: `github.com/avdrav1/cronkite`; suite page: `sites/cronkite/` (cronkite.cc). Suite architecture: `docs/architecture/overview.md`; suite ADRs: `docs/adr/`.
+Cronkite: a Linux-native office suite in Rust: one Cargo workspace, three apps. Repo: `github.com/avdrav1/cronkite`; web pages: `sites/<name>/` (cronkite.cc, bricks.cronkite.cc, slate.cronkite.cc, frame.cronkite.cc). Suite architecture: `docs/architecture/overview.md`; suite ADRs: `docs/adr/`.
 
 - **Bricks** (`apps/bricks`, command `bricks`): a fast, lightweight spreadsheet. V0.1 is the best large-CSV editor on Linux; Excel compatibility comes later. Product spec: `apps/bricks/docs/SPEC.md`. Work queue: `BACKLOG.md`.
 - **Slate** (`apps/slate`, command `slate`): word processor for .txt, .md, and .docx. Spec: `docs/specs/slate.md`; design: `docs/adr/0003-slate-document-model.md`. SL0 builds a read-only viewer.

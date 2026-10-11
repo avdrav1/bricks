@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Slate: a lightweight word processor for Linux, part of Cronkite</title>
+<meta name="description" content="Slate is a lightweight, native word processor for Linux, part of the Cronkite office suite. It is in development.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=League+Spartan:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #fbfcfb; --ink: #14201a; --muted: #5b6b62; --rule: #d5ded8; --head: #eef2ef;
+    --accent: #0b7a5a; --accent-tint: #e3f2ec; --soon: #8a6a1a; --soon-tint: #f6efdc;
+    --font: "League Spartan", "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --paper: #111814; --ink: #e6ede9; --muted: #9aaba1; --rule: #2a3630; --head: #18221d;
+            --accent: #3fbf91; --accent-tint: #17302a; --soon: #d9b45a; --soon-tint: #2b2615; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 17px/1.6 var(--font); }
+  main { max-width: 980px; margin: 0 auto; padding: 0 20px 64px; }
+  a { color: var(--accent); text-underline-offset: 3px; }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  code { font-family: var(--mono); font-size: 0.9em; background: var(--head); padding: 1px 5px; border-radius: 3px; }
+  header.masthead { border-bottom: 3px double var(--rule); padding: 56px 0 28px; }
+  .badge { display: inline-block; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; color: var(--soon); background: var(--soon-tint); }
+  .wordmark { font-size: clamp(52px, 10vw, 104px); font-weight: 800; letter-spacing: -0.035em; line-height: 0.95; margin: 14px 0 0; }
+  .tagline { font-size: clamp(20px, 2.6vw, 26px); margin: 14px 0 0; max-width: 34ch; }
+  .dateline { margin: 18px 0 0; color: var(--muted); font-size: 14px; letter-spacing: 0.04em; text-transform: uppercase; }
+  .dateline a { color: inherit; }
+  section { margin-top: 56px; max-width: 66ch; }
+  h2 { font-size: 26px; letter-spacing: -0.01em; margin: 0 0 6px; }
+  pre { margin: 10px 0 6px; padding: 14px 16px; overflow-x: auto; font: 15px/1.5 var(--mono); background: var(--head); border: 1px solid var(--rule); }
+  footer { border-top: 1px solid var(--rule); margin-top: 72px; padding: 18px 20px; color: var(--muted); font-size: 14px; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <header class="masthead">
+    <span class="badge">In development</span>
+    <h1 class="wordmark">Slate</h1>
+    <p class="tagline">A lightweight, native word processor for Linux.</p>
+    <p class="dateline">Part of <a href="https://cronkite.cc">Cronkite</a> &middot; Written in Rust</p>
+  </header>
+
+  <section aria-labelledby="status-h">
+    <h2 id="status-h">Not released yet</h2>
+    <p>Slate is in development and has no release to install yet. Today it opens <code>.docx</code>, Markdown, and plain-text files in a read-only viewer; editing and saving come next. When it ships, its install instructions will be on this page and on <a href="https://cronkite.cc">cronkite.cc</a>.</p>
+  </section>
+
+  <section aria-labelledby="now-h">
+    <h2 id="now-h">Available today: Bricks</h2>
+    <p>Bricks, Cronkite's spreadsheet, is ready now. It opens gigabyte CSV files in a blink and edits <code>.xlsx</code> workbooks. Install it for your user, without sudo:</p>
+    <pre>curl -fsSL https://bricks.cronkite.cc/install.sh | sh</pre>
+    <p>Requirements, updates, and uninstalling: <a href="https://cronkite.cc/#install">cronkite.cc</a>.</p>
+  </section>
+
+  <section aria-labelledby="source-h">
+    <h2 id="source-h">Source</h2>
+    <p>Slate is developed in the open with the rest of Cronkite: <a href="https://github.com/avdrav1/cronkite">github.com/avdrav1/cronkite</a>.</p>
+  </section>
+</main>
+<footer><a href="https://cronkite.cc">Cronkite</a> &middot; <a href="https://bricks.cronkite.cc">Bricks</a> &middot; Slate &middot; <a href="https://frame.cronkite.cc">Frame</a></footer>
+</body>
+</html>

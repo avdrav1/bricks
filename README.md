@@ -38,6 +38,7 @@ BACKLOG.md            Bricks' work queue, read by scripts/backlog.py
 scripts/, packaging/  Bricks' tooling and packaging
 sites/bricks/         Bricks' download page and installer (bricks.cronkite.cc)
 sites/cronkite/       the suite's install page (cronkite.cc)
+sites/slate/, sites/frame/   Slate's and Frame's pages (slate.cronkite.cc, frame.cronkite.cc)
 ```
 
 Shared crates stay small; code becomes shared only when at least two apps genuinely need it. See [`docs/architecture/overview.md`](docs/architecture/overview.md).

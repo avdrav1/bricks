@@ -8,7 +8,7 @@
 #   scripts/ship.sh verify             the binary starts on clean Arch, Ubuntu 24.04, and Fedora
 #   scripts/ship.sh upload [--dry-run] tarball, checksum, latest.json -> Cloudflare R2
 #   scripts/ship.sh site   [--dry-run] Bricks download page (sites/bricks) -> Cloudflare Pages
-#   scripts/ship.sh suite-site [--dry-run] suite install page (sites/cronkite) -> Cloudflare Pages
+#   scripts/ship.sh page NAME [--dry-run] static page sites/NAME (cronkite, slate, frame) -> Pages project NAME
 #   scripts/ship.sh tag                annotated git tag vX.Y.Z (local only)
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -21,7 +21,7 @@ version() { sed -n '/^\[workspace.package\]/,/^\[/{s/^version = "\(.*\)"/\1/p}' 
 V=$(version)
 NAME="$APP-$V-x86_64-linux"
 TAR="dist/$NAME.tar.gz"
-DRY=false; [ "${2:-}" = "--dry-run" ] && DRY=true
+DRY=false; case " $* " in *" --dry-run "*) DRY=true ;; esac
 BUILD_IMAGE=bricks-build:ubuntu-24.04
 need() { for v in "$@"; do [ -n "${!v:-}" ] || { echo "missing env: $v (see .env.ship.example)"; exit 1; }; done; }
 run() { if $DRY; then echo "[dry-run] $*"; else "$@"; fi; }
@@ -97,19 +97,35 @@ site)
   sed -i "s|@DOWNLOAD_BASE_URL@|$DOWNLOAD_BASE_URL|" dist/site/install.sh
   run wr pages deploy dist/site --project-name "$CF_PAGES_PROJECT" --branch main --commit-dirty=true
   ;;
-suite-site)
-  # cronkite.cc: static, no release data, so it deploys only when sites/cronkite changes.
-  # The custom domain cronkite.cc is attached to the project once, in the dashboard.
-  need CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CF_SUITE_PAGES_PROJECT
-  rm -rf dist/cronkite-site; cp -r sites/cronkite dist/cronkite-site
+page)
+  # Static pages with no release data (cronkite.cc, slate.cronkite.cc, frame.cronkite.cc):
+  # each is its own Pages project, named as its folder, and deploys only when it changes.
+  P="${2:?usage: page cronkite|slate|frame [--dry-run]}"
+  case "$P" in
+    cronkite) domains="cronkite.cc www.cronkite.cc" ;;
+    slate|frame) domains="$P.cronkite.cc" ;;
+    *) echo "no page $P (sites/cronkite, sites/slate, sites/frame)"; exit 1 ;;
+  esac
+  need CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID
+  rm -rf "dist/page-$P"; cp -r "sites/$P" "dist/page-$P"
   # Match the name exactly: the table's domains column holds bricks.cronkite.cc.
   if ! wr pages project list --json | python3 -c 'import json, sys
-sys.exit(sys.argv[1] not in [p["Project Name"] for p in json.load(sys.stdin)])' "$CF_SUITE_PAGES_PROJECT"; then
+sys.exit(sys.argv[1] not in [p["Project Name"] for p in json.load(sys.stdin)])' "$P"; then
     # --force: wrangler 4.149 otherwise hands new projects to Workers and fails on a plain
     # folder of assets. Like `spreadsheet`, this is a classic Pages project.
-    run wr pages project create "$CF_SUITE_PAGES_PROJECT" --production-branch main --force
+    run wr pages project create "$P" --production-branch main --force
   fi
-  run wr pages deploy dist/cronkite-site --project-name "$CF_SUITE_PAGES_PROJECT" --branch main --commit-dirty=true
+  run wr pages deploy "dist/page-$P" --project-name "$P" --branch main --commit-dirty=true
+  # Custom domains (wrangler can't add them). Each also needs a proxied CNAME to the
+  # project's pages.dev address in the zone's DNS, which this token can't edit.
+  api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$P/domains"
+  for d in $domains; do
+    if $DRY; then echo "[dry-run] add custom domain $d to $P"; continue; fi
+    curl -fsS "$api/$d" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" >/dev/null 2>&1 && continue
+    curl -fsS -X POST "$api" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+      -H "Content-Type: application/json" --data "{\"name\":\"$d\"}" >/dev/null
+    echo "added custom domain $d to $P"
+  done
   ;;
 tag)
   git tag -a "v$V" -m "v$V"
