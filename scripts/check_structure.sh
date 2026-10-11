@@ -64,7 +64,7 @@ echo "== app log"; grep "^bricks:" /tmp/app.log | head -20
 section() { awk -v s="== $1" '/^== /{on=($0 ~ "^" s)} on' <<<"$out"; }
 fail=0
 check() { # WHAT SECTION PATTERN
-  if section "$2" | grep -qE -- "$3"; then echo "ok   $1"; else echo "FAIL $1 (no match for: $3)"; fail=1; fi
+  if section "$2" | grep -E -- "$3" >/dev/null; then echo "ok   $1"; else echo "FAIL $1 (no match for: $3)"; fail=1; fi
 }
 check "1: a range grows over an inserted row" "1 inserted" "^b1: =SUM\(A1:A4\)$"
 check "1: a moved formula's reference follows its row" "1 inserted" "^b3: =A3\*10$"

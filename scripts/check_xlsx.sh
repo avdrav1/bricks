@@ -85,7 +85,7 @@ echo "== app log"; grep "^bricks:" /tmp/app.log | head -20
 section() { awk -v s="== $1" '/^== /{on=($0 ~ "^" s)} on' <<<"$out"; }
 fail=0
 check() { # WHAT SECTION PATTERN
-  if section "$2" | grep -qE -- "$3"; then echo "ok   $1"; else echo "FAIL $1 (no match for: $3)"; fail=1; fi
+  if section "$2" | grep -E -- "$3" >/dev/null; then echo "ok   $1"; else echo "FAIL $1 (no match for: $3)"; fail=1; fi
 }
 check "1: the Data tab" "1 tabs" "^shown: Data$"
 check "1: the Q1 Sales tab" "1 tabs" "^shown: Q1 Sales$"

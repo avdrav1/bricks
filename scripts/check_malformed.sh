@@ -78,10 +78,10 @@ echo "== app log"; grep "^bricks:" /tmp/app.log | head -20
 section() { awk -v s="== $1" '/^== /{on=($0 ~ "^" s)} on' <<<"$out"; }
 fail=0
 check() { # WHAT SECTION PATTERN
-  if section "$2" | grep -qE -- "$3"; then echo "ok   $1"; else echo "FAIL $1 (no match for: $3)"; fail=1; fi
+  if section "$2" | grep -E -- "$3" >/dev/null; then echo "ok   $1"; else echo "FAIL $1 (no match for: $3)"; fail=1; fi
 }
 refute() { # WHAT SECTION PATTERN
-  if section "$2" | grep -qE -- "$3"; then echo "FAIL $1 (matched: $3)"; fail=1; else echo "ok   $1"; fi
+  if section "$2" | grep -E -- "$3" >/dev/null; then echo "FAIL $1 (matched: $3)"; fail=1; else echo "ok   $1"; fi
 }
 check "1: the dialog names the file" "1 unclosed" "^shown: “unclosed.csv” has a malformed line$"
 check "1: it gives the line (quoted newline counted)" "1 unclosed" "Line 5: a quote opens a field and never closes"

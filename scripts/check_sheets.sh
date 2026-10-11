@@ -85,10 +85,10 @@ echo "== app log"; grep "^bricks:" /tmp/app.log | head -20
 section() { awk -v s="== $1" '/^== /{on=($0 ~ "^" s)} on' <<<"$out"; }
 fail=0
 check() { # WHAT SECTION PATTERN
-  if section "$2" | grep -qE -- "$3"; then echo "ok   $1"; else echo "FAIL $1 (no match for: $3)"; fail=1; fi
+  if section "$2" | grep -E -- "$3" >/dev/null; then echo "ok   $1"; else echo "FAIL $1 (no match for: $3)"; fail=1; fi
 }
 refute() { # WHAT SECTION PATTERN
-  if section "$2" | grep -qE -- "$3"; then echo "FAIL $1 (matched: $3)"; fail=1; else echo "ok   $1"; fi
+  if section "$2" | grep -E -- "$3" >/dev/null; then echo "FAIL $1 (matched: $3)"; fail=1; else echo "ok   $1"; fi
 }
 check "1: the file's own tab" "1 added" "^shown: t$"
 check "1: Shift+F11 adds Sheet1" "1 added" "^shown: Sheet1$"

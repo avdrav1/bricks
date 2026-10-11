@@ -73,7 +73,7 @@ echo "== app log"; grep "^bricks:" /tmp/app.log | head -20
 section() { awk -v s="== $1" '/^== /{on=($0 ~ "^" s)} on' <<<"$out"; }
 fail=0
 check() { # WHAT SECTION PATTERN
-  if section "$2" | grep -qE -- "$3"; then echo "ok   $1"; else echo "FAIL $1 (no match for: $3)"; fail=1; fi
+  if section "$2" | grep -E -- "$3" >/dev/null; then echo "ok   $1"; else echo "FAIL $1 (no match for: $3)"; fail=1; fi
 }
 check "1: B2 shows its formula's result" "1 result" "^shown: B2: 4$"
 check "2: a typed formula shows its result" "2 typed" "^shown: C2: 6$"
