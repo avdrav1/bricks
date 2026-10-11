@@ -4,7 +4,7 @@ Reference box: 16 GB RAM, 8-core x86_64, NVMe SSD, Arch Linux on Wayland. Number
 
 Corpus: `python3 scripts/gen_corpus.py` (the 1 GB file is 19.1M rows).
 
-Run `cargo bench` to measure every row and print this table with Latest filled in (`app/benches/corpus.rs`). Rows that open a window need a graphical session; CI prints them as skipped. Latest below: `cargo bench` on 2026-10-10, Ryzen 9 5900 (24 threads), 126 GiB RAM, NVMe btrfs, Hyprland. This is not the reference box. "8 cores" is the same run under `systemd-run --user --scope -p MemoryMax=16G taskset -c 0-7`, an approximation of the reference box.
+Run `cargo bench` to measure every row and print this table with Latest filled in (`app/benches/corpus.rs`). Rows that open a window need a graphical session; CI prints them as skipped. Latest below: `cargo bench` on 2026-10-10, Ryzen 9 5900 (24 threads), 126 GiB RAM, NVMe btrfs, Hyprland. This is not the reference box. The XLSX and formula rows (BENCH-2, 2026-10-10) were measured only under the 8-core approximation; they need `corpus/formulas.csv` and `corpus/rows_1m.xlsx` (`cargo run --release -p xlsx --example gen_corpus_xlsx`). "8 cores" is the same run under `systemd-run --user --scope -p MemoryMax=16G taskset -c 0-7`, an approximation of the reference box.
 
 | Benchmark (1 GB unless noted) | Target | Latest | LibreOffice |
 | --- | --- | --- | --- |
@@ -17,3 +17,9 @@ Run `cargo bench` to measure every row and print this table with Latest filled i
 | Sort numeric column | < 10 s (< 3 s at 2M rows) | 0.82 s for 19.1M rows, 128 ms at 2M; 8 cores: 1.02 s and 149 ms. Saving the sorted file: 3.7 s (SORT-1) | |
 | Two-column filter | < 3 s | 0.34 s: city = Portland, then revenue > 50,000 (1,362,719 rows); 8 cores: 0.55 s | |
 | Save with 1,000 edits | < 15 s | 0.92 s incl. fsync and verify; 8 cores: 0.93 s. In the app with the UI scrolling at 60 fps: 0.77 s, main loop p99 1.1 ms late (`save_responsive`, ENG-8) | |
+| Open 1,048,576-row XLSX, all sheets ready | < 10 s | 8 cores: 3.69 s from spawn to the imported workbook drawn (median of 3, warm cache), `corpus/rows_1m.xlsx` (1,048,576 rows, 1 sheet); 196 MiB peak RSS | |
+| Save 1,048,576-row workbook as XLSX | < 30 s | 8 cores: 8.19 s incl. fsync (45 MiB file); 7.17 s in an earlier run | |
+| Scroll frame time p99, 60 visible formulas | < 16 ms | 8 cores: 2.1 ms frame CPU p99; 59.5 fps, 1 of 600 frames late; 1887×884 px grid on `corpus/formulas.csv` (1M rows, 4 formula columns incl. a running total) | |
+| Recalculate SUM over a 1 GB column | < 5 s | 8 cores: 3.77 s, `=SUM(rows!D:D)` over 19.1M rows (median of 3) | |
+| Running total, 1,000,000 rows | < 5 s | 8 cores: 3.75 s, `formulas.csv` E1000001 on a fresh calculation: every `=E{n-1}+D{n}` and `=B*C` above it (median of 3). 10.98 s before the span cache (BENCH-2) | |
+| 10,000 exact VLOOKUPs into 1,000,000 rows | < 2 s | 8 cores: 0.24 s incl. building the lookup index (median of 3) | |

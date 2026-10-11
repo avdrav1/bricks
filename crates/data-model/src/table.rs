@@ -11,7 +11,7 @@ use crate::{
 };
 use csv_engine::{
     detect_dialect, detect_header, open_text, open_text_as, split_fields, Dialect, Encoding, Field,
-    RowIndex, Source, SparseRowIndex, DETECT_SAMPLE_BYTES,
+    RowIndex, Source, SparseRowIndex, DETECT_SAMPLE_BYTES, STRIDE,
 };
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -842,6 +842,44 @@ impl CsvTable {
         })
     }
 
+    /// [`Self::cell_of`] for a caller reading many single cells near one another, as a
+    /// formula chain does (BENCH-2): each file row's span comes from `spans`, which keeps
+    /// whole [`STRIDE`]-row blocks, instead of a rescan from the block's checkpoint.
+    pub(crate) fn cell_cached(
+        &self,
+        row: RowId,
+        col: ColId,
+        spans: &mut SpanCache,
+    ) -> Option<Cow<'_, str>> {
+        if row.is_inserted()
+            || col.is_inserted()
+            || self.overlay.get(CellRef { row, col }).is_some()
+        {
+            return self.cell_of(row, col);
+        }
+        let Some(span) = spans.span(&self.index, row.0) else {
+            // A block the index hasn't finished: no caching.
+            return self.cell_of(row, col);
+        };
+        let source = self.index.source();
+        let mut line = &source.bytes()[span.start as usize..span.end as usize];
+        if span.start == 0 {
+            line = line.strip_prefix(UTF8_BOM).unwrap_or(line);
+        }
+        split_fields(line, &self.dialect, &mut spans.fields);
+        if source.changed() {
+            return None;
+        }
+        let field = spans.fields.get(col.0 as usize)?;
+        if self.cleared.at(row.0).is_some_and(|c| c.contains(col)) {
+            return Some(Cow::Borrowed(""));
+        }
+        Some(match field.value(line, self.dialect.quote) {
+            Cow::Borrowed(b) => String::from_utf8_lossy(b),
+            Cow::Owned(v) => Cow::Owned(String::from_utf8_lossy(&v).into_owned()),
+        })
+    }
+
     /// The text a cell shows: a formula's result when the table has [`Computed`] results
     /// (a job's snapshot), else its raw text.
     pub(crate) fn shown_of(&self, row: RowId, col: ColId) -> Option<Cow<'_, str>> {
@@ -1079,6 +1117,39 @@ impl CsvTable {
             Some(Cow::Borrowed(b)) => String::from_utf8_lossy(b),
             Some(Cow::Owned(v)) => Cow::Owned(String::from_utf8_lossy(&v).into_owned()),
         }
+    }
+}
+
+/// Blocks of file row spans kept by [`SpanCache`]: direct-mapped, 256 KiB at most.
+const SPAN_SLOTS: usize = 256;
+
+/// Recently read file row spans, a whole [`STRIDE`]-row block at a time, for
+/// [`CsvTable::cell_cached`]. Valid for one table's file.
+#[derive(Default)]
+pub(crate) struct SpanCache {
+    slots: Vec<Option<(u64, Vec<Range<u64>>)>>,
+    fields: Vec<Field>,
+}
+
+impl SpanCache {
+    /// File row `row`'s span; `None` if its block isn't fully indexed or the file changed.
+    fn span(&mut self, index: &SparseRowIndex, row: u64) -> Option<Range<u64>> {
+        if self.slots.is_empty() {
+            self.slots.resize_with(SPAN_SLOTS, || None);
+        }
+        let block = row / STRIDE;
+        let slot = &mut self.slots[block as usize % SPAN_SLOTS];
+        if !matches!(slot, Some((b, _)) if *b == block) {
+            let mut spans = slot.take().map(|(_, s)| s).unwrap_or_default();
+            let start = block * STRIDE;
+            index.row_spans(start..start + STRIDE, &mut spans).ok()?;
+            if spans.len() as u64 != STRIDE {
+                return None;
+            }
+            *slot = Some((block, spans));
+        }
+        let (_, spans) = slot.as_ref()?;
+        Some(spans[(row % STRIDE) as usize].clone())
     }
 }
 

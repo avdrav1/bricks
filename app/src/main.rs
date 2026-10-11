@@ -1327,7 +1327,9 @@ fn bench_open(app: &gtk::Application, grid: &GridView) {
         let grid = grid.downgrade();
         move |_| {
             let Some(grid) = grid.upgrade() else { return };
-            let empty = grid.is_complete() && grid.row_count() == 0;
+            // An .xlsx shows an empty workbook until its import is done (XLSX-1).
+            let ready = grid.is_complete() && !grid.is_loading();
+            let empty = ready && grid.row_count() == 0;
             if !first.get() && (grid.painted_top_row().is_some() || empty) {
                 first.set(true);
                 // How far indexing had got when rows first showed (APP-3).
@@ -1337,10 +1339,11 @@ fn bench_open(app: &gtk::Application, grid: &GridView) {
                     grid.is_complete()
                 );
             }
-            if first.get() && grid.is_complete() {
+            if first.get() && ready {
                 println!(
-                    r#"OPENED {{"rows":{},"rss_anon_kib":{},"rss_file_kib":{},"vm_hwm_kib":{}}}"#,
+                    r#"OPENED {{"rows":{},"sheets":{},"rss_anon_kib":{},"rss_file_kib":{},"vm_hwm_kib":{}}}"#,
                     grid.row_count(),
+                    grid.sheet_count(),
                     proc_status_kib("RssAnon:"),
                     proc_status_kib("RssFile:"),
                     proc_status_kib("VmHWM:"),

@@ -2,6 +2,7 @@
 //! work stack for deep chains and a cell-visit budget for the UI thread.
 
 use crate::formulas::is_formula;
+use crate::table::SpanCache;
 use crate::workbook::same_name;
 use crate::{CellRef, Computed, RowBlock, RowPositions, SheetId, TableSource, Workbook};
 use formula::{
@@ -40,6 +41,9 @@ pub(crate) struct Calc {
     values: HashMap<Key, Value>,
     parsed: HashMap<Key, Option<Arc<Expr>>>,
     indexes: HashMap<AreaKey, Arc<ExactIndex>>,
+    /// Each sheet's recently read row spans: a chain of single-cell references reads
+    /// rows near one another (BENCH-2).
+    spans: HashMap<SheetId, SpanCache>,
 }
 
 impl Calc {
@@ -48,6 +52,7 @@ impl Calc {
             self.values.clear();
             self.parsed.clear();
             self.indexes.clear();
+            self.spans.clear();
             self.revision = revision;
         }
     }
@@ -337,7 +342,8 @@ impl Eval<'_> {
         let Some(s) = self.book.sheet(sheet) else {
             return Ok(Value::Error(ErrorKind::Ref));
         };
-        let Some(raw) = s.table.cell_of(at.row, at.col) else {
+        let spans = self.calc.spans.entry(sheet).or_default();
+        let Some(raw) = s.table.cell_cached(at.row, at.col, spans) else {
             return Ok(Value::Empty);
         };
         if !is_formula(&raw) {
