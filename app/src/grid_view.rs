@@ -7,8 +7,8 @@ use commands::{Batch, ClearCells, Command, OnSheet, Reshape, SetCell, SheetEdit,
 use csv_engine::RowIndex as _;
 use data_model::{
     is_formula, parse_tsv, BookEdit, BookState, Budget, CellRef, CellValues, ColId, ColumnTypes,
-    Compare, Copied, CsvTable, DelimiterChoice, Edit, Filter, FilterError, FormulaCells, Hit,
-    InferredType, JournalError, Matches, Origin, PasteError, Query, ReplaceError, RereadError,
+    Compare, Computed, Copied, CsvTable, DelimiterChoice, Edit, Filter, FilterError, FormulaCells,
+    Hit, InferredType, JournalError, Matches, Origin, PasteError, Query, ReplaceError, RereadError,
     RowId, RowSet, SaveJob, SaveJobError, SearchError, SearchProgress, SheetId, ShownSheet,
     SortError, SortOrder, Step, TableSource, Test, Workbook, PASTE_MAX_CELLS, UI_BUDGET,
 };
@@ -81,6 +81,13 @@ pub struct ScanJob {
     rows: u64,
 }
 
+/// A sheet's formula results, for the workbook revision they were computed at (FML-11).
+pub type KnownResults = (u64, SheetId, Arc<Computed>);
+
+/// How a job gets the active table as it shows (FML-11): a snapshot, with the sheet's
+/// formula results computed in the job when they aren't known yet. `None` once cancelled.
+type JobTable = Box<dyn FnOnce(&jobs::CancelToken) -> Option<CsvTable> + Send>;
+
 /// Formula rewrites a sheet or structure change needs (SHEET-2, FML-10), computed on the
 /// job pool from a workbook snapshot.
 pub struct RewriteJob {
@@ -124,12 +131,22 @@ pub enum Found {
     NotReady,
     /// Cancelled or replaced by a newer search: nothing changed.
     Cancelled,
+    /// Replace was asked on a formula cell, which it never changes (FML-11): the cursor
+    /// went on to the next match, the `ordinal`th of `total`.
+    Skipped {
+        ordinal: u64,
+        total: u64,
+    },
 }
 
 /// A replace all on the job pool (SRCH-3): the matching cells and the edit, and the
 /// progress of counting them.
+/// What a replace all found: matching cells, and the edit (if any) with the formula cells
+/// it skipped (FML-11).
+type ReplaceResult = Result<(u64, (Option<Edit>, u64)), ReplaceError>;
+
 pub struct ReplaceJob {
-    job: jobs::Job<Result<(u64, Option<Edit>), ReplaceError>>,
+    job: jobs::Job<ReplaceResult>,
     progress: Arc<SearchProgress>,
     rows: u64,
 }
@@ -137,8 +154,12 @@ pub struct ReplaceJob {
 /// How a replace all went (SRCH-3), for the find bar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Replaced {
-    /// This many cells changed, as one undo step.
-    Cells(u64),
+    /// This many cells changed, as one undo step; matching formula cells are never
+    /// replaced (FML-11), and this many were skipped.
+    Cells {
+        replaced: u64,
+        skipped: u64,
+    },
     Nothing,
     /// Refused: this many cells is over [`data_model::REPLACE_MAX_CELLS`].
     TooMany(u64),
@@ -243,6 +264,9 @@ mod imp {
         pub loading: Cell<bool>,
         /// Each sheet's cursor, scroll, and sizes while another sheet shows (XLSX-1).
         pub sheet_ui: RefCell<HashMap<SheetId, SheetUi>>,
+        /// The active sheet's formula results as the last job computed them (FML-11), by
+        /// workbook revision and sheet: jobs that read shown text reuse them.
+        pub results: Arc<std::sync::Mutex<Option<KnownResults>>>,
         /// Formulas being rewritten for a change that waits for them (SHEET-2, FML-10).
         /// Edits wait for it, as for a sort.
         pub rewriting: RefCell<Option<RewriteJob>>,
@@ -1746,7 +1770,7 @@ impl GridView {
         }
         let sel = imp.selection.get();
         let (tl, br) = sel.range();
-        let (mut snapshot, rows) = {
+        let rows = {
             let table = self.table();
             let rows = match sel.whole_columns() {
                 Some(_) if !table.is_complete() => return,
@@ -1756,14 +1780,17 @@ impl GridView {
             if rows.is_empty() {
                 return;
             }
-            (table.snapshot(), rows)
+            rows
         };
+        let get = self.job_table();
         let done = Arc::new(AtomicU64::new(0));
         let whole_rows = sel.is_whole_rows();
         let count = rows.end - rows.start;
         let job = jobs::spawn({
             let done = done.clone();
             move |cancel| {
+                // Formula cells copy as their results (FML-11).
+                let mut snapshot = get(cancel)?;
                 if whole_rows {
                     snapshot.copy_range(rows, tl.col.., cancel.flag(), &done)
                 } else {
@@ -1975,22 +2002,26 @@ impl GridView {
             return;
         }
         let col = imp.selection.get().cursor().col;
-        let (snapshot, rows) = {
+        let rows = {
             let t = self.table();
             if !t.is_complete() {
                 return;
             }
-            (t.snapshot(), t.index().row_count())
+            t.index().row_count()
         };
+        let get = self.job_table();
         let done = Arc::new(AtomicU64::new(0));
         let started = Instant::now();
         let job = jobs::spawn({
             let done = done.clone();
             move |cancel| -> Result<Sorted, SortError> {
+                // A formula column sorts by its results (FML-11).
+                let mut snapshot = get(cancel).ok_or(SortError::Cancelled)?;
                 let edit = snapshot.sort_rows(col, order, cancel.flag(), &done)?;
                 // A moved formula's relative references follow it, as in Excel (FML-10).
                 let rewrites = match &edit {
                     Some(Edit::Reorder(new)) if snapshot.has_formulas() => {
+                        snapshot.set_computed(None);
                         snapshot.sort_rewrites(new)
                     }
                     _ => Vec::new(),
@@ -2153,7 +2184,7 @@ impl GridView {
             let at_hit = hit.filter(|h| (h.row, h.col) == (cur.row, cur.col));
             (m, at_hit)
         });
-        let mut snapshot = self.table().snapshot();
+        let get = self.job_table();
         self.cancel_search();
         let progress = Arc::new(SearchProgress::default());
         let counting = known.is_none();
@@ -2161,6 +2192,8 @@ impl GridView {
         let job = jobs::spawn({
             let progress = progress.clone();
             move |cancel| {
+                // Find looks at what cells show: formula results (FML-11).
+                let mut snapshot = get(cancel).ok_or(SearchError::Cancelled)?;
                 let (matches, hint) = match known {
                     Some(k) => k,
                     None => (
@@ -2281,9 +2314,18 @@ impl GridView {
         let Some((matches, _)) = on_match else {
             return self.find(text, match_case, column_only, Step::Here, done);
         };
+        let value = self.cell_text(cur);
+        if is_formula(&value) {
+            // Replace never edits a formula (FML-11): on to the next match, saying so.
+            return self.find(text, match_case, column_only, Step::Next, move |found| {
+                done(match found {
+                    Found::Hit { ordinal, total } => Found::Skipped { ordinal, total },
+                    other => other,
+                })
+            });
+        }
         let cmd = {
             let table = self.table();
-            let value = table.cell_value(cur.row, cur.col).unwrap_or_default();
             matches.replace_in(&value, with).map(|new| {
                 let at = CellRef {
                     row: table.row_id(cur.row),
@@ -2319,13 +2361,15 @@ impl GridView {
         };
         let known = self.known_matches(&query).map(|(m, _)| m);
         self.cancel_search();
-        let mut snapshot = self.table().snapshot();
+        let get = self.job_table();
         let progress = Arc::new(SearchProgress::default());
         let with = with.to_owned();
         let started = Instant::now();
         let job = jobs::spawn({
             let progress = progress.clone();
             move |cancel| {
+                // Matches are counted on results; formula cells are skipped (FML-11).
+                let mut snapshot = get(cancel).ok_or(ReplaceError::Cancelled)?;
                 let matches = match known {
                     Some(m) => m,
                     None => Arc::new(
@@ -2353,13 +2397,24 @@ impl GridView {
                 return done(Replaced::Cancelled); // a new table
             }
             imp.replacing.take();
-            let (cells, edit) = match result {
+            let (cells, (edit, skipped)) = match result {
                 Ok(Ok(r)) => r,
                 Ok(Err(ReplaceError::TooMany(n))) => return done(Replaced::TooMany(n)),
                 _ => return done(Replaced::Cancelled),
             };
             let Some(edit) = edit else {
-                return done(Replaced::Nothing);
+                return done(if skipped > 0 {
+                    Replaced::Cells {
+                        replaced: 0,
+                        skipped,
+                    }
+                } else {
+                    Replaced::Nothing
+                });
+            };
+            let replaced = match &edit {
+                Edit::Cells(list) => list.len() as u64,
+                _ => 1,
             };
             let built = started.elapsed();
             {
@@ -2374,7 +2429,7 @@ impl GridView {
                 );
             }
             g.after_change(None);
-            done(Replaced::Cells(cells));
+            done(Replaced::Cells { replaced, skipped });
         });
     }
 
@@ -2557,7 +2612,7 @@ impl GridView {
         if filters.is_empty() || self.busy() || imp.editing.get().is_some() {
             return;
         }
-        let (snapshot, filters, rows) = {
+        let (filters, rows) = {
             let t = self.table();
             if !t.is_complete() {
                 return;
@@ -2570,13 +2625,16 @@ impl GridView {
                 })
                 .collect();
             let rows = t.index().row_count() * filters.len() as u64;
-            (t.snapshot(), filters, rows)
+            (filters, rows)
         };
+        let get = self.job_table();
         let done = Arc::new(AtomicU64::new(0));
         let started = Instant::now();
         let job = jobs::spawn({
             let (done, filters) = (done.clone(), filters.clone());
             move |cancel| {
+                // A formula column filters on its results (FML-11).
+                let snapshot = get(cancel).ok_or(FilterError::Cancelled)?;
                 filters
                     .iter()
                     .map(|f| snapshot.filter_rows(f, cancel.flag(), &done))
@@ -2737,17 +2795,19 @@ impl GridView {
     /// new table makes a running one moot.
     pub fn infer_types(&self) {
         let imp = self.imp();
-        let (mut snapshot, sheet) = {
+        let sheet = {
             let book = imp.book.borrow();
             let t = book.active();
             // A sheet shown before keeps its types (XLSX-1).
             if !t.is_complete() || t.has_types() {
                 return;
             }
-            (t.snapshot(), book.active_id())
+            book.active_id()
         };
+        let get = self.job_table();
         let started = Instant::now();
-        let job = jobs::spawn(move |cancel| snapshot.infer_types(cancel.flag()));
+        // A formula column's type is its results' (FML-11).
+        let job = jobs::spawn(move |cancel| get(cancel)?.infer_types(cancel.flag()));
         if let Some(old) = imp.inferring.replace(Some(job.clone())) {
             old.cancel();
         }
@@ -2951,6 +3011,39 @@ impl GridView {
     /// The whole workbook as it is now, for a job.
     pub fn workbook_snapshot(&self) -> Workbook {
         self.imp().book.borrow().snapshot()
+    }
+
+    /// The active table for a job that reads what cells show: sort, filter, find, replace,
+    /// type inference, copy (FML-11). Formula cells read as their results: known ones are
+    /// reused; otherwise the job computes them first, on a workbook snapshot.
+    fn job_table(&self) -> JobTable {
+        let imp = self.imp();
+        let book = imp.book.borrow();
+        let mut table = book.active().snapshot();
+        if !table.has_formulas() {
+            return Box::new(move |_| Some(table));
+        }
+        let (revision, sheet) = (book.revision(), book.active_id());
+        let known = imp
+            .results
+            .lock()
+            .expect("no job panics holding it")
+            .as_ref()
+            .filter(|(r, s, _)| (*r, *s) == (revision, sheet))
+            .map(|(_, _, c)| c.clone());
+        if let Some(c) = known {
+            table.set_computed(Some(c));
+            return Box::new(move |_| Some(table));
+        }
+        let (mut snapshot, cache) = (book.snapshot(), imp.results.clone());
+        Box::new(move |cancel| {
+            let done = AtomicU64::new(0);
+            let computed = Arc::new(snapshot.computed_for(sheet, cancel.shared(), &done)?);
+            *cache.lock().expect("no job panics holding it") =
+                Some((revision, sheet, computed.clone()));
+            table.set_computed(Some(computed));
+            Some(table)
+        })
     }
 
     /// The active sheet's name.

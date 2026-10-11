@@ -192,12 +192,27 @@ pub fn title(name: &str, edits: usize) -> String {
 /// The find bar's note (SRCH-2, SRCH-3): the count streaming in while matches are
 /// counted, then which match the cursor is on, or how a replace all went.
 pub enum FindNote {
-    Counting { found: u64 },
-    Hit { ordinal: u64, total: u64 },
+    Counting {
+        found: u64,
+    },
+    Hit {
+        ordinal: u64,
+        total: u64,
+    },
     Nothing,
     NotReady,
-    Replaced { cells: u64 },
-    TooMany { cells: u64 },
+    Replaced {
+        cells: u64,
+        skipped: u64,
+    },
+    /// Replace was asked on a formula cell and went on to the next match (FML-11).
+    Skipped {
+        ordinal: u64,
+        total: u64,
+    },
+    TooMany {
+        cells: u64,
+    },
 }
 
 pub fn find_note(n: FindNote) -> String {
@@ -215,7 +230,22 @@ pub fn find_note(n: FindNote) -> String {
         }
         FindNote::Nothing => "No matches".into(),
         FindNote::NotReady => "Wait for indexing to finish".into(),
-        FindNote::Replaced { cells: n } => format!("Replaced {}", cells(n)),
+        FindNote::Replaced { cells: n, skipped } => {
+            let mut note = format!("Replaced {}", cells(n));
+            if skipped > 0 {
+                note.push_str(&format!(
+                    " · skipped {} formula {}",
+                    group_digits(skipped),
+                    if skipped == 1 { "cell" } else { "cells" }
+                ));
+            }
+            note
+        }
+        FindNote::Skipped { ordinal, total } => format!(
+            "Formula cells aren't replaced · {} of {}",
+            group_digits(ordinal),
+            group_digits(total)
+        ),
         FindNote::TooMany { cells: n } => format!(
             "Too many: {} (max {})",
             group_digits(n),

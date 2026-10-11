@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# FML-4 acceptance: formulas in a CSV show their results; typed
+# FML-4 acceptance (and FML-11's find): formulas in a CSV show their results; typed
 # formulas evaluate, undo removes them, and one that doesn't parse is refused with where
 # it fails; the file keeps its formulas' text.
 #
@@ -12,7 +12,8 @@
 #   2. typing =A2*3 in C2 shows `C2: 6`;
 #   3. Ctrl+Z empties C2 again: `C2: `;
 #   4. typing =A2+ is refused: an alert says "Formula error at character 5";
-#   5. after Escape and Ctrl+S the file still holds `=A2*2`.
+#   5. after Escape and Ctrl+S the file still holds `=A2*2`;
+#   6. (FML-11) Ctrl+F 4 finds B2, whose result is 4 (its text is =A2*2).
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -57,6 +58,11 @@ session() {
   keys -k Escape; keys -k Escape; keys -M ctrl s -m ctrl; sleep 3; shot 5-saved
   echo "file: $(tr "\n" "|" < /tmp/t.csv)"
 
+  echo "== 6 find"
+  keys -k Left; keys -k Left; shown before
+  keys -M ctrl f -m ctrl; keys 4; keys -k Return; sleep 2; keys -k Escape; sleep 1
+  shot 6-find; shown
+
   pkill -x bricks
   swaymsg exit >/dev/null 2>&1 || true
 }
@@ -74,6 +80,7 @@ check "2: a typed formula shows its result" "2 typed" "^shown: C2: 6$"
 check "3: Ctrl+Z removes it" "3 undo" "^shown: C2: $"
 check "4: a formula with an error is refused, saying where" "4 refused" "Formula error at character 5"
 check "5: the file keeps the formula's text" "5 saved" "^file: a,b\|2,=A2\*2\|$"
+check "6: find finds a formula's result" "6 find" "^shown: B2: 4$"
 if [ $fail = 0 ]; then echo "FORMULAS OK"; else
   echo "FORMULAS CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

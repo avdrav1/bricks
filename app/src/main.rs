@@ -1273,7 +1273,9 @@ fn bench_find(app: &gtk::Application, grid: &GridView, find: &FindBar, text: Rc<
             FindEvent::Done(done, found) => {
                 use grid_view::Found;
                 let result = match found {
-                    Found::Hit { ordinal, total } => format!("hit:{ordinal}/{total}"),
+                    Found::Hit { ordinal, total } | Found::Skipped { ordinal, total } => {
+                        format!("hit:{ordinal}/{total}")
+                    }
                     Found::Nothing => "nothing".into(),
                     Found::Cancelled => "cancelled".into(),
                     Found::NotReady => "notready".into(),
@@ -2327,6 +2329,7 @@ impl FindBar {
         use grid_view::Found;
         let note = match found {
             Found::Hit { ordinal, total } => FindNote::Hit { ordinal, total },
+            Found::Skipped { ordinal, total } => FindNote::Skipped { ordinal, total },
             Found::Nothing => FindNote::Nothing,
             Found::NotReady => FindNote::NotReady,
             Found::Cancelled => return,
@@ -2371,7 +2374,10 @@ impl FindBar {
             move |done| {
                 use grid_view::Replaced;
                 let note = match done {
-                    Replaced::Cells(cells) => FindNote::Replaced { cells },
+                    Replaced::Cells { replaced, skipped } => FindNote::Replaced {
+                        cells: replaced,
+                        skipped,
+                    },
                     Replaced::TooMany(cells) => FindNote::TooMany { cells },
                     Replaced::Nothing => FindNote::Nothing,
                     Replaced::NotReady => FindNote::NotReady,
