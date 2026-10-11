@@ -1,14 +1,71 @@
-//! Slate: a fast, lightweight Linux-native word processor.
+//! Slate: a fast, lightweight Linux-native word processor. SL0 is a read-only viewer
+//! (docs/specs/slate.md, docs/adr/0003-slate-document-model.md).
 //!
-//! A scaffold: it identifies itself and exits. Its UI will be GTK 4 (docs/adr/0002-gtk4-for-the-suite.md).
+//! `slate FILE…` opens each file in its own window; without a file a start window offers
+//! Open. Ctrl+O picks a file through the desktop's file dialog, and files dropped on any
+//! window open too. A file is read off the UI thread while its window says "Opening…"; one
+//! that can't be read gets an alert naming it and the reason, and its window closes.
 
+mod open;
+mod view;
+
+use gtk::prelude::*;
+use gtk::{gdk, gio, glib};
+use std::cell::RefCell;
 use std::io::IsTerminal;
-use std::process::ExitCode;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use suite_core::AppKind;
 
 const APP: AppKind = AppKind::Slate;
+const APP_ID: &str = "dev.cronkite.Slate";
+const USAGE: &str = "usage: slate [FILE.txt|FILE.md|FILE.docx]... [--version]";
+const START_WINDOW: &str = "start";
 
-fn main() -> ExitCode {
+/// The page is paper: dark text on white whatever the theme, as the document was written.
+const CSS: &str = "
+textview.slate-page, textview.slate-page > text,
+textview.slate-cell, textview.slate-cell > text {
+  background-color: #ffffff;
+  color: #1e1e1e;
+}
+textview.slate-page, textview.slate-cell { font-size: 11pt; }
+textview.slate-cell { border: 1px solid #c0bfbc; }
+grid.slate-table { margin: 6px 0; }
+separator.page-break {
+  min-height: 0;
+  background: none;
+  border-top: 2px dashed #9a9996;
+  margin: 18px 0;
+}
+separator.rule { min-height: 1px; background-color: #c0bfbc; margin: 12px 0; }
+";
+
+thread_local! {
+    /// The windows showing a file, by the file's canonical path.
+    static OPEN: RefCell<Vec<(PathBuf, glib::WeakRef<gtk::ApplicationWindow>)>> =
+        const { RefCell::new(Vec::new()) };
+}
+
+fn main() -> glib::ExitCode {
+    let mut files = Vec::new();
+    for arg in std::env::args_os().skip(1) {
+        match arg.to_str() {
+            Some("--version") => {
+                println!("slate {}", env!("CARGO_PKG_VERSION"));
+                return glib::ExitCode::SUCCESS;
+            }
+            Some("--help" | "-h") => {
+                println!("{USAGE}");
+                return glib::ExitCode::SUCCESS;
+            }
+            Some(a) if a.starts_with('-') => {
+                eprintln!("slate: unknown option {a}\n{USAGE}");
+                return glib::ExitCode::from(2);
+            }
+            _ => files.push(PathBuf::from(arg)),
+        }
+    }
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_ansi(std::io::stderr().is_terminal())
@@ -16,8 +73,332 @@ fn main() -> ExitCode {
     tracing::info!("application starting");
     if let Err(e) = suite_platform::current() {
         eprintln!("slate: {e}");
-        return ExitCode::FAILURE;
+        return glib::ExitCode::FAILURE;
     }
-    println!("{}", suite_ui::startup_message(APP));
-    ExitCode::SUCCESS
+    eprintln!("{}", suite_ui::startup_message(APP));
+
+    let app = gtk::Application::builder()
+        .application_id(APP_ID)
+        .flags(gio::ApplicationFlags::NON_UNIQUE)
+        .build();
+    app.connect_startup(|app| {
+        let css = gtk::CssProvider::new();
+        css.load_from_string(CSS);
+        if let Some(display) = gdk::Display::default() {
+            gtk::style_context_add_provider_for_display(
+                &display,
+                &css,
+                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
+        }
+        let open = gio::ActionEntry::builder("open")
+            .activate(|app: &gtk::Application, _, _| choose_and_open(app))
+            .build();
+        let close = gio::ActionEntry::builder("close")
+            .activate(|app: &gtk::Application, _, _| {
+                if let Some(w) = app.active_window() {
+                    w.close();
+                }
+            })
+            .build();
+        let quit = gio::ActionEntry::builder("quit")
+            .activate(|app: &gtk::Application, _, _| app.quit())
+            .build();
+        app.add_action_entries([open, close, quit]);
+        app.set_accels_for_action("app.open", &["<Control>o"]);
+        app.set_accels_for_action("app.close", &["<Control>w"]);
+        app.set_accels_for_action("app.quit", &["<Control>q"]);
+    });
+    let files = RefCell::new(Some(files));
+    app.connect_activate(move |app| match files.take() {
+        Some(files) if !files.is_empty() => {
+            for f in files {
+                open_window(app, &f);
+            }
+        }
+        _ if app.windows().is_empty() => start_window(app),
+        _ => {}
+    });
+    app.run_with_args::<&str>(&[])
+}
+
+fn canonical(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned())
+}
+
+/// The window already showing `path`, if any.
+fn window_for(path: &Path) -> Option<gtk::ApplicationWindow> {
+    OPEN.with_borrow_mut(|open| {
+        open.retain(|(_, w)| w.upgrade().is_some());
+        open.iter()
+            .find(|(p, _)| p == path)
+            .and_then(|(_, w)| w.upgrade())
+    })
+}
+
+fn header(title: &str) -> gtk::HeaderBar {
+    let header = gtk::HeaderBar::new();
+    let open = gtk::Button::from_icon_name("document-open-symbolic");
+    open.set_tooltip_text(Some("Open… (Ctrl+O)"));
+    open.set_action_name(Some("app.open"));
+    open.update_property(&[gtk::accessible::Property::Label("Open")]);
+    header.pack_start(&open);
+    let menu = gio::Menu::new();
+    menu.append(Some("Open…"), Some("app.open"));
+    menu.append(Some("Close Window"), Some("app.close"));
+    menu.append(Some("Quit"), Some("app.quit"));
+    let button = gtk::MenuButton::builder()
+        .icon_name("open-menu-symbolic")
+        .menu_model(&menu)
+        .tooltip_text("Menu")
+        .build();
+    header.pack_end(&button);
+    let label = gtk::Label::new(Some(title));
+    label.add_css_class("title");
+    header.set_title_widget(Some(&label));
+    header
+}
+
+/// The window shown without a file: what Slate opens, and Open.
+fn start_window(app: &gtk::Application) {
+    let window = gtk::ApplicationWindow::builder()
+        .application(app)
+        .title("Slate")
+        .default_width(720)
+        .default_height(520)
+        .name(START_WINDOW)
+        .build();
+    window.set_titlebar(Some(&header("Slate")));
+    let heading = gtk::Label::new(Some("Open a document"));
+    heading.add_css_class("title-2");
+    let hint = gtk::Label::new(Some(
+        "Slate shows .txt, .md, and .docx files. Drop one here or choose Open.",
+    ));
+    hint.add_css_class("dim-label");
+    let open = gtk::Button::with_label("Open…");
+    open.set_action_name(Some("app.open"));
+    open.set_halign(gtk::Align::Center);
+    open.add_css_class("suggested-action");
+    let content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(12)
+        .valign(gtk::Align::Center)
+        .halign(gtk::Align::Center)
+        .build();
+    content.append(&heading);
+    content.append(&hint);
+    content.append(&open);
+    window.set_child(Some(&content));
+    accept_drops(app, &window);
+    window.present();
+}
+
+fn close_start_window(app: &gtk::Application) {
+    for w in app.windows() {
+        if w.widget_name() == START_WINDOW {
+            w.close();
+        }
+    }
+}
+
+/// File → Open: the desktop's file dialog (through the portal when one runs), filtered to
+/// the documents Slate reads.
+fn choose_and_open(app: &gtk::Application) {
+    let documents = gtk::FileFilter::new();
+    documents.set_name(Some("Documents (.txt, .md, .docx)"));
+    for mime in [
+        "text/plain",
+        "text/markdown",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ] {
+        documents.add_mime_type(mime);
+    }
+    for suffix in ["txt", "text", "md", "markdown", "docx"] {
+        documents.add_suffix(suffix);
+    }
+    let all = gtk::FileFilter::new();
+    all.set_name(Some("All files"));
+    all.add_pattern("*");
+    let filters = gio::ListStore::new::<gtk::FileFilter>();
+    filters.append(&documents);
+    filters.append(&all);
+    let dialog = gtk::FileDialog::builder()
+        .title("Open")
+        .modal(true)
+        .filters(&filters)
+        .default_filter(&documents)
+        .build();
+    let (app, parent) = (app.clone(), app.active_window());
+    glib::spawn_future_local(async move {
+        match dialog.open_future(parent.as_ref()).await {
+            Ok(file) => open_file(&app, &file, parent.as_ref()),
+            Err(e) if e.matches(gtk::DialogError::Dismissed) => {}
+            Err(e) => alert(
+                parent.as_ref(),
+                "Cannot show the file dialog",
+                &e.to_string(),
+            ),
+        }
+    });
+}
+
+fn open_file(app: &gtk::Application, file: &gio::File, parent: Option<&gtk::Window>) {
+    match file.path() {
+        Some(path) => open_window(app, &path),
+        None => alert(
+            parent,
+            &format!("Cannot open {}", file.uri()),
+            "Only local files can be opened.",
+        ),
+    }
+}
+
+/// Files dropped on `window` open as Open does, each in its own window. They open once the
+/// drop is done: opening one may close the start window, which may be the drop's target.
+fn accept_drops(app: &gtk::Application, window: &gtk::ApplicationWindow) {
+    let target = gtk::DropTarget::new(gdk::FileList::static_type(), gdk::DragAction::COPY);
+    target.connect_drop({
+        let (app, window) = (app.clone(), window.downgrade());
+        move |_, value, _, _| {
+            let Ok(files) = value.get::<gdk::FileList>() else {
+                return false;
+            };
+            let files = files.files();
+            if files.is_empty() {
+                return false;
+            }
+            let (app, window) = (app.clone(), window.clone());
+            glib::idle_add_local_once(move || {
+                let parent = window.upgrade().map(|w| w.upcast::<gtk::Window>());
+                for file in files {
+                    open_file(&app, &file, parent.as_ref());
+                }
+            });
+            true
+        }
+    });
+    window.add_controller(target);
+}
+
+fn alert(parent: Option<&gtk::Window>, message: &str, detail: &str) {
+    gtk::AlertDialog::builder()
+        .message(message)
+        .detail(detail)
+        .modal(true)
+        .build()
+        .show(parent);
+}
+
+/// Show `path` in a window: its own if it is open, else a new one that says "Opening…"
+/// while the file is read in the background.
+fn open_window(app: &gtk::Application, path: &Path) {
+    let path = canonical(path);
+    if let Some(window) = window_for(&path) {
+        window.present();
+        return;
+    }
+    let name = suite_file::document_name(&path).into_owned();
+    let window = gtk::ApplicationWindow::builder()
+        .application(app)
+        .title(&name)
+        .default_width(900)
+        .default_height(860)
+        .build();
+    window.set_titlebar(Some(&header(&name)));
+
+    let spinner = gtk::Spinner::builder().spinning(true).build();
+    let opening = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(12)
+        .valign(gtk::Align::Center)
+        .halign(gtk::Align::Center)
+        .build();
+    opening.append(&spinner);
+    opening.append(&gtk::Label::new(Some("Opening…")));
+    let stack = gtk::Stack::builder().vexpand(true).build();
+    stack.add_named(&opening, Some("opening"));
+
+    let status = gtk::Label::builder()
+        .halign(gtk::Align::Start)
+        .margin_start(12)
+        .margin_end(12)
+        .margin_top(4)
+        .margin_bottom(4)
+        .build();
+    status.add_css_class("caption");
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    content.append(&stack);
+    content.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+    content.append(&status);
+    window.set_child(Some(&content));
+    accept_drops(app, &window);
+    OPEN.with_borrow_mut(|open| open.push((path.clone(), window.downgrade())));
+    window.present();
+
+    let reading = gio::spawn_blocking({
+        let path = path.clone();
+        move || open::read(&path)
+    });
+    let app = app.clone();
+    glib::spawn_future_local(async move {
+        let reason = match reading.await {
+            Ok(Ok(opened)) => {
+                show(&stack, &status, &name, opened);
+                close_start_window(&app);
+                return;
+            }
+            Ok(Err(e)) => e.to_string(),
+            Err(_) => "Reading it failed unexpectedly.".to_owned(),
+        };
+        tracing::warn!("cannot open {}: {reason}", path.display());
+        let dialog = gtk::AlertDialog::builder()
+            .message(format!("Cannot open “{name}”"))
+            .detail(&reason)
+            .buttons(["Close"])
+            .default_button(0)
+            .cancel_button(0)
+            .modal(true)
+            .build();
+        let _ = dialog.choose_future(Some(&window)).await;
+        window.close();
+    });
+}
+
+/// Replace "Opening…" with the document.
+fn show(stack: &gtk::Stack, status: &gtk::Label, name: &str, opened: open::Opened) {
+    let page = Rc::new(view::Page::new(&opened.doc, &opened.textures));
+    page.view
+        .update_property(&[gtk::accessible::Property::Label(name)]);
+    let scrolled = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Automatic)
+        .child(&page.view)
+        .build();
+    let hadj = scrolled.hadjustment();
+    hadj.connect_page_size_notify({
+        let page = page.clone();
+        move |adj| page.fit(adj.page_size() as i32)
+    });
+    stack.add_named(&scrolled, Some("document"));
+    stack.set_visible_child_name("document");
+    let words = opened.words;
+    status.set_text(&format!(
+        "{} · {} word{}",
+        opened.doc.format.name(),
+        group_digits(words),
+        if words == 1 { "" } else { "s" }
+    ));
+    page.view.grab_focus();
+}
+
+/// `1234567` as `1,234,567`.
+fn group_digits(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
 }
