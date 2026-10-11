@@ -1,0 +1,262 @@
+group	formula	inputs	kind	result	excel	why
+ops	1+2		value	3.0		
+ops	5-7		value	-2.0		
+ops	2*3		value	6.0		
+ops	7/2		value	3.5		
+ops	2^10		value	1024.0		
+ops	1/0		error	#DIV/0!		
+ops	0/0		error	#DIV/0!		
+ops	1E+308*10		error	#NUM!		
+ops	-5		value	-5.0		
+ops	--5		value	5.0		
+ops	+5		value	5.0		
+ops	0^0		value	1.0		
+ops	0^-1		error	#NUM!		
+ops	(-8)^(1/3)		value	-2.0		
+ops	(-4)^0.5		error	#NUM!		
+ops	(-8)^(2/3)		error	#NUM!		
+ops	2^0.5		value	1.4142135623730951		
+ops	10/4*2		value	5.0		
+ops	10-2-3		value	5.0		
+ops	2*3+4		value	10.0		
+ops	2+3*4		value	14.0		
+ops	(2+3)*4		value	20.0		
+ops	-2^2		value	4.0		
+ops	2^-2		value	0.25		
+ops	2^3^2		value	64.0		
+ops	100%		value	1.0		
+ops	5%*20		value	1.0		
+ops	50%%		value	0.005		
+ops	1.5E3+1		value	1501.0		
+ops	.5+.5		value	1.0		
+ops	0.1+0.2		value	0.30000000000000004		
+ops	0.1+0.2-0.3		value	0.0		
+ops	1-0.9-0.1		value	0.0		
+ops	3*0.1		value	0.30000000000000004		
+ops	1/3		value	0.3333333333333333		
+ops	2/3		value	0.6666666666666666		
+ops	10^15		value	1000000000000000.0		
+ops	10^-10		value	1e-10		
+ops	1E+300*1E+10		error	#NUM!		
+ops	-0		value	-0.0		
+ops	1+-1		value	0.0		
+ops	7-(-3)		value	10.0		
+ops	1E+308+1E+308		error	#NUM!		
+ops	2^1024		error	#NUM!		
+ops	10^-400		error	#NUM!		
+ops	(1+2)/(3-3)		error	#DIV/0!		
+ops	4/2/2		value	1.0		
+ops	2*-3		value	-6.0		
+ops	-(-(-1))		value	-1.0		
+ops	1E-300*1E-300		value	0.0		
+ops	"a"&"b"		text	ab		
+ops	1&2		text	12		
+ops	1.5&""		text	1.5		
+ops	"x"&A1		text	x		
+ops	1/3&""		text	0.333333333333333		
+ops	-1/3&""		text	-0.333333333333333		
+ops	0.000001&""		text	0.000001		
+ops	2.50&""		text	2.5		
+ops	100&""		text	100		
+ops	"a"&1/0		error	#DIV/0!		
+ops	10^15&""		text	1000000000000000	text:1E+15	Numbers as text follow Excel's General format; LibreOffice writes 1E+016-style exponents and integers up to 2^53 in full
+ops	1E-10&""		text	0.0000000001	text:1E-10	Numbers as text follow Excel's General format; LibreOffice writes 1E+016-style exponents and integers up to 2^53 in full
+ops	123456789012345678&""		text	1.23456789012346E+017	text:1.23456789012346E+17	Numbers as text follow Excel's General format; LibreOffice writes 1E+016-style exponents and integers up to 2^53 in full
+ops	A1&""	A1=2024-01-01	text	45292		
+ops	A1&A2		text			
+ops	"a"&""&"b"		text	ab		
+ops	1E+20&""		text	1E+020	text:1E+20	Numbers as text follow Excel's General format; LibreOffice writes 1E+016-style exponents and integers up to 2^53 in full
+ops	0.1+0.2&""		text	0.3		
+ops	-5&"x"		text	-5x		
+ops	TRUE()&""		text	1	text:TRUE	Booleans are their own type, as in Excel; LibreOffice treats them as 1 and 0
+ops	5&TRUE()		text	51	text:5TRUE	Booleans are their own type, as in Excel; LibreOffice treats them as 1 and 0
+ops	A1&"!"	A1=FALSE	text	0!	text:FALSE!	Booleans are their own type, as in Excel; LibreOffice treats them as 1 and 0
+ops	1=1		bool	TRUE		
+ops	1<2		bool	TRUE		
+ops	2<1		bool	FALSE		
+ops	1<>1		bool	FALSE		
+ops	1<=1		bool	TRUE		
+ops	1>=2		bool	FALSE		
+ops	"a"="A"		bool	TRUE		
+ops	"a"<"b"		bool	TRUE		
+ops	"B">"a"		bool	TRUE		
+ops	"abc"<"abd"		bool	TRUE		
+ops	"x"<"xy"		bool	TRUE		
+ops	"10"<"9"		bool	TRUE		
+ops	2>"1"		bool	FALSE		
+ops	"1"=1		bool	FALSE		
+ops	1<"a"		bool	TRUE		
+ops	"a"<1		bool	FALSE		
+ops	A1=0		bool	TRUE		
+ops	A1=""		bool	TRUE		
+ops	A1<1		bool	TRUE		
+ops	A1>-1		bool	TRUE		
+ops	A1<"a"		bool	TRUE		
+ops	""=A1		bool	TRUE		
+ops	0.1+0.2=0.3		bool	TRUE		
+ops	1+1E-15=1		bool	TRUE		
+ops	1+1E-14=1		bool	FALSE		
+ops	1+1E-14>1		bool	TRUE		
+ops	"é"="É"		bool	TRUE		
+ops	TRUE()=TRUE()		bool	TRUE		
+ops	FALSE()<TRUE()		bool	TRUE		
+ops	A1=FALSE()		bool	TRUE		
+ops	1/0=1		error	#DIV/0!		
+ops	#N/A=1		error	#N/A		
+ops	1=#N/A		error	#N/A		
+ops	"a"<>"A"		bool	FALSE		
+ops	A1=A2		bool	TRUE		
+ops	-1<A1		bool	TRUE		
+ops	"Zebra">"apple"		bool	TRUE		
+ops	""<"a"		bool	TRUE		
+ops	" a"="a"		bool	FALSE		
+ops	1E-20=0		bool	FALSE		
+ops	TRUE()=1		bool	TRUE	bool:FALSE	Booleans are their own type, as in Excel; LibreOffice treats them as 1 and 0
+ops	TRUE()>"z"		bool	FALSE	bool:TRUE	Booleans are their own type, as in Excel; LibreOffice treats them as 1 and 0
+ops	TRUE()>5		bool	FALSE	bool:TRUE	Booleans are their own type, as in Excel; LibreOffice treats them as 1 and 0
+ops	A1>100	A1=TRUE	bool	FALSE	bool:TRUE	Booleans are their own type, as in Excel; LibreOffice treats them as 1 and 0
+ops	"1"+1		value	2.0		
+ops	" 1 "+1		value	2.0		
+ops	"1e3"+1		value	1001.0		
+ops	"1,000"+1		value	1001.0		
+ops	"1,000.5"+0		value	1000.5		
+ops	"12,34"+0		error	#VALUE!		
+ops	"50%"+0		value	0.5		
+ops	"-5%"+0		value	-0.05		
+ops	"$5"+0		value	5.0		
+ops	"(5)"+0		value	-5.0		
+ops	"+5"+0		value	5.0		
+ops	".5"+0		value	0.5		
+ops	"5."+0		value	5.0		
+ops	"0012"+0		value	12.0		
+ops	"1e"+0		error	#VALUE!		
+ops	"inf"+0		error	#VALUE!		
+ops	""+1		error	#VALUE!		
+ops	"abc"*2		error	#VALUE!		
+ops	"12:30"+0		value	0.5208333333333334		
+ops	"2024-01-01"+0		value	45292.0		
+ops	"2024-01-01 12:00"+0		value	45292.5		
+ops	"2024-01-01T12:00"+0		value	45292.5		
+ops	-"a"		error	#VALUE!		
+ops	+"a"		text	a		
+ops	-"5"		value	-5.0		
+ops	"3"*"4"		value	12.0		
+ops	"1,234,567"+0		value	1234567.0		
+ops	"1,23,456"+0		error	#VALUE!		
+ops	"- 5"+0		value	-5.0		
+ops	"5-"+0		value	-5.0		
+ops	"9:05:30"+0		value	0.37881944444444443		
+ops	"25:00"+0		value	1.0416666666666667		
+ops	"TRUE"+0		value	1.0	error:#VALUE!	Booleans are their own type, as in Excel; LibreOffice treats them as 1 and 0
+ops	TRUE()+1		value	2.0		
+ops	-TRUE()		value	-1.0		
+ops	TRUE()*5		value	5.0		
+ops	FALSE()/1		value	0.0		
+ops	TRUE()+TRUE()		value	2.0		
+ops	FALSE()^0		value	1.0		
+ops	A1	A1=00123	text	00123		
+ops	A1+1	A1=00123	value	124.0		
+ops	A1*1	A1=abc	error	#VALUE!		
+ops	A1+1	A1=TRUE	value	2.0		
+ops	A1+1	A1=2024-01-01	value	45293.0		
+ops	A1-A2	A1=2024-01-10;A2=2024-01-01	value	9.0		
+ops	A1	A1=2024-01-01	value	45292.0		
+ops	A1+1	A1=#N/A	error	#N/A		
+ops	A1&"x"	A1=#DIV/0!	error	#DIV/0!		
+ops	A1*2	A1=1.5	value	3.0		
+ops	A1^2	A1=-0.5	value	0.25		
+ops	A1+0	A1=1e3	value	1000.0		
+ops	A1+1	A1=   	error	#VALUE!		
+ops	A1+0	A1=12:30	value	0.5208333333333334		
+ops	A1	A1=hello	text	hello		
+ops	A1	A1=TRUE	bool	TRUE		
+ops	A1	A1=2024-01-01 06:00	value	45292.25		
+ops	A1+0.5	A1=2024-01-01	value	45292.5		
+ops	A1*2	A1=2024-01-01	value	90584.0		
+ops	A2-A1	A1=2024-01-01;A2=2024-03-01	value	60.0		
+ops	A1+B1	A1=2;B1=3	value	5.0		
+ops	A1*B1-C1	A1=2;B1=3;C1=4	value	2.0		
+ops	A1/B1	A1=1;B1=0	error	#DIV/0!		
+ops	A1/B1	A1=1	error	#DIV/0!		
+ops	A1&B1	A1=a;B1=1	text	a1		
+ops	A1=B1	A1=abc;B1=ABC	bool	TRUE		
+ops	A1<B1	A1=1;B1=a	bool	TRUE		
+ops	A1+B1	A1=1;B1=a	error	#VALUE!		
+ops	-A1	A1=2024-01-01	value	-45292.0		
+ops	A1	A1=-0	value	-0.0		
+ops	A1	A1=+3	value	3.0		
+ops	A1+1	A1=+3	value	4.0		
+ops	A1+1	A1=1.50	value	2.5		
+ops	A1		value	0.0		
+ops	A1+A2		value	0.0		
+ops	A1*5		value	0.0		
+ops	A1&A2		text			
+ops	-A1		value	-0.0		
+ops	A1%		value	0.0		
+ops	A1^2		value	0.0		
+ops	A1/2		value	0.0		
+ops	2/A1		error	#DIV/0!		
+ops	A1=A1		bool	TRUE		
+ops	1/0+1		error	#DIV/0!		
+ops	#N/A+1		error	#N/A		
+ops	#N/A&"x"		error	#N/A		
+ops	-#N/A		error	#N/A		
+ops	#N/A%		error	#N/A		
+ops	#VALUE!*2		error	#VALUE!		
+ops	#REF!+1		error	#REF!		
+ops	#NAME?=1		error	#NAME?		
+ops	1+#DIV/0!		error	#DIV/0!		
+ops	#N/A+#DIV/0!		error	#N/A		
+ops	#DIV/0!+#N/A		error	#DIV/0!		
+ops	NOSUCHFUNCTION()		error	#NAME?		
+ops	nosuchname		error	#NAME?		
+ops	#NUM!^2		error	#NUM!		
+ops	"x"&#REF!		error	#REF!		
+ops	#NULL!+1		error	#NULL!		
+ops	ROW()		value	1.0		
+ops	COLUMN()		value	7.0		
+ops	ROW(A5)		value	5.0		
+ops	COLUMN(C1)		value	3.0		
+ops	ROW(B2:D9)		value	2.0		
+ops	COLUMN(B2:D9)		value	2.0		
+ops	ROW(A:A)		value	1.0		
+ops	COLUMN(C:E)		value	3.0		
+ops	ROW(3:3)		value	3.0		
+ops	ROW()+COLUMN()		value	8.0		
+ops	ROW(Z100)		value	100.0		
+ops	COLUMN($AA$1)		value	27.0		
+ops	TRUE()		bool	TRUE		
+ops	FALSE()		bool	FALSE		
+ops	ROW(1)		error	Err:504	error:#VALUE!	LibreOffice reports Err:504, a parameter-list error with no Excel error value
+ops	A1:A3	A1=1;A2=2;A3=3	value	1.0		
+ops	A1:A3	A2=7	value	0.0		
+ops	A1:C1	B1=5	error	#VALUE!		
+ops	A1:B2	A1=1	error	#VALUE!		
+ops	A:A	A1=4	value	4.0		
+ops	A1:A3*2	A1=3	value	6.0		
+ops	A2:A5	A2=1	error	#VALUE!		
+ops	A1:A3&"x"	A1=a	text	ax		
+ops	-A1:A3	A1=2	value	-2.0		
+ops	B:B+1	B1=1	value	2.0		
+ops	A1:A1	A1=9	value	9.0		
+ops	(A1:A3)	A1=5	value	5.0		
+ops	A1:A3=5	A1=5	bool	TRUE		
+ops	{1,2;3,4}		value	1.0		
+ops	{1,2}+{10;20}		value	11.0		
+ops	{1,2}*2		value	2.0		
+ops	{"a","b"}&"x"		text	ax		
+ops	-{3,4}		value	-3.0		
+ops	{1,2}={1,3}		bool	TRUE		
+ops	{#N/A,1}+1		error	Err:539	error:#N/A	LibreOffice doesn't accept error literals in array constants (Err:539)
+ops	{TRUE,FALSE}		value	1.0	bool:TRUE	Booleans are their own type, as in Excel; LibreOffice treats them as 1 and 0
+ops	{"x"}		text	x		
+ops	{1;2}^2		value	1.0		
+ops	{1,2,3}-{1,2}		value	0.0		
+ops	2^{3,4}		value	8.0		
+ops	{-1.5}*2		value	-3.0		
+ops	{1,2}%		value	0.01		
+ops	5%		value	0.05		
+ops	A1%	A1=50	value	0.5		
+ops	"50"%		value	0.5		
+ops	"a"%		error	#VALUE!		
+ops	TRUE()%		value	0.01		

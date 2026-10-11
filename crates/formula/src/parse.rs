@@ -443,6 +443,14 @@ impl Parser {
         Ok(Some((row - 1, abs, end)))
     }
 
+    /// Where `$?DIGITS` (not starting with 0) at `i` ends, if it is there.
+    fn row_end(&self, i: usize) -> Option<usize> {
+        let start = i + usize::from(self.at(i) == Some('$'));
+        self.at(start)
+            .is_some_and(|c| matches!(c, '1'..='9'))
+            .then(|| self.digits_end(start))
+    }
+
     fn cell_at(&self, i: usize) -> Result<Option<(CellAddr, usize)>> {
         let Some((col, col_abs, j)) = self.col_at(i) else {
             return Ok(None);
@@ -498,6 +506,12 @@ impl Parser {
                     }
                 }
             }
+        }
+        let is_rows = self
+            .row_end(i)
+            .is_some_and(|after| self.at(after) == Some(':') && self.row_end(after + 1).is_some());
+        if !is_rows {
+            return Ok(None);
         }
         if let Some((first, first_abs, after)) = self.row_at(i)? {
             if self.at(after) == Some(':') {
