@@ -61,7 +61,7 @@ Slate's crates, in `apps/slate/crates/`:
 
 | Crate | Owns |
 | --- | --- |
-| `document-model` | Slate's document model (ADR 0003): blocks, runs, plain-text reader with encoding and line-ending detection |
+| `document-model` | Slate's document model (ADR 0003): blocks, runs, plain-text reader with encoding and line-ending detection, Markdown reader (`pulldown-cmark`) |
 
 ## Commands
 

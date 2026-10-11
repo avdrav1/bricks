@@ -4,10 +4,13 @@
 //! A [`Document`] is a flat list of [`Block`]s: paragraphs, list items, code blocks,
 //! tables (whose cells hold blocks), images, page breaks, rules, and [`Raw`] source Slate
 //! can't model. A paragraph holds [`Run`]s of text with one look each. Readers convert a
-//! file into the model: plain text ([`read_text`]) here, DOCX in the `docx` crate.
+//! file into the model: plain text ([`read_text`]) and Markdown ([`read_markdown`]) here,
+//! DOCX in the `docx` crate.
 
+mod markdown;
 mod text;
 
+pub use markdown::{load_linked_images, read_markdown};
 pub use text::{decode, read_text, Encoding, LineEnding, TextInfo};
 
 use std::sync::Arc;
