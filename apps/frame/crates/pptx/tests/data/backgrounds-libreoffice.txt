@@ -1,0 +1,87 @@
+size	9144000	6858000
+slide	1	hidden=0
+background	solid DDD9C3 100
+shape	0	TitleTextShape	685800	2130480	7772400	1469880	0	0	0	Title 1
+fill	none
+line	none
+para	0	center	Solid Fill
+run	44	0	0	0	0	000000	Calibri	Solid Fill
+shape	0	SubtitleShape	1371600	3886200	6400800	1752480	0	0	0	Subtitle 2
+fill	none
+line	none
+para	0	center	Defined on the master slide:
+run	32	0	0	0	0	8B8B8B	Calibri	Defined on the master slide:
+para	0	center	Tan, darker 10%
+run	32	0	0	0	0	8B8B8B	Calibri	Tan, darker 10%
+shape	0	CustomShape	1905120	457200	4572000	1523880	0	0	0	Rectangle 3
+fill	none
+line	solid 632523 127080
+slide	2	hidden=0
+background	gradient
+shape	0	TitleTextShape	457200	274680	8229600	1143000	0	0	0	Title 1
+fill	solid EBF1DE 57
+line	solid C1D1EC 0
+para	0	center	Gradient Fill
+run	44	0	0	0	0	000000	Calibri	Gradient Fill
+shape	0	OutlinerShape	457200	1600200	8229600	4525920	0	0	0	Content Placeholder 2
+fill	gradient
+line	none
+para	0	left	Gradient stops
+run	32	0	0	0	0	000000	Calibri	Gradient stops
+slide	3	hidden=0
+background	gradient
+shape	0	TitleTextShape	457200	274680	8229600	1143000	0	0	0	Title 1
+fill	gradient
+line	none
+para	0	center	Master Gradient Fill
+run	44	0	0	0	0	000000	Calibri	Master Gradient Fill
+shape	0	OutlinerShape	457200	1600200	8229600	4525920	0	0	0	Content Placeholder 2
+fill	bitmap
+line	none
+para	0	left	hello
+run	32	0	0	0	0	000000	Calibri	hello
+shape	0	CustomShape	3048120	3352680	1905120	2362320	0	0	0	Isosceles Triangle 3
+fill	bitmap
+line	solid 3A5F8B 25560
+shape	0	CustomShape	5943600	2286000	2438280	2514600	0	0	0	Oval 4
+fill	bitmap
+line	solid 3A5F8B 25560
+shape	0	CustomShape	685800	2666880	2666880	2438280	0	0	0	Sun 5
+fill	solid D99694 49
+line	solid 3A5F8B 25560
+slide	4	hidden=0
+background	bitmap
+shape	0	TitleTextShape	457200	274680	8229600	1143000	0	0	0	Title 1
+fill	none
+line	none
+para	0	center	Texture: papirus
+run	44	0	0	0	0	000000	Calibri	Texture: papirus
+shape	0	CustomShape	4343400	1676520	2590920	2031480	0	0	0	TextBox 2
+fill	gradient
+line	none
+para	0	left	Gradient Fill
+run	18	0	0	0	0	000000	Calibri	Gradient Fill
+para	0	left	A
+run	18	0	0	0	0	000000	Calibri	A
+para	0	left	A
+run	18	0	0	0	0	000000	Calibri	A
+para	0	left	A
+run	18	0	0	0	0	000000	Calibri	A
+para	0	left	A
+run	18	0	0	0	0	000000	Calibri	A
+para	0	left	Aa
+run	18	0	0	0	0	000000	Calibri	Aa
+para	0	left	a
+run	18	0	0	0	0	000000	Calibri	a
+shape	0	CustomShape	762120	2590920	2590920	1094400	0	0	0	Right Arrow 3
+fill	bitmap
+line	solid 3A5F8B 25560
+shape	0	CustomShape	762120	4648320	2514600	1447920	0	0	0	Oval 4
+fill	solid A6A6A6 50
+line	solid 3A5F8B 25560
+shape	0	CustomShape	0	0	7467480	1219320	0	0	0	Rectangle 5
+fill	gradient
+line	solid 3A5F8B 25560
+shape	0	CustomShape	5257800	4648320	3886200	2209680	0	0	0	Rectangle 6
+fill	gradient
+line	solid 3A5F8B 25560

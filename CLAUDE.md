@@ -70,7 +70,7 @@ Frame's crates, in `apps/frame/crates/`:
 | Crate | Owns |
 | --- | --- |
 | `presentation-model` | slides, shapes, frames, and placeholders with every value resolved (ADR 0004); no dependencies |
-| `pptx` | PPTX reading: package, slide order, placeholder inheritance through layout and master, group transforms, notes |
+| `pptx` | PPTX reading: package, slide order, placeholder inheritance through layout and master, group transforms, text styles, theme colours and fonts, notes |
 
 ## Commands
 

@@ -1,0 +1,125 @@
+size	9144000	6858000
+slide	1	hidden=0
+background	solid FFFFFF 100
+shape	0	TitleTextShape	685800	2130480	7772400	1469880	0	0	0	Title 1
+fill	none
+line	none
+para	0	center	Standard Office theme
+run	44	0	0	0	0	000000	Calibri	Standard Office theme
+shape	0	SubtitleShape	1371600	3886200	6400800	1752480	0	0	0	Subtitle 2
+fill	none
+line	none
+para	0	center	No subtitle
+run	32	0	0	0	0	8B8B8B	Calibri	No subtitle
+shape	0	CustomShape	1447920	762120	2895480	1295280	0	0	0	Rectangle 3
+fill	solid 4F81BD 100
+line	solid 3A5F8B 25560
+para	0	left	Fill: RGB(79,129,189)
+run	18	0	0	0	0	FFFFFF	Calibri	Fill: RGB(79,129,189)
+para	0	left	Text: white
+run	18	0	0	0	0	FFFFFF	Calibri	Text: white
+slide	2	hidden=0
+background	solid DDD9C3 100
+shape	0	TitleTextShape	457200	274680	8229600	1143000	0	0	0	Title 1
+fill	none
+line	none
+para	0	center	Office theme again
+run	44	0	0	0	0	000000	Calibri	Office theme again
+shape	0	OutlinerShape	457200	1600200	8229600	4525920	0	0	0	Content Placeholder 2
+fill	none
+line	none
+para	0	left	With a solid fill defined in the slide layout
+run	32	0	0	0	0	000000	Calibri	With a solid fill defined in the slide layout
+slide	3	hidden=0
+background	gradient
+shape	0	TitleTextShape	457200	274680	8229600	1143000	0	0	0	Title 3
+fill	none
+line	none
+para	0	center	Radial Gradient Fill On Slide Layout
+run	44	0	0	0	0	000000	Calibri	Radial Gradient Fill On Slide Layout
+slide	4	hidden=0
+background	gradient
+shape	0	TitleTextShape	1043640	1027800	7024680	1143000	0	0	0	Title 3
+fill	none
+line	none
+para	0	left	Austin Theme
+run	40	1	1	0	0	94C600	Century Gothic	Austin Theme
+shape	0	CustomShape	4648320	3886200	2971800	1752480	0	0	0	Rectangle 4
+fill	solid 94C600 100
+line	solid 6D9200 10800
+para	0	center	Text in a autoshape is white
+run	18	0	0	0	0	FFFFFF	Century Gothic	Text in a autoshape is white
+para	0	center	Fill: RGB(148, 198,0)
+run	18	0	0	0	0	FFFFFF	Century Gothic	Fill: RGB(148, 198,0)
+slide	5	hidden=0
+background	bitmap
+shape	0	TitleTextShape	1043640	1027800	7024680	1143000	0	0	0	Title 1
+fill	none
+line	none
+para	0	left	This slide overrides master background with a texture fill
+run	40	1	1	0	0	94C600	Century Gothic	This slide overrides master background with a texture fill
+shape	0	GraphicObjectShape	3352680	3276720	1828800	1676520	0	0	0	Picture 3
+line	none
+picture	image/jpeg	192x176
+slide	6	hidden=0
+background	gradient
+shape	0	TitleTextShape	4733280	2708640	3313440	1702080	0	0	0	Title 2
+fill	none
+line	none
+para	0	left	Title slide
+run	36	0	0	0	0	94C600	Century Gothic	Title slide
+shape	0	SubtitleShape	4733280	4421160	3309840	1260720	0	0	0	Subtitle 3
+fill	none
+line	none
+para	0	left	Slide layout turns off graphics from the master slide
+run	18	0	0	0	0	424242	Century Gothic	Slide layout turns off graphics from the master slide
+slide	7	hidden=0
+background	solid BDEF57 100
+shape	0	TitleTextShape	4733280	2708640	3313440	1702080	0	0	0	Title 1
+fill	none
+line	none
+para	0	left	Overridden background
+run	36	0	0	0	0	94C600	Century Gothic	Overridden background
+shape	0	SubtitleShape	4733280	4421160	3309840	1260720	0	0	0	Subtitle 2
+fill	none
+line	none
+para	0	left	Slide background overrides slide master.
+run	18	0	0	0	0	424242	Century Gothic	Slide background overrides slide master.
+para	0	left	Also, background graphics is suppressed.
+run	18	0	0	0	0	424242	Century Gothic	Also, background graphics is suppressed.
+slide	8	hidden=0
+background	bitmap
+shape	0	TitleTextShape	380880	4853520	8458200	1222200	0	0	0	Title 2
+fill	none
+line	none
+para	0	left	Treck theme is sandy
+run	36	0	0	0	0	4E3B30	Franklin Gothic Medium	Treck theme is sandy
+shape	0	SubtitleShape	380880	3886200	8458200	914400	0	0	0	Subtitle 3
+fill	none
+line	none
+para	0	left	Text in the title is capitalized (in fact it is lower-case)
+run	24	0	0	0	0	44342A	Franklin Gothic Book	Text in the title is capitalized (in fact it is lower-case)
+slide	9	hidden=0
+background	bitmap
+shape	0	OutlinerShape	380880	1676520	8458200	1219320	0	0	0	Text Placeholder 1
+fill	none
+line	none
+para	0	right	Darker background
+run	20	0	0	0	0	DDD2B1	Franklin Gothic Book	Darker background
+shape	0	TitleTextShape	180360	2946960	8686800	1184760	0	0	0	Title 2
+fill	none
+line	none
+para	0	right	Section header in the treck theme
+run	36	0	0	0	0	FBEEC9	Franklin Gothic Medium	Section header in the treck theme
+slide	10	hidden=0
+background	gradient
+shape	0	TitleTextShape	1066680	1406160	6172200	2251440	0	0	0	Title 3
+fill	none
+line	none
+para	0	left	Trade show 
+run	66	0	0	0	0	FFFFFF	Arial Black	Trade show 
+shape	0	SubtitleShape	1066680	3906000	6172200	1123200	0	0	0	Subtitle 4
+fill	none
+line	none
+para	0	left	White text on a blue background
+run	20	0	1	0	0	FFFFFF	Candara	White text on a blue background

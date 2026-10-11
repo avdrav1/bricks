@@ -1,7 +1,10 @@
 //! From package parts to the model: slide order, shapes in z-order, placeholder
-//! inheritance (slide → layout → master), group transforms, hidden slides, and notes.
+//! inheritance (slide → layout → master), group transforms, text (through `text`),
+//! hidden slides, and notes.
 
+use crate::color::Palette;
 use crate::package::{Package, Part};
+use crate::text::{self, FontRef, Fonts, Styles, TextContext};
 use crate::xml::Element;
 use crate::Error;
 use presentation_model::{
@@ -21,11 +24,16 @@ pub(crate) struct Reader {
     pkg: Package,
     masters: HashMap<String, Rc<Master>>,
     layouts: HashMap<String, Rc<Layout>>,
+    /// `presentation.xml`'s `defaultTextStyle`.
+    default_style: Option<Element>,
 }
 
 struct Master {
     part: Rc<Part>,
     placeholders: Vec<Placeholder>,
+    fonts: Fonts,
+    /// The theme's colour scheme through the master's colour map.
+    palette: Palette,
 }
 
 struct Layout {
@@ -47,7 +55,11 @@ struct Placeholder {
 /// What a shape on the slide being read inherits from.
 struct Scope<'a> {
     layer: Layer,
+    /// The layout slide placeholders inherit from (`None` on layouts and masters).
     layout: Option<&'a Layout>,
+    master: Option<&'a Master>,
+    default_style: Option<&'a Element>,
+    text: &'a TextContext<'a>,
 }
 
 /// A group's transform: its frame on the slide (or in its parent group) and the child
@@ -67,6 +79,7 @@ impl Reader {
             pkg,
             masters: HashMap::new(),
             layouts: HashMap::new(),
+            default_style: None,
         }
     }
 
@@ -88,6 +101,7 @@ impl Reader {
                 })
             })
             .unwrap_or(DEFAULT_SIZE);
+        self.default_style = pres.root.child("defaultTextStyle").cloned();
         let mut slides = Vec::new();
         for id in pres
             .root
@@ -99,12 +113,13 @@ impl Reader {
                 continue;
             };
             let target = rel.target.clone();
-            slides.push(self.slide(&target)?);
+            let number = slides.len() + 1;
+            slides.push(self.slide(&target, number)?);
         }
         Ok(Presentation { size, slides })
     }
 
-    fn slide(&mut self, path: &str) -> Result<Slide, Error> {
+    fn slide(&mut self, path: &str, number: usize) -> Result<Slide, Error> {
         let part = self.pkg.part(path)?;
         let layout = match part.rels.of_kind("slideLayout") {
             Some(r) => {
@@ -114,38 +129,62 @@ impl Reader {
             None => None,
         };
         let root = &part.root;
+        let master = layout.as_ref().map(|l| l.master.clone());
+        // Colours: the master's map, as the layout and then the slide override it.
+        let mut palette = master
+            .as_ref()
+            .map(|m| m.palette.clone())
+            .unwrap_or_default();
+        for over in layout
+            .as_ref()
+            .map(|l| &l.part.root)
+            .into_iter()
+            .chain([root])
+            .filter_map(|r| r.path(&["clrMapOvr", "overrideClrMapping"]))
+        {
+            palette.remap(over);
+        }
+        let fonts = master.as_ref().map(|m| m.fonts.clone()).unwrap_or_default();
+        let ctx = TextContext {
+            palette: &palette,
+            fonts: &fonts,
+            slide_number: number,
+        };
         let mut shapes = Vec::new();
+        let scope = |layer, layout| Scope {
+            layer,
+            layout,
+            master: master.as_deref(),
+            default_style: self.default_style.as_ref(),
+            text: &ctx,
+        };
         if let Some(layout) = &layout {
             if root.flag("showMasterSp") != Some(false) {
                 if layout.show_master {
-                    let scope = Scope {
-                        layer: Layer::Master,
-                        layout: None,
-                    };
+                    let tree = sp_tree(&layout.master.part.root);
                     collect(
-                        &scope,
-                        sp_tree(&layout.master.part.root),
+                        &scope(Layer::Master, None),
+                        tree,
                         &mut Vec::new(),
                         &mut shapes,
                     );
                 }
-                let scope = Scope {
-                    layer: Layer::Layout,
-                    layout: None,
-                };
+                let tree = sp_tree(&layout.part.root);
                 collect(
-                    &scope,
-                    sp_tree(&layout.part.root),
+                    &scope(Layer::Layout, None),
+                    tree,
                     &mut Vec::new(),
                     &mut shapes,
                 );
             }
         }
-        let scope = Scope {
-            layer: Layer::Slide,
-            layout: layout.as_deref(),
-        };
-        collect(&scope, sp_tree(root), &mut Vec::new(), &mut shapes);
+        let tree = sp_tree(root);
+        collect(
+            &scope(Layer::Slide, layout.as_deref()),
+            tree,
+            &mut Vec::new(),
+            &mut shapes,
+        );
         let notes = match part.rels.of_kind("notesSlide") {
             Some(r) => {
                 let target = r.target.clone();
@@ -186,8 +225,21 @@ impl Reader {
             return Ok(m.clone());
         }
         let part = self.pkg.part(path)?;
+        let theme = match part.rels.of_kind("theme") {
+            Some(r) => {
+                let target = r.target.clone();
+                Some(self.pkg.part(&target)?)
+            }
+            None => None,
+        };
+        let elements = theme.as_ref().and_then(|t| t.root.child("themeElements"));
         let master = Rc::new(Master {
             placeholders: placeholders(sp_tree(&part.root)),
+            fonts: Fonts::of(elements.and_then(|e| e.child("fontScheme"))),
+            palette: Palette::new(
+                elements.and_then(|e| e.child("clrScheme")),
+                part.root.child("clrMap"),
+            ),
             part,
         });
         self.masters.insert(path.to_owned(), master.clone());
@@ -436,6 +488,7 @@ fn shape(scope: &Scope<'_>, e: &Element, groups: &[Group]) -> Option<Shape> {
                 .unwrap_or_else(|| "rect".to_owned()),
         },
     };
+    let text = shape_text(scope, e, ph, &parents);
     Some(Shape {
         name: nv
             .and_then(|n| n.child("cNvPr"))
@@ -446,7 +499,63 @@ fn shape(scope: &Scope<'_>, e: &Element, groups: &[Group]) -> Option<Shape> {
         kind,
         placeholder: ph.map(|p| placeholder_kind(p.attr("type").unwrap_or("obj"))),
         layer: scope.layer,
+        text,
     })
+}
+
+/// A shape's text with its styles: the presentation default, the master text style for
+/// its kind, its style's font reference, and the placeholders' and its own list styles.
+/// An orphan placeholder (no layout match) reads like a text box, as in LibreOffice.
+fn shape_text(
+    scope: &Scope<'_>,
+    e: &Element,
+    ph: Option<&Element>,
+    parents: &[&Element],
+) -> Option<presentation_model::TextBody> {
+    let tx_body = e.child("txBody")?;
+    let linked = ph.filter(|_| !parents.is_empty());
+    let master_style = match linked.map(|p| family(p.attr("type").unwrap_or("obj"))) {
+        Some("title") => "titleStyle",
+        Some("body") => "bodyStyle",
+        _ => "otherStyle",
+    };
+    let base = scope
+        .default_style
+        .into_iter()
+        .chain(
+            scope
+                .master
+                .and_then(|m| m.part.root.path(&["txStyles", master_style])),
+        )
+        .collect();
+    // Nearest parent last: the master placeholder's list style, then the layout's.
+    let inherited = parents.iter().rev().filter_map(|p| p.child("txBody"));
+    let styles = Styles {
+        base,
+        font_ref: font_ref(e, scope.text),
+        shape: inherited
+            .clone()
+            .chain([tx_body])
+            .filter_map(|b| b.child("lstStyle"))
+            .collect(),
+        body: inherited.filter_map(|b| b.child("bodyPr")).collect(),
+    };
+    text::body(Some(tx_body), &styles, scope.text)
+}
+
+/// The font and colour a shape style's `<a:fontRef idx="minor|major">` gives its text.
+fn font_ref(e: &Element, ctx: &TextContext<'_>) -> FontRef {
+    let Some(r) = e.path(&["style", "fontRef"]) else {
+        return FontRef::default();
+    };
+    FontRef {
+        font: match r.attr("idx") {
+            Some("major") => Some(ctx.fonts.major.clone()),
+            Some("minor") => Some(ctx.fonts.minor.clone()),
+            _ => None,
+        },
+        color: ctx.palette.first(r, None),
+    }
 }
 
 /// A shape's geometry: its preset name, or `custom` for freeform geometry.

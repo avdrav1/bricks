@@ -179,7 +179,15 @@ pub fn dump(name: &str) -> Dump {
 
 /// The decks with LibreOffice dumps: the LibreOffice-built fixture and PowerPoint-authored
 /// samples from Apache POI (tests/data/README.md).
-pub const DECKS: [&str; 4] = ["fixture", "shapes", "layouts", "SampleShow"];
+pub const DECKS: [&str; 7] = [
+    "fixture",
+    "shapes",
+    "layouts",
+    "SampleShow",
+    "themes",
+    "backgrounds",
+    "bar-chart",
+];
 
 /// The slide's own shapes paired with LibreOffice's, in z-order, names equal.
 ///

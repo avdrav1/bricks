@@ -6,9 +6,11 @@
 //! `idx`, then `type`); group transforms are applied, so each shape's frame is where it
 //! shows on the slide.
 
+mod color;
 mod detect;
 mod package;
 mod read;
+mod text;
 mod xml;
 
 pub use detect::{kind, refusal, Kind};
