@@ -663,9 +663,9 @@ impl FileLayout {
         self.rows.push((row, row + 1, spec));
     }
 
-    /// Runs of rows with a spec: what the row layout costs.
-    pub fn row_runs(&self) -> usize {
-        self.rows.len()
+    /// The rows with a spec, as `(start, end, spec)` runs of source rows.
+    pub fn row_runs(&self) -> &[(u64, u64, RowSpec)] {
+        &self.rows
     }
 }
 

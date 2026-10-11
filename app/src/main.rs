@@ -24,6 +24,7 @@ mod crash;
 mod editor;
 mod formula_bar;
 mod grid_view;
+mod looks;
 mod malformed;
 mod recent;
 mod recovery;
@@ -2549,7 +2550,8 @@ fn bench_scroll(app: &gtk::Application, grid: &GridView, vadj: &gtk::Adjustment,
     let app = app.clone();
     let vadj = vadj.clone();
     grid.add_tick_callback(move |grid, _| {
-        if !grid.is_complete() {
+        // An .xlsx shows an empty workbook until its import is done (XLSX-1).
+        if !grid.is_complete() || grid.is_loading() {
             return glib::ControlFlow::Continue;
         }
         let n = ticks.get();

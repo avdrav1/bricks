@@ -1,23 +1,27 @@
 //! The grid widget: draws the cells `grid::GridCache` holds with GSK + Pango (ADR 0001).
 
 use crate::editor::{self, Action, ClipCommand, Mode, ShapeCommand, Start};
+use crate::looks::{Dash, Line, Look, Looks};
 use crate::status::ClipView;
 
 use commands::{Batch, ClearCells, Command, OnSheet, Reshape, SetCell, SheetEdit, UndoStack};
 use csv_engine::RowIndex as _;
+use data_model::HAlign;
 use data_model::{
     is_formula, parse_tsv, BookEdit, BookState, Budget, CellRef, CellValues, ColId, ColumnTypes,
     Compare, Computed, Copied, CsvTable, DelimiterChoice, Edit, Filter, FilterError, FormulaCells,
     Hit, InferredType, JournalError, Matches, Origin, PasteError, Query, ReplaceError, RereadError,
     RowId, RowSet, SaveJob, SaveJobError, SearchError, SearchProgress, SheetId, ShownSheet,
-    SortError, SortOrder, Step, TableSource, Test, Workbook, PASTE_MAX_CELLS, UI_BUDGET,
+    SortError, SortOrder, Step, StyleId, TableSource, Test, VAlign, Workbook, PASTE_MAX_CELLS,
+    UI_BUDGET,
 };
-use formula::column_name;
+use formula::{column_name, Formatted, NumberFormat, Value};
 use grid::{Bounds, GridCache, Key, Mods, Selection, Sizes, Viewport};
 use gtk::{gdk, gio, glib, graphene, pango, prelude::*, subclass::prelude::*};
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::HashMap;
 use std::fmt::Write as _;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -215,6 +219,17 @@ mod imp {
         /// this holds at most two screens of cells.
         pub layouts: RefCell<HashMap<String, pango::Layout>>,
         pub layouts_prev: RefCell<HashMap<String, pango::Layout>>,
+        /// How each cell style looks (STYLE-3), resolved once per style.
+        pub looks: RefCell<Option<Looks>>,
+        /// Shaped cell text in its style's font, by font key, wrap width, and text; kept
+        /// like `layouts`.
+        pub styled: RefCell<HashMap<(u32, i32, String), pango::Layout>>,
+        pub styled_prev: RefCell<HashMap<(u32, i32, String), pango::Layout>>,
+        /// Number formats by code, compiled once (`None`: a code that doesn't compile).
+        pub formats: RefCell<HashMap<Box<str>, Option<Rc<NumberFormat>>>>,
+        /// Cell text under a number format, by code and text; kept like `layouts`.
+        pub formatted: RefCell<FormattedCache>,
+        pub formatted_prev: RefCell<FormattedCache>,
         pub buf: RefCell<String>,
         pub row_header_w: Cell<f64>,
         /// Top row of the last frame drawn with its text loaded; `None` before then.
@@ -367,6 +382,63 @@ mod imp {
         fn end_frame(&self) {
             let cur = std::mem::take(&mut *self.layouts.borrow_mut());
             *self.layouts_prev.borrow_mut() = cur;
+            let cur = std::mem::take(&mut *self.styled.borrow_mut());
+            *self.styled_prev.borrow_mut() = cur;
+            let cur = std::mem::take(&mut *self.formatted.borrow_mut());
+            *self.formatted_prev.borrow_mut() = cur;
+        }
+
+        /// `text` shaped in `look`'s font, wrapped at `wrap` pixels (0: one line).
+        pub fn styled_layout(&self, text: &str, look: &Look, wrap: i32) -> pango::Layout {
+            if look.font_key == 0 && wrap == 0 {
+                return self.layout(text);
+            }
+            let key = (look.font_key, wrap, text.to_owned());
+            if let Some(l) = self.styled.borrow().get(&key) {
+                return l.clone();
+            }
+            let l = self
+                .styled_prev
+                .borrow_mut()
+                .remove(&key)
+                .unwrap_or_else(|| {
+                    let l = self.obj().create_pango_layout(Some(text));
+                    if let Some(font) = &look.font {
+                        l.set_font_description(Some(font));
+                    }
+                    l.set_attributes(look.attrs.as_ref());
+                    if wrap > 0 {
+                        l.set_width(wrap * pango::SCALE);
+                        l.set_wrap(pango::WrapMode::WordChar);
+                    } else {
+                        l.set_single_paragraph_mode(true);
+                    }
+                    l
+                });
+            self.styled.borrow_mut().insert(key, l.clone());
+            l
+        }
+
+        /// `text` as number format `code` shows it; `None` if the code doesn't compile.
+        pub fn formatted(&self, code: &str, text: &str) -> Option<Rc<Formatted>> {
+            let key = (Box::<str>::from(code), text.to_owned());
+            if let Some(f) = self.formatted.borrow().get(&key) {
+                return Some(f.clone());
+            }
+            let f = match self.formatted_prev.borrow_mut().remove(&key) {
+                Some(f) => f,
+                None => {
+                    let format = self
+                        .formats
+                        .borrow_mut()
+                        .entry(key.0.clone())
+                        .or_insert_with(|| NumberFormat::parse(code).ok().map(Rc::new))
+                        .clone()?;
+                    Rc::new(format.display(&formula::literal(text)))
+                }
+            };
+            self.formatted.borrow_mut().insert(key, f.clone());
+            Some(f)
         }
 
         pub fn body_size(&self) -> (f64, f64) {
@@ -462,14 +534,187 @@ mod imp {
             for c in visible_cols.clone() {
                 let (x, cw) = (rh_w + cols.pos(c), cols.size(c));
                 snapshot.append_color(&line, &rect(x + cw - 1.0, HEADER_H, 1.0, body_h));
-                snapshot.push_clip(&rect(x, HEADER_H, cw - 1.0, body_h));
-                for r in visible.clone() {
-                    if let Some(text) = cache.cell(r, c as u32).filter(|t| !t.is_empty()) {
-                        text_at(text, x + PAD, HEADER_H + rows.pos(r) + 3.0);
+            }
+
+            // Cells (STYLE-3): fills, then text, then borders, so text can overflow into
+            // empty neighbours and borders sit on top.
+            let pool = book.styles().clone();
+            let base = obj.pango_context().font_description().unwrap_or_default();
+            let mut looks = self.looks.borrow_mut();
+            let looks = looks.get_or_insert_with(|| Looks::new(pool.clone(), base.clone(), fg));
+            looks.sync(&pool, &base, fg);
+            let styled = !table.file_styles().is_empty() || pool.xfs.len() > 1;
+            let plain = looks.get(StyleId(0));
+            let mut cells: Vec<(u64, u64, Rc<Look>)> = Vec::new();
+            for r in visible.clone().take_while(|&r| r < table.row_count()) {
+                let row = table.row_id(r);
+                for c in visible_cols.clone() {
+                    let look = if styled {
+                        let col = table.col_id(c as u32);
+                        looks.get(table.style_of(CellRef { row, col }))
+                    } else {
+                        plain.clone()
+                    };
+                    cells.push((r, c, look));
+                }
+            }
+            for (r, c, look) in &cells {
+                if let Some(fill) = look.fill {
+                    let (x, y) = (rh_w + cols.pos(*c), HEADER_H + rows.pos(*r));
+                    snapshot.append_color(&fill, &rect(x, y, cols.size(*c), rows.size(*r)));
+                }
+            }
+            let empty = |r: u64, c: u64| cache.cell(r, c as u32).is_none_or(str::is_empty);
+            let digit_w = f64::from(self.layout("0").pixel_size().0.max(1));
+            for (r, c, look) in &cells {
+                let Some(raw) = cache.cell(*r, *c as u32).filter(|t| !t.is_empty()) else {
+                    continue;
+                };
+                let (x, cw) = (rh_w + cols.pos(*c), cols.size(*c));
+                let (y, rh) = (HEADER_H + rows.pos(*r), rows.size(*r));
+                let value = formula::literal(raw);
+                let formatted = look
+                    .format
+                    .as_deref()
+                    .and_then(|code| self.formatted(code, raw));
+                let text = formatted.as_ref().map_or(raw, |f| f.text.as_str());
+                let color = formatted
+                    .as_ref()
+                    .and_then(|f| f.color)
+                    .and_then(|tag| looks.tag_color(look, tag))
+                    .or(look.color)
+                    .unwrap_or(fg);
+                let number = matches!(value, Value::Number(_) | Value::Date(_));
+                let align = match look.horizontal {
+                    HAlign::General if number => Align::Right,
+                    HAlign::General if matches!(value, Value::Bool(_) | Value::Error(_)) => {
+                        Align::Center
+                    }
+                    HAlign::General | HAlign::Left | HAlign::Fill | HAlign::Justify => Align::Left,
+                    HAlign::Distributed => Align::Left,
+                    HAlign::Center | HAlign::CenterContinuous => Align::Center,
+                    HAlign::Right => Align::Right,
+                };
+                let indent = f64::from(look.indent) * digit_w * 1.5;
+                let wrap = if look.wrap {
+                    ((cw - 2.0 * PAD).max(1.0)) as i32
+                } else {
+                    0
+                };
+                // A `*x` fill: the text splits there, the parts go to the two edges, and x
+                // repeats between them (Excel's accounting formats pad with spaces).
+                if let Some((at, ch)) = formatted
+                    .as_ref()
+                    .and_then(|f| f.fill)
+                    .filter(|_| wrap == 0)
+                {
+                    let (left, right) = text.split_at(at.min(text.len()));
+                    let (lw, th) = self.styled_layout(left, look, 0).pixel_size();
+                    let rw = self.styled_layout(right, look, 0).pixel_size().0;
+                    let ty = text_y(look.vertical, y, rh, f64::from(th));
+                    snapshot.push_clip(&rect(x, y, cw - 1.0, rh - 1.0));
+                    let draw = |t: &str, tx: f64| {
+                        let layout = self.styled_layout(t, look, 0);
+                        snapshot.save();
+                        snapshot.translate(&graphene::Point::new(tx as f32, ty as f32));
+                        snapshot.append_layout(&layout, &color);
+                        snapshot.restore();
+                    };
+                    draw(left, x + PAD);
+                    let right_x = x + cw - PAD - f64::from(rw);
+                    draw(right, right_x);
+                    if ch != ' ' {
+                        let mut one = [0u8; 4];
+                        let unit = self
+                            .styled_layout(ch.encode_utf8(&mut one), look, 0)
+                            .pixel_size()
+                            .0;
+                        let gap = right_x - (x + PAD + f64::from(lw));
+                        let n = (gap / f64::from(unit.max(1))).floor().max(0.0) as usize;
+                        draw(&ch.to_string().repeat(n), x + PAD + f64::from(lw));
+                    }
+                    snapshot.pop();
+                    continue;
+                }
+                let layout = self.styled_layout(text, look, wrap);
+                let (tw, th) = layout.pixel_size();
+                let (tw, th) = (f64::from(tw), f64::from(th));
+                // Text that doesn't fit spills into empty neighbours, as in Excel: numbers and
+                // wrapped text don't.
+                let (mut x0, mut x1) = (x, x + cw);
+                if wrap == 0 && !number && tw + 2.0 * PAD + indent > cw {
+                    let spill = |mut k: u64, step: i64, room: &mut f64| {
+                        let mut width = 0.0;
+                        while *room > 0.0 {
+                            let next = k as i64 + step;
+                            if next < visible_cols.start as i64
+                                || next >= visible_cols.end as i64
+                                || !empty(*r, next as u64)
+                            {
+                                break;
+                            }
+                            k = next as u64;
+                            let w = cols.size(k);
+                            width += w;
+                            *room -= w;
+                        }
+                        width
+                    };
+                    let mut room = tw + 2.0 * PAD + indent - cw;
+                    match align {
+                        Align::Left => x1 += spill(*c, 1, &mut room),
+                        Align::Right => x0 -= spill(*c, -1, &mut room),
+                        Align::Center => {
+                            room /= 2.0;
+                            let mut other = room;
+                            x1 += spill(*c, 1, &mut room);
+                            x0 -= spill(*c, -1, &mut other);
+                        }
                     }
                 }
-                snapshot.pop();
+                let tx = match align {
+                    Align::Left => x + PAD + indent,
+                    Align::Right => x + cw - PAD - tw - indent,
+                    Align::Center => x + (cw - tw) / 2.0,
+                };
+                let ty = if wrap > 0 && th > rh - 6.0 {
+                    y + 1.0 // wrapped lines that fill the row start at its top
+                } else {
+                    text_y(look.vertical, y, rh, th)
+                };
+                // Most text fits its cell: a clip per cell costs the renderer, so only text
+                // that reaches past its room gets one.
+                let clip = tx < x0 || tx + tw > x1 - 1.0 || ty + th > y + rh - 1.0;
+                if clip {
+                    snapshot.push_clip(&rect(x0, y, x1 - x0 - 1.0, rh - 1.0));
+                }
+                snapshot.save();
+                snapshot.translate(&graphene::Point::new(tx as f32, ty as f32));
+                snapshot.append_layout(&layout, &color);
+                snapshot.restore();
+                if clip {
+                    snapshot.pop();
+                }
             }
+            for (r, c, look) in cells
+                .iter()
+                .filter(|(_, _, l)| l.borders.iter().any(Option::is_some))
+            {
+                let (x, cw) = (rh_w + cols.pos(*c), cols.size(*c));
+                let (y, rh) = (HEADER_H + rows.pos(*r), rows.size(*r));
+                let [top, bottom, left, right] = look.borders;
+                for (line, x, y, len, across) in [
+                    (top, x - 1.0, y - 1.0, cw + 1.0, true),
+                    (bottom, x - 1.0, y + rh - 1.0, cw + 1.0, true),
+                    (left, x - 1.0, y - 1.0, rh + 1.0, false),
+                    (right, x + cw - 1.0, y - 1.0, rh + 1.0, false),
+                ] {
+                    if let Some(line) = line {
+                        draw_line(snapshot, &line, x, y, len, across);
+                    }
+                }
+            }
+            drop(cells);
 
             // Selection and cell cursor. Coordinates are clamped to just outside the body
             // before narrowing to f32, so far-away edges stay exact.
@@ -880,7 +1125,8 @@ impl GridView {
                 self.update_adjustments();
             }
             Some(Edge::Row(r)) => {
-                self.set_row_height(r, ROW_H);
+                let h = self.imp().sizing.borrow().rows.default_size();
+                self.set_row_height(r, h);
                 self.update_adjustments();
             }
             None => self.begin_edit(x, y),
@@ -961,6 +1207,72 @@ impl GridView {
         imp.sizing.borrow_mut().rows.set(row, height);
     }
 
+    /// The active sheet's sizes as its file gives them (STYLE-3): the most common row
+    /// height and the default column width become the sheet's own defaults, scaled from
+    /// Excel's units to Bricks' row height and digit width; the rest are kept by row and
+    /// column identity. A CSV sheet has none.
+    fn file_ui(&self) -> SheetUi {
+        let table = self.table();
+        let layout = table.layout();
+        if layout.default_row_height.is_none()
+            && layout.default_col_width.is_none()
+            && layout.cols.is_empty()
+            && layout.row_runs().is_empty()
+        {
+            return SheetUi::default();
+        }
+        let digit_w = f64::from(self.create_pango_layout(Some("0")).pixel_size().0.max(1));
+        // Excel's row heights are points; a default-height row is Bricks' row height.
+        let default_pt = layout.default_row_height.unwrap_or(15.0).max(1.0);
+        let row_px = |pt: f64| (pt * ROW_H / default_pt).max(MIN_ROW_H);
+        let mut heights: HashMap<u64, u64> = HashMap::new();
+        let mut covered = 0;
+        for (start, end, spec) in layout.row_runs() {
+            if let Some(h) = spec.height {
+                *heights.entry(h.to_bits()).or_default() += end - start;
+                covered += end - start;
+            }
+        }
+        *heights.entry(default_pt.to_bits()).or_default() +=
+            table.total_rows().saturating_sub(covered);
+        let common = heights
+            .iter()
+            .max_by_key(|&(h, n)| (*n, *h))
+            .map_or(default_pt, |(&h, _)| f64::from_bits(h));
+        // Excel's column widths count the default font's widest digit (7 px for Calibri
+        // 11) plus padding; Bricks' digit takes its place.
+        let col_px = |chars: f64| {
+            let px = ((256.0 * chars + (128.0 / 7.0f64).trunc()) / 256.0 * 7.0).trunc();
+            (px * digit_w / 7.0).max(MIN_COL_W)
+        };
+        let default_chars = layout
+            .default_col_width
+            .or_else(|| layout.base_col_width.map(|b| f64::from(b) + 0.43))
+            .unwrap_or(8.43);
+        let mut ui = SheetUi {
+            sizing: Sizing {
+                rows: Sizes::new(row_px(common)),
+                cols: Sizes::new(col_px(default_chars)),
+            },
+            ..SheetUi::default()
+        };
+        for (start, end, spec) in layout.row_runs() {
+            let h = spec.height.unwrap_or(default_pt);
+            if h != common {
+                ui.row_heights
+                    .extend((*start..*end).map(|r| (RowId::source(r), row_px(h))));
+            }
+        }
+        for spec in &layout.cols {
+            if let Some(w) = spec.width.filter(|&w| w != default_chars) {
+                let last = spec.last.min(spec.first + 16_384);
+                ui.col_widths
+                    .extend((spec.first..=last).map(|c| (ColId::source(c), col_px(w))));
+            }
+        }
+        ui
+    }
+
     /// Lay the remembered sizes out by where their rows and columns are now; those not
     /// shown (deleted) are kept for an undo.
     fn refit_sizes(&self) {
@@ -969,16 +1281,18 @@ impl GridView {
         let mut sizing = imp.sizing.borrow_mut();
         sizing.rows.clear();
         sizing.cols.clear();
-        for (&id, &h) in imp.row_heights.borrow().iter() {
-            if let Some(r) = table.row_of(id) {
-                sizing.rows.set(r, h);
-            }
-        }
-        for (&id, &w) in imp.col_widths.borrow().iter() {
-            if let Some(c) = table.col_of(id) {
-                sizing.cols.set(u64::from(c), w);
-            }
-        }
+        let heights = imp.row_heights.borrow();
+        sizing.rows.set_all(
+            heights
+                .iter()
+                .filter_map(|(&id, &h)| Some((table.row_of(id)?, h))),
+        );
+        let widths = imp.col_widths.borrow();
+        sizing.cols.set_all(
+            widths
+                .iter()
+                .filter_map(|(&id, &w)| Some((u64::from(table.col_of(id)?), w))),
+        );
     }
 
     /// A click (GRID-4): a cell, a row or column header, or the corner (everything).
@@ -3009,8 +3323,11 @@ impl GridView {
         imp.undo.replace(UndoStack::default());
         imp.cache.borrow_mut().reset();
         imp.titles.take();
-        imp.row_heights.borrow_mut().clear();
-        imp.col_widths.borrow_mut().clear();
+        // The new file's own sizes, then those the user set, by position.
+        let file = self.file_ui();
+        imp.sizing.replace(file.sizing);
+        imp.row_heights.replace(file.row_heights);
+        imp.col_widths.replace(file.col_widths);
         // Rows of the new file appear as indexing reaches them; heights past what is
         // indexed now land on their positions' source ids all the same.
         let first = u64::from(self.table().has_header());
@@ -3288,11 +3605,8 @@ impl GridView {
             // Kept even for a removed sheet: an undo brings it back as it was.
             imp.sheet_ui.borrow_mut().insert(shown, ui);
         }
-        let ui = imp
-            .sheet_ui
-            .borrow_mut()
-            .remove(&active)
-            .unwrap_or_default();
+        let ui = imp.sheet_ui.borrow_mut().remove(&active);
+        let ui = ui.unwrap_or_else(|| self.file_ui());
         imp.sizing.replace(ui.sizing);
         imp.row_heights.replace(ui.row_heights);
         imp.col_widths.replace(ui.col_widths);
@@ -3675,18 +3989,29 @@ impl GridView {
             .cell_value(cur.row, cur.col)
             .map(|v| v.into_owned())
             .unwrap_or_default();
-        if !is_formula(&raw) {
-            text.push_str(&raw);
-            return text;
-        }
         let at = CellRef {
             row: t.row_id(cur.row),
             col: t.col_id(cur.col),
         };
-        let sheet = book.active_id();
-        match book.value_of(sheet, at, &mut Budget::cells(UI_BUDGET)) {
-            Ok(v) => text.push_str(&formula::result_text(&v)),
-            Err(_) => text.push_str(data_model::PENDING),
+        let shown = if is_formula(&raw) {
+            let sheet = book.active_id();
+            match book.value_of(sheet, at, &mut Budget::cells(UI_BUDGET)) {
+                Ok(v) => formula::result_text(&v),
+                Err(_) => return text + data_model::PENDING,
+            }
+        } else {
+            raw
+        };
+        // Under its number format, as the grid draws it (STYLE-3).
+        let pool = book.styles();
+        let xf = pool.xf(book.active().style_of(at));
+        let code = pool
+            .custom_format(xf.num_fmt)
+            .or_else(|| formula::builtin_format(xf.num_fmt))
+            .filter(|c| !c.eq_ignore_ascii_case("general"));
+        match code.and_then(|c| imp.formatted(c, &shown)) {
+            Some(f) if !shown.is_empty() => text.push_str(f.text.trim()),
+            _ => text.push_str(&shown),
         }
         text
     }
@@ -3762,6 +4087,56 @@ impl GridView {
         }
         drop(sizing);
         self.queue_draw();
+    }
+}
+
+/// Cell text under number formats, by format code and text.
+type FormattedCache = HashMap<(Box<str>, String), Rc<Formatted>>;
+
+/// Where a cell's text goes across it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Align {
+    Left,
+    Center,
+    Right,
+}
+
+/// The top of a line of text `th` high in a row at `y`, `rh` high. A default-height row
+/// keeps its text 3 px from the top, whatever the alignment.
+fn text_y(vertical: VAlign, y: f64, rh: f64, th: f64) -> f64 {
+    match vertical {
+        VAlign::Top => y + 3.0,
+        VAlign::Center | VAlign::Justify | VAlign::Distributed => y + ((rh - th) / 2.0).max(3.0),
+        VAlign::Bottom => y + (rh - th - 3.0).max(3.0),
+    }
+}
+
+/// A border line from (`x`, `y`), `len` long, across the row (`across`) or down the column.
+fn draw_line(snapshot: &gtk::Snapshot, line: &Line, x: f64, y: f64, len: f64, across: bool) {
+    let w = f64::from(line.width);
+    let rect = |at: f64, run: f64, offset: f64, thick: f64| {
+        if across {
+            graphene::Rect::new(at as f32, (y + offset) as f32, run as f32, thick as f32)
+        } else {
+            graphene::Rect::new((x + offset) as f32, at as f32, thick as f32, run as f32)
+        }
+    };
+    let start = if across { x } else { y };
+    match line.dash {
+        Dash::Solid => snapshot.append_color(&line.color, &rect(start, len, 0.0, w)),
+        Dash::Double => {
+            snapshot.append_color(&line.color, &rect(start, len, -1.0, 1.0));
+            snapshot.append_color(&line.color, &rect(start, len, 1.0, 1.0));
+        }
+        Dash::Dashed(on, off) => {
+            let (on, step) = (f64::from(on), f64::from(on) + f64::from(off));
+            let mut at = start;
+            while at < start + len {
+                let run = on.min(start + len - at);
+                snapshot.append_color(&line.color, &rect(at, run, 0.0, w));
+                at += step;
+            }
+        }
     }
 }
 

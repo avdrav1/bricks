@@ -56,6 +56,24 @@ impl Sizes {
         self.custom.clear();
     }
 
+    /// Give many indexes their sizes at once, in one pass over the running sums (setting
+    /// them one by one costs a pass each).
+    pub fn set_all(&mut self, sizes: impl IntoIterator<Item = (u64, f64)>) {
+        for (i, size) in sizes {
+            let size = size.max(MIN_SIZE);
+            if size == self.default {
+                self.custom.remove(&i);
+            } else {
+                self.custom.insert(i, (size, 0.0));
+            }
+        }
+        let mut sum = 0.0;
+        for (s, through) in self.custom.values_mut() {
+            sum += *s - self.default;
+            *through = sum;
+        }
+    }
+
     fn delta_before(&self, i: u64) -> f64 {
         self.custom
             .range(..i)
