@@ -18,16 +18,16 @@ Bricks: a fast, lightweight Linux spreadsheet in Rust (command `bricks`). V0.1 i
 5. **Every mutation is an undoable command** that stores the operation, not a snapshot.
 6. **Saving is atomic:** temp file in the same directory, verify, fsync, rename. A crash never corrupts the original.
 7. **Filters never drop rows on save.** Sorting changes row order; filtering changes only the view.
-8. **Non-goals stay out:** charts, pivots, macros, scripting, styling, plugins, collaboration. Formulas, multiple sheets, and XLSX are in scope from M5 (ADRs 0006-0008).
+8. **Non-goals stay out:** charts, pivots, macros, scripting, plugins, collaboration. Formulas, multiple sheets, XLSX (ADRs 0006-0008), and cell styles (ADRs 0009-0010) are in scope from M5. Bricks keeps the charts, pivots, and macros it can't edit when it saves.
 
 ## Crates
 
 | Crate | Owns |
 | --- | --- |
 | `csv-engine` | parsing, dialect and encoding detection, row index, CSV writing |
-| `data-model` | cells, overlay, row map, inferred types, sort and filter views |
-| `formula` | formula language: parse, render, references, values, evaluation, functions; no dependencies |
-| `xlsx` | XLSX import into indexed sheet copies, XLSX export |
+| `data-model` | cells, overlay, row map, inferred types, sort and filter views, cell styles |
+| `formula` | formula language: parse, render, references, values, evaluation, functions, number formats; no dependencies |
+| `xlsx` | XLSX import into indexed sheet copies with styles; save by patching the original package |
 | `grid` | toolkit-free viewport, selection, navigation |
 | `commands` | `Command` trait, undo/redo |
 | `file-format` | atomic save |

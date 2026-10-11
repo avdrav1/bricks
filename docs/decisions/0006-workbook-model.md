@@ -32,6 +32,6 @@ None; decided with the user while planning M5 from API research (calamine 0.36.1
 
 - Every table feature works per sheet for free, including atomic save and crash recovery of edits.
 - Import is a full pass over the sheet before it shows.
-- XLSX formatting (styles, merges, charts, comments) is not modelled; XLSX-2 warns about what a save drops.
+- XLSX formatting (styles, merges, charts, comments) is not modelled; XLSX-2 warns about what a save drops. Superseded by ADR 0009 (styles are modelled and shown) and ADR 0010 (save keeps everything else).
 - Raw values remain text: typed XLSX values are written as their canonical text, and export writes numbers, booleans, and dates back only when their text is canonical, so a round trip never changes a cell's text.
 - **Revisit if:** per-cell styles become a goal, or import time of 1M-row sheets misses its target.
