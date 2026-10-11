@@ -112,6 +112,11 @@ impl CsvTable {
         self.types = types.into_iter().collect();
     }
 
+    /// Whether column types were inferred ([`Self::set_types`]) and are still current.
+    pub fn has_types(&self) -> bool {
+        !self.types.is_empty()
+    }
+
     /// The type sort and filter use for the column shown at `col`: the user's override
     /// (TYPE-2), else the inferred type; `None` until inferred, and for columns inserted
     /// since that have no override.

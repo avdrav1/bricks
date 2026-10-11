@@ -1,13 +1,13 @@
 //! APP-7: the crash recovery journal. A table's unsaved edits, every kind, written to a
-//! journal and read back into a freshly opened table, save to the same bytes; putting
+//! journal and read back into a freshly opened workbook, save to the same bytes; putting
 //! them back is one undo step; and a journal that is damaged, cut short, or written for
 //! another file is refused rather than half-applied.
 
-use commands::{Batch, ClearCells, Reshape, SetCell, UndoStack};
+use commands::{Batch, ClearCells, Reshape, SetCell, SheetEdit, UndoStack};
 use csv_engine::{Charset, Encoding};
 use data_model::{
-    read_journal, read_journal_header, CellRef, CsvTable, DelimiterChoice, JournalError,
-    JournalHeader, SaveProgress, SortOrder, TableSource,
+    read_book_journal, read_journal_header, CellRef, CsvTable, DelimiterChoice, FileKind,
+    JournalError, JournalHeader, Origin, SaveProgress, SortOrder, TableSource, Workbook,
 };
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64};
@@ -48,6 +48,7 @@ fn saved(t: &CsvTable) -> String {
 fn header(path: Option<&Path>) -> JournalHeader {
     JournalHeader {
         path: path.map(Path::to_owned),
+        kind: FileKind::Csv,
         file_size: 123,
         file_mtime_ns: 456,
         delimiter: b',',
@@ -63,9 +64,17 @@ fn header(path: Option<&Path>) -> JournalHeader {
     }
 }
 
+/// The one-sheet workbook a window holds for `t`, as the app builds it.
+fn book(t: CsvTable, titled: bool) -> Workbook {
+    let origin = if titled { Origin::Csv } else { Origin::New };
+    Workbook::single("Sheet1".into(), t, origin)
+}
+
 fn journal(t: &CsvTable, h: &JournalHeader) -> Vec<u8> {
     let mut out = Vec::new();
-    t.snapshot().write_journal(h, &mut out).unwrap();
+    book(t.snapshot(), h.path.is_some())
+        .write_journal(h, &mut out)
+        .unwrap();
     out
 }
 
@@ -104,18 +113,18 @@ fn edit_everything(t: &mut CsvTable, undo: &mut UndoStack<CsvTable>) {
     undo.execute(Box::new(Batch::new("Sort", vec![e], at(t, 0, 0))), t);
 }
 
-/// Restore `bytes` onto `t` as the app does: one undoable step.
+/// Restore `bytes` onto `book` as the app does: one undoable step.
 fn restore(
-    t: &mut CsvTable,
-    undo: &mut UndoStack<CsvTable>,
+    book: &mut Workbook,
+    undo: &mut UndoStack<Workbook>,
     bytes: &[u8],
 ) -> Result<(), JournalError> {
-    let (_, state) = read_journal(bytes)?;
-    let edit = t.restore_edit(state)?;
-    let focus = at(t, 0, 0);
+    let (_, state) = read_book_journal(bytes)?;
+    let plan = book.restore_plan(state)?;
+    let show = Some(book.active_id());
     undo.execute(
-        Box::new(Batch::new("Restore unsaved edits", vec![edit], focus)),
-        t,
+        Box::new(SheetEdit::new("Restore unsaved edits", plan, show)),
+        book,
     );
     Ok(())
 }
@@ -133,26 +142,25 @@ fn every_kind_of_edit_comes_back_from_the_journal() {
     let bytes = journal(&before, &h);
     assert_eq!(read_journal_header(&bytes[..]).unwrap(), h, "header alone");
 
-    // "Relaunch": a new table on the same file.
-    let mut after = open(&src.0);
+    // "Relaunch": a new workbook on the same file.
+    let mut after = book(open(&src.0), true);
     let mut undo = UndoStack::default();
     restore(&mut after, &mut undo, &bytes).unwrap();
-    assert_eq!(saved(&after), want, "saves the same bytes");
-    assert_eq!(after.changes(), before.changes());
+    assert_eq!(saved(after.active()), want, "saves the same bytes");
+    assert_eq!(after.active().changes(), before.changes());
     assert_eq!(undo.len(), 1, "one step");
     undo.undo(&mut after).unwrap();
-    assert_eq!(saved(&after), CSV, "undo takes it all back");
+    assert_eq!(saved(after.active()), CSV, "undo takes it all back");
     undo.redo(&mut after).unwrap();
-    assert_eq!(saved(&after), want);
+    assert_eq!(saved(after.active()), want);
 
     // New edits after a restore get fresh ids: an inserted row isn't handed out twice.
-    let e = after.insert_rows(0, 1).unwrap();
-    undo.execute(Box::new(Reshape::new(e, at(&after, 0, 0))), &mut after);
-    undo.execute(
-        Box::new(SetCell::new(at(&after, 0, 0), "fresh")),
-        &mut after,
-    );
-    let text = saved(&after);
+    let t = after.active_mut();
+    let mut undo = UndoStack::default();
+    let e = t.insert_rows(0, 1).unwrap();
+    undo.execute(Box::new(Reshape::new(e, at(t, 0, 0))), t);
+    undo.execute(Box::new(SetCell::new(at(t, 0, 0), "fresh")), t);
+    let text = saved(t);
     assert!(text.contains("fresh") && text.contains("new"), "{text}");
 }
 
@@ -165,9 +173,9 @@ fn journals_are_deterministic_and_unsorted_orders_round_trip() {
     undo.execute(Box::new(Reshape::new(e, at(&t, 0, 0))), &mut t);
     let h = header(Some(&src.0));
     assert_eq!(journal(&t, &h), journal(&t, &h), "same state, same bytes");
-    let mut back = open(&src.0);
+    let mut back = book(open(&src.0), true);
     restore(&mut back, &mut UndoStack::default(), &journal(&t, &h)).unwrap();
-    assert_eq!(saved(&back), saved(&t));
+    assert_eq!(saved(back.active()), saved(&t));
 }
 
 #[test]
@@ -177,7 +185,7 @@ fn damaged_or_foreign_journals_are_refused() {
     let mut undo = UndoStack::default();
     edit_everything(&mut t, &mut undo);
     let bytes = journal(&t, &header(Some(&src.0)));
-    let mut fresh = open(&src.0);
+    let mut fresh = book(open(&src.0), true);
     let mut undo = UndoStack::default();
 
     let mut flipped = bytes.clone();
@@ -193,29 +201,30 @@ fn damaged_or_foreign_journals_are_refused() {
         Err(JournalError::Corrupt(_))
     ));
     assert!(matches!(
-        read_journal(&b"not a journal at all"[..]),
+        read_book_journal(&b"not a journal at all"[..]),
         Err(JournalError::Corrupt(_))
     ));
     let mut longer = bytes.clone();
     longer.push(0);
     assert!(matches!(
-        read_journal(&longer[..]),
+        read_book_journal(&longer[..]),
         Err(JournalError::Corrupt(_))
     ));
 
     // Written for a 5-row file, applied to a 2-row one: the rows aren't there.
     let small = file("small", "id,city,score\n1,Denver,10\n2,boston,3\n");
-    let mut other = open(&small.0);
+    let mut other = book(open(&small.0), true);
     assert!(matches!(
         restore(&mut other, &mut undo, &bytes),
         Err(JournalError::Mismatch(_))
     ));
     assert_eq!(
-        saved(&other),
+        saved(other.active()),
         "id,city,score\n1,Denver,10\n2,boston,3\n",
         "untouched"
     );
-    assert_eq!(saved(&fresh), CSV, "nothing half-applied");
+    assert_eq!(saved(fresh.active()), CSV, "nothing half-applied");
+    assert!(undo.is_empty(), "no step for a refused journal");
 }
 
 #[test]
@@ -230,10 +239,12 @@ fn an_untitled_table_comes_back_too() {
     }
     let bytes = journal(&t, &header(None));
     assert_eq!(read_journal_header(&bytes[..]).unwrap().path, None);
-    let mut back = CsvTable::untitled();
+    let mut back = Workbook::default();
     restore(&mut back, &mut UndoStack::default(), &bytes).unwrap();
-    assert_eq!(back.row_count(), 3);
-    assert_eq!(saved(&back), saved(&t));
+    assert_eq!(back.sheets().len(), 1);
+    assert_eq!(back.sheets()[0].name, "Sheet1");
+    assert_eq!(back.sheets()[0].table.row_count(), 3);
+    assert_eq!(saved(&back.sheets()[0].table), saved(&t));
 }
 
 /// APP-7 at scale: the biggest journal, a sorted 1 GB table (its order is 19.1M rows),
@@ -260,20 +271,22 @@ fn a_sorted_1gb_table_journals_and_restores() {
     undo.execute(Box::new(SetCell::new(at(&t, 7, 1), "edited")), &mut t);
     let file = std::env::temp_dir().join(format!("app7-1gb-{}.journal", std::process::id()));
     let start = Instant::now();
-    t.snapshot()
+    book(t.snapshot(), true)
         .write_journal(&header(Some(&path)), std::fs::File::create(&file).unwrap())
         .unwrap();
     let wrote = start.elapsed();
     let bytes = std::fs::metadata(&file).unwrap().len();
     let start = Instant::now();
-    let (_, state) = read_journal(std::fs::File::open(&file).unwrap()).unwrap();
+    let (_, state) = read_book_journal(std::fs::File::open(&file).unwrap()).unwrap();
     let read = start.elapsed();
-    let mut back = open(&path);
+    let mut back = book(open(&path), true);
     let start = Instant::now();
-    let edit = back.restore_edit(state).unwrap();
-    back.apply(edit);
+    for edit in back.restore_plan(state).unwrap() {
+        back.apply(edit);
+    }
     let applied = start.elapsed();
     std::fs::remove_file(&file).unwrap();
+    let back = back.active();
     assert_eq!(back.cell_value(7, 1).as_deref(), Some("edited"));
     assert_eq!(back.row_id(12345), t.row_id(12345), "same order");
     eprintln!(

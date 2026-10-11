@@ -29,7 +29,10 @@ pub use copy::{Copied, HTML_MAX_CELLS};
 pub use filter::{Compare, Filter, FilterError, RowSet, Test};
 pub use formulas::{is_formula, FormulaCells, RowPositions};
 pub use infer::{value_type, ColumnTypes, SAMPLE_HEAD, SAMPLE_SPREAD};
-pub use journal::{read_journal, read_journal_header, EditState, JournalError, JournalHeader};
+pub use journal::{
+    read_book_journal, read_journal_header, BookState, EditState, FileKind, JournalError,
+    JournalHeader, SheetState,
+};
 pub use paste::{parse_tsv, PasteError, PASTE_MAX_CELLS};
 pub use rowmap::{RowOrder, Run};
 pub use save::{SaveJob, SaveJobError, SaveProgress, SaveStats};
@@ -147,7 +150,8 @@ pub enum Edit {
     /// inverse holds the order before. Build it with [`CsvTable::sort_rows`] (SORT-1).
     Reorder(Option<RowOrder>),
     /// Put back a whole edit state (APP-7: unsaved edits after a crash); the inverse holds
-    /// the state before. Build it with [`CsvTable::restore_edit`].
+    /// the state before. Built by [`Workbook::restore_plan`] after
+    /// [`CsvTable::check_edit_state`].
     Restore(Box<EditState>),
 }
 
