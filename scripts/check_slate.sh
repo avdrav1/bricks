@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# SLATE-4 acceptance: the viewer window opens, shows, and refuses documents.
+# SLATE-4 and SLATE-10 acceptance: the viewer window opens, shows, and refuses documents,
+# and its pageless column follows View → Text Width.
 #
 #   scripts/check_slate.sh [BINARY]   (default target/release/slate)
 #
@@ -23,6 +24,16 @@
 #   7. a file that isn't a Word document, named .docx, and a .doc each alert with the file's
 #      name and the reason ("Save it as .docx first" for the .doc); after Close the window
 #      is gone and slate has exited.
+#   8. col-a.md and col-b.md (a long word that wraps, a rule, a table) in two windows of one
+#      slate process and col-c.md in another process, tabbed: each window measured in a
+#      screenshot at Medium, then after F10 → Text Width → Narrow, Wide, and Full in col-a's
+#      menu: the rule (the column's width exactly) and the widest line of text above it
+#      measure 480, 624, 816, and 1232 px (the 1280 px screen less 24 px a side) in all
+#      three windows, centred;
+#   9. after Ctrl+Q the settings file says full, and slate relaunched shows a Full column;
+#  10. Wide in a window resized to 640 px (floating) narrows the column to 592; Narrow
+#      there stays 480;
+#  11. `slate fixture.docx`: its page break is an accessible object named "Page break".
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -43,6 +54,7 @@ mkdir -p /shots /tmp/rt /tmp/md /tmp/proto && chmod 700 /tmp/rt && touch /tmp/pr
 python -m pywayland.scanner -i /usr/share/wayland/wayland.xml \
   /usr/share/wlr-protocols/unstable/wlr-virtual-pointer-unstable-v1.xml -o /tmp/proto/wlr_proto >/dev/null
 export PYTHONPATH=/tmp/proto XDG_RUNTIME_DIR=/tmp/rt GDK_DEBUG=no-portals XDG_STATE_HOME=/tmp/state GDK_BACKEND=wayland
+export XDG_CONFIG_HOME=/tmp/config
 printf "output HEADLESS-1 resolution 1280x720 position 0 0\ndefault_border none\n" > /tmp/sway.conf
 cp /model/windows1252-cr.txt /tmp/w.txt
 cp /model/fixture.md /model/picture.png /tmp/md/
@@ -51,6 +63,9 @@ cp /docx/poi/IllustrativeCases.docx /docx/poi/Numbering.docx /tmp/
 printf "not a zip at all\n" > /tmp/bad.docx
 printf "\320\317\021\340\241\261\032\341old" > /tmp/old.doc
 printf "# HHHHHHHH\n\nHHHHHHHH\n\n**HHHHHHHH**\n" > /tmp/looks.md
+# A word too long for any line wraps at every width, so its lines are as wide as the column.
+python3 -c "print(\"# Column\n\n\" + \"x\" * 800 + \"\n\n---\n\n| a | b |\n|---|---|\n| c | d |\")" > /tmp/col-a.md
+cp /tmp/col-a.md /tmp/col-b.md; cp /tmp/col-a.md /tmp/col-c.md
 cat > /tmp/md.expected <<"EOF"
 Slate Markdown fixture
 Second level heading
@@ -162,6 +177,35 @@ if len(bands) >= 3:
     print(f"heading height: {height(bands[0]) * 100 // height(bands[1])}")
     print(f"bold ink: {bands[2][2] * 100 // bands[1][2]}")
 PY
+cat > /tmp/col.py <<"PY"
+import sys
+import gi
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import GdkPixbuf
+p = GdkPixbuf.Pixbuf.new_from_file(sys.argv[1])
+w, h, rs, n, px = p.get_width(), p.get_height(), p.get_rowstride(), p.get_n_channels(), p.get_pixels()
+# The rule: the longest run of its grey (c0bfbc) on one row; the column is as wide as it.
+rule, rule_y, rule_x = 0, None, 0
+for y in range(h):
+    row = px[y * rs:y * rs + w * n]
+    run = 0
+    for x in range(w):
+        if all(abs(row[x * n + i] - c) <= 6 for i, c in enumerate((0xC0, 0xBF, 0xBC))):
+            run += 1
+            if run > rule:
+                rule, rule_y, rule_x = run, y, x - run + 1
+        else:
+            run = 0
+# The wrapped word just above it: the widest extent of dark ink on a row (text, not the
+# black desktop around a floating window).
+text = 0
+for y in range(max(0, (rule_y or 0) - 60), rule_y or 0):
+    row = px[y * rs:y * rs + w * n]
+    dark = [x for x in range(w) if 0 < sum(row[x * n:x * n + 3]) < 300]
+    if dark:
+        text = max(text, dark[-1] - dark[0] + 1)
+print(f"rule {rule} text {text} off {rule_x + rule // 2 - w // 2}")
+PY
 session() {
   WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 sway --unsupported-gpu -c /tmp/sway.conf >/tmp/sway.log 2>&1 &
   for i in $(seq 50); do ls /tmp/rt/wayland-[0-9] >/dev/null 2>&1 && break; sleep 0.1; done
@@ -172,6 +216,21 @@ session() {
   titles() { echo "titles: $(swaymsg -t get_tree | jq -r ".. | objects | select(.type==\"con\" and .name!=null) | .name" | sort | tr "\n" ",")"; }
   a11y() { python3 /tmp/a11y.py "$@" 2>&1; }
   quit() { pkill -x slate; sleep 1; }
+  # Screenshot each column window (focused in turn) and measure it: "LABEL col-X.md: rule ...".
+  measure() {
+    for t in col-a col-b col-c; do
+      [ $# -gt 1 ] && [ $t != $2 ] && continue
+      swaymsg "[title=$t] focus" >/dev/null; sleep 1; shot $1-$t
+      echo "$1 $t.md: $(python3 /tmp/col.py /shots/$1-$t.png)"
+    done
+  }
+  # F10 in col-a, Text Width, the Nth width (1 Narrow, 2 Medium, 3 Wide, 4 Full).
+  text_width() {
+    swaymsg "[title=col-a] focus" >/dev/null; sleep 1
+    keys -k F10; keys -k Down; keys -k Down; keys -k Return
+    for i in $(seq $1); do keys -k Down; done
+    keys -k Return; sleep 1
+  }
 
   echo "== 1 txt"
   slate /tmp/w.txt >>/tmp/app.log 2>&1 & sleep 4
@@ -209,6 +268,31 @@ session() {
     pgrep -x slate >/dev/null && echo "after close: slate still running" || echo "after close: slate exited"
     quit
   done
+  echo "== 8 width"
+  slate /tmp/col-a.md /tmp/col-b.md >>/tmp/app.log 2>&1 & sleep 4
+  slate /tmp/col-c.md >>/tmp/app.log 2>&1 & other=$!; sleep 4
+  swaymsg "[title=col-a] focus, layout tabbed" >/dev/null; sleep 1
+  titles; measure medium
+  text_width 1; measure narrow
+  text_width 3; measure wide
+  text_width 4; measure full
+  kill $other; sleep 1
+  echo "== 9 restart"
+  swaymsg "[title=col-a] focus" >/dev/null; sleep 1
+  keys -M ctrl q -m ctrl; sleep 2
+  pgrep -x slate >/dev/null && echo "after quit: slate still running" || echo "after quit: slate exited"
+  echo "settings: $(cat /tmp/config/slate/settings 2>/dev/null)"
+  slate /tmp/col-a.md >>/tmp/app.log 2>&1 & sleep 4
+  measure restart col-a
+  echo "== 10 narrow window"
+  text_width 3; measure wide1280 col-a
+  swaymsg "[title=col-a] floating enable, resize set width 640 px height 600 px, move position center" >/dev/null; sleep 1
+  measure wide640 col-a
+  text_width 1; measure narrow640 col-a
+  quit
+  echo "== 11 page break"
+  slate /tmp/fixture.docx >>/tmp/app.log 2>&1 & sleep 4
+  echo "page breaks: $(a11y dump | grep -c "^Page break$")"; quit
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -224,6 +308,17 @@ at_least() { # WHAT SECTION KEY MIN
   local v
   v=$(section "$2" | sed -n "s/^$3: //p" | head -1)
   if [ -n "$v" ] && [ "$v" -ge "$4" ]; then echo "ok   $1 ($v)"; else echo "FAIL $1 (${v:-nothing}, want >= $4)"; fail=1; fi
+}
+column() { # WHAT SECTION LABEL WIDTH: the rule within 1 px, the text within 16 px, centred
+  local m r t o
+  m=$(section "$2" | sed -n "s/^$3: //p" | head -1)
+  read -r _ r _ t _ o <<<"$m" || true
+  if [ -n "$o" ] && [ "$r" -ge $(($4 - 1)) ] && [ "$r" -le $(($4 + 1)) ] && [ "$t" -le "$4" ] \
+    && [ "$t" -ge $(($4 - 16)) ] && [ "${o#-}" -le 2 ]; then
+    echo "ok   $1 (rule $r, text $t, off centre $o)"
+  else
+    echo "FAIL $1 (${m:-nothing}; want $4)"; fail=1
+  fi
 }
 check "1: the .txt window is titled w.txt" "1 txt" "^titles: .*w\.txt"
 check "1: the accessible text equals the Windows-1252 file's lines" "1 txt" "^text equals the file$"
@@ -252,6 +347,18 @@ if [ "$(section "7 bad" | grep -c "^after close: slate exited$")" = 2 ]; then
 else
   echo "FAIL 7: the window closes after the alert"; fail=1
 fi
+for w in medium:624 narrow:480 wide:816 full:1232; do
+  for t in col-a col-b col-c; do
+    column "8: ${w%%:*} in $t.md measures ${w#*:} px" "8 width" "${w%%:*} $t\.md" "${w#*:}"
+  done
+done
+check "9: Ctrl+Q quits" "9 restart" "^after quit: slate exited$"
+check "9: the settings file remembers Full" "9 restart" "^settings: text-width=full$"
+column "9: relaunched, the column is still Full" "9 restart" "restart col-a\.md" 1232
+column "10: Wide in a 1280 px window" "10 narrow window" "wide1280 col-a\.md" 816
+column "10: Wide in a 640 px window narrows to 592" "10 narrow window" "wide640 col-a\.md" 592
+column "10: Narrow in a 640 px window stays 480" "10 narrow window" "narrow640 col-a\.md" 480
+check "11: the .docx page break is named Page break to screen readers" "11 page break" "^page breaks: 1$"
 if [ $fail = 0 ]; then echo "SLATE OK"; else
   echo "SLATE CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

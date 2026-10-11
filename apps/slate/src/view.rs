@@ -1,30 +1,33 @@
-//! The SL0 viewer's page (ADR 0003): a document drawn into a read-only `GtkTextView`.
+//! The SL0 viewer's document column (ADR 0003, ADR 0005): a document drawn into a
+//! read-only `GtkTextView`.
 //!
 //! Paragraph and run looks become text tags, one per distinct look. Tables are embedded
 //! `gtk::Grid`s whose cells are text views drawn the same way, pictures embedded
-//! `gtk::Picture`s scaled to fit the column, and page breaks and rules separators. The
-//! text column is a page wide (6.5 in at 96 dpi) and centred: the view's margins grow with
-//! the window, and the tags that indent paragraphs follow them.
+//! `gtk::Picture`s scaled to fit the column, and page breaks and rules separators. Slate is
+//! pageless: the text column is as wide as the user's text width setting (narrower when the
+//! window is) and centred; the view's margins grow with the window, the tags that indent
+//! paragraphs follow them, and the embedded widgets are resized to the column.
 //!
 //! Markdown and plain text take their looks from the paragraph style (headings larger and
 //! bold, quotes indented and italic); a DOCX file's runs already carry the sizes and weights
 //! its styles give them, so its headings only get their spacing here.
 
+use crate::settings::TextWidth;
 use document_model::{
     Align, Block, CodeBlock, Document, Format, Image, ImageSource, ListKind, Paragraph,
     ParagraphStyle, Raw, Run, Table,
 };
 use gtk::prelude::*;
 use gtk::{gdk, pango};
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::collections::HashMap;
-use std::rc::Rc;
 use std::sync::Arc;
 
-/// The text column's width: 6.5 in at 96 dpi.
-pub const PAGE_WIDTH: i32 = 624;
-/// The smallest margin beside the column, when the window is narrower than a page.
+/// The smallest margin beside the column, when the window is narrower than the text width
+/// (and on each side of a Full column).
 const MIN_MARGIN: i32 = 24;
+/// The narrowest the column gets, however narrow the window.
+const MIN_COLUMN: i32 = 120;
 /// How far each list or quote level indents.
 const LEVEL_INDENT: i32 = 28;
 /// Space below a paragraph, and below a list item followed by another.
@@ -46,32 +49,67 @@ pub fn texture_key(bytes: &Arc<[u8]>) -> usize {
     Arc::as_ptr(bytes) as *const u8 as usize
 }
 
-/// A document's page: the text view, and the tags whose indent follows its margin.
-pub struct Page {
-    pub view: gtk::TextView,
-    margin_tags: Rc<RefCell<Vec<(gtk::TextTag, i32)>>>,
+/// The text column's width for `setting` in a view `view_width` pixels wide: the setting's
+/// width, or the view's less a margin each side when that is narrower (Full always), but
+/// never under [`MIN_COLUMN`].
+pub fn column_width(setting: TextWidth, view_width: i32) -> i32 {
+    let room = view_width - 2 * MIN_MARGIN;
+    setting
+        .pixels()
+        .map_or(room, |px| px.min(room))
+        .max(MIN_COLUMN)
 }
 
-impl Page {
-    pub fn new(doc: &Document, textures: &Textures) -> Self {
+/// A document's column: the text view, the tags whose indent follows its margin, and the
+/// embedded widgets sized by its width.
+pub struct Column {
+    pub view: gtk::TextView,
+    margin_tags: Vec<(gtk::TextTag, i32)>,
+    embedded: Vec<Embedded>,
+    setting: Cell<TextWidth>,
+    /// The view's width at the last [`Column::fit`]; 0 before the first.
+    view_width: Cell<i32>,
+    /// The width the embedded widgets are sized to.
+    width: Cell<i32>,
+}
+
+impl Column {
+    pub fn new(doc: &Document, textures: &Textures, setting: TextWidth) -> Self {
         let view = text_view("slate-page");
         view.set_top_margin(40);
         view.set_bottom_margin(64);
         let style_looks = !matches!(doc.format, Format::Docx);
         let plain = matches!(doc.format, Format::Text(_));
-        let mut r = Renderer::new(&view, textures, style_looks, plain, PAGE_WIDTH);
+        let mut r = Renderer::new(&view, textures, style_looks, plain);
         r.render(&doc.blocks);
-        let page = Page {
+        let column = Column {
             view,
-            margin_tags: Rc::new(RefCell::new(r.margin_tags)),
+            margin_tags: r.margin_tags,
+            embedded: r.embedded,
+            setting: Cell::new(setting),
+            view_width: Cell::new(0),
+            width: Cell::new(0),
         };
-        page.set_margin(MIN_MARGIN);
-        page
+        column.set_margin(MIN_MARGIN);
+        column.resize(setting.pixels().unwrap_or(MIN_COLUMN));
+        column
     }
 
-    /// Centre the column in a view `width` pixels wide.
-    pub fn fit(&self, width: i32) {
-        self.set_margin(((width - PAGE_WIDTH) / 2).max(MIN_MARGIN));
+    /// Centre the column in a view `view_width` pixels wide.
+    pub fn fit(&self, view_width: i32) {
+        self.view_width.set(view_width);
+        let width = column_width(self.setting.get(), view_width);
+        self.set_margin(((view_width - width) / 2).max(MIN_MARGIN));
+        self.resize(width);
+    }
+
+    /// Follow a new text width setting.
+    pub fn set_text_width(&self, setting: TextWidth) {
+        self.setting.set(setting);
+        match self.view_width.get() {
+            0 => self.resize(setting.pixels().unwrap_or(MIN_COLUMN)),
+            w => self.fit(w),
+        }
     }
 
     fn set_margin(&self, margin: i32) {
@@ -80,8 +118,52 @@ impl Page {
         }
         self.view.set_left_margin(margin);
         self.view.set_right_margin(margin);
-        for (tag, extra) in self.margin_tags.borrow().iter() {
+        for (tag, extra) in &self.margin_tags {
             tag.set_left_margin(margin + extra);
+        }
+    }
+
+    fn resize(&self, width: i32) {
+        if self.width.replace(width) != width {
+            resize(&self.embedded, width);
+        }
+    }
+}
+
+/// A widget embedded in a text view, sized by the view's column.
+enum Embedded {
+    /// A page break's or rule's line: the column's width.
+    Line(gtk::Separator),
+    /// A picture at `width` x `height`, scaled down to fit.
+    Picture(gtk::Picture, f32, f32),
+    /// A table of `columns` homogeneous columns filling the column.
+    Table { columns: i32, cells: Vec<TableCell> },
+}
+
+struct TableCell {
+    view: gtk::TextView,
+    span: i32,
+    embedded: Vec<Embedded>,
+}
+
+/// Size `embedded` to a column `width` pixels wide.
+fn resize(embedded: &[Embedded], width: i32) {
+    for e in embedded {
+        match e {
+            Embedded::Line(line) => line.set_size_request(width, -1),
+            Embedded::Picture(picture, w, h) => {
+                let shown = w.min(width as f32).max(1.0);
+                let height = (h * shown / w.max(1.0)).max(1.0);
+                picture.set_size_request(shown.round() as i32, height.round() as i32);
+            }
+            Embedded::Table { columns, cells } => {
+                let column = (width / columns).max(24);
+                for cell in cells {
+                    cell.view.set_size_request(column * cell.span, -1);
+                    // Inside the cell's padding and its 1px border (main.rs CSS).
+                    resize(&cell.embedded, column * cell.span - 2 * CELL_PADDING - 2);
+                }
+            }
         }
     }
 }
@@ -168,8 +250,8 @@ struct Renderer<'a> {
     style_looks: bool,
     /// Plain text: lines, without space between paragraphs.
     plain: bool,
-    /// The width embedded tables and pictures fit in.
-    width: i32,
+    /// Embedded widgets sized by the column, drawn so far.
+    embedded: Vec<Embedded>,
     /// Every run bold: a Markdown table's header row.
     all_bold: bool,
     /// Blocks drawn so far: each after the first starts a new line.
@@ -177,13 +259,7 @@ struct Renderer<'a> {
 }
 
 impl<'a> Renderer<'a> {
-    fn new(
-        view: &gtk::TextView,
-        textures: &'a Textures,
-        style_looks: bool,
-        plain: bool,
-        width: i32,
-    ) -> Self {
+    fn new(view: &gtk::TextView, textures: &'a Textures, style_looks: bool, plain: bool) -> Self {
         Self {
             view: view.clone(),
             buffer: view.buffer(),
@@ -192,7 +268,7 @@ impl<'a> Renderer<'a> {
             margin_tags: Vec::new(),
             style_looks,
             plain,
-            width,
+            embedded: Vec::new(),
             all_bold: false,
             started: false,
         }
@@ -266,8 +342,9 @@ impl<'a> Renderer<'a> {
             Block::CodeBlock(code) => self.code(code),
             Block::Raw(raw) => self.raw(raw),
             Block::Table(table) => {
-                let grid = self.table(table);
+                let (grid, embedded) = self.table(table);
                 self.embed(&grid);
+                self.embedded.push(embedded);
             }
             Block::Image(image) => {
                 let picture = self.image(image);
@@ -276,15 +353,15 @@ impl<'a> Renderer<'a> {
             Block::PageBreak => {
                 let line = gtk::Separator::new(gtk::Orientation::Horizontal);
                 line.add_css_class("page-break");
-                line.set_size_request(self.width, -1);
                 line.update_property(&[gtk::accessible::Property::Label("Page break")]);
                 self.embed(&line);
+                self.embedded.push(Embedded::Line(line));
             }
             Block::Rule => {
                 let line = gtk::Separator::new(gtk::Orientation::Horizontal);
                 line.add_css_class("rule");
-                line.set_size_request(self.width, -1);
                 self.embed(&line);
+                self.embedded.push(Embedded::Line(line));
             }
         }
     }
@@ -505,8 +582,9 @@ impl<'a> Renderer<'a> {
             .insert_with_tags(&mut self.end(), &raw.source, &[&look]);
     }
 
-    /// A table as a grid of cells, each a text view drawn like the page.
-    fn table(&self, table: &Table) -> gtk::Grid {
+    /// A table as a grid of cells, each a text view drawn like the column; sized by
+    /// [`resize`].
+    fn table(&self, table: &Table) -> (gtk::Grid, Embedded) {
         let grid = gtk::Grid::new();
         grid.add_css_class("slate-table");
         grid.set_column_homogeneous(true);
@@ -518,7 +596,7 @@ impl<'a> Renderer<'a> {
             .max()
             .unwrap_or(1)
             .max(1);
-        let column = (self.width / columns).max(24);
+        let mut cells = Vec::new();
         for (y, row) in table.rows.iter().enumerate() {
             let mut x = 0;
             for cell in &row.cells {
@@ -528,33 +606,34 @@ impl<'a> Renderer<'a> {
                 view.set_right_margin(CELL_PADDING);
                 view.set_top_margin(CELL_PADDING / 2);
                 view.set_bottom_margin(CELL_PADDING / 2);
-                view.set_size_request(column * span, -1);
-                // Inside the cell's padding and its 1px border (main.rs CSS).
-                let width = column * span - 2 * CELL_PADDING - 2;
-                let mut r = Renderer::new(&view, self.textures, self.style_looks, false, width);
+                let mut r = Renderer::new(&view, self.textures, self.style_looks, false);
                 r.all_bold = row.header && self.style_looks;
                 r.render(&cell.blocks);
                 grid.attach(&view, x, y as i32, span, 1);
                 x += span;
+                cells.push(TableCell {
+                    view,
+                    span,
+                    embedded: r.embedded,
+                });
             }
         }
-        grid
+        (grid, Embedded::Table { columns, cells })
     }
 
-    fn image(&self, image: &Image) -> gtk::Widget {
+    /// A picture, sized by [`resize`]; its alt text when it can't be shown.
+    fn image(&mut self, image: &Image) -> gtk::Widget {
         if let ImageSource::Embedded { bytes, .. } = &image.source {
             if let Some(texture) = self.textures.get(&texture_key(bytes)) {
                 let (w, h) = image
                     .size
                     .unwrap_or((texture.width() as f32, texture.height() as f32));
-                let width = w.min(self.width as f32).max(1.0);
-                let height = (h * width / w.max(1.0)).max(1.0);
                 let picture = gtk::Picture::for_paintable(texture);
                 picture.set_can_shrink(true);
                 picture.set_content_fit(gtk::ContentFit::Contain);
-                picture.set_size_request(width.round() as i32, height.round() as i32);
                 picture.set_halign(gtk::Align::Start);
                 picture.set_alternative_text(Some(&image.alt));
+                self.embedded.push(Embedded::Picture(picture.clone(), w, h));
                 return picture.upcast();
             }
         }
@@ -566,5 +645,52 @@ impl<'a> Renderer<'a> {
         let label = gtk::Label::new(Some(&text));
         label.add_css_class("dim-label");
         label.upcast()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_wide_window_gets_the_settings_width() {
+        for (setting, px) in [
+            (TextWidth::Narrow, 480),
+            (TextWidth::Medium, 624),
+            (TextWidth::Wide, 816),
+        ] {
+            assert_eq!(column_width(setting, 1280), px);
+            // Exactly room for it and a margin each side.
+            assert_eq!(column_width(setting, px + 2 * MIN_MARGIN), px);
+        }
+    }
+
+    #[test]
+    fn full_is_the_window_less_a_margin_each_side() {
+        assert_eq!(column_width(TextWidth::Full, 1280), 1232);
+        assert_eq!(column_width(TextWidth::Full, 900), 852);
+        assert_eq!(column_width(TextWidth::Full, 3840), 3792);
+    }
+
+    #[test]
+    fn a_narrower_window_narrows_the_column() {
+        assert_eq!(
+            column_width(TextWidth::Medium, 624 + 2 * MIN_MARGIN - 1),
+            623
+        );
+        assert_eq!(column_width(TextWidth::Wide, 640), 592);
+        assert_eq!(column_width(TextWidth::Narrow, 500), 452);
+    }
+
+    #[test]
+    fn the_column_never_gets_narrower_than_the_minimum() {
+        for setting in TextWidth::ALL {
+            assert_eq!(
+                column_width(setting, MIN_COLUMN + 2 * MIN_MARGIN),
+                MIN_COLUMN
+            );
+            assert_eq!(column_width(setting, 100), MIN_COLUMN);
+            assert_eq!(column_width(setting, 0), MIN_COLUMN);
+        }
     }
 }

@@ -5,16 +5,20 @@
 //! Open. Ctrl+O picks a file through the desktop's file dialog, and files dropped on any
 //! window open too. A file is read off the UI thread while its window says "Opening…"; one
 //! that can't be read gets an alert naming it and the reason, and its window closes.
+//! Documents show as one pageless column (ADR 0005) whose width the menu's View → Text
+//! Width sets for every window at once, remembered in the user's settings.
 
 mod open;
+mod settings;
 mod view;
 
 use gtk::prelude::*;
 use gtk::{gdk, gio, glib};
+use settings::{Saver, Settings, TextWidth};
 use std::cell::RefCell;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use suite_core::AppKind;
 
 const APP: AppKind = AppKind::Slate;
@@ -22,7 +26,7 @@ const APP_ID: &str = "dev.cronkite.Slate";
 const USAGE: &str = "usage: slate [FILE.txt|FILE.md|FILE.docx]... [--version]";
 const START_WINDOW: &str = "start";
 
-/// The page is paper: dark text on white whatever the theme, as the document was written.
+/// The document is paper: dark text on white whatever the theme, as it was written.
 const CSS: &str = "
 textview.slate-page, textview.slate-page > text,
 textview.slate-cell, textview.slate-cell > text {
@@ -45,6 +49,11 @@ thread_local! {
     /// The windows showing a file, by the file's canonical path.
     static OPEN: RefCell<Vec<(PathBuf, glib::WeakRef<gtk::ApplicationWindow>)>> =
         const { RefCell::new(Vec::new()) };
+    /// The documents shown, which follow the text width setting.
+    static COLUMNS: RefCell<Vec<Weak<view::Column>>> = const { RefCell::new(Vec::new()) };
+    static SAVER: RefCell<Saver> = RefCell::new(Saver::default());
+    /// Watches the settings file for changes made by other Slate processes.
+    static SETTINGS_MONITOR: RefCell<Option<gio::FileMonitor>> = const { RefCell::new(None) };
 }
 
 fn main() -> glib::ExitCode {
@@ -104,11 +113,27 @@ fn main() -> glib::ExitCode {
         let quit = gio::ActionEntry::builder("quit")
             .activate(|app: &gtk::Application, _, _| app.quit())
             .build();
-        app.add_action_entries([open, close, quit]);
+        // View → Text Width: a radio choice for every window at once, remembered.
+        let text_width = gio::ActionEntry::builder("text-width")
+            .parameter_type(Some(glib::VariantTy::STRING))
+            .state(Settings::load().text_width.id().to_variant())
+            .change_state(|_: &gtk::Application, action, value| {
+                let Some(width) = value.and_then(|v| v.str()).and_then(TextWidth::from_id) else {
+                    return;
+                };
+                if apply_text_width(action, width) {
+                    SAVER.with_borrow_mut(|s| s.save(Settings { text_width: width }));
+                }
+            })
+            .build();
+        app.add_action_entries([open, close, quit, text_width]);
         app.set_accels_for_action("app.open", &["<Control>o"]);
         app.set_accels_for_action("app.close", &["<Control>w"]);
         app.set_accels_for_action("app.quit", &["<Control>q"]);
+        watch_settings(app);
     });
+    // Changes still being written finish before Slate exits.
+    app.connect_shutdown(|_| SAVER.with_borrow_mut(Saver::finish));
     let files = RefCell::new(Some(files));
     app.connect_activate(move |app| match files.take() {
         Some(files) if !files.is_empty() => {
@@ -143,15 +168,32 @@ fn header(title: &str) -> gtk::HeaderBar {
     open.set_action_name(Some("app.open"));
     open.update_property(&[gtk::accessible::Property::Label("Open")]);
     header.pack_start(&open);
+    let file = gio::Menu::new();
+    file.append(Some("Open…"), Some("app.open"));
+    file.append(Some("Close Window"), Some("app.close"));
+    // View → Text Width: a radio item per width, checked by `app.text-width`'s state.
+    let widths = gio::Menu::new();
+    for width in TextWidth::ALL {
+        let item = gio::MenuItem::new(Some(width.label()), None);
+        item.set_action_and_target_value(Some("app.text-width"), Some(&width.id().to_variant()));
+        widths.append_item(&item);
+    }
+    let view = gio::Menu::new();
+    view.append_submenu(Some("Text Width"), &widths);
+    let quit = gio::Menu::new();
+    quit.append(Some("Quit"), Some("app.quit"));
     let menu = gio::Menu::new();
-    menu.append(Some("Open…"), Some("app.open"));
-    menu.append(Some("Close Window"), Some("app.close"));
-    menu.append(Some("Quit"), Some("app.quit"));
+    menu.append_section(None, &file);
+    menu.append_section(Some("View"), &view);
+    menu.append_section(None, &quit);
+    // The primary menu: F10 opens it.
     let button = gtk::MenuButton::builder()
         .icon_name("open-menu-symbolic")
         .menu_model(&menu)
         .tooltip_text("Menu")
+        .primary(true)
         .build();
+    button.update_property(&[gtk::accessible::Property::Label("Main Menu")]);
     header.pack_end(&button);
     let label = gtk::Label::new(Some(title));
     label.add_css_class("title");
@@ -343,7 +385,7 @@ fn open_window(app: &gtk::Application, path: &Path) {
     glib::spawn_future_local(async move {
         let reason = match reading.await {
             Ok(Ok(opened)) => {
-                show(&stack, &status, &name, opened);
+                show(&app, &stack, &status, &name, opened);
                 close_start_window(&app);
                 return;
             }
@@ -364,19 +406,98 @@ fn open_window(app: &gtk::Application, path: &Path) {
     });
 }
 
+/// Make `width` `app.text-width`'s state and show every document at it; false if it
+/// already was.
+fn apply_text_width(action: &gio::SimpleAction, width: TextWidth) -> bool {
+    let state = width.id().to_variant();
+    if action.state().as_ref() == Some(&state) {
+        return false;
+    }
+    action.set_state(&state);
+    COLUMNS.with_borrow_mut(|columns| {
+        columns.retain(|c| c.strong_count() > 0);
+        for column in columns.iter().filter_map(Weak::upgrade) {
+            column.set_text_width(width);
+        }
+    });
+    true
+}
+
+/// Follow text width changes another Slate process saves (each `slate` command is one), so
+/// every window follows the setting. The file is read off the UI thread.
+fn watch_settings(app: &gtk::Application) {
+    let path = settings::path();
+    // A file in a directory that doesn't exist yet is only polled for; make the directory.
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let monitor = match gio::File::for_path(&path)
+        .monitor_file(gio::FileMonitorFlags::WATCH_MOVES, gio::Cancellable::NONE)
+    {
+        Ok(monitor) => monitor,
+        Err(e) => {
+            tracing::warn!("cannot watch {}: {e}", path.display());
+            return;
+        }
+    };
+    let app = app.downgrade();
+    monitor.connect_changed(move |_, _, _, event| {
+        use gio::FileMonitorEvent as E;
+        if !matches!(
+            event,
+            E::ChangesDoneHint | E::Created | E::MovedIn | E::Renamed
+        ) {
+            return;
+        }
+        let app = app.clone();
+        glib::spawn_future_local(async move {
+            let Ok(settings) = gio::spawn_blocking(Settings::load).await else {
+                return;
+            };
+            let action = app
+                .upgrade()
+                .and_then(|app| app.lookup_action("text-width"))
+                .and_downcast::<gio::SimpleAction>();
+            if let Some(action) = action {
+                apply_text_width(&action, settings.text_width);
+            }
+        });
+    });
+    SETTINGS_MONITOR.set(Some(monitor));
+}
+
+/// The text width setting: `app.text-width`'s state.
+fn text_width(app: &gtk::Application) -> TextWidth {
+    app.action_state("text-width")
+        .and_then(|v| v.str().and_then(TextWidth::from_id))
+        .unwrap_or_default()
+}
+
 /// Replace "Opening…" with the document.
-fn show(stack: &gtk::Stack, status: &gtk::Label, name: &str, opened: open::Opened) {
-    let page = Rc::new(view::Page::new(&opened.doc, &opened.textures));
-    page.view
+fn show(
+    app: &gtk::Application,
+    stack: &gtk::Stack,
+    status: &gtk::Label,
+    name: &str,
+    opened: open::Opened,
+) {
+    let column = Rc::new(view::Column::new(
+        &opened.doc,
+        &opened.textures,
+        text_width(app),
+    ));
+    COLUMNS.with_borrow_mut(|columns| columns.push(Rc::downgrade(&column)));
+    column
+        .view
         .update_property(&[gtk::accessible::Property::Label(name)]);
     let scrolled = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Automatic)
-        .child(&page.view)
+        .child(&column.view)
         .build();
     let hadj = scrolled.hadjustment();
     hadj.connect_page_size_notify({
-        let page = page.clone();
-        move |adj| page.fit(adj.page_size() as i32)
+        let column = column.clone();
+        move |adj| column.fit(adj.page_size() as i32)
     });
     stack.add_named(&scrolled, Some("document"));
     stack.set_visible_child_name("document");
@@ -387,7 +508,7 @@ fn show(stack: &gtk::Stack, status: &gtk::Label, name: &str, opened: open::Opene
         group_digits(words),
         if words == 1 { "" } else { "s" }
     ));
-    page.view.grab_focus();
+    column.view.grab_focus();
 }
 
 /// `1234567` as `1,234,567`.

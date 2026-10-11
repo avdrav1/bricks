@@ -1,5 +1,5 @@
 //! Reading a file into a document, off the UI thread (SLATE-4): which reader its name
-//! picks, what Slate refuses and why, and the pictures decoded for the page.
+//! picks, what Slate refuses and why, and the pictures decoded for the document.
 
 use crate::view::{texture_key, Textures};
 use document_model::{Block, Document, ImageFormat, ImageSource};
