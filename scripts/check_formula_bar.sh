@@ -13,7 +13,8 @@
 #   3. on B2, Ctrl+G and Tab to the bar, =A2*5 Enter: B2 shows 10; Ctrl+Z: 4 again;
 #   4. =A2+ in the bar: "Formula error at character 5";
 #   5. Ctrl+G, Nope!A1, Enter: "No sheet named that";
-#   6. from a second, empty sheet, Ctrl+G t!B2 goes back to the file's sheet, onto B2.
+#   6. from a second, empty sheet, Ctrl+G t!B2 goes back to the file's sheet, onto B2;
+#   7. (FML-12) B2 copied and pasted on B3: B3 holds =A3*2.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -65,6 +66,10 @@ session() {
   echo "== 6 other sheet"
   keys -M shift -k F11 -m shift
   keys -M ctrl g -m ctrl -s 300 "t!B2" -s 300 -k Return; sleep 1; shot 6-other; shown
+
+  echo "== 7 paste"
+  keys -M ctrl c -m ctrl; sleep 1; keys -k Down; keys -M ctrl v -m ctrl; sleep 1
+  shot 7-paste; shown
   pkill -x bricks
   swaymsg exit >/dev/null 2>&1 || true
 }
@@ -86,6 +91,8 @@ check "3: one Ctrl+Z takes it back" "3 edit" "^undone: B2: 4$"
 check "4: a formula with an error is refused, saying where" "4 refused" "^shown: Formula error at character 5: unexpected end$"
 check "5: an unknown sheet is named" "5 no sheet" "^shown: No sheet named that$"
 check "6: the name box goes to another sheet's cell" "6 other sheet" "^shown: B2: 4$"
+check "7: a pasted formula follows its new row" "7 paste" "^shown: =A3\*2$"
+check "7: on B3" "7 paste" "^shown: B3$"
 if [ $fail = 0 ]; then echo "FORMULA BAR OK"; else
   echo "FORMULA BAR CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

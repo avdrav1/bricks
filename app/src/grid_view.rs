@@ -39,9 +39,27 @@ const CLIP_NOTE: Duration = Duration::from_secs(4);
 
 /// A copy running on the job pool (CLIP-1, ENG-8).
 pub struct CopyJob {
-    job: jobs::Job<Option<Copied>>,
+    job: jobs::Job<Option<(Copied, Vec<ClipFormula>)>>,
     done: Arc<AtomicU64>,
     rows: u64,
+}
+
+/// A formula cell in a copied block (FML-12): where it is in the block (row and column
+/// offsets), its raw text, and where it was (row among all rows, view column), so a paste
+/// inside Bricks can shift its relative references.
+pub struct ClipFormula {
+    row: u64,
+    col: u32,
+    raw: String,
+    from: (u64, u32),
+}
+
+/// The last copy's formulas (FML-12): pasted back into Bricks, the cells get them, shifted;
+/// pasted anywhere else, the text is the results.
+pub struct FormulaClip {
+    /// The exact text put on the clipboard.
+    text: String,
+    cells: Vec<ClipFormula>,
 }
 
 /// A sort's result: the new row order, and the formulas whose relative rows follow their
@@ -231,6 +249,9 @@ mod imp {
         pub col_widths: RefCell<HashMap<ColId, f64>>,
         /// The copy running, if any; a new one cancels it.
         pub copying: RefCell<Option<CopyJob>>,
+        /// The formulas of the last copy made here, while its text is what was copied
+        /// (FML-12).
+        pub formula_clip: RefCell<Option<FormulaClip>>,
         /// The last copy or paste result, and when, for the status bar.
         pub clip_note: Cell<Option<(ClipView, Instant)>>,
         /// Tables shown so far: `replace_table` counts up, so the status tick can tell a
@@ -1789,13 +1810,22 @@ impl GridView {
         let job = jobs::spawn({
             let done = done.clone();
             move |cancel| {
-                // Formula cells copy as their results (FML-11).
+                // Formula cells copy as their results (FML-11), and their formulas are kept
+                // for a paste back into Bricks (FML-12).
                 let mut snapshot = get(cancel)?;
-                if whole_rows {
-                    snapshot.copy_range(rows, tl.col.., cancel.flag(), &done)
+                let copied = if whole_rows {
+                    snapshot.copy_range(rows.clone(), tl.col.., cancel.flag(), &done)
                 } else {
-                    snapshot.copy_range(rows, tl.col..br.col + 1, cancel.flag(), &done)
-                }
+                    snapshot.copy_range(rows.clone(), tl.col..br.col + 1, cancel.flag(), &done)
+                }?;
+                let last_col = if whole_rows { u32::MAX } else { br.col };
+                let formulas = if copied.cells <= PASTE_MAX_CELLS && snapshot.has_formulas() {
+                    snapshot.set_computed(None);
+                    clip_formulas(&mut snapshot, rows, tl.col..=last_col, cancel)?
+                } else {
+                    Vec::new()
+                };
+                Some((copied, formulas))
             }
         });
         let running = imp.copying.replace(Some(CopyJob {
@@ -1817,7 +1847,14 @@ impl GridView {
                 return;
             }
             imp.copying.take();
-            let Some(copied) = copied else { return };
+            let Some((copied, formulas)) = copied else {
+                return;
+            };
+            imp.formula_clip
+                .replace((!formulas.is_empty()).then(|| FormulaClip {
+                    text: copied.tsv.clone(),
+                    cells: formulas,
+                }));
             let mut flavors = Vec::new();
             let text_only = copied.html.is_none();
             if let Some(html) = copied.html {
@@ -1874,12 +1911,42 @@ impl GridView {
         if self.busy() || imp.editing.get().is_some() {
             return;
         }
-        let cells = parse_tsv(text);
+        let mut cells = parse_tsv(text);
         let width = cells.iter().map(Vec::len).max().unwrap_or(0) as u32;
         if width == 0 {
             return;
         }
         let (tl, _) = imp.selection.get().range();
+        // What this window copied pastes back as formulas, their relative references moved
+        // as far as the cells did (FML-12); text from anywhere else pastes as values.
+        if let Some(clip) = imp
+            .formula_clip
+            .borrow()
+            .as_ref()
+            .filter(|c| c.text == text)
+        {
+            let t = self.table();
+            let position = |row: u64| {
+                let n = t.row_count();
+                if row < n {
+                    t.position(row)
+                } else {
+                    t.total_rows() + (row - n)
+                }
+            };
+            for f in &clip.cells {
+                let Some(slot) = cells
+                    .get_mut(f.row as usize)
+                    .and_then(|r| r.get_mut(f.col as usize))
+                else {
+                    continue;
+                };
+                let to = (position(tl.row + f.row), tl.col + f.col);
+                let rows = to.0 as i64 - f.from.0 as i64;
+                let cols = i64::from(to.1) - i64::from(f.from.1);
+                *slot = formula::shift_formula(&f.raw, rows, cols).unwrap_or_else(|| f.raw.clone());
+            }
+        }
         let (note, cmd) = {
             let mut table = self.table_mut();
             let at = tl.row.min(table.row_count());
@@ -3696,6 +3763,43 @@ impl GridView {
         drop(sizing);
         self.queue_draw();
     }
+}
+
+/// The formula cells among table rows `rows` and columns `cols` of `table` (its raw text:
+/// no results set), as offsets in the block (FML-12). `None` once `cancel` is set.
+fn clip_formulas(
+    table: &mut CsvTable,
+    rows: std::ops::Range<u64>,
+    cols: std::ops::RangeInclusive<u32>,
+    cancel: &jobs::CancelToken,
+) -> Option<Vec<ClipFormula>> {
+    const CHUNK: u64 = 65_536;
+    let mut out = Vec::new();
+    let mut block = data_model::RowBlock::full_text();
+    let mut at = rows.start;
+    while at < rows.end {
+        if cancel.is_cancelled() {
+            return None;
+        }
+        let end = (at + CHUNK).min(rows.end);
+        table.read_rows(at..end, &mut block);
+        for r in at..end {
+            let last = block.cells_in_row(r).min(cols.end().saturating_add(1));
+            for c in *cols.start()..last {
+                let text = block.cell(r, c).unwrap_or("");
+                if is_formula(text) {
+                    out.push(ClipFormula {
+                        row: r - rows.start,
+                        col: c - cols.start(),
+                        raw: text.to_owned(),
+                        from: (table.position(r), c),
+                    });
+                }
+            }
+        }
+        at = end;
+    }
+    Some(out)
 }
 
 /// The number the row gutter shows for table row `row`: its file row (from 1, the header
