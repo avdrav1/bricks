@@ -12,7 +12,11 @@
 //!
 //! Both are built from a snapshot of the table on a worker, with progress and cancel.
 
-use crate::{Col, CsvTable, Row, RowBlock, TableSource};
+use crate::{
+    CellRef, Col, CsvTable, Edit, Fill, Pattern, Row, RowBlock, RowId, StyleEdit, StyleId,
+    StylePool, StyleRange, TableSource, Underline,
+};
+use std::fmt::Write as _;
 use std::ops::{Bound, Range, RangeBounds};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
@@ -35,6 +39,23 @@ pub struct Copied {
 const HTML_START: &str = "<html><head><meta charset=\"utf-8\"></head><body><table>\n";
 const HTML_END: &str = "</table></body></html>\n";
 
+/// Cells' styles in a copied block (STYLE-7), row by row, `width` to a row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StyleBlock {
+    pub width: u32,
+    pub styles: Vec<StyleId>,
+}
+
+impl StyleBlock {
+    pub fn rows(&self) -> u64 {
+        if self.width == 0 {
+            0
+        } else {
+            (self.styles.len() / self.width as usize) as u64
+        }
+    }
+}
+
 impl CsvTable {
     /// The text of table rows `rows` in columns `cols`. A bounded column range gives every
     /// row the same number of cells (short rows padded), so the copy is a rectangle; an
@@ -44,6 +65,90 @@ impl CsvTable {
         &mut self,
         rows: Range<Row>,
         cols: impl RangeBounds<Col>,
+        cancel: &AtomicBool,
+        done: &AtomicU64,
+    ) -> Option<Copied> {
+        self.copy_cells(rows, cols, None, cancel, done)
+    }
+
+    /// [`Self::copy_range`], with each cell's look written into the HTML for other
+    /// applications (STYLE-7): bold, italic, underline, strikethrough, colours.
+    pub fn copy_range_styled(
+        &mut self,
+        rows: Range<Row>,
+        cols: impl RangeBounds<Col>,
+        styles: &StylePool,
+        cancel: &AtomicBool,
+        done: &AtomicU64,
+    ) -> Option<Copied> {
+        self.copy_cells(rows, cols, Some(styles), cancel, done)
+    }
+
+    /// The styles of table rows `rows` in columns `cols`, for a paste back into Bricks
+    /// (STYLE-7).
+    pub fn copy_styles(&self, rows: Range<Row>, cols: Range<Col>) -> StyleBlock {
+        let rows = rows.start..rows.end.min(self.row_count());
+        let mut styles = Vec::with_capacity((rows.end - rows.start) as usize * cols.len());
+        let col_ids: Vec<_> = cols.clone().map(|c| self.col_id(c)).collect();
+        for r in rows {
+            let row = self.row_id(r);
+            styles.extend(
+                col_ids
+                    .iter()
+                    .map(|&col| self.style_of(CellRef { row, col })),
+            );
+        }
+        StyleBlock {
+            width: cols.len() as u32,
+            styles,
+        }
+    }
+
+    /// The edit that gives the cells a paste wrote (`pasted`, from [`Self::paste`] at table
+    /// row `row`, column `col`) the styles of `block`; run it after them, in the same undo
+    /// step. `None` if there is nothing to style.
+    pub fn paste_styles(
+        &self,
+        pasted: &[Edit],
+        row: Row,
+        col: Col,
+        block: &StyleBlock,
+    ) -> Option<Edit> {
+        let rows = self.row_count();
+        let start = row.min(rows);
+        let added = pasted.iter().find_map(|e| match e {
+            Edit::InsertRows { rows, .. } => rows.first().map(|r| r.first),
+            _ => None,
+        });
+        let mut edit = StyleEdit::default();
+        for c in 0..block.width {
+            let id = self.col_id(col + c);
+            let mut ranges: Vec<StyleRange> = Vec::new();
+            for r in 0..block.rows() {
+                let at = start + r;
+                let row_id = match added {
+                    Some(first) if at >= rows => RowId(first.0 + (at - rows)),
+                    _ if at >= rows => continue,
+                    _ => self.row_id(at),
+                };
+                let style = block.styles[(r * u64::from(block.width) + u64::from(c)) as usize];
+                match ranges.last_mut() {
+                    Some(last) if last.1 == row_id.0 && last.2 == Some(style) => last.1 += 1,
+                    _ => ranges.push((row_id.0, row_id.0 + 1, Some(style))),
+                }
+            }
+            if !ranges.is_empty() {
+                edit.cells.push((id, ranges));
+            }
+        }
+        (!edit.is_empty()).then_some(Edit::Styles(edit))
+    }
+
+    fn copy_cells(
+        &mut self,
+        rows: Range<Row>,
+        cols: impl RangeBounds<Col>,
+        styles: Option<&StylePool>,
         cancel: &AtomicBool,
         done: &AtomicU64,
     ) -> Option<Copied> {
@@ -83,6 +188,7 @@ impl CsvTable {
                 if let Some(html) = &mut out.html {
                     html.push_str("<tr>");
                 }
+                let row = self.row_id(r);
                 for c in start..stop {
                     let value = block.cell(r, c).unwrap_or("");
                     if c > start {
@@ -90,7 +196,14 @@ impl CsvTable {
                     }
                     push_tsv(value, &mut out.tsv);
                     if let Some(html) = &mut out.html {
-                        push_html_cell(value, html);
+                        let css = styles.map(|pool| {
+                            let at = CellRef {
+                                row,
+                                col: self.col_id(c),
+                            };
+                            css_of(pool, self.style_of(at))
+                        });
+                        push_html_cell(value, css.as_deref().unwrap_or(""), html);
                     }
                 }
                 if let Some(html) = &mut out.html {
@@ -126,13 +239,58 @@ fn needs_text_format(value: &str) -> bool {
         || (digits && (value.len() > 15 || (value.len() > 1 && value.starts_with('0'))))
 }
 
+/// A style as CSS for a `<td>`: what other applications read of it (STYLE-7).
+fn css_of(pool: &StylePool, id: StyleId) -> String {
+    let xf = pool.xf(id);
+    let font = pool.font(xf);
+    let mut css = String::new();
+    if font.bold {
+        css.push_str("font-weight:bold;");
+    }
+    if font.italic {
+        css.push_str("font-style:italic;");
+    }
+    match (font.underline != Underline::None, font.strike) {
+        (true, true) => css.push_str("text-decoration:underline line-through;"),
+        (true, false) => css.push_str("text-decoration:underline;"),
+        (false, true) => css.push_str("text-decoration:line-through;"),
+        (false, false) => {}
+    }
+    if let Some(rgb) = pool
+        .rgb(font.color)
+        .filter(|_| font.color != pool.default_font().color)
+    {
+        let _ = write!(css, "color:#{rgb:06x};");
+    }
+    if let Some(Fill::Pattern {
+        pattern: Pattern::Solid,
+        fg,
+        ..
+    }) = pool.fill(xf)
+    {
+        if let Some(rgb) = pool.rgb(*fg) {
+            let _ = write!(css, "background-color:#{rgb:06x};");
+        }
+    }
+    css
+}
+
 /// One `<td>`: text escaped, line breaks as `<br>`, tabs kept, spaces kept where HTML
-/// would collapse them.
-fn push_html_cell(value: &str, out: &mut String) {
+/// would collapse them; `css` its look.
+fn push_html_cell(value: &str, css: &str, out: &mut String) {
     if needs_text_format(value) {
-        out.push_str("<td sdnum=\"1033;0;@\" style=\"mso-number-format:'\\@'\">");
-    } else {
+        out.push_str("<td sdnum=\"1033;0;@\" style=\"mso-number-format:'\\@'");
+        if !css.is_empty() {
+            out.push(';');
+            out.push_str(css);
+        }
+        out.push_str("\">");
+    } else if css.is_empty() {
         out.push_str("<td>");
+    } else {
+        out.push_str("<td style=\"");
+        out.push_str(css);
+        out.push_str("\">");
     }
     let keep_spaces = value.starts_with(' ')
         || value.ends_with(' ')
@@ -183,7 +341,7 @@ mod tests {
     fn html_marks_values_a_spreadsheet_would_change() {
         let cell = |v: &str| {
             let mut s = String::new();
-            push_html_cell(v, &mut s);
+            push_html_cell(v, "", &mut s);
             s
         };
         let text = "<td sdnum=\"1033;0;@\" style=\"mso-number-format:'\\@'\">";

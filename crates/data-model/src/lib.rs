@@ -30,7 +30,7 @@ pub use calc::{Budget, CellValues, ShownSheet, PENDING, UI_BUDGET};
 pub use check::{Problem, ProblemKind, Problems};
 pub use cleared::ColSet;
 pub use computed::Computed;
-pub use copy::{Copied, HTML_MAX_CELLS};
+pub use copy::{Copied, StyleBlock, HTML_MAX_CELLS};
 pub use filter::{Compare, Filter, FilterError, RowSet, Test};
 pub use format::{
     BorderPreset, Edges, FormatError, FormatTarget, StyleEdit, StylePatch, StyleRange, StyleRun,

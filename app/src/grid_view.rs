@@ -6,7 +6,6 @@ use crate::status::ClipView;
 
 use commands::{Batch, ClearCells, Command, OnSheet, Reshape, SetCell, SheetEdit, UndoStack};
 use csv_engine::RowIndex as _;
-use data_model::HAlign;
 use data_model::{
     is_formula, parse_tsv, BookEdit, BookState, Budget, CellArea, CellRef, CellValues, ColId,
     ColumnTypes, Compare, Computed, Copied, CsvTable, DelimiterChoice, Edit, Fill, Filter,
@@ -16,6 +15,7 @@ use data_model::{
     SortError, SortOrder, Step, StyleId, StylePatch, TableSource, Test, Underline, VAlign,
     Workbook, Xf, MERGE_MAX_CELLS, PASTE_MAX_CELLS, REPLACE_MAX_CELLS, UI_BUDGET,
 };
+use data_model::{HAlign, StyleBlock};
 use formula::{column_name, Formatted, NumberFormat, Value};
 use grid::{Bounds, GridCache, Key, Mods, Selection, Sizes, Viewport};
 use gtk::{gdk, gio, glib, graphene, pango, prelude::*, subclass::prelude::*};
@@ -44,10 +44,14 @@ const CLIP_NOTE: Duration = Duration::from_secs(4);
 
 /// A copy running on the job pool (CLIP-1, ENG-8).
 pub struct CopyJob {
-    job: jobs::Job<Option<(Copied, Vec<ClipFormula>)>>,
+    job: jobs::Job<Option<CopyResult>>,
     done: Arc<AtomicU64>,
     rows: u64,
 }
+
+/// What a copy gives: the clipboard text, and the formulas and styles a paste back into
+/// Bricks restores.
+type CopyResult = (Copied, Vec<ClipFormula>, Option<StyleBlock>);
 
 /// A formula cell in a copied block (FML-12): where it is in the block (row and column
 /// offsets), its raw text, and where it was (row among all rows, view column), so a paste
@@ -59,12 +63,14 @@ pub struct ClipFormula {
     from: (u64, u32),
 }
 
-/// The last copy's formulas (FML-12): pasted back into Bricks, the cells get them, shifted;
-/// pasted anywhere else, the text is the results.
+/// The last copy's formulas (FML-12) and styles (STYLE-7): pasted back into Bricks, the
+/// cells get the formulas, shifted, and the styles; pasted anywhere else, the text is the
+/// results.
 pub struct FormulaClip {
     /// The exact text put on the clipboard.
     text: String,
     cells: Vec<ClipFormula>,
+    styles: Option<StyleBlock>,
 }
 
 /// A sort's result: the new row order, and the formulas whose relative rows follow their
@@ -2516,6 +2522,7 @@ impl GridView {
             rows
         };
         let get = self.job_table();
+        let pool = imp.book.borrow().styles().clone();
         let done = Arc::new(AtomicU64::new(0));
         let whole_rows = sel.is_whole_rows();
         let count = rows.end - rows.start;
@@ -2523,13 +2530,26 @@ impl GridView {
             let done = done.clone();
             move |cancel| {
                 // Formula cells copy as their results (FML-11), and their formulas are kept
-                // for a paste back into Bricks (FML-12).
+                // for a paste back into Bricks (FML-12), as are their styles (STYLE-7).
                 let mut snapshot = get(cancel)?;
                 let copied = if whole_rows {
-                    snapshot.copy_range(rows.clone(), tl.col.., cancel.flag(), &done)
+                    snapshot.copy_range_styled(rows.clone(), tl.col.., &pool, cancel.flag(), &done)
                 } else {
-                    snapshot.copy_range(rows.clone(), tl.col..br.col + 1, cancel.flag(), &done)
+                    let cols = tl.col..br.col + 1;
+                    snapshot.copy_range_styled(rows.clone(), cols, &pool, cancel.flag(), &done)
                 }?;
+                let styled = !snapshot.file_styles().is_empty()
+                    || snapshot.has_user_styles()
+                    || pool.xfs.len() > 1;
+                let styles = (copied.cells <= PASTE_MAX_CELLS && styled).then(|| {
+                    let width = if whole_rows {
+                        let widest = copied.tsv.lines().map(|l| l.split('\t').count()).max();
+                        (widest.unwrap_or(0) as u32).max(snapshot.styled_width())
+                    } else {
+                        br.col - tl.col + 1
+                    };
+                    snapshot.copy_styles(rows.clone(), tl.col..tl.col + width)
+                });
                 let last_col = if whole_rows { u32::MAX } else { br.col };
                 let formulas = if copied.cells <= PASTE_MAX_CELLS && snapshot.has_formulas() {
                     snapshot.set_computed(None);
@@ -2537,7 +2557,7 @@ impl GridView {
                 } else {
                     Vec::new()
                 };
-                Some((copied, formulas))
+                Some((copied, formulas, styles))
             }
         });
         let running = imp.copying.replace(Some(CopyJob {
@@ -2559,14 +2579,17 @@ impl GridView {
                 return;
             }
             imp.copying.take();
-            let Some((copied, formulas)) = copied else {
+            let Some((copied, formulas, styles)) = copied else {
                 return;
             };
             imp.formula_clip
-                .replace((!formulas.is_empty()).then(|| FormulaClip {
-                    text: copied.tsv.clone(),
-                    cells: formulas,
-                }));
+                .replace(
+                    (!formulas.is_empty() || styles.is_some()).then(|| FormulaClip {
+                        text: copied.tsv.clone(),
+                        cells: formulas,
+                        styles,
+                    }),
+                );
             let mut flavors = Vec::new();
             let text_only = copied.html.is_none();
             if let Some(html) = copied.html {
@@ -2630,13 +2653,16 @@ impl GridView {
         }
         let (tl, _) = imp.selection.get().range();
         // What this window copied pastes back as formulas, their relative references moved
-        // as far as the cells did (FML-12); text from anywhere else pastes as values.
+        // as far as the cells did (FML-12), and with its styles (STYLE-7); text from
+        // anywhere else pastes as values and keeps the cells' own formats.
+        let mut styles = None;
         if let Some(clip) = imp
             .formula_clip
             .borrow()
             .as_ref()
             .filter(|c| c.text == text)
         {
+            styles = clip.styles.clone();
             let t = self.table();
             let position = |row: u64| {
                 let n = t.row_count();
@@ -2663,7 +2689,10 @@ impl GridView {
             let mut table = self.table_mut();
             let at = tl.row.min(table.row_count());
             match table.paste(at, tl.col, &cells) {
-                Ok(edits) => {
+                Ok(mut edits) => {
+                    if let Some(block) = &styles {
+                        edits.extend(table.paste_styles(&edits, at, tl.col, block));
+                    }
                     let cmd = (!edits.is_empty()).then(|| {
                         let focus = CellRef {
                             row: table.row_id(at.min(table.row_count().saturating_sub(1))),

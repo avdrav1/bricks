@@ -12,7 +12,10 @@
 #   3. on a CSV, Ctrl+B then Ctrl+S opens Save As saying a CSV file can't keep
 #      formatting, and the CSV stays as it was;
 #   4. Ctrl+B on a CSV, wait for the journal, kill -9, relaunch, Enter on Restore: the
-#      Bold toggle is on for that cell again.
+#      Bold toggle is on for that cell again;
+#   5. (STYLE-7) the bold Data!A2 copied and pasted on D5: D5 is bold, and one Ctrl+Z
+#      takes it back; text another program copied (wl-copy) pasted on a bold D6 leaves D6
+#      bold.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -26,7 +29,7 @@ out=$(docker run --rm --cap-add SYS_NICE -v "$bin:/usr/local/bin/bricks:ro" \
   -v "$fixture:/fixture.xlsx:ro" -v "$PWD/scripts/a11y_helpers.py:/a11y.py:ro" "${shots[@]}" \
   archlinux:latest bash -c '
 set -uo pipefail
-pacman -Syu --noconfirm --needed sway wtype grim gtk4 ttf-dejavu dbus python-gobject at-spi2-core >/dev/null 2>&1
+pacman -Syu --noconfirm --needed sway wtype grim gtk4 ttf-dejavu dbus python-gobject at-spi2-core wl-clipboard >/dev/null 2>&1
 mkdir -p /shots /tmp/rt && chmod 700 /tmp/rt
 export XDG_RUNTIME_DIR=/tmp/rt GDK_DEBUG=no-portals XDG_STATE_HOME=/tmp/state GDK_BACKEND=wayland
 printf "output HEADLESS-1 resolution 1600x900\ndefault_border none\n" > /tmp/sway.conf
@@ -78,6 +81,16 @@ session() {
   bold before-save
   keys -M ctrl s -m ctrl; sleep 6
   python3 /tmp/cell.py /tmp/f.xlsx Data A2 2>&1 | sed "s/^/saved /"
+
+  echo "== 5 paste"
+  go Data!A2; keys -M ctrl c -m ctrl; sleep 1
+  go Data!D5; bold d5-before
+  keys -M ctrl v -m ctrl; sleep 1; bold d5-pasted
+  keys -M ctrl z -m ctrl; sleep 1; bold d5-undone
+  go Data!D6; keys -M ctrl b -m ctrl; sleep 1
+  printf "elsewhere" | wl-copy; sleep 1
+  keys -M ctrl v -m ctrl; sleep 1; bold d6-pasted
+  echo "d6: $(python3 /a11y.py text | grep "^D6: ")"
   pkill -x bricks; sleep 1
 
   echo "== 3 csv"
@@ -116,6 +129,11 @@ check "3: Ctrl+B on a CSV" "3 csv" "^csv-bold: on$"
 check "3: a CSV with formatting saves only as .xlsx" "3 csv" "^note: A CSV file can.t keep formatting"
 check "3: the CSV file is untouched" "3 csv" "^csv unchanged: a,b 1,2 $"
 check "4: crash recovery restores the bold" "4 recovery" "^restored: on$"
+check "5: D5 isn't bold to begin with" "5 paste" "^d5-before: off$"
+check "5: pasting the bold A2 makes D5 bold" "5 paste" "^d5-pasted: on$"
+check "5: one Ctrl+Z takes text and style back" "5 paste" "^d5-undone: off$"
+check "5: another program's text keeps D6 bold" "5 paste" "^d6-pasted: on$"
+check "5: and it pasted" "5 paste" "^d6: D6: elsewhere$"
 if [ $fail = 0 ]; then echo "FORMAT OK"; else
   [ -n "${VERBOSE:-}" ] || sed 's/^/  /' <<<"$out" | tail -40
   echo "FORMAT CHECK FAILED"; exit 1
