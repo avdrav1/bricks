@@ -180,14 +180,17 @@ impl Matches {
 
     /// Replace all (SRCH-3): one edit giving every matching cell shown its value with
     /// the text replaced, for one undo step. Run it on a snapshot on the job pool; `done`
-    /// counts rows done. `None` if there is nothing to replace.
+    /// counts rows done. Formula cells (those with a result in the snapshot's
+    /// [`CsvTable::set_computed`]) are never replaced (FML-11): they are counted instead.
+    /// Returns the edit, `None` if there is nothing to replace, and how many matching
+    /// formula cells were skipped.
     pub fn replace_all(
         &self,
         table: &CsvTable,
         with: &str,
         cancel: &AtomicBool,
         done: &AtomicU64,
-    ) -> Result<Option<Edit>, ReplaceError> {
+    ) -> Result<(Option<Edit>, u64), ReplaceError> {
         if !self.is_current(table) {
             return Err(ReplaceError::Stale);
         }
@@ -195,7 +198,7 @@ impl Matches {
             return Err(ReplaceError::TooMany(self.total));
         }
         if self.total == 0 {
-            return Ok(None);
+            return Ok((None, 0));
         }
         // The rows shown with a match, by id.
         let mut rows: Vec<RowId> = Vec::new();
@@ -260,20 +263,26 @@ impl Matches {
             .flatten()
             .collect();
 
-        // Rows with edits, from their cells as shown.
-        let mut scratch = Vec::new();
+        // Rows with edits or formula results, from their cells as shown.
+        let computed = table.computed.as_deref();
+        let (mut scratch, mut skipped) = (Vec::new(), 0);
         for id in edited {
             for col in table.edited_row_cols(self, id, table.overlay.row(id)) {
                 let Some(v) = table.shown_of(id, col) else {
                     continue;
                 };
                 if let Some(new) = self.needle.replace(&v, with, &mut scratch) {
-                    cells.push((CellRef { row: id, col }, Some(new.into_boxed_str())));
+                    let at = CellRef { row: id, col };
+                    if computed.is_some_and(|c| c.get(at).is_some()) {
+                        skipped += 1;
+                    } else {
+                        cells.push((at, Some(new.into_boxed_str())));
+                    }
                 }
             }
             done.fetch_add(1, Ordering::Relaxed);
         }
-        Ok((!cells.is_empty()).then_some(Edit::Cells(cells)))
+        Ok(((!cells.is_empty()).then_some(Edit::Cells(cells)), skipped))
     }
 
     /// The match `step` leads to from cell `from` (row, column of the rows shown), going

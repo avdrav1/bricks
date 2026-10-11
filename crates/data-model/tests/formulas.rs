@@ -3,8 +3,8 @@
 
 use csv_engine::{Dialect, Source, SparseRowIndex};
 use data_model::{
-    Budget, CellRef, CsvTable, DelimiterChoice, Edit, Origin, RowBlock, SaveProgress, ShownSheet,
-    SortOrder, TableSource, Workbook,
+    Budget, CellRef, Compare, CsvTable, DelimiterChoice, Edit, Filter, Origin, Query, RowBlock,
+    SaveProgress, SearchProgress, ShownSheet, SortOrder, Step, TableSource, Test, Workbook,
 };
 use formula::Value;
 use std::path::{Path, PathBuf};
@@ -247,6 +247,129 @@ fn cycles_show_circ() {
     let mut b = book("=A2\n=A1\n=A3+1\n", "cycle.csv");
     let rows = shown(&mut b);
     assert_eq!(rows, [["#CIRC!"], ["#CIRC!"], ["#CIRC!"]]);
+}
+
+/// FML-11: `n,b,f` with the header on; row `n` (file row n+1) has `b = n` and
+/// `f = =10-B{n+1}`, so results run 9, 8, ... 2 while raw texts mention other numbers.
+fn results_table(tag: &str) -> (Workbook, CsvTable) {
+    let mut csv = String::from("n,b,f\n");
+    for n in 1..=8 {
+        csv.push_str(&format!("{n},{n},=10-B{}\n", n + 1));
+    }
+    let mut b = book(&csv, tag);
+    b.active_mut().set_header(true);
+    let sheet = b.active_id();
+    let computed = b
+        .snapshot()
+        .computed_for(sheet, Arc::new(AtomicBool::new(false)), &AtomicU64::new(0))
+        .unwrap();
+    let mut snap = b.active().snapshot();
+    snap.set_computed(Some(Arc::new(computed)));
+    (b, snap)
+}
+
+#[test]
+fn jobs_see_results_sort_filter_infer() {
+    let (mut b, mut snap) = results_table("jobs.csv");
+
+    let edit = snap
+        .sort_rows(
+            2,
+            SortOrder::Ascending,
+            &AtomicBool::new(false),
+            &AtomicU64::new(0),
+        )
+        .unwrap()
+        .unwrap();
+    let mut sorted = b.active().snapshot();
+    sorted.apply(edit);
+    let order: Vec<String> = (0..8)
+        .map(|r| sorted.cell_value(r, 0).unwrap().into_owned())
+        .collect();
+    assert_eq!(order, ["8", "7", "6", "5", "4", "3", "2", "1"], "by result");
+
+    let types = snap.infer_types(&AtomicBool::new(false)).unwrap();
+    snap.set_types(types);
+    assert_eq!(snap.column_type(2), Some(data_model::InferredType::Integer));
+
+    let filter = Filter {
+        col: snap.col_id(2),
+        test: Test::Number(Compare::Gt, 5.0),
+    };
+    let passed = snap
+        .filter_rows(&filter, &AtomicBool::new(false), &AtomicU64::new(0))
+        .unwrap();
+    let kept: Vec<u64> = (0..8).filter(|&r| passed.passes(snap.row_id(r))).collect();
+    assert_eq!(kept, [0, 1, 2, 3], "results 9, 8, 7, 6");
+    b.active_mut()
+        .set_types(snap.infer_types(&AtomicBool::new(false)).unwrap());
+    b.active_mut().set_filter(filter, passed);
+    assert_eq!(b.active().row_count(), 4);
+}
+
+#[test]
+fn find_copy_and_replace_see_results() {
+    let (_, mut snap) = results_table("find.csv");
+    let query = Query {
+        text: "8".into(),
+        match_case: false,
+        col: Some(snap.col_id(2)),
+    };
+    let matches = snap
+        .search(&query, &AtomicBool::new(false), &SearchProgress::default())
+        .unwrap();
+    assert_eq!(matches.total(), 1);
+    let hit = matches
+        .step(&mut snap, (0, 0), Step::Here, None, &AtomicBool::new(false))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (hit.row, hit.col),
+        (1, 2),
+        "the result 8, not the text `=10-B8`"
+    );
+
+    let copied = snap
+        .copy_range(0..3, 1..3, &AtomicBool::new(false), &AtomicU64::new(0))
+        .unwrap();
+    assert_eq!(copied.tsv, "1\t9\n2\t8\n3\t7");
+
+    let all = Query {
+        text: "8".into(),
+        match_case: false,
+        col: None,
+    };
+    let matches = snap
+        .search(&all, &AtomicBool::new(false), &SearchProgress::default())
+        .unwrap();
+    assert_eq!(matches.total(), 3, "n and b of row 8, and the result 8");
+    let (edit, skipped) = matches
+        .replace_all(&snap, "X", &AtomicBool::new(false), &AtomicU64::new(0))
+        .unwrap();
+    assert_eq!(skipped, 1, "the formula cell is left alone");
+    let Some(Edit::Cells(cells)) = edit else {
+        panic!("the two value cells are replaced");
+    };
+    let mut texts: Vec<&str> = cells.iter().map(|(_, v)| v.as_deref().unwrap()).collect();
+    texts.sort_unstable();
+    assert_eq!(texts, ["X", "X"]);
+    assert!(cells.iter().all(|(at, _)| at.col != snap.col_id(2)));
+
+    let only = matches_in(&mut snap, 2);
+    let (edit, skipped) = only
+        .replace_all(&snap, "X", &AtomicBool::new(false), &AtomicU64::new(0))
+        .unwrap();
+    assert_eq!((edit, skipped), (None, 1), "only formula cells matched");
+}
+
+fn matches_in(snap: &mut CsvTable, col: u32) -> data_model::Matches {
+    let q = Query {
+        text: "8".into(),
+        match_case: false,
+        col: Some(snap.col_id(col)),
+    };
+    snap.search(&q, &AtomicBool::new(false), &SearchProgress::default())
+        .unwrap()
 }
 
 /// FML-3 acceptance: `=SUM(rows!D:D)` over the 1 GB file computes in the background in

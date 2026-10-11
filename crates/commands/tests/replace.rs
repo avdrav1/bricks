@@ -40,9 +40,13 @@ fn search(t: &CsvTable, q: &Query) -> Matches {
         .unwrap()
 }
 
+/// Replace all on a table without formulas: nothing is skipped.
 fn replace_all(t: &CsvTable, q: &Query, with: &str) -> Result<Option<Edit>, ReplaceError> {
     let snap = t.snapshot();
-    search(t, q).replace_all(&snap, with, &AtomicBool::new(false), &AtomicU64::new(0))
+    let (edit, skipped) =
+        search(t, q).replace_all(&snap, with, &AtomicBool::new(false), &AtomicU64::new(0))?;
+    assert_eq!(skipped, 0);
+    Ok(edit)
 }
 
 /// Replace all as the app runs it: one undoable step.

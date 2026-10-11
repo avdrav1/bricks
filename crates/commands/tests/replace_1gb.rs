@@ -55,6 +55,7 @@ fn replace_all_in_1gb_is_one_step() {
     let edit = m
         .replace_all(&t.snapshot(), "ZZ99", &no, &AtomicU64::new(0))
         .unwrap()
+        .0
         .unwrap();
     let built = start.elapsed();
 
