@@ -2,8 +2,7 @@
 //! directory, which is then mapped and indexed like any CSV file. A formula cell's raw text
 //! is its formula (`=SUM(A1:A3)`); the result the file stored is kept beside it.
 
-use crate::losses::{self, Losses};
-use crate::package;
+use crate::package::{self, Package};
 use calamine::{
     CellErrorType, Data, DataRef, Dimensions, ExcelDateTime, Reader, SheetType, Xlsx, XlsxError,
 };
@@ -62,11 +61,11 @@ pub struct Imported {
     /// Defined names and their formulas, without `=`; Excel's built-in `_xlnm.` names
     /// (print areas and the like) left out.
     pub names: Vec<(String, String)>,
-    /// The content the workbook holds that a save would drop.
-    pub losses: Losses,
     /// Every style record of the workbook (ADR 0009); each sheet's table carries its
     /// cells' styles into this pool.
     pub styles: StylePool,
+    /// The file as it was read, which a save patches (ADR 0010).
+    pub package: Arc<Package>,
 }
 
 #[derive(Debug)]
@@ -109,6 +108,9 @@ pub type Result<T, E = ImportError> = std::result::Result<T, E>;
 /// Read every worksheet of the workbook at `path`. Setting `cancel` stops it with
 /// [`ImportError::Cancelled`].
 pub fn import(path: &Path, cancel: &AtomicBool, progress: &Progress) -> Result<Imported> {
+    // Everything is read from a private copy, the one a save will patch.
+    let package = Arc::new(Package::copy_of(path)?);
+    let path = package.path();
     let mut book: Xlsx<BufReader<File>> = calamine::open_workbook(path)?;
     let names = book
         .defined_names()
@@ -128,7 +130,7 @@ pub fn import(path: &Path, cancel: &AtomicBool, progress: &Progress) -> Result<I
         .map(|s| s.name.clone())
         .collect();
     let mut zip = package::open(path)?;
-    let parts = package::parts(&mut zip)?;
+    let parts = &package.parts;
     let styles = match &parts.styles {
         Some(p) => package::read_part(&mut zip, p)?,
         None => None,
@@ -170,12 +172,11 @@ pub fn import(path: &Path, cancel: &AtomicBool, progress: &Progress) -> Result<I
             cached,
         });
     }
-    let losses = losses::scan(path)?;
     Ok(Imported {
         sheets,
         names,
-        losses,
         styles,
+        package,
     })
 }
 

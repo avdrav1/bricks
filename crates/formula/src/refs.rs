@@ -11,7 +11,7 @@ pub fn column_name(col: u32, out: &mut String) {
 }
 
 /// Appends the column name of `col` to `out`.
-pub(crate) fn push_column(mut col: u32, out: &mut String) {
+pub fn push_column(mut col: u32, out: &mut String) {
     let mut letters = [0u8; 7];
     let mut i = letters.len();
     loop {

@@ -1,6 +1,6 @@
 [package]
 name = "xlsx"
-description = "XLSX import into indexed sheet copies, XLSX export"
+description = "XLSX import into indexed sheet copies with styles; save by patching the original package"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,10 +12,12 @@ csv-engine.workspace = true
 data-model.workspace = true
 file-format.workspace = true
 formula.workspace = true
-memchr = "2.8.3"
 quick-xml = "0.41"
-rust_xlsxwriter = { version = "0.99", features = ["constant_memory"] }
 zip = { version = "8", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+# The corpus example writes Excel-like workbooks with a writer independent of Bricks'.
+rust_xlsxwriter = { version = "0.99", features = ["constant_memory"] }
 
 [lints]
 workspace = true

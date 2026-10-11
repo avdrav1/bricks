@@ -13,8 +13,8 @@
 
 use csv_engine::{Dialect, RowIndex, Source, SparseRowIndex};
 use data_model::{
-    CellRef, ColId, Compare, CsvTable, DelimiterChoice, Edit, Filter, Origin, Query, SaveProgress,
-    SearchProgress, SheetId, SortOrder, Step, TableSource, Test, Workbook,
+    CellRef, ColId, Compare, CsvTable, DelimiterChoice, Edit, Filter, Origin, Query, RowId,
+    SaveProgress, SearchProgress, SheetId, SortOrder, Step, TableSource, Test, Workbook,
 };
 use formula::Value;
 use std::collections::HashMap;
@@ -405,38 +405,46 @@ fn formula_jobs(corpus: &Path) -> Vec<(&'static str, Measured)> {
     out
 }
 
-/// Saving the 1,048,576-row workbook as XLSX (BENCH-2): rows_1m.xlsx imported, then saved
-/// next to the corpus as the app's save job does (atomic, fsync).
-fn xlsx_save(corpus: &Path) -> Measured {
-    let path = corpus.join("rows_1m.xlsx");
+/// Saving a 1,048,576-row workbook as XLSX: `file` imported, one cell edited, then saved
+/// next to the corpus as the app's save job does: the package patched, the sheet written
+/// again with every unchanged cell copied (ADR 0010), atomic with fsync.
+fn xlsx_save(file: &Path, corpus: &Path) -> Measured {
     let no = AtomicBool::new(false);
-    let imported = match xlsx::import(&path, &no, &xlsx::Progress::default()) {
+    let imported = match xlsx::import(file, &no, &xlsx::Progress::default()) {
         Ok(i) => i,
-        Err(e) => return note(format!("cannot import {}: {e}", path.display())),
+        Err(e) => return note(format!("cannot import {}: {e}", file.display())),
     };
-    let s = imported.sheets.into_iter().next().unwrap();
-    let rows = s.table.total_rows();
+    let package = imported.package.clone();
+    let styles = imported.styles.clone();
+    let sheets = imported
+        .sheets
+        .into_iter()
+        .map(|s| (s.name, s.table, Origin::Xlsx(s.index), s.cached))
+        .collect();
+    let mut book = Workbook::from_sheets(sheets, imported.names);
+    book.set_styles(styles);
+    let rows = book.active().total_rows();
+    let at = CellRef {
+        row: RowId::source(rows / 2),
+        col: ColId::source(1),
+    };
+    book.active_mut().apply(Edit::set(at, "edited"));
     let dest = corpus.join(format!(".bench-save-{}.xlsx", std::process::id()));
     let start = Instant::now();
-    let stats = xlsx::save_xlsx(
-        &dest,
-        vec![xlsx::ExportSheet {
-            name: s.name,
-            table: s.table,
-            computed: Default::default(),
-            widths: Vec::new(),
-            active: true,
-        }],
-        &[],
-        &SaveProgress::default(),
-        &no,
+    let saved = xlsx::SaveBook::from_workbook(
+        book,
+        Some(package),
+        &HashMap::new(),
+        Arc::new(AtomicBool::new(false)),
+        &AtomicU64::new(0),
     )
-    .unwrap();
+    .expect("not cancelled");
+    let stats = xlsx::save(&dest, saved, &SaveProgress::default(), &no).unwrap();
     let secs = start.elapsed().as_secs_f64();
     std::fs::remove_file(&dest).unwrap();
     ok(
         format!(
-            "{secs:.2} s: {rows} rows, {} MiB, incl. fsync",
+            "{secs:.2} s: {rows} rows, one cell edited, {} MiB, incl. fsync",
             stats.bytes >> 20
         ),
         secs < 30.0,
@@ -543,7 +551,7 @@ fn measure_all(corpus: &Path) -> HashMap<&'static str, Measured> {
     m.insert(
         "Save 1,048,576-row workbook as XLSX",
         if xlsx_file.exists() {
-            xlsx_save(corpus)
+            xlsx_save(&xlsx_file, corpus)
         } else {
             note(no_xlsx)
         },

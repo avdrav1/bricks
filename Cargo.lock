@@ -1127,7 +1127,6 @@ dependencies = [
  "data-model",
  "file-format",
  "formula",
- "memchr",
  "quick-xml",
  "rust_xlsxwriter",
  "zip",

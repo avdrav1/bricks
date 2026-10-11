@@ -1207,70 +1207,14 @@ impl GridView {
         imp.sizing.borrow_mut().rows.set(row, height);
     }
 
-    /// The active sheet's sizes as its file gives them (STYLE-3): the most common row
-    /// height and the default column width become the sheet's own defaults, scaled from
-    /// Excel's units to Bricks' row height and digit width; the rest are kept by row and
-    /// column identity. A CSV sheet has none.
+    /// The active sheet's sizes as its file gives them (STYLE-3).
     fn file_ui(&self) -> SheetUi {
-        let table = self.table();
-        let layout = table.layout();
-        if layout.default_row_height.is_none()
-            && layout.default_col_width.is_none()
-            && layout.cols.is_empty()
-            && layout.row_runs().is_empty()
-        {
-            return SheetUi::default();
-        }
-        let digit_w = f64::from(self.create_pango_layout(Some("0")).pixel_size().0.max(1));
-        // Excel's row heights are points; a default-height row is Bricks' row height.
-        let default_pt = layout.default_row_height.unwrap_or(15.0).max(1.0);
-        let row_px = |pt: f64| (pt * ROW_H / default_pt).max(MIN_ROW_H);
-        let mut heights: HashMap<u64, u64> = HashMap::new();
-        let mut covered = 0;
-        for (start, end, spec) in layout.row_runs() {
-            if let Some(h) = spec.height {
-                *heights.entry(h.to_bits()).or_default() += end - start;
-                covered += end - start;
-            }
-        }
-        *heights.entry(default_pt.to_bits()).or_default() +=
-            table.total_rows().saturating_sub(covered);
-        let common = heights
-            .iter()
-            .max_by_key(|&(h, n)| (*n, *h))
-            .map_or(default_pt, |(&h, _)| f64::from_bits(h));
-        // Excel's column widths count the default font's widest digit (7 px for Calibri
-        // 11) plus padding; Bricks' digit takes its place.
-        let col_px = |chars: f64| {
-            let px = ((256.0 * chars + (128.0 / 7.0f64).trunc()) / 256.0 * 7.0).trunc();
-            (px * digit_w / 7.0).max(MIN_COL_W)
-        };
-        let default_chars = layout
-            .default_col_width
-            .or_else(|| layout.base_col_width.map(|b| f64::from(b) + 0.43))
-            .unwrap_or(8.43);
-        let mut ui = SheetUi {
-            sizing: Sizing {
-                rows: Sizes::new(row_px(common)),
-                cols: Sizes::new(col_px(default_chars)),
-            },
-            ..SheetUi::default()
-        };
-        for (start, end, spec) in layout.row_runs() {
-            let h = spec.height.unwrap_or(default_pt);
-            if h != common {
-                ui.row_heights
-                    .extend((*start..*end).map(|r| (RowId::source(r), row_px(h))));
-            }
-        }
-        for spec in &layout.cols {
-            if let Some(w) = spec.width.filter(|&w| w != default_chars) {
-                let last = spec.last.min(spec.first + 16_384);
-                ui.col_widths
-                    .extend((spec.first..=last).map(|c| (ColId::source(c), col_px(w))));
-            }
-        }
-        ui
+        file_ui_of(&self.table(), self.excel_scale_digit())
+    }
+
+    /// The width of a digit in the grid's font: Excel measures columns in it.
+    fn excel_scale_digit(&self) -> f64 {
+        f64::from(self.create_pango_layout(Some("0")).pixel_size().0.max(1))
     }
 
     /// Lay the remembered sizes out by where their rows and columns are now; those not
@@ -3462,31 +3406,55 @@ impl GridView {
             .collect()
     }
 
-    /// The column widths the user set on each sheet, by view column, in pixels (XLSX-1).
-    pub fn sheet_widths(&self) -> HashMap<SheetId, Vec<(u32, u32)>> {
+    /// The sizes the user set on each sheet, in Excel's units (ADR 0010): those that
+    /// differ from what the file gives, for a save to write.
+    pub fn user_sizes(&self) -> HashMap<SheetId, xlsx::SheetSizes> {
         let imp = self.imp();
         let book = imp.book.borrow();
-        let widths = |table: &CsvTable, set: &HashMap<ColId, f64>| -> Vec<(u32, u32)> {
-            let mut out: Vec<(u32, u32)> = set
-                .iter()
-                .filter_map(|(&id, &w)| Some((table.col_of(id)?, w.round() as u32)))
-                .collect();
-            out.sort_unstable();
-            out
-        };
         let ui = imp.sheet_ui.borrow();
-        book.sheets()
-            .iter()
-            .map(|s| {
-                let w = if s.id == book.active_id() {
-                    widths(&s.table, &imp.col_widths.borrow())
-                } else {
-                    ui.get(&s.id)
-                        .map_or_else(Vec::new, |u| widths(&s.table, &u.col_widths))
-                };
-                (s.id, w)
-            })
-            .collect()
+        let scale = self.excel_scale_digit();
+        let mut out = HashMap::new();
+        for sheet in book.sheets() {
+            let (heights, widths) = if sheet.id == book.active_id() {
+                (
+                    imp.row_heights.borrow().clone(),
+                    imp.col_widths.borrow().clone(),
+                )
+            } else {
+                match ui.get(&sheet.id) {
+                    Some(u) => (u.row_heights.clone(), u.col_widths.clone()),
+                    None => continue, // never shown: as the file has it
+                }
+            };
+            let file = file_ui_of(&sheet.table, scale);
+            let scale = ExcelScale::of(&sheet.table, scale);
+            let differs = |a: f64, b: f64| (a - b).abs() > 0.5;
+            let mut sizes = xlsx::SheetSizes::default();
+            for (&id, &px) in &widths {
+                let was = file
+                    .col_widths
+                    .get(&id)
+                    .copied()
+                    .unwrap_or(file.sizing.cols.default_size());
+                if differs(px, was) {
+                    sizes.widths.push((id, scale.chars(px)));
+                }
+            }
+            for (&id, &px) in &heights {
+                let was = file
+                    .row_heights
+                    .get(&id)
+                    .copied()
+                    .unwrap_or(file.sizing.rows.default_size());
+                if differs(px, was) {
+                    sizes.heights.push((id, scale.points(px)));
+                }
+            }
+            if !sizes.widths.is_empty() || !sizes.heights.is_empty() {
+                out.insert(sheet.id, sizes);
+            }
+        }
+        out
     }
 
     /// Each sheet's header row and the column types the user set, by position, to set
@@ -4092,6 +4060,100 @@ impl GridView {
 
 /// Cell text under number formats, by format code and text.
 type FormattedCache = HashMap<(Box<str>, String), Rc<Formatted>>;
+
+/// Excel's units on a sheet as Bricks draws them (STYLE-3): a row of the sheet's default
+/// height is Bricks' row height; a column's characters count Bricks' digit width in place
+/// of Excel's 7 px (Calibri 11).
+#[derive(Debug, Clone, Copy)]
+struct ExcelScale {
+    /// Points per default row.
+    default_pt: f64,
+    digit_w: f64,
+}
+
+impl ExcelScale {
+    fn of(table: &CsvTable, digit_w: f64) -> Self {
+        Self {
+            default_pt: table.layout().default_row_height.unwrap_or(15.0).max(1.0),
+            digit_w,
+        }
+    }
+
+    fn row_px(self, pt: f64) -> f64 {
+        (pt * ROW_H / self.default_pt).max(MIN_ROW_H)
+    }
+
+    fn points(self, px: f64) -> f64 {
+        (px * self.default_pt / ROW_H * 100.0).round() / 100.0
+    }
+
+    /// Excel's pixel width for `chars`, scaled to Bricks' digit.
+    fn col_px(self, chars: f64) -> f64 {
+        let px = ((256.0 * chars + (128.0 / 7.0f64).trunc()) / 256.0 * 7.0).trunc();
+        (px * self.digit_w / 7.0).max(MIN_COL_W)
+    }
+
+    /// Excel's characters for a width of `px` (its own formula, from Excel's pixels).
+    fn chars(self, px: f64) -> f64 {
+        let excel_px = px * 7.0 / self.digit_w;
+        ((excel_px - 5.0) / 7.0 * 100.0 + 0.5).trunc().max(0.0) / 100.0
+    }
+}
+
+/// A sheet's sizes as its file gives them (STYLE-3): the most common row height and the
+/// default column width become the sheet's own defaults, the rest are kept by row and
+/// column identity. A CSV sheet has none.
+fn file_ui_of(table: &CsvTable, digit_w: f64) -> SheetUi {
+    let layout = table.layout();
+    if layout.default_row_height.is_none()
+        && layout.default_col_width.is_none()
+        && layout.cols.is_empty()
+        && layout.row_runs().is_empty()
+    {
+        return SheetUi::default();
+    }
+    let scale = ExcelScale::of(table, digit_w);
+    let default_pt = scale.default_pt;
+    let mut heights: HashMap<u64, u64> = HashMap::new();
+    let mut covered = 0;
+    for (start, end, spec) in layout.row_runs() {
+        if let Some(h) = spec.height {
+            *heights.entry(h.to_bits()).or_default() += end - start;
+            covered += end - start;
+        }
+    }
+    *heights.entry(default_pt.to_bits()).or_default() += table.total_rows().saturating_sub(covered);
+    let common = heights
+        .iter()
+        .max_by_key(|&(h, n)| (*n, *h))
+        .map_or(default_pt, |(&h, _)| f64::from_bits(h));
+    let default_chars = layout
+        .default_col_width
+        .or_else(|| layout.base_col_width.map(|b| f64::from(b) + 0.43))
+        .unwrap_or(8.43);
+    let mut ui = SheetUi {
+        sizing: Sizing {
+            rows: Sizes::new(scale.row_px(common)),
+            cols: Sizes::new(scale.col_px(default_chars)),
+        },
+        ..SheetUi::default()
+    };
+    for (start, end, spec) in layout.row_runs() {
+        let h = spec.height.unwrap_or(default_pt);
+        if h != common {
+            ui.row_heights
+                .extend((*start..*end).map(|r| (RowId::source(r), scale.row_px(h))));
+        }
+    }
+    for spec in &layout.cols {
+        if let Some(w) = spec.width.filter(|&w| w != default_chars) {
+            let last = spec.last.min(spec.first + 16_384);
+            ui.col_widths
+                .extend((spec.first..=last).map(|c| (ColId::source(c), scale.col_px(w))));
+        }
+    }
+    ui
+}
 
 /// Where a cell's text goes across it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

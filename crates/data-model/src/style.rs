@@ -386,6 +386,44 @@ impl StylePool {
     }
 }
 
+impl StylePool {
+    /// The id of a custom number format with `code`, added if new (ids from 164 up).
+    pub fn num_fmt_id(&mut self, code: &str) -> u32 {
+        if let Some((&id, _)) = self.num_fmts.iter().find(|(_, c)| &***c == code) {
+            return id;
+        }
+        let id = self
+            .num_fmts
+            .keys()
+            .next_back()
+            .map_or(164, |&k| (k + 1).max(164));
+        self.num_fmts.insert(id, code.into());
+        id
+    }
+
+    /// The id of cell format `xf`: an equal one already in the pool, else a new one
+    /// appended. The file's records keep their indices; the pool only grows.
+    pub fn intern(&mut self, xf: Xf) -> StyleId {
+        match self.xfs.iter().position(|x| *x == xf) {
+            Some(i) => StyleId(i as u32),
+            None => {
+                self.xfs.push(xf);
+                StyleId(self.xfs.len() as u32 - 1)
+            }
+        }
+    }
+
+    /// Style `id` with number format `code` instead of its own.
+    pub fn with_num_fmt(&mut self, id: StyleId, code: &str) -> StyleId {
+        let num_fmt = self.num_fmt_id(code);
+        let xf = Xf {
+            num_fmt,
+            ..self.xf(id).clone()
+        };
+        self.intern(xf)
+    }
+}
+
 /// Excel's tint: lighten (`tint` > 0) or darken a colour in HLS space.
 pub fn apply_tint(rgb: u32, tint: f64) -> u32 {
     if tint == 0.0 {
@@ -501,6 +539,16 @@ impl FileStyles {
     /// Row `row`'s style, if the file gives it one.
     pub fn row(&self, row: u64) -> Option<StyleId> {
         run_at(&self.rows, row)
+    }
+
+    /// Columns that have cells with their own styles: those past it have none.
+    pub fn width(&self) -> u32 {
+        self.cells.len() as u32
+    }
+
+    /// Column styles as `(first, last, style)` ranges, inclusive, sorted.
+    pub fn column_ranges(&self) -> &[(u32, u32, StyleId)] {
+        &self.cols
     }
 
     /// Stored runs in all: what these styles cost.

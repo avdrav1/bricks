@@ -1,5 +1,7 @@
 //! The parts of an XLSX package Bricks reads itself (calamine reads the cell values): where
 //! the workbook, its styles, its theme, and each worksheet live, from the relationships.
+//! A [`Package`] is a private copy of the file a workbook was read from, which saving
+//! patches (ADR 0010).
 
 use crate::xml::attr;
 use quick_xml::events::Event;
@@ -7,7 +9,7 @@ use quick_xml::Reader;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufReader, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use zip::ZipArchive;
 
 pub(crate) type Zip = ZipArchive<BufReader<File>>;
@@ -17,19 +19,57 @@ const REL_WORKSHEET: &str = "/worksheet";
 const REL_STYLES: &str = "/styles";
 const REL_THEME: &str = "/theme";
 
-/// A worksheet's name and part, in workbook order.
+/// A worksheet's name, part, and relationship id, in workbook order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SheetPart {
     pub name: String,
     pub part: String,
+    pub rel_id: String,
 }
 
 /// Where a workbook's parts are.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Parts {
+    /// The workbook part (`xl/workbook.xml`).
+    pub workbook: String,
     pub worksheets: Vec<SheetPart>,
     pub styles: Option<String>,
     pub theme: Option<String>,
+}
+
+/// A private copy of the package a workbook was read from, in the cache directory and
+/// removed with the last reference to it: saving reads it, so the original may change,
+/// move, or be saved over meanwhile.
+#[derive(Debug)]
+pub struct Package {
+    copy: PathBuf,
+    pub(crate) parts: Parts,
+}
+
+impl Package {
+    /// Copy the package at `path` and read where its parts are.
+    pub fn copy_of(path: &Path) -> io::Result<Package> {
+        let copy = csv_engine::scratch_path()?;
+        std::fs::copy(path, &copy)?;
+        // Made first so the copy is removed if reading it fails.
+        let mut package = Package {
+            copy,
+            parts: Parts::default(),
+        };
+        package.parts = parts(&mut open(&package.copy)?)?;
+        Ok(package)
+    }
+
+    /// Where the copy is.
+    pub fn path(&self) -> &Path {
+        &self.copy
+    }
+}
+
+impl Drop for Package {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.copy);
+    }
 }
 
 pub(crate) fn open(path: &Path) -> io::Result<Zip> {
@@ -64,6 +104,7 @@ pub(crate) fn parts(zip: &mut Zip) -> io::Result<Parts> {
             .map(|r| r.target.clone())
     };
     let mut parts = Parts {
+        workbook: workbook.clone(),
         worksheets: Vec::new(),
         styles: find(REL_STYLES),
         theme: find(REL_THEME),
@@ -80,6 +121,7 @@ pub(crate) fn parts(zip: &mut Zip) -> io::Result<Parts> {
                     parts.worksheets.push(SheetPart {
                         name: name.into_owned(),
                         part: rel.target.clone(),
+                        rel_id: rel.id.clone(),
                     });
                 }
             }
@@ -90,22 +132,28 @@ pub(crate) fn parts(zip: &mut Zip) -> io::Result<Parts> {
     Ok(parts)
 }
 
-#[derive(Debug)]
-struct Rel {
-    id: String,
-    kind: String,
+#[derive(Debug, Clone)]
+pub(crate) struct Rel {
+    pub id: String,
+    pub kind: String,
     /// The target part's full name in the package.
-    target: String,
+    pub target: String,
 }
 
-/// The relationships of part `source` ("" for the package itself), targets resolved.
-fn rels(zip: &mut Zip, source: &str) -> io::Result<Vec<Rel>> {
+/// The name of part `source`'s relationships part ("" for the package's own).
+pub(crate) fn rels_name(source: &str) -> String {
     let (dir, file) = source.rsplit_once('/').unwrap_or(("", source));
-    let rels_name = if dir.is_empty() {
+    if dir.is_empty() {
         format!("_rels/{file}.rels")
     } else {
         format!("{dir}/_rels/{file}.rels")
-    };
+    }
+}
+
+/// The relationships of part `source` ("" for the package itself), targets resolved.
+pub(crate) fn rels(zip: &mut Zip, source: &str) -> io::Result<Vec<Rel>> {
+    let dir = source.rsplit_once('/').map_or("", |(d, _)| d);
+    let rels_name = rels_name(source);
     let Some(xml) = read_part(zip, &rels_name)? else {
         return Ok(Vec::new());
     };
@@ -125,7 +173,7 @@ fn rels(zip: &mut Zip, source: &str) -> io::Result<Vec<Rel>> {
                 out.push(Rel {
                     id: id.into_owned(),
                     kind: kind.into_owned(),
-                    target: resolve(dir, &target),
+                    target: resolve_target(dir, &target),
                 });
             }
             Event::Eof => break,
@@ -136,7 +184,7 @@ fn rels(zip: &mut Zip, source: &str) -> io::Result<Vec<Rel>> {
 }
 
 /// A relationship target relative to directory `dir`, as a part name.
-fn resolve(dir: &str, target: &str) -> String {
+pub(crate) fn resolve_target(dir: &str, target: &str) -> String {
     let mut segments: Vec<&str> = if let Some(abs) = target.strip_prefix('/') {
         return normalize(abs.split('/').collect());
     } else if dir.is_empty() {
@@ -164,7 +212,7 @@ fn normalize(segments: Vec<&str>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve;
+    use super::resolve_target as resolve;
 
     #[test]
     fn targets_resolve_against_the_source_part() {

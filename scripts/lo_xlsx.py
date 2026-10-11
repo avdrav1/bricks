@@ -48,6 +48,8 @@ from com.sun.star.beans import PropertyValue
 from com.sun.star.table import BorderLine2, CellAddress, CellRangeAddress
 
 PORT = int(os.environ.get("LO_PORT", "2105"))  # set it to run several at once
+# Dump at most this many rows of each sheet (big real-world workbooks dump slowly).
+MAX_ROWS = int(os.environ.get("LO_MAX_ROWS", "0")) or None
 RESULT_STRING = 2  # com.sun.star.sheet.FormulaResult.STRING
 
 
@@ -302,7 +304,7 @@ def dump(doc):
         cursor = sheet.createCursor()
         cursor.gotoEndOfUsedArea(False)
         end = cursor.RangeAddress
-        for r in range(end.EndRow + 1):
+        for r in range(min(end.EndRow + 1, MAX_ROWS or end.EndRow + 1)):
             for c in range(end.EndColumn + 1):
                 cell = sheet.getCellByPosition(c, r)
                 kind = cell.Type.value  # com.sun.star.table.CellContentType
@@ -344,7 +346,7 @@ def styles(doc):
         cursor.gotoEndOfUsedArea(False)
         end = cursor.RangeAddress
         merges = []
-        for r in range(end.EndRow + 1):
+        for r in range(min(end.EndRow + 1, MAX_ROWS or end.EndRow + 1)):
             for c in range(end.EndColumn + 1):
                 cell = sheet.getCellByPosition(c, r)
                 ref = f"{col_name(c)}{r + 1}"
@@ -372,7 +374,7 @@ def styles(doc):
         for c in range(end.EndColumn + 1):
             col = sheet.Columns.getByIndex(c)
             lines.append(f"col {col_name(c)} {col.Width} {int(not col.IsVisible)}")
-        for r in range(end.EndRow + 1):
+        for r in range(min(end.EndRow + 1, MAX_ROWS or end.EndRow + 1)):
             row = sheet.Rows.getByIndex(r)
             lines.append(f"row {r + 1} {row.Height} {int(not row.IsVisible)}")
     return "\n".join(lines) + "\n"

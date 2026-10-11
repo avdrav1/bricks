@@ -1,6 +1,7 @@
 //! Small helpers over quick-xml for reading package parts: attributes by local name, so
 //! prefixed producers (`x:c`) read like plain ones.
 
+use quick_xml::events::attributes::Attribute;
 use quick_xml::events::BytesStart;
 use std::borrow::Cow;
 
@@ -10,6 +11,11 @@ pub(crate) fn attr<'a>(e: &'a BytesStart<'_>, name: &[u8]) -> Option<Cow<'a, str
         .attributes()
         .flatten()
         .find(|a| a.key.local_name().as_ref() == name)?;
+    value(a)
+}
+
+/// An attribute's value, unescaped; `None` if malformed.
+pub(crate) fn value(a: Attribute<'_>) -> Option<Cow<'_, str>> {
     match a.value {
         Cow::Borrowed(raw) => {
             let text = std::str::from_utf8(raw).ok()?;

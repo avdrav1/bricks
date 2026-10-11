@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# XLSX-1 and XLSX-2 acceptance: an .xlsx workbook opens with every sheet as a tab, names
-# what a save would drop, asks before saving over it, saves as .xlsx, and a crash with
-# edits on two sheets restores both.
+# XLSX-1 and STYLE-5 acceptance: an .xlsx workbook opens with every sheet as a tab, saves
+# as .xlsx by patching the file (its chart and comments stay), and a crash with edits on
+# two sheets restores both.
 #
 #   scripts/check_xlsx.sh [BINARY]   (default target/release/bricks)
 #
@@ -11,10 +11,8 @@
 # fixture (crates/xlsx/tests/data/fixture.xlsx):
 #   1. the tabs Data, Q1 Sales, and Summary show;
 #   2. Ctrl+Page Down shows Q1 Sales: its A1 is `=Data!B2*2`;
-#   5. a bar names what saving drops: cell formatting, 1 chart, comments, merged cells;
-#   6. 42 typed in Q1 Sales!A1, Ctrl+S: an alert asks "Save over “f.xlsx”?"; Cancel
-#      leaves the file as it was;
-#   3. Ctrl+S again, Save: the saved sheet2.xml holds <v>42</v>;
+#   3. 42 typed in Q1 Sales!A1, Ctrl+S: no question, the saved sheet2.xml holds <v>42</v>,
+#      and the chart and the comments are still in the file (STYLE-5);
 #   4. an edit on two sheets, 6.5 s for the journal, kill -9, relaunch, Restore: both
 #      edits are back;
 #   7. (FML-9) Summary!A3, =BAHTTEXT(1), shows the file's result, and the formula bar
@@ -58,16 +56,11 @@ session() {
   echo "== 2 next sheet"
   keys -M ctrl -k Page_Down -m ctrl; shot 2-next; shown
 
-  echo "== 6 asked"
-  before=$(stat -c %Y.%s /tmp/f.xlsx)
-  keys 42; keys -k Return; keys -k Up; keys -M ctrl s -m ctrl; sleep 1; shot 6-asked; shown
-  python3 /a11y.py press Cancel && echo "cancelled"; sleep 2
-  echo "unchanged: $([ "$(stat -c %Y.%s /tmp/f.xlsx)" = "$before" ] && echo yes || echo no)"
-
   echo "== 3 saved"
-  keys -M ctrl s -m ctrl; sleep 1; python3 /a11y.py press Save && echo "confirmed"; sleep 6
+  keys 42; keys -k Return; keys -k Up; keys -M ctrl s -m ctrl; sleep 6
   shot 3-saved
   echo "sheet2: $(unzip -p /tmp/f.xlsx xl/worksheets/sheet2.xml | grep -o "<c r=\"A1\"[^>]*>\(<[^/][^>]*>[^<]*</[^>]*>\)*" | head -1)"
+  unzip -l /tmp/f.xlsx | grep -o "xl/charts/chart1.xml\|xl/comments1.xml" | sed "s/^/kept: /"
   shown after
 
   echo "== 4 restored"
@@ -97,14 +90,11 @@ check() { # WHAT SECTION PATTERN
 check "1: the Data tab" "1 tabs" "^shown: Data$"
 check "1: the Q1 Sales tab" "1 tabs" "^shown: Q1 Sales$"
 check "1: the Summary tab" "1 tabs" "^shown: Summary$"
-for item in "cell formatting" "1 chart" "comments" "merged cells"; do
-  check "5: the bar names $item" "1 tabs" "^shown: Bricks shows this workbook.s values, formulas, and sheets\. Saving will drop: .*$item"
-done
-check "6: Ctrl+S over it asks first" "6 asked" "^shown: Save over “f\.xlsx”\?$"
-check "6: Cancel leaves the file as it was" "6 asked" "^unchanged: yes$"
 check "2: Ctrl+Page Down shows Q1 Sales!A1 (=Data!B2*2)" "2 next sheet" "^shown: A1: $want_a1$"
 check "3: the save wrote 42 into Q1 Sales!A1" "3 saved" "^sheet2: .*<v>42</v>"
 check "3: and shows it after reading the file back" "3 saved" "^after: A1: 42$"
+check "3: the chart is still in the file" "3 saved" "^kept: xl/charts/chart1.xml$"
+check "3: so are the comments" "3 saved" "^kept: xl/comments1.xml$"
 check "4: a restore is offered after kill -9" "4 restored" "^asked: Restore unsaved edits\?$"
 check "4: the edit on the active sheet is back" "4 restored" "^restored: A1: second$"
 check "4: and the one on the other sheet" "4 restored" "^other: A1: first$"

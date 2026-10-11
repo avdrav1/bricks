@@ -6,13 +6,16 @@ use data_model::{
     SheetId, Workbook,
 };
 use formula::{literal, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
 use std::time::Instant;
-use xlsx::{check_limits, import, kind, refusal, save_xlsx, ExportSheet, Imported, Kind, Progress};
+use xlsx::{
+    check_limits, import, kind, refusal, save, Imported, Kind, Package, Progress, SaveBook,
+    SheetSizes,
+};
 
 const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
 
@@ -72,15 +75,36 @@ fn cells(table: &mut CsvTable) -> BTreeMap<(u64, u32), String> {
     out
 }
 
-fn workbook(imported: Imported) -> Workbook {
-    Workbook::from_sheets(
+/// The workbook an import read, as the app makes it, and the package it came from.
+fn workbook(imported: Imported) -> (Workbook, Arc<Package>) {
+    let mut book = Workbook::from_sheets(
         imported
             .sheets
             .into_iter()
             .map(|s| (s.name, s.table, Origin::Xlsx(s.index), s.cached))
             .collect(),
         imported.names,
+    );
+    book.set_styles(imported.styles);
+    (book, imported.package)
+}
+
+/// Save `book` to `dest` as the app does, patching `package` if there is one.
+fn save_book(
+    dest: &Path,
+    book: &Workbook,
+    package: Option<Arc<Package>>,
+    sizes: &HashMap<SheetId, SheetSizes>,
+) -> data_model::SaveStats {
+    let book = SaveBook::from_workbook(
+        book.snapshot(),
+        package,
+        sizes,
+        Arc::new(no_cancel()),
+        &AtomicU64::new(0),
     )
+    .unwrap();
+    save(dest, book, &SaveProgress::default(), &no_cancel()).unwrap_or_else(|e| panic!("{e}"))
 }
 
 struct Dumped {
@@ -146,7 +170,7 @@ fn fixture_imports_as_libreoffice_reads_it() {
     let indices: Vec<u32> = imported.sheets.iter().map(|s| s.index).collect();
     assert_eq!(indices, [0, 1, 2, 3]);
 
-    let mut book = workbook(imported);
+    let (mut book, _) = workbook(imported);
     let mut formulas = 0;
     for (k, (name, expected)) in dump.iter().enumerate() {
         let id = SheetId(k as u32);
@@ -204,7 +228,7 @@ type SheetCells = Vec<(String, BTreeMap<(u64, u32), String>)>;
 /// Import the fixture, edit one cell per sheet, and save it; returns the saved path and
 /// the cells saved.
 fn edited_fixture_save(test: &str) -> (PathBuf, SheetCells) {
-    let mut book = workbook(import_file(&data("fixture.xlsx")));
+    let (mut book, package) = workbook(import_file(&data("fixture.xlsx")));
     let at = |row, col| CellRef {
         row: RowId::source(row),
         col: ColId::source(col),
@@ -220,33 +244,24 @@ fn edited_fixture_save(test: &str) -> (PathBuf, SheetCells) {
             .table
             .apply(Edit::set(at, text));
     }
+    book.set_active(SheetId(1));
     let mut expected = Vec::new();
-    let mut sheets = Vec::new();
-    for k in 0..3 {
-        let id = SheetId(k);
-        let computed = book
-            .computed_for(id, Arc::new(no_cancel()), &AtomicU64::new(0))
-            .unwrap();
-        let sheet = book.sheet_mut(id).unwrap();
+    let mut rows = 0;
+    for k in 0..4 {
+        let sheet = book.sheet_mut(SheetId(k)).unwrap();
+        rows += sheet.table.total_rows();
         expected.push((sheet.name.clone(), cells(&mut sheet.table)));
-        sheets.push(ExportSheet {
-            name: sheet.name.clone(),
-            table: sheet.table.snapshot(),
-            computed,
-            widths: vec![(0, 120), (3, 64)],
-            active: k == 1,
-        });
     }
+    let sizes = HashMap::from([(
+        SheetId(0),
+        SheetSizes {
+            widths: vec![(ColId::source(0), 17.0), (ColId::source(3), 9.0)],
+            heights: vec![(RowId::source(2), 30.0)],
+        },
+    )]);
     let dest = temp(test, "saved.xlsx");
-    let stats = save_xlsx(
-        &dest,
-        sheets,
-        book.names(),
-        &SaveProgress::default(),
-        &no_cancel(),
-    )
-    .unwrap();
-    assert_eq!(stats.rows, 51 + 10 + 3);
+    let stats = save_book(&dest, &book, Some(package), &sizes);
+    assert_eq!(stats.rows, rows);
     assert_eq!(stats.bytes, std::fs::metadata(&dest).unwrap().len());
     (dest, expected)
 }
@@ -284,16 +299,7 @@ fn assert_round_trip(test: &str, name: &str, mut table: CsvTable) {
     let before = cells(&mut table);
     let dest = temp(test, "saved.xlsx");
     let book = Workbook::single(name.to_string(), table, Origin::Csv);
-    let sheet = book.active_sheet();
-    let sheets = vec![ExportSheet {
-        name: sheet.name.clone(),
-        table: sheet.table.snapshot(),
-        computed: Default::default(),
-        widths: Vec::new(),
-        active: true,
-    }];
-    save_xlsx(&dest, sheets, &[], &SaveProgress::default(), &no_cancel())
-        .unwrap_or_else(|e| panic!("{test}: {e}"));
+    save_book(&dest, &book, None, &HashMap::new());
     let mut imported = import_file(&dest);
     assert_eq!(imported.sheets.len(), 1);
     let after = cells(&mut imported.sheets[0].table);
@@ -513,24 +519,16 @@ fn save_1m() {
     let Some(path) = corpus("rows_1m.xlsx") else {
         return;
     };
-    let imported = import_file(&path);
-    let sheet = imported.sheets.into_iter().next().unwrap();
+    // One edit: the sheet is written again, every unchanged cell copied from the file.
+    let (mut book, package) = workbook(import_file(&path));
+    let at = CellRef {
+        row: RowId::source(500_000),
+        col: ColId::source(1),
+    };
+    book.active_mut().apply(Edit::set(at, "edited"));
     let dest = temp("save_1m", "saved.xlsx");
     let start = Instant::now();
-    let stats = save_xlsx(
-        &dest,
-        vec![ExportSheet {
-            name: sheet.name,
-            table: sheet.table,
-            computed: Default::default(),
-            widths: Vec::new(),
-            active: true,
-        }],
-        &[],
-        &SaveProgress::default(),
-        &no_cancel(),
-    )
-    .unwrap();
+    let stats = save_book(&dest, &book, Some(package), &HashMap::new());
     let secs = start.elapsed().as_secs_f64();
     println!(
         "save_1m: {} rows, {} MiB in {secs:.2} s, peak RSS {} MiB",

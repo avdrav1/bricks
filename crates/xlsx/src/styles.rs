@@ -187,6 +187,21 @@ fn read_styles(xml: &str) -> io::Result<StylePool> {
     })
 }
 
+/// The number format ids a styles part defines.
+pub(crate) fn file_num_fmt_ids(xml: &str) -> io::Result<Vec<u32>> {
+    let mut ids = Vec::new();
+    let mut reader = Reader::from_str(xml);
+    loop {
+        match reader.read_event().map_err(io::Error::other)? {
+            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"numFmt" => {
+                ids.extend(num::<u32>(&e, b"numFmtId"));
+            }
+            Event::Eof => return Ok(ids),
+            _ => {}
+        }
+    }
+}
+
 fn font_child(font: &mut Font, child: &[u8], e: &BytesStart<'_>) {
     let val = || attr(e, b"val");
     match child {

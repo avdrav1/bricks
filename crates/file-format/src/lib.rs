@@ -6,7 +6,7 @@
 use csv_engine::{open_text_as, Charset, EncodeWriter, RowIndex, SparseRowIndex};
 use data_model::{SaveJob, SaveProgress, SaveStats};
 use std::fs::{File, OpenOptions};
-use std::io::{self, BufWriter, Write};
+use std::io::{self, BufWriter, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -56,6 +56,11 @@ fn temp_path(dest: &Path) -> io::Result<PathBuf> {
     Ok(dest.with_file_name(tmp))
 }
 
+/// A writer that can also seek: a zip package goes back to fill in each part's sizes.
+pub trait WriteSeek: Write + Seek {}
+
+impl<T: Write + Seek> WriteSeek for T {}
+
 /// Atomically replace `dest` with the bytes `write` produces. `verify` inspects the fully
 /// written and fsynced temp file before it is renamed into place. On any error the original
 /// is untouched and the temp file is removed. Once `cancel` is set, waiting for the fsync
@@ -67,7 +72,7 @@ pub fn save_atomic<W, V>(
     verify: V,
 ) -> Result<(), SaveError>
 where
-    W: FnOnce(&mut (dyn Write + Send)) -> io::Result<()>,
+    W: FnOnce(&mut (dyn WriteSeek + Send)) -> io::Result<()>,
     V: FnOnce(&Path) -> Result<(), String>,
 {
     let tmp = temp_path(dest)?;
@@ -86,7 +91,7 @@ fn write_verify_rename<W, V>(
     verify: V,
 ) -> Result<(), SaveError>
 where
-    W: FnOnce(&mut (dyn Write + Send)) -> io::Result<()>,
+    W: FnOnce(&mut (dyn WriteSeek + Send)) -> io::Result<()>,
     V: FnOnce(&Path) -> Result<(), String>,
 {
     let file = OpenOptions::new().write(true).create_new(true).open(tmp)?;

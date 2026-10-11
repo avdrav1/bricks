@@ -14,6 +14,7 @@ mod formulas;
 mod infer;
 mod journal;
 mod paste;
+mod patch;
 mod rewrites;
 mod rowmap;
 mod save;
@@ -258,6 +259,14 @@ impl EditOverlay {
 
     pub fn get(&self, at: CellRef) -> Option<&str> {
         self.rows.get(&at.row)?.get(&at.col).map(|s| &**s)
+    }
+
+    /// Every edited cell and its text, in no particular order.
+    pub fn cells(&self) -> impl Iterator<Item = (CellRef, &str)> {
+        self.rows.iter().flat_map(|(&row, cols)| {
+            cols.iter()
+                .map(move |(&col, text)| (CellRef { row, col }, &**text))
+        })
     }
 
     /// Remove an edit so the source value shows again. Returns the removed value.

@@ -24,7 +24,7 @@ pub use exact::{ExactIndex, Key};
 pub use numfmt::{builtin_format, FormatColor, Formatted, NumberFormat};
 pub use parse::{parse, ParseError};
 pub use refs::{
-    adjust, column_index, column_name, format_reference, names_sheet, parse_reference,
+    adjust, column_index, column_name, format_reference, names_sheet, parse_reference, push_column,
     shift_formula, Axis, Change,
 };
 pub use render::{render, render_xlsx};
