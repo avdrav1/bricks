@@ -1,6 +1,6 @@
 # Frame
 
-Fast, lightweight Linux-native presentation application. Command `frame`; "Frame" is a working name. Design: [ADR 0004](../adr/0004-frame-presentation-model.md).
+Fast, lightweight Linux-native presentation application, easier to use than PowerPoint (user decision). Command `frame`; "Frame" is a working name. Design: [ADR 0004](../adr/0004-frame-presentation-model.md) (model and reading), [ADR 0006](../adr/0006-frame-editor.md) (editor).
 
 ## Format
 
@@ -17,9 +17,23 @@ Fast, lightweight Linux-native presentation application. Command `frame`; "Frame
 - The window title is the file name; the status bar shows "Slide N of M".
 - Accessibility: each slide's text is exposed as the canvas's accessible description.
 
+## Easier than PowerPoint
+
+Frame edits the same `.pptx` decks as PowerPoint with less to learn and fewer steps (user decision): direct editing on the slide, as in Keynote, plus an outline view for writing (user decision). The rules every FR1 feature follows:
+
+- **No ribbon, one inspector.** The header bar holds New Slide, Insert (Text, Shape, Picture, Table), Outline, and Play. A sidebar inspector shows only what applies to the selection: with nothing selected, the slide (layout, background, hidden); with text, its font, size, bold, italic, underline, colour, alignment, bullets, and level; with a shape, its fill, outline, and geometry; with a table, its rows, columns, and cell fill. Changes apply as you make them; formatting never opens a dialog.
+- **Things line up by themselves.** Moving or resizing a shape snaps its edges and centre to the slide's edges and centre, to the layout's placeholder positions, and to other shapes' edges and centres, within 6 screen pixels, drawing a guide line for each snap; three shapes in a row snap to equal spacing. Holding Alt turns snapping off. Arrow keys nudge the selection by one screen pixel, Shift+arrow by ten.
+- **Layouts are pictures, and new slides guess right.** New Slide (Ctrl+M) adds a slide after the current one with its layout, or, after a title slide, the deck's Title and Content layout. The New Slide menu and the inspector's layout picker show the deck's own layouts as thumbnails. Changing a slide's layout moves its text into the new layout's matching placeholders.
+- **Content goes where it belongs.** A picture dropped, pasted, or inserted fills the selected or first empty picture or content placeholder; with none, it lands centred, scaled to fit the slide. Text that overflows its placeholder shrinks to fit (PowerPoint's shrink on overflow, saved as `normAutofit`).
+- **Writing in an outline.** View → Outline shows every slide's title and bullet text as one editable outline, as PowerPoint's outline view does: Enter after a title starts a new slide, Tab and Shift+Tab change a line's level (Tab on a title makes it a bullet of the slide before; Shift+Tab on a first-level bullet makes it a new slide's title). Slides added from the outline take the Title and Content layout. Text outside the title and body placeholders (text boxes, tables, SmartArt) isn't in the outline and is never changed by it; such a slide shows its title and how many other items it holds. The outline and the slide edit the same deck and share one undo history.
+- **Starting is one step.** File → New (Ctrl+N), or `frame` with no file, opens Frame's built-in blank 16:9 deck with a title slide, ready to type; there is no template gallery.
+- **Undo, not confirmation.** Every edit undoes and redoes; Frame doesn't ask "are you sure" for anything undo can reverse. The only dialogs are opening and saving files and alerts.
+
+**Measured:** the reference task, a 4-slide deck (title slide "Quarterly review" with a subtitle; "Highlights" with three bullets, one at the second level; "Revenue" with a picture from a file; "Next steps" with two bullets; saved as `.pptx`), takes fewer input actions in Frame than in PowerPoint. Input actions are clicks, drags, and key presses other than the content's own characters. Frame's count comes from its check script; PowerPoint's (Microsoft 365, fastest documented path) is counted by hand once and recorded in the story's Notes.
+
 ## FR1: editor (not built yet)
 
-Editing slide text and shapes with undo, adding, deleting, and reordering slides, save by patching the original package, speaker notes.
+Editing slide text on the slide and in the outline view, moving and resizing shapes with snapping, formatting through the inspector, inserting text boxes, shapes, pictures, and tables, adding, deleting, duplicating, and reordering slides, new decks from the built-in blank deck, and save by patching the original package, all with undo. Speaker notes come later.
 
 ## Non-goals for now
 

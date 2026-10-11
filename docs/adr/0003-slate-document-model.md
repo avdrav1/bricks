@@ -1,6 +1,6 @@
 # ADR 0003: Slate's Document Model and Formats
 
-Status: Accepted
+Status: Accepted; pagination superseded by [ADR 0005](0005-slate-is-pageless.md) (Slate is pageless)
 
 Date: 2026-10-11
 

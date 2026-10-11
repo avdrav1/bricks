@@ -4,8 +4,8 @@ Cronkite is a Linux-native office suite written in Rust: Bricks, Slate, and Fram
 
 ```text
 Bricks — spreadsheet / CSV editor
-Slate  — word processor: .txt, .md, .docx (docs/specs/slate.md, ADR 0003)
-Frame  — presentation app (working name): .pptx (docs/specs/frame.md, ADR 0004)
+Slate  — pageless word processor: .txt, .md, .docx (docs/specs/slate.md, ADRs 0003, 0005)
+Frame  — presentation app (working name), easier than PowerPoint: .pptx (docs/specs/frame.md, ADRs 0004, 0006)
 ```
 
 ## Guiding principle
