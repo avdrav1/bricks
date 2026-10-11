@@ -960,13 +960,13 @@ FML-6	TEXT(45306.75,"h:mm AM/PM")
 FML-6	TEXT(45306.25,"h:mm AM/PM")			
 FML-6	TEXT(45306,"h AM/PM")			
 FML-6	TEXT(45306.5,"hh AM/PM")			
-FML-6	TEXT(0.5104166,"h:mm")			
-FML-6	TEXT(0.5104166,"mm:ss")			
-FML-6	TEXT(0.5104166,"h m")			
-FML-6	TEXT(45292.0423611,"h:m:s")			
-FML-6	TEXT(45292.0423611,"hh:mm:ss")			
-FML-6	TEXT(45292.0423611,"s")			
-FML-6	TEXT(45292.0423611,"ss")			
+FML-6	TEXT(0.5104166,"h:mm")		text:12:15	Excel rounds a time to the second before showing it (12:14:59.994 is 12:15:00); LibreOffice cuts the seconds off
+FML-6	TEXT(0.5104166,"mm:ss")		text:15:00	Excel rounds a time to the second before showing it (12:14:59.994 is 12:15:00); LibreOffice cuts the seconds off
+FML-6	TEXT(0.5104166,"h m")		text:12 15	Excel rounds a time to the second before showing it (12:14:59.994 is 12:15:00); LibreOffice cuts the seconds off
+FML-6	TEXT(45292.0423611,"h:m:s")		text:1:1:0	Excel rounds a time to the second before showing it (1:00:59.999 is 1:01:00); LibreOffice cuts the seconds off
+FML-6	TEXT(45292.0423611,"hh:mm:ss")		text:01:01:00	Excel rounds a time to the second before showing it (1:00:59.999 is 1:01:00); LibreOffice cuts the seconds off
+FML-6	TEXT(45292.0423611,"s")		text:0	Excel rounds a time to the second before showing it (1:00:59.999 is 1:01:00); LibreOffice cuts the seconds off
+FML-6	TEXT(45292.0423611,"ss")		text:00	Excel rounds a time to the second before showing it (1:00:59.999 is 1:01:00); LibreOffice cuts the seconds off
 FML-6	TEXT(45306.99999,"hh:mm:ss")			
 FML-6	TEXT(1/3,"hh:mm:ss")			
 FML-6	TEXT(45306+1/3,"yyyy-mm-dd hh:mm:ss")			
@@ -975,6 +975,23 @@ FML-6	TEXT(45292.75,"yyyy-mm-dd h:mm am/pm")
 FML-6	TEXT(45306.75,"mm/ss")			
 FML-6	TEXT(A1,"hh:mm")	A1=2024-01-15T13:45:30		
 FML-6	TEXT("13:45","h:mm AM/PM")			
+STYLE-2	TEXT(5,"0*x")			
+STYLE-2	TEXT(-5,"*-0")			
+STYLE-2	TEXT(-1234,"_(* #,##0_);_(* \(#,##0\);_(* ""-""??_);_(@_)")			
+STYLE-2	TEXT("abc","_(* #,##0_);_(* \(#,##0\);_(* ""-""??_);_(@_)")			
+STYLE-2	TEXT(-5,"[Red]0;[Blue]0")			
+STYLE-2	TEXT(150,"[>=100]""big"";""small""")			
+STYLE-2	TEXT(1.5,"# ?/?")			
+STYLE-2	TEXT(3.14159,"?/?")			
+STYLE-2	TEXT(12345,"0.00E+00")			
+STYLE-2	TEXT(12345,"##0.0E+0")			
+STYLE-2	TEXT(2.5,"[h]:mm")			
+STYLE-2	TEXT(0.75,"h:mm:ss.00")			
+STYLE-2	TEXT(1234.5,"[$€-407]#,##0.00")			
+STYLE-2	TEXT(45306,"[$-F800]dddd, mmmm dd, yyyy")			
+STYLE-2	TEXT(45306,"mmmmm")			
+STYLE-2	TEXT(3E6,"yyyy")		error:#VALUE!	Excel has no date past 9999-12-31 and gives #VALUE!; LibreOffice shows year 10113
+STYLE-2	TEXT(5,"0x")		error:#VALUE!	Excel refuses a bare letter in a format code; LibreOffice shows it as text
 FML-6	LEN(TRIM("a"&CHAR(9)&"  b"))			
 FML-7	VLOOKUP(4,A1:B4,2)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
 FML-7	VLOOKUP(5,A1:B4,2,FALSE)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		

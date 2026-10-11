@@ -1,10 +1,11 @@
 //! Text functions (FML-6). Lengths and positions count Unicode scalar values; numbers read
 //! as text through [`to_text`] (15 significant digits, a date as its serial number).
 
-use super::{add, format, scalar, wildcard, Outcome, Registry};
+use super::{add, scalar, wildcard, Outcome, Registry};
 use crate::ast::{ErrorKind, Expr};
 use crate::coerce::{text_to_number, to_bool, to_number, to_text};
 use crate::eval::{as_reference, bounds, evaluate, Context, Interrupt};
+use crate::numfmt::NumberFormat;
 use crate::value::Value;
 
 /// The longest text `REPT` builds, in characters (Excel's cell text limit).
@@ -343,19 +344,28 @@ fn rept(args: &[Expr], ctx: &mut dyn Context) -> Result<Value> {
 }
 
 /// `TEXT(value, format)`: numbers, dates, and text that reads as a number go through the
-/// format code; other text (and TRUE/FALSE) through its text section.
+/// format code's number sections; other text (and TRUE/FALSE) through its text section. A
+/// `*x` fill is left out, as LibreOffice's `TEXT` leaves it out.
 fn text_fn(args: &[Expr], ctx: &mut dyn Context) -> Result<Value> {
     let v = scalar(&args[0], ctx)?;
     let code = text(&args[1], ctx)?;
-    let shown = match &v {
-        Value::Error(e) => return Err((*e).into()),
-        Value::Text(t) => match text_to_number(t) {
-            Some(n) => format::format(n, &code)?,
-            None => format::format_text(t, &code)?,
+    let v = match v {
+        Value::Error(e) => return Err(e.into()),
+        Value::Text(t) => match text_to_number(&t) {
+            Some(n) => Value::Number(n),
+            None => Value::Text(t),
         },
-        Value::Bool(_) => format::format_text(&to_text(&v)?, &code)?,
-        v => format::format(to_number(v)?, &code)?,
+        Value::Bool(_) => Value::text(to_text(&v)?),
+        v => Value::Number(to_number(&v)?),
     };
+    if code.is_empty() {
+        // Excel and LibreOffice give "" for a number and the text itself for text.
+        return Ok(match v {
+            Value::Text(t) => Value::Text(t),
+            _ => Value::text(""),
+        });
+    }
+    let shown = NumberFormat::parse(&code)?.text_function(&v)?;
     Ok(Value::text(shown))
 }
 

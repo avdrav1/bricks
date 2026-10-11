@@ -87,19 +87,28 @@ pub fn result_text(v: &Value) -> String {
 /// A number as Excel's General format writes it: 15 significant digits; scientific
 /// (`1.2345E+15`, `1E-10`) from 1E+15 up and below 1E-9.
 pub fn number_text(x: f64) -> String {
+    let mut out = String::new();
+    push_number_text(x, &mut out);
+    out
+}
+
+/// [`number_text`] appended to `out`, without other allocation.
+pub(crate) fn push_number_text(x: f64, out: &mut String) {
     if !x.is_finite() {
-        return ErrorKind::Num.text().to_string();
+        out.push_str(ErrorKind::Num.text());
+        return;
     }
-    let y: f64 = format!("{x:.14e}").parse().expect("{:e} parses as f64");
+    let y = round15(x);
     if y == 0.0 {
-        return "0".to_string();
+        out.push('0');
+        return;
     }
     let a = y.abs();
     if a >= 1e15 || a < 1e-9 {
-        let s = format!("{y:e}");
-        let (mantissa, exp) = s.split_once('e').expect("{:e} has an exponent");
+        let mut buf = StackText::default();
+        let _ = write!(buf, "{y:e}");
+        let (mantissa, exp) = buf.as_str().split_once('e').expect("{:e} has an exponent");
         let exp: i32 = exp.parse().expect("an integer exponent");
-        let mut out = String::with_capacity(mantissa.len() + 5);
         out.push_str(mantissa);
         let _ = write!(
             out,
@@ -107,9 +116,52 @@ pub fn number_text(x: f64) -> String {
             if exp < 0 { '-' } else { '+' },
             exp.unsigned_abs()
         );
-        out
     } else {
-        format!("{y}")
+        let _ = write!(out, "{y}");
+    }
+}
+
+/// `x` rounded to 15 significant digits, as Excel shows numbers (`x` itself when that
+/// rounds past the largest double).
+pub(crate) fn round15(x: f64) -> f64 {
+    let mut buf = StackText::default();
+    let _ = write!(buf, "{x:.14e}");
+    let y: f64 = buf.as_str().parse().expect("{:e} parses as f64");
+    if y.is_finite() {
+        y
+    } else {
+        x
+    }
+}
+
+/// A short ASCII text on the stack, for formatting a number without allocating.
+pub(crate) struct StackText {
+    bytes: [u8; 40],
+    len: usize,
+}
+
+impl Default for StackText {
+    fn default() -> Self {
+        StackText {
+            bytes: [0; 40],
+            len: 0,
+        }
+    }
+}
+
+impl StackText {
+    pub(crate) fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.bytes[..self.len]).expect("written as str")
+    }
+}
+
+impl Write for StackText {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        let end = self.len + s.len();
+        let dest = self.bytes.get_mut(self.len..end).ok_or(std::fmt::Error)?;
+        dest.copy_from_slice(s.as_bytes());
+        self.len = end;
+        Ok(())
     }
 }
 

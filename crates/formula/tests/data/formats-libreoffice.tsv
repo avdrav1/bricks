@@ -1,0 +1,1052 @@
+code	value	text	color	excel	why
+General	0	0			
+General	1	1			
+General	-1	-1			
+General	0.1	0.1			
+General	0.333333333333333333	0.333333333333333			
+General	1234.5	1234.5			
+General	-1234.5	-1234.5			
+General	1e15	1000000000000000		"1E+15"	Bricks' General is result_text's (scientific from 1E+15 with two exponent digits) as Excel shows it; LibreOffice writes 16 digits and three exponent digits
+General	999999999999999	999999999999999			
+General	1e-9	0.000000001			
+General	1.5e-9	0.0000000015			
+General	1e-10	1E-10			
+General	123456789012345678	1.23456789012346E+017		"1.23456789012346E+17"	Bricks' General is result_text's (scientific from 1E+15 with two exponent digits) as Excel shows it; LibreOffice writes 16 digits and three exponent digits
+General	-1.2345e-12	-1.2345E-12			
+General	1e300	1E+300			
+General	5e-324	5E-324			
+General	1234567890.12345	1234567890.12345			
+General	text:abc	abc			
+General	text:00123	00123			
+General	TRUE	1		"TRUE"	Excel shows TRUE/FALSE under every number format; LibreOffice formats the boolean as the number 1/0
+General	FALSE	0		"FALSE"	Excel shows TRUE/FALSE under every number format; LibreOffice formats the boolean as the number 1/0
+General	2024-01-15	45306			
+general	2.5	2.5			
+0	1234.567	1235			
+0	-1234.567	-1235			
+0	0	0			
+0	2.5	3			
+0	-2.5	-3			
+0	0.5	1			
+0	0.4	0			
+0	-0.4	0			
+0	999.5	1000			
+0	1e20	100000000000000000000			
+0	-1e20	-100000000000000000000			
+0	1e300	1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000			
+0	1e-300	0			
+0	123456789012345678	123456789012346000			
+0.00	1234.567	1234.57			
+0.00	-1234.567	-1234.57			
+0.00	0	0.00			
+0.00	0.005	0.01			
+0.00	1.005	1.01			
+0.00	9.995	10.00			
+0.00	0.125	0.13			
+0.00	2.675	2.68			
+0.00	-0.001	0.00			
+0.00	1e-300	0.00			
+0.0	4.35	4.4			
+0.0	1.45	1.5			
+0.0	0.05	0.1			
+0.0	-0.05	-0.1			
+0.000	0.0005	0.001			
+000	5	005			
+000	-5	-005			
+000	1234	1234			
+#	5.5	6			
+#	0.4				
+#	0				
+#	-3	-3			
+#.##	0.5	.5			
+#.##	12	12			
+#.##	12.345	12.35			
+#.##	0				
+0.0#	1	1.0			
+0.0#	1.25	1.25			
+0.0#	1.255	1.26			
+?	5	5			
+?	0	 			
+???	5	  5			
+???	1234	1234			
+0.0??	1.5	1.5  			
+0.0??	1.2345	1.235			
+0.0??	1	1.0  			
+#.??	12	12.  			
+#.??	12.3	12.3 			
+??0.0?	5	  5.0 			
+??0.0?	12345.678	12345.68			
+???.???	1.5	  1.5  			
+???.???	123.25	123.25 			
+#,##0	1234567	1,234,567			
+#,##0	5	5			
+#,##0	0	0			
+#,##0	-1234567	-1,234,567			
+#,##0	1234.5	1,235			
+#,##0	1e20	100,000,000,000,000,000,000			
+#,##0	123456789012345678	123,456,789,012,346,000			
+#,##0.00	1234.567	1,234.57			
+#,##0.00	-1234.567	-1,234.57			
+#,##0.00	0	0.00			
+#,##0.00	1234567.891	1,234,567.89			
+0,000	5	0,005			
+0,000	1234	1,234			
+#,	1234567	1235			
+#,##0,	1234567	1,235			
+#,##0,	499	0			
+0.0,,	1234567	1.2			
+0.0,,	-987654321	-987.7			
+0.00,	1234	1.23			
+#,##0,,"M"	123456789	123M			
+0%	0.5	50%			
+0%	-0.25	-25%			
+0%	0	0%			
+0%	1.234	123%			
+0.0%	0.1234	12.3%			
+0.0%	-0.0005	-0.1%			
+0%%	0.1234	12%%		"1234%%"	Excel multiplies by 100 for each %; LibreOffice only once
+%0	5	%500			
+0 %	5	500 %			
+#,##0.00%	123.456	12,345.60%			
+"$"0.00	12345	$12345.00			
+"$"0.00	-12.5	-$12.50			
+\$0	12345	$12345			
+\$0	-12.5	-$13			
+0" units"	12345	12345 units			
+0" units"	-12.5	-13 units			
+$#,##0.00	12345	$12,345.00			
+$#,##0.00	-12.5	-$12.50			
+(0)	12345	(12345)			
+(0)	-12.5	-(13)			
+€0	12345	€12345			
+€0	-12.5	-€13			
+0 0	12345	1234 5			
+0 0	-12.5	-1 3			
+000-0000	12345	001-2345			
+000-0000	-12.5	-000-0013			
++0;-0;0	12345	+12345			
++0;-0;0	-12.5	-13			
+0!	12345	12345!			
+0!	-12.5	-13!			
+^0~	12345	^12345~			
+^0~	-12.5	-^13~			
+{0}	12345	{12345}			
+{0}	-12.5	-{13}			
+<0>	12345	<12345>			
+<0>	-12.5	-<13>			
+=0	12345	=12345			
+=0	-12.5	-=13			
+'0'	12345	'12345'			
+'0'	-12.5	-'13'			
+0:0	12345	1234:5			
+0:0	-12.5	-1:3			
+0&0	12345	1234&5			
+0&0	-12.5	-1&3			
+\a\b0	12345	ab12345			
+\a\b0	-12.5	-ab13			
+"Total: "0.0	12345	Total: 12345.0			
+"Total: "0.0	-12.5	-Total: 12.5			
+0.00"x"0	12345	12345.00x0			
+0.00"x"0	-12.5	-12.50x0			
+kr 0	12345	#REJECTED			
+kr 0	-12.5	#REJECTED			
+0;(0)	5	5			
+0;(0)	-5	(5)			
+0;(0)	0	0			
+0;(0)	-0.001	(0)			
+0;(0)	0.04	0			
+0;(0)	text:t	t			
+0;0	5	5			
+0;0	-5	5			
+0;0	0	0			
+0;0	-0.001	0			
+0;0	0.04	0			
+0;0	text:t	t			
+0;-0;"zero"	5	5			
+0;-0;"zero"	-5	-5			
+0;-0;"zero"	0	zero			
+0;-0;"zero"	-0.001	-0			
+0;-0;"zero"	0.04	0			
+0;-0;"zero"	text:t	t			
+0.00;;	5	5.00			
+0.00;;	-5				
+0.00;;	0				
+0.00;;	-0.001				
+0.00;;	0.04	0.04			
+0.00;;	text:t	t			
+0;	5	5			
+0;	-5				
+0;	0	0			
+0;	-0.001				
+0;	0.04	0			
+0;	text:t	t			
+;;;	5				
+;;;	-5				
+;;;	0				
+;;;	-0.001				
+;;;	0.04				
+;;;	text:t				
+0;0;0;	5	5			
+0;0;0;	-5	5			
+0;0;0;	0	0			
+0;0;0;	-0.001	0			
+0;0;0;	0.04	0			
+0;0;0;	text:t				
+0;@	5	5			
+0;@	-5	-5			
+0;@	0	0			
+0;@	-0.001	0			
+0;@	0.04	0			
+0;@	text:t	t			
+0;-0;@	5	5			
+0;-0;@	-5	-5			
+0;-0;@	0	0			
+0;-0;@	-0.001	-0			
+0;-0;@	0.04	0			
+0;-0;@	text:t	t			
+0.0;(0.0);-	5	5.0			
+0.0;(0.0);-	-5	(5.0)			
+0.0;(0.0);-	0	-			
+0.0;(0.0);-	-0.001	(0.0)			
+0.0;(0.0);-	0.04	0.0			
+0.0;(0.0);-	text:t	t			
+"pos";"neg";"zero";"text"	5	pos			
+"pos";"neg";"zero";"text"	-5	neg			
+"pos";"neg";"zero";"text"	0	zero			
+"pos";"neg";"zero";"text"	-0.001	neg			
+"pos";"neg";"zero";"text"	0.04	pos			
+"pos";"neg";"zero";"text"	text:t	text			
+0;;"z"	5	5			
+0;;"z"	-5				
+0;;"z"	0	z			
+0;;"z"	-0.001				
+0;;"z"	0.04	0			
+0;;"z"	text:t	t			
+General;(General)	5	5			
+General;(General)	-5	(5)			
+General;(General)	0	0			
+General;(General)	-0.001	(0.001)			
+General;(General)	0.04	0.04			
+General;(General)	text:t	t			
+0.0;-0.0;"zero"	5	5.0			
+0.0;-0.0;"zero"	-5	-5.0			
+0.0;-0.0;"zero"	0	zero			
+0.0;-0.0;"zero"	-0.001	-0.0			
+0.0;-0.0;"zero"	0.04	0.0			
+0.0;-0.0;"zero"	text:t	t			
+#,##0.00;(#,##0.00);"-"	5	5.00			
+#,##0.00;(#,##0.00);"-"	-5	(5.00)			
+#,##0.00;(#,##0.00);"-"	0	-			
+#,##0.00;(#,##0.00);"-"	-0.001	(0.00)			
+#,##0.00;(#,##0.00);"-"	0.04	0.04			
+#,##0.00;(#,##0.00);"-"	text:t	t			
+[>=100]0;[<0]0;0	150	150			
+[>=100]0;[<0]0;0	50	50			
+[>=100]0;[<0]0;0	1	1			
+[>=100]0;[<0]0;0	-5	5			
+[>=100]0;[<0]0;0	0	0			
+[>=100]0;[<0]0;0	-0.4	0			
+[>=100]0;[<0]0;0	text:t	t			
+[>=100]"big "0;"small "0	150	big 150			
+[>=100]"big "0;"small "0	50	small 50			
+[>=100]"big "0;"small "0	1	small 1			
+[>=100]"big "0;"small "0	-5	small 5			
+[>=100]"big "0;"small "0	0	small 0			
+[>=100]"big "0;"small "0	-0.4	small 0			
+[>=100]"big "0;"small "0	text:t	t			
+[<10]"lo "0;"hi "0	150	hi 150			
+[<10]"lo "0;"hi "0	50	hi 50			
+[<10]"lo "0;"hi "0	1	lo 1			
+[<10]"lo "0;"hi "0	-5	-lo 5			
+[<10]"lo "0;"hi "0	0	lo 0			
+[<10]"lo "0;"hi "0	-0.4	lo 0			
+[<10]"lo "0;"hi "0	text:t	t			
+[<=-1]"neg "0;[>=1]"pos "0;"mid "0.0	150	pos 150			
+[<=-1]"neg "0;[>=1]"pos "0;"mid "0.0	50	pos 50			
+[<=-1]"neg "0;[>=1]"pos "0;"mid "0.0	1	pos 1			
+[<=-1]"neg "0;[>=1]"pos "0;"mid "0.0	-5	-neg 5			
+[<=-1]"neg "0;[>=1]"pos "0;"mid "0.0	0	mid 0.0			
+[<=-1]"neg "0;[>=1]"pos "0;"mid "0.0	-0.4	mid 0.4			
+[<=-1]"neg "0;[>=1]"pos "0;"mid "0.0	text:t	t			
+[=0]"zero";0	150	150			
+[=0]"zero";0	50	50			
+[=0]"zero";0	1	1			
+[=0]"zero";0	-5	5			
+[=0]"zero";0	0	zero			
+[=0]"zero";0	-0.4	0			
+[=0]"zero";0	text:t	t			
+[>100]0	150	150			
+[>100]0	50	50			
+[>100]0	1	1			
+[>100]0	-5	5			
+[>100]0	0	0			
+[>100]0	-0.4	0.4			
+[>100]0	text:t	t			
+[<0]"neg "0;"pos "0	150	pos 150			
+[<0]"neg "0;"pos "0	50	pos 50			
+[<0]"neg "0;"pos "0	1	pos 1			
+[<0]"neg "0;"pos "0	-5	neg 5			
+[<0]"neg "0;"pos "0	0	pos 0			
+[<0]"neg "0;"pos "0	-0.4	neg 0			
+[<0]"neg "0;"pos "0	text:t	t			
+[<>1]0;"one"	150	150			
+[<>1]0;"one"	50	50			
+[<>1]0;"one"	1	one			
+[<>1]0;"one"	-5	-5			
+[<>1]0;"one"	0	0			
+[<>1]0;"one"	-0.4	0			
+[<>1]0;"one"	text:t	t			
+[>=1.5]0.0;0.00	150	150.0			
+[>=1.5]0.0;0.00	50	50.0			
+[>=1.5]0.0;0.00	1	1.00			
+[>=1.5]0.0;0.00	-5	5.00			
+[>=1.5]0.0;0.00	0	0.00			
+[>=1.5]0.0;0.00	-0.4	0.40			
+[>=1.5]0.0;0.00	text:t	t			
+[>=100]"A"0;"B"0;"C"0	150	A150			
+[>=100]"A"0;"B"0;"C"0	50	C50			
+[>=100]"A"0;"B"0;"C"0	1	C1			
+[>=100]"A"0;"B"0;"C"0	-5	B5			
+[>=100]"A"0;"B"0;"C"0	0	C0			
+[>=100]"A"0;"B"0;"C"0	-0.4	B0			
+[>=100]"A"0;"B"0;"C"0	text:t	t			
+[<=0]"np "0;"pos "0	150	pos 150			
+[<=0]"np "0;"pos "0	50	pos 50			
+[<=0]"np "0;"pos "0	1	pos 1			
+[<=0]"np "0;"pos "0	-5	np 5			
+[<=0]"np "0;"pos "0	0	np 0			
+[<=0]"np "0;"pos "0	-0.4	np 0			
+[<=0]"np "0;"pos "0	text:t	t			
+[Red][<=100]0;[Blue][>100]0	150	150	0000FF		
+[Red][<=100]0;[Blue][>100]0	50	50	FF0000		
+[Red][<=100]0;[Blue][>100]0	1	1	FF0000		
+[Red][<=100]0;[Blue][>100]0	-5	-5	FF0000		
+[Red][<=100]0;[Blue][>100]0	0	0	FF0000		
+[Red][<=100]0;[Blue][>100]0	-0.4	0	FF0000		
+[Red][<=100]0;[Blue][>100]0	text:t	t			
+[Red]0	5	5	FF0000		
+[Red]0	-5	-5	FF0000		
+[Red]0	0	0	FF0000		
+[Red]0	text:t	t			
+[Blue]0;[Red]0	5	5	0000FF		
+[Blue]0;[Red]0	-5	5	FF0000		
+[Blue]0;[Red]0	0	0	0000FF		
+[Blue]0;[Red]0	text:t	t			
+0;[Red]-0	5	5			
+0;[Red]-0	-5	-5	FF0000		
+0;[Red]-0	0	0			
+0;[Red]-0	text:t	t			
+[Green]0;[Magenta]0;[Cyan]0;[Yellow]@	5	5	00FF00		
+[Green]0;[Magenta]0;[Cyan]0;[Yellow]@	-5	5	FF00FF		
+[Green]0;[Magenta]0;[Cyan]0;[Yellow]@	0	0	00FFFF		
+[Green]0;[Magenta]0;[Cyan]0;[Yellow]@	text:t	t	FFFF00		
+[Black]0	5	5	000000		
+[Black]0	-5	-5	000000		
+[Black]0	0	0	000000		
+[Black]0	text:t	t			
+[White]0	5	5	FFFFFF		
+[White]0	-5	-5	FFFFFF		
+[White]0	0	0	FFFFFF		
+[White]0	text:t	t			
+[Color3]0	5	5	1C1C1C		
+[Color3]0	-5	-5	1C1C1C		
+[Color3]0	0	0	1C1C1C		
+[Color3]0	text:t	t			
+[Color56]0	5	5	8E86AE		
+[Color56]0	-5	-5	8E86AE		
+[Color56]0	0	0	8E86AE		
+[Color56]0	text:t	t			
+[red]0	5	5	FF0000		
+[red]0	-5	-5	FF0000		
+[red]0	0	0	FF0000		
+[red]0	text:t	t			
+[BLUE]0.0	5	5.0	0000FF		
+[BLUE]0.0	-5	-5.0	0000FF		
+[BLUE]0.0	0	0.0	0000FF		
+[BLUE]0.0	text:t	t			
+[Red][>=100]0;[Blue]0	5	5	0000FF		
+[Red][>=100]0;[Blue]0	-5	5	0000FF		
+[Red][>=100]0;[Blue]0	0	0	0000FF		
+[Red][>=100]0;[Blue]0	text:t	t			
+[Red]General	5	5	FF0000		
+[Red]General	-5	-5	FF0000		
+[Red]General	0	0	FF0000		
+[Red]General	text:t	t			
+#,##0.00_);[Red](#,##0.00)	5	5.00 			
+#,##0.00_);[Red](#,##0.00)	-5	(5.00)	FF0000		
+#,##0.00_);[Red](#,##0.00)	0	0.00 			
+#,##0.00_);[Red](#,##0.00)	text:t	t			
+_(* #,##0_);_(* \(#,##0\);_(* "-"??_);_(@_)	1234	 1,234 			
+_(* #,##0_);_(* \(#,##0\);_(* "-"??_);_(@_)	-1234	 (1,234)			
+_(* #,##0_);_(* \(#,##0\);_(* "-"??_);_(@_)	0	 -   			
+_(* #,##0_);_(* \(#,##0\);_(* "-"??_);_(@_)	0.4	 0 			
+_(* #,##0_);_(* \(#,##0\);_(* "-"??_);_(@_)	1234567.89	 1,234,568 			
+_(* #,##0_);_(* \(#,##0\);_(* "-"??_);_(@_)	-0.001	 (0)			
+_(* #,##0_);_(* \(#,##0\);_(* "-"??_);_(@_)	text:abc	 abc 			
+_($* #,##0.00_);_($* \(#,##0.00\);_($* "-"??_);_(@_)	1234	 $1,234.00 			
+_($* #,##0.00_);_($* \(#,##0.00\);_($* "-"??_);_(@_)	-1234	 $(1,234.00)			
+_($* #,##0.00_);_($* \(#,##0.00\);_($* "-"??_);_(@_)	0	 $-   			
+_($* #,##0.00_);_($* \(#,##0.00\);_($* "-"??_);_(@_)	0.4	 $0.40 			
+_($* #,##0.00_);_($* \(#,##0.00\);_($* "-"??_);_(@_)	1234567.89	 $1,234,567.89 			
+_($* #,##0.00_);_($* \(#,##0.00\);_($* "-"??_);_(@_)	-0.001	 $(0.00)			
+_($* #,##0.00_);_($* \(#,##0.00\);_($* "-"??_);_(@_)	text:abc	 abc 			
+_(* #,##0.00_);_(* \(#,##0.00\);_(* "-"??_);_(@_)	1234	 1,234.00 			
+_(* #,##0.00_);_(* \(#,##0.00\);_(* "-"??_);_(@_)	-1234	 (1,234.00)			
+_(* #,##0.00_);_(* \(#,##0.00\);_(* "-"??_);_(@_)	0	 -   			
+_(* #,##0.00_);_(* \(#,##0.00\);_(* "-"??_);_(@_)	0.4	 0.40 			
+_(* #,##0.00_);_(* \(#,##0.00\);_(* "-"??_);_(@_)	1234567.89	 1,234,567.89 			
+_(* #,##0.00_);_(* \(#,##0.00\);_(* "-"??_);_(@_)	-0.001	 (0.00)			
+_(* #,##0.00_);_(* \(#,##0.00\);_(* "-"??_);_(@_)	text:abc	 abc 			
+0*x	5	5			
+0*x	-5	-5			
+0*x	text:ab	ab			
+*-0	5	5			
+*-0	-5	-5			
+*-0	text:ab	ab			
+"x"* 0	5	x5			
+"x"* 0	-5	-x5			
+"x"* 0	text:ab	ab			
+@*.	5	5			
+@*.	-5	-5			
+@*.	text:ab	ab			
+_)0	5	 5			
+_)0	-5	- 5			
+_)0	text:ab	ab			
+0_)	5	5 			
+0_)	-5	-5 			
+0_)	text:ab	ab			
+_(0_)	5	 5 			
+_(0_)	-5	- 5 			
+_(0_)	text:ab	ab			
+* #,##0	5	5			
+* #,##0	-5	-5			
+* #,##0	text:ab	ab			
+0*	5	#REJECTED			
+0*	-5	#REJECTED			
+0*	text:ab	#REJECTED			
+**0	5	5			
+**0	-5	-5			
+**0	text:ab	ab			
+0.00E+00	12345	1.23E+04			
+0.00E+00	0.000123	1.23E-04			
+0.00E+00	-1.5	-1.50E+00			
+0.00E+00	0	0.00E+00			
+0.00E+00	1e100	1.00E+100			
+0.00E+00	1	1.00E+00			
+0.00E+00	123456	1.23E+05			
+0.00E+00	1e-300	1.00E-300			
+0.00E+00	-1e300	-1.00E+300			
+##0.0E+0	12345	12.3E+3			
+##0.0E+0	0.000123	123.0E-6			
+##0.0E+0	-1.5	-1.5E+0			
+##0.0E+0	0	0.0E+0			
+##0.0E+0	1e100	10.0E+99			
+##0.0E+0	1	1.0E+0			
+##0.0E+0	123456	123.5E+3			
+##0.0E+0	1e-300	1.0E-300			
+##0.0E+0	-1e300	-1.0E+300			
+00.00E+00	12345	01.23E+04			
+00.00E+00	0.000123	01.23E-04			
+00.00E+00	-1.5	-01.50E+00			
+00.00E+00	0	00.00E+00			
+00.00E+00	1e100	01.00E+100			
+00.00E+00	1	01.00E+00			
+00.00E+00	123456	12.35E+04			
+00.00E+00	1e-300	01.00E-300			
+00.00E+00	-1e300	-01.00E+300			
+#0.0E+0	12345	1.2E+4			
+#0.0E+0	0.000123	1.2E-4			
+#0.0E+0	-1.5	-1.5E+0			
+#0.0E+0	0	0.0E+0			
+#0.0E+0	1e100	1.0E+100			
+#0.0E+0	1	1.0E+0			
+#0.0E+0	123456	12.3E+4			
+#0.0E+0	1e-300	1.0E-300			
+#0.0E+0	-1e300	-1.0E+300			
+0E+0	12345	1E+4			
+0E+0	0.000123	1E-4			
+0E+0	-1.5	-2E+0			
+0E+0	0	0E+0			
+0E+0	1e100	1E+100			
+0E+0	1	1E+0			
+0E+0	123456	1E+5			
+0E+0	1e-300	1E-300			
+0E+0	-1e300	-1E+300			
+0.0e-00	12345	1.2e04			
+0.0e-00	0.000123	1.2e-04			
+0.0e-00	-1.5	-1.5e00			
+0.0e-00	0	0.0e00			
+0.0e-00	1e100	1.0e100			
+0.0e-00	1	1.0e00			
+0.0e-00	123456	1.2e05			
+0.0e-00	1e-300	1.0e-300			
+0.0e-00	-1e300	-1.0e300			
+0.00E-00	12345	1.23E04			
+0.00E-00	0.000123	1.23E-04			
+0.00E-00	-1.5	-1.50E00			
+0.00E-00	0	0.00E00			
+0.00E-00	1e100	1.00E100			
+0.00E-00	1	1.00E00			
+0.00E-00	123456	1.23E05			
+0.00E-00	1e-300	1.00E-300			
+0.00E-00	-1e300	-1.00E300			
+#.##E+00	12345	1.23E+04			
+#.##E+00	0.000123	1.23E-04			
+#.##E+00	-1.5	-1.5E+00			
+#.##E+00	0	0E+00			
+#.##E+00	1e100	1E+100			
+#.##E+00	1	1E+00			
+#.##E+00	123456	1.23E+05			
+#.##E+00	1e-300	1E-300			
+#.##E+00	-1e300	-1E+300			
+###.##E+00	12345	12.35E+03			
+###.##E+00	0.000123	123E-06			
+###.##E+00	-1.5	-1.5E+00			
+###.##E+00	0	0E+00			
+###.##E+00	1e100	10E+99			
+###.##E+00	1	1E+00			
+###.##E+00	123456	123.46E+03			
+###.##E+00	1e-300	1E-300			
+###.##E+00	-1e300	-1E+300			
+0.00e+00	12345	1.23E+04			
+0.00e+00	0.000123	1.23E-04			
+0.00e+00	-1.5	-1.50E+00			
+0.00e+00	0	0.00E+00			
+0.00e+00	1e100	1.00E+100			
+0.00e+00	1	1.00E+00			
+0.00e+00	123456	1.23E+05			
+0.00e+00	1e-300	1.00E-300			
+0.00e+00	-1e300	-1.00E+300			
+##0.00E+0	99.995	100.00E+0			
+##0.00E+0	999.996	1.00E+3			
+0.0E+0	9.96	1.0E+1			
+0.0E+0	0.00001	1.0E-5			
+# ?/?	1.5	1 1/2			
+# ?/?	0.3333	 1/3			
+# ?/?	5	5    			
+# ?/?	0	0    			
+# ?/?	-2.75	-2 3/4			
+# ?/?	0.01	0    			
+# ?/?	3.14159	3 1/7			
+# ?/?	0.999	1    			
+# ?/?	-0.01	0    			
+# ??/??	1.5	1  1/2 			
+# ??/??	0.3333	  1/3 			
+# ??/??	5	5      			
+# ??/??	0	0      			
+# ??/??	-2.75	-2  3/4 			
+# ??/??	0.01	  1/99			
+# ??/??	3.14159	3 14/99			
+# ??/??	0.999	1      			
+# ??/??	-0.01	-  1/99			
+?/8	1.5	12/8			
+?/8	0.3333	3/8			
+?/8	5	40/8			
+?/8	0	0/8			
+?/8	-2.75	-22/8			
+?/8	0.01	0/8			
+?/8	3.14159	25/8			
+?/8	0.999	8/8			
+?/8	-0.01	0/8			
+# ??/16	1.5	1  8/16			
+# ??/16	0.3333	  5/16			
+# ??/16	5	5    			
+# ??/16	0	0    			
+# ??/16	-2.75	-2 12/16			
+# ??/16	0.01	0    			
+# ??/16	3.14159	3  2/16			
+# ??/16	0.999	1    			
+# ??/16	-0.01	0    			
+0/100	1.5	150/100			
+0/100	0.3333	33/100			
+0/100	5	500/100			
+0/100	0	0/100			
+0/100	-2.75	-275/100			
+0/100	0.01	1/100			
+0/100	3.14159	314/100			
+0/100	0.999	100/100			
+0/100	-0.01	-1/100			
+?/?	1.5	3/2			
+?/?	0.3333	1/3			
+?/?	5	5/1			
+?/?	0	0/1			
+?/?	-2.75	-11/4			
+?/?	0.01	0/1			
+?/?	3.14159	22/7			
+?/?	0.999	1/1			
+?/?	-0.01	0/1			
+# ???/???	1.5	1   1/2  			
+# ???/???	0.3333	   1/3  			
+# ???/???	5	5        			
+# ???/???	0	0        			
+# ???/???	-2.75	-2   3/4  			
+# ???/???	0.01	   1/100			
+# ???/???	3.14159	3  16/113			
+# ???/???	0.999	 998/999			
+# ???/???	-0.01	-   1/100			
+0 ?/?	1.5	1 1/2			
+0 ?/?	0.3333	0 1/3			
+0 ?/?	5	5    			
+0 ?/?	0	0    			
+0 ?/?	-2.75	-2 3/4			
+0 ?/?	0.01	0    			
+0 ?/?	3.14159	3 1/7			
+0 ?/?	0.999	1    			
+0 ?/?	-0.01	0    			
+# ?/4	1.5	1 2/4			
+# ?/4	0.3333	 1/4			
+# ?/4	5	5   			
+# ?/4	0	0   			
+# ?/4	-2.75	-2 3/4			
+# ?/4	0.01	0   			
+# ?/4	3.14159	3 1/4			
+# ?/4	0.999	1   			
+# ?/4	-0.01	0   			
+??/??	1.5	 3/2 			
+??/??	0.3333	 1/3 			
+??/??	5	 5/1 			
+??/??	0	 0/1 			
+??/??	-2.75	-11/4 			
+??/??	0.01	 1/99			
+??/??	3.14159	311/99			
+??/??	0.999	 1/1 			
+??/??	-0.01	- 1/99			
+# ?/?" in"	1.5	1 1/2 in			
+# ?/?" in"	0.3333	 1/3 in			
+# ?/?" in"	5	5     in			
+# ?/?" in"	0	0     in			
+# ?/?" in"	-2.75	-2 3/4 in			
+# ?/?" in"	0.01	0     in			
+# ?/?" in"	3.14159	3 1/7 in			
+# ?/?" in"	0.999	1     in			
+# ?/?" in"	-0.01	0     in			
+yyyy-mm-dd	2024-01-15	2024-01-15			
+yyyy-mm-dd	2024-12-01	2024-12-01			
+yyyy-mm-dd	2000-02-29	2000-02-29			
+yyyy-mm-dd	1900-01-01	1900-01-01			
+yy	2024-01-15	24			
+yy	2024-12-01	24			
+yy	2000-02-29	00			
+yy	1900-01-01	00			
+m	2024-01-15	1			
+m	2024-12-01	12			
+m	2000-02-29	2			
+m	1900-01-01	1			
+mm	2024-01-15	01			
+mm	2024-12-01	12			
+mm	2000-02-29	02			
+mm	1900-01-01	01			
+mmm	2024-01-15	Jan			
+mmm	2024-12-01	Dec			
+mmm	2000-02-29	Feb			
+mmm	1900-01-01	Jan			
+mmmm	2024-01-15	January			
+mmmm	2024-12-01	December			
+mmmm	2000-02-29	February			
+mmmm	1900-01-01	January			
+mmmmm	2024-01-15	J			
+mmmmm	2024-12-01	D			
+mmmmm	2000-02-29	F			
+mmmmm	1900-01-01	J			
+d	2024-01-15	15			
+d	2024-12-01	1			
+d	2000-02-29	29			
+d	1900-01-01	1			
+dd	2024-01-15	15			
+dd	2024-12-01	01			
+dd	2000-02-29	29			
+dd	1900-01-01	01			
+ddd	2024-01-15	Mon			
+ddd	2024-12-01	Sun			
+ddd	2000-02-29	Tue			
+ddd	1900-01-01	Mon			
+dddd	2024-01-15	Monday			
+dddd	2024-12-01	Sunday			
+dddd	2000-02-29	Tuesday			
+dddd	1900-01-01	Monday			
+d mmmm yyyy	2024-01-15	15 January 2024			
+d mmmm yyyy	2024-12-01	1 December 2024			
+d mmmm yyyy	2000-02-29	29 February 2000			
+d mmmm yyyy	1900-01-01	1 January 1900			
+dddd, mmmm d, yyyy	2024-01-15	Monday, January 15, 2024			
+dddd, mmmm d, yyyy	2024-12-01	Sunday, December 1, 2024			
+dddd, mmmm d, yyyy	2000-02-29	Tuesday, February 29, 2000			
+dddd, mmmm d, yyyy	1900-01-01	Monday, January 1, 1900			
+m/d/yy	2024-01-15	1/15/24			
+m/d/yy	2024-12-01	12/1/24			
+m/d/yy	2000-02-29	2/29/00			
+m/d/yy	1900-01-01	1/1/00			
+YYYY-MM-DD	2024-01-15	2024-01-15			
+YYYY-MM-DD	2024-12-01	2024-12-01			
+YYYY-MM-DD	2000-02-29	2000-02-29			
+YYYY-MM-DD	1900-01-01	1900-01-01			
+yyyy-mm-dd	1899-12-31	1899-12-31			
+yyyy-mm-dd	1900-02-28	1900-02-28			
+yyyy-mm-dd	1900-03-01	1900-03-01			
+yyyy-mm-dd	1850-06-15	1850-06-15			
+yyyy-mm-dd	9999-12-31	9999-12-31			
+yyyy-mm-dd	1600-03-01	1600-03-01			
+yyyy-mm-dd	45306.75	2024-01-15			
+yyyy-mm-dd	0	1899-12-30			
+yyyy-mm-dd	-1	1899-12-29			
+yyyy-mm-dd	2958466	10000-01-01		""	Excel fills the cell with # for a date past 9999-12-31 (Formatted.fill); LibreOffice shows year 10000 on
+yyyy-mm-dd	-700000	-0018-06-20		""	Excel can't show a date before 1900 and fills the cell with #; Bricks shows dates back to 0001-01-01 as LibreOffice does and fills before that
+yyyy-mm-dd	1e8	#FMT		""	Excel fills the cell with # for a date past 9999-12-31 (Formatted.fill); LibreOffice shows year 10000 on
+yyyy-mm-dd	60	1900-02-28			
+yyyy-mm-dd	61	1900-03-01			
+mmm d	1900-01-01	Jan 1			
+mmm d	1899-12-30	Dec 30			
+mmm d	1899-12-31	Dec 31			
+dddd	1899-12-30	Saturday			
+dddd	1899-12-31	Sunday			
+h:mm	2024-01-15T13:45:30	13:45			
+h:mm	2024-01-15T00:00:00	0:00			
+h:mm	2024-01-15T12:00:00	12:00			
+h:mm	2024-01-15T09:05:07	9:05			
+h:mm	0.75	18:00			
+hh:mm:ss	2024-01-15T13:45:30	13:45:30			
+hh:mm:ss	2024-01-15T00:00:00	00:00:00			
+hh:mm:ss	2024-01-15T12:00:00	12:00:00			
+hh:mm:ss	2024-01-15T09:05:07	09:05:07			
+hh:mm:ss	0.75	18:00:00			
+h:mm AM/PM	2024-01-15T13:45:30	1:45 PM			
+h:mm AM/PM	2024-01-15T00:00:00	12:00 AM			
+h:mm AM/PM	2024-01-15T12:00:00	12:00 PM			
+h:mm AM/PM	2024-01-15T09:05:07	9:05 AM			
+h:mm AM/PM	0.75	6:00 PM			
+h:mm:ss am/pm	2024-01-15T13:45:30	1:45:30 PM			
+h:mm:ss am/pm	2024-01-15T00:00:00	12:00:00 AM			
+h:mm:ss am/pm	2024-01-15T12:00:00	12:00:00 PM			
+h:mm:ss am/pm	2024-01-15T09:05:07	9:05:07 AM			
+h:mm:ss am/pm	0.75	6:00:00 PM			
+h:mm A/P	2024-01-15T13:45:30	1:45 p		"1:45 P"	Excel writes A/P in the case it is written; LibreOffice always in lower case
+h:mm A/P	2024-01-15T00:00:00	12:00 a		"12:00 A"	Excel writes A/P in the case it is written; LibreOffice always in lower case
+h:mm A/P	2024-01-15T12:00:00	12:00 p		"12:00 P"	Excel writes A/P in the case it is written; LibreOffice always in lower case
+h:mm A/P	2024-01-15T09:05:07	9:05 a		"9:05 A"	Excel writes A/P in the case it is written; LibreOffice always in lower case
+h:mm A/P	0.75	6:00 p		"6:00 P"	Excel writes A/P in the case it is written; LibreOffice always in lower case
+h:mm a/p	2024-01-15T13:45:30	1:45 p			
+h:mm a/p	2024-01-15T00:00:00	12:00 a			
+h:mm a/p	2024-01-15T12:00:00	12:00 p			
+h:mm a/p	2024-01-15T09:05:07	9:05 a			
+h:mm a/p	0.75	6:00 p			
+mm:ss	2024-01-15T13:45:30	45:30			
+mm:ss	2024-01-15T00:00:00	00:00			
+mm:ss	2024-01-15T12:00:00	00:00			
+mm:ss	2024-01-15T09:05:07	05:07			
+mm:ss	0.75	00:00			
+h	2024-01-15T13:45:30	13			
+h	2024-01-15T00:00:00	0			
+h	2024-01-15T12:00:00	12			
+h	2024-01-15T09:05:07	9			
+h	0.75	18			
+hh	2024-01-15T13:45:30	13			
+hh	2024-01-15T00:00:00	00			
+hh	2024-01-15T12:00:00	12			
+hh	2024-01-15T09:05:07	09			
+hh	0.75	18			
+s	2024-01-15T13:45:30	30			
+s	2024-01-15T00:00:00	0			
+s	2024-01-15T12:00:00	0			
+s	2024-01-15T09:05:07	7			
+s	0.75	0			
+ss	2024-01-15T13:45:30	30			
+ss	2024-01-15T00:00:00	00			
+ss	2024-01-15T12:00:00	00			
+ss	2024-01-15T09:05:07	07			
+ss	0.75	00			
+h:m:s	2024-01-15T13:45:30	13:45:30			
+h:m:s	2024-01-15T00:00:00	0:0:0			
+h:m:s	2024-01-15T12:00:00	12:0:0			
+h:m:s	2024-01-15T09:05:07	9:5:7			
+h:m:s	0.75	18:0:0			
+yyyy-mm-dd hh:mm	2024-01-15T13:45:30	2024-01-15 13:45			
+yyyy-mm-dd hh:mm	2024-01-15T00:00:00	2024-01-15 00:00			
+yyyy-mm-dd hh:mm	2024-01-15T12:00:00	2024-01-15 12:00			
+yyyy-mm-dd hh:mm	2024-01-15T09:05:07	2024-01-15 09:05			
+yyyy-mm-dd hh:mm	0.75	1899-12-30 18:00			
+yyyy-mm-dd hh:mm:ss	2024-01-15T13:45:30	2024-01-15 13:45:30			
+yyyy-mm-dd hh:mm:ss	2024-01-15T00:00:00	2024-01-15 00:00:00			
+yyyy-mm-dd hh:mm:ss	2024-01-15T12:00:00	2024-01-15 12:00:00			
+yyyy-mm-dd hh:mm:ss	2024-01-15T09:05:07	2024-01-15 09:05:07			
+yyyy-mm-dd hh:mm:ss	0.75	1899-12-30 18:00:00			
+AM/PM h	2024-01-15T13:45:30	PM 1			
+AM/PM h	2024-01-15T00:00:00	AM 12			
+AM/PM h	2024-01-15T12:00:00	PM 12			
+AM/PM h	2024-01-15T09:05:07	AM 9			
+AM/PM h	0.75	PM 6			
+hh:mm:ss.0	0.75	18:00:00.0			
+hh:mm:ss.0	2.5	12:00:00.0			
+hh:mm:ss.0	-0.5	12:00:00.0			
+hh:mm:ss.0	100.25	06:00:00.0			
+hh:mm:ss.0	0.000011574	00:00:00.9		"00:00:01.0"	Excel rounds a time to the smallest unit shown (the second, or its fraction) and carries it into minutes, hours, and days; LibreOffice cuts it off
+hh:mm:ss.0	1.9999999	23:59:59.9		"00:00:00.0"	Excel rounds a time to the smallest unit shown (the second, or its fraction) and carries it into minutes, hours, and days; LibreOffice cuts it off
+mm:ss.00	0.75	00:00.00			
+mm:ss.00	2.5	00:00.00			
+mm:ss.00	-0.5	00:00.00			
+mm:ss.00	100.25	00:00.00			
+mm:ss.00	0.000011574	00:00.99		"00:01.00"	Excel rounds a time to the smallest unit shown (the second, or its fraction) and carries it into minutes, hours, and days; LibreOffice cuts it off
+mm:ss.00	1.9999999	59:59.99			
+ss.000	0.75	00.000			
+ss.000	2.5	00.000			
+ss.000	-0.5	00.000			
+ss.000	100.25	00.000			
+ss.000	0.000011574	00.999		"01.000"	Excel rounds a time to the smallest unit shown (the second, or its fraction) and carries it into minutes, hours, and days; LibreOffice cuts it off
+ss.000	1.9999999	59.991			
+hh:mm:ss.000	0.75	18:00:00.000			
+hh:mm:ss.000	2.5	12:00:00.000			
+hh:mm:ss.000	-0.5	12:00:00.000			
+hh:mm:ss.000	100.25	06:00:00.000			
+hh:mm:ss.000	0.000011574	00:00:00.999		"00:00:01.000"	Excel rounds a time to the smallest unit shown (the second, or its fraction) and carries it into minutes, hours, and days; LibreOffice cuts it off
+hh:mm:ss.000	1.9999999	23:59:59.991			
+[h]:mm:ss	0.75	18:00:00			
+[h]:mm:ss	2.5	60:00:00			
+[h]:mm:ss	-0.5	-12:00:00			
+[h]:mm:ss	100.25	2406:00:00			
+[h]:mm:ss	0.000011574	0:00:01			
+[h]:mm:ss	1.9999999	48:00:00			
+[hh]:mm	0.75	18:00			
+[hh]:mm	2.5	60:00			
+[hh]:mm	-0.5	-12:00			
+[hh]:mm	100.25	2406:00			
+[hh]:mm	0.000011574	00:00			
+[hh]:mm	1.9999999	48:00			
+[m]:ss	0.75	1080:00			
+[m]:ss	2.5	3600:00			
+[m]:ss	-0.5	-720:00			
+[m]:ss	100.25	144360:00			
+[m]:ss	0.000011574	0:01			
+[m]:ss	1.9999999	2880:00			
+[mm]:ss	0.75	1080:00			
+[mm]:ss	2.5	3600:00			
+[mm]:ss	-0.5	-720:00			
+[mm]:ss	100.25	144360:00			
+[mm]:ss	0.000011574	00:01			
+[mm]:ss	1.9999999	2880:00			
+[s]	0.75	64800			
+[s]	2.5	216000			
+[s]	-0.5	-43200			
+[s]	100.25	8661600			
+[s]	0.000011574	1			
+[s]	1.9999999	172800			
+[ss].0	0.75	64800.0			
+[ss].0	2.5	216000.0			
+[ss].0	-0.5	-43200.0			
+[ss].0	100.25	8661600.0			
+[ss].0	0.000011574	01.0			
+[ss].0	1.9999999	172800.0			
+[h]:mm:ss.00	0.75	18:00:00.00			
+[h]:mm:ss.00	2.5	60:00:00.00			
+[h]:mm:ss.00	-0.5	-12:00:00.00			
+[h]:mm:ss.00	100.25	2406:00:00.00			
+[h]:mm:ss.00	0.000011574	0:00:01.00			
+[h]:mm:ss.00	1.9999999	47:59:59.99			
+h:mm:ss	0.75	18:00:00			
+h:mm:ss	2.5	12:00:00			
+h:mm:ss	-0.5	12:00:00			
+h:mm:ss	100.25	6:00:00			
+h:mm:ss	0.000011574	0:00:00		"0:00:01"	Excel rounds a time to the smallest unit shown (the second, or its fraction) and carries it into minutes, hours, and days; LibreOffice cuts it off
+h:mm:ss	1.9999999	23:59:59		"0:00:00"	Excel rounds a time to the smallest unit shown (the second, or its fraction) and carries it into minutes, hours, and days; LibreOffice cuts it off
+yyyy-mm-dd	0.75	1899-12-30			
+yyyy-mm-dd	2.5	1900-01-01			
+yyyy-mm-dd	-0.5	1899-12-29			
+yyyy-mm-dd	100.25	1900-04-09			
+yyyy-mm-dd	0.000011574	1899-12-30			
+yyyy-mm-dd	1.9999999	1899-12-31			
+dd hh:mm	0.75	30 18:00			
+dd hh:mm	2.5	01 12:00			
+dd hh:mm	-0.5	29 12:00			
+dd hh:mm	100.25	09 06:00			
+dd hh:mm	0.000011574	30 00:00			
+dd hh:mm	1.9999999	31 23:59		"01 00:00"	Excel rounds a time to the smallest unit shown (the second, or its fraction) and carries it into minutes, hours, and days; LibreOffice cuts it off
+h:mm:ss	0.5104166666	12:14:59		"12:15:00"	Excel rounds a time to the smallest unit shown (the second, or its fraction) and carries it into minutes, hours, and days; LibreOffice cuts it off
+h:mm	0.5104166666	12:14		"12:15"	Excel rounds a time to the smallest unit shown (the second, or its fraction) and carries it into minutes, hours, and days; LibreOffice cuts it off
+mm:ss	0.5104166666	14:59		"15:00"	Excel rounds a time to the smallest unit shown (the second, or its fraction) and carries it into minutes, hours, and days; LibreOffice cuts it off
+h:mm:ss	0.99999999	23:59:59		"0:00:00"	Excel rounds a time to the smallest unit shown (the second, or its fraction) and carries it into minutes, hours, and days; LibreOffice cuts it off
+[h]:mm:ss	0.99999999	24:00:00			
+yyyy-mm-dd hh:mm:ss	0.99999999	1899-12-30 23:59:59		"1899-12-31 00:00:00"	Excel rounds a time to the smallest unit shown (the second, or its fraction) and carries it into minutes, hours, and days; LibreOffice cuts it off
+yyyy-mm-dd	45306.999999	2024-01-15			
+d	45306.999999	15			
+[$€-407]#,##0.00	1234.5	€1,234.50			
+[$€-407]#,##0.00	45306.75	€45,306.75			
+[$€-407]#,##0.00	-5	-€5.00			
+[$USD] 0	1234.5	USD 1235			
+[$USD] 0	45306.75	USD 45307			
+[$USD] 0	-5	-USD 5			
+[$-409]0	1234.5	1235			
+[$-409]0	45306.75	45307			
+[$-409]0	-5	-5			
+[$-F800]dddd, mmmm dd, yyyy	1234.5	Monday, May 18, 1903			
+[$-F800]dddd, mmmm dd, yyyy	45306.75	Monday, January 15, 2024			
+[$-F800]dddd, mmmm dd, yyyy	-5	Monday, December 25, 1899			
+[$-F400]h:mm:ss AM/PM	1234.5	12:00:00 PM			
+[$-F400]h:mm:ss AM/PM	45306.75	06:00:00 PM		"6:00:00 PM"	Excel's [$-F400] is the system long time, h:mm:ss AM/PM in en-US; LibreOffice pads the hour
+[$-F400]h:mm:ss AM/PM	-5	12:00:00 AM			
+#,##0.00 [$€-1]	1234.5	1,234.50 €			
+#,##0.00 [$€-1]	45306.75	45,306.75 €			
+#,##0.00 [$€-1]	-5	-5.00 €			
+[$£-809]#,##0	1234.5	£1,235			
+[$£-809]#,##0	45306.75	£45,307			
+[$£-809]#,##0	-5	-£5			
+[$-409]mmmm d, yyyy	1234.5	May 18, 1903			
+[$-409]mmmm d, yyyy	45306.75	January 15, 2024			
+[$-409]mmmm d, yyyy	-5	December 25, 1899			
+[DBNum1]0	1234.5	1235			
+[DBNum1]0	45306.75	45307			
+[DBNum1]0	-5	-5			
+[$¥-411]#,##0	1234.5	¥1,235			
+[$¥-411]#,##0	45306.75	¥45,307			
+[$¥-411]#,##0	-5	-¥5			
+[$€]0	1234.5	€1235			
+[$€]0	45306.75	€45307			
+[$€]0	-5	-€5			
+[$-407]0.00	1234.5	1234.50			
+[$-407]0.00	45306.75	45306.75			
+[$-407]0.00	-5	-5.00			
+[$-F800]yyyy	1234.5	Monday, May 18, 1903			
+[$-F800]yyyy	45306.75	Monday, January 15, 2024			
+[$-F800]yyyy	-5	Monday, December 25, 1899			
+@	text:abc	abc			
+@	12	12			
+@	-12	-12			
+"x"@	text:abc	xabc			
+"x"@	12	12			
+"x"@	-12	-12			
+@" items"	text:abc	abc items			
+@" items"	12	12			
+@" items"	-12	-12			
+"("@")"	text:abc	(abc)			
+"("@")"	12	12			
+"("@")"	-12	-12			
+0;0;0;"lit"	text:abc	lit			
+0;0;0;"lit"	12	12			
+0;0;0;"lit"	-12	12			
+0;0;0;@@	text:abc	abcabc			
+0;0;0;@@	12	12			
+0;0;0;@@	-12	12			
+@_)	text:abc	abc 			
+@_)	12	12			
+@_)	-12	-12			
+_(@_)	text:abc	 abc 			
+_(@_)	12	12			
+_(@_)	-12	-12			
+0.00;-0.00;0;[Red]"<"@">"	text:abc	<abc>	FF0000		
+0.00;-0.00;0;[Red]"<"@">"	12	12.00			
+0.00;-0.00;0;[Red]"<"@">"	-12	-12.00			
+"x"@	TRUE	1		"TRUE"	Excel shows TRUE/FALSE under every number format; LibreOffice formats the boolean as the number 1/0
+0.00;-0.00;0;[Red]"<"@">"	TRUE	1.00		"TRUE"	Excel shows TRUE/FALSE under every number format; LibreOffice formats the boolean as the number 1/0
+0.00	2024-01-15T12:00:00	45306.50			
+"x"0	2024-01-15T12:00:00	x45307			
+#,##0;(#,##0)	2024-01-15T12:00:00	45,307			
+0.00	TRUE	1.00		"TRUE"	Excel shows TRUE/FALSE under every number format; LibreOffice formats the boolean as the number 1/0
+0.00	FALSE	0.00		"FALSE"	Excel shows TRUE/FALSE under every number format; LibreOffice formats the boolean as the number 1/0
+#,##0;(#,##0)	TRUE	1		"TRUE"	Excel shows TRUE/FALSE under every number format; LibreOffice formats the boolean as the number 1/0
+#,##0;(#,##0)	FALSE	0		"FALSE"	Excel shows TRUE/FALSE under every number format; LibreOffice formats the boolean as the number 1/0
+General	45306.6543	45306.6543			
+General	-1234.5678	-1234.5678			
+General	0.000123	0.000123			
+0	45306.6543	45307			
+0	-1234.5678	-1235			
+0	0.000123	0			
+0.00	45306.6543	45306.65			
+0.00	-1234.5678	-1234.57			
+0.00	0.000123	0.00			
+#,##0	45306.6543	45,307			
+#,##0	-1234.5678	-1,235			
+#,##0	0.000123	0			
+#,##0.00	45306.6543	45,306.65			
+#,##0.00	-1234.5678	-1,234.57			
+#,##0.00	0.000123	0.00			
+0%	45306.6543	4530665%			
+0%	-1234.5678	-123457%			
+0%	0.000123	0%			
+0.00%	45306.6543	4530665.43%			
+0.00%	-1234.5678	-123456.78%			
+0.00%	0.000123	0.01%			
+0.00E+00	45306.6543	4.53E+04			
+0.00E+00	-1234.5678	-1.23E+03			
+# ?/?	45306.6543	45306 2/3			
+# ?/?	-1234.5678	-1234 4/7			
+# ?/?	0.000123	0    			
+# ??/??	45306.6543	45306 53/81			
+# ??/??	-1234.5678	-1234 46/81			
+# ??/??	0.000123	0      			
+m/d/yyyy	45306.6543	1/15/2024			
+m/d/yyyy	-1234.5678	8/12/1896			
+m/d/yyyy	0.000123	12/30/1899			
+d-mmm-yy	45306.6543	15-Jan-24			
+d-mmm-yy	-1234.5678	12-Aug-96			
+d-mmm-yy	0.000123	30-Dec-99			
+d-mmm	45306.6543	15-Jan			
+d-mmm	-1234.5678	12-Aug			
+d-mmm	0.000123	30-Dec			
+mmm-yy	45306.6543	Jan-24			
+mmm-yy	-1234.5678	Aug-96			
+mmm-yy	0.000123	Dec-99			
+h:mm AM/PM	45306.6543	3:42 PM			
+h:mm AM/PM	-1234.5678	10:22 AM			
+h:mm AM/PM	0.000123	12:00 AM			
+h:mm:ss AM/PM	45306.6543	3:42:11 PM		"3:42:12 PM"	Excel rounds a time to the smallest unit shown (the second, or its fraction) and carries it into minutes, hours, and days; LibreOffice cuts it off
+h:mm:ss AM/PM	-1234.5678	10:22:22 AM			
+h:mm:ss AM/PM	0.000123	12:00:10 AM		"12:00:11 AM"	Excel rounds a time to the smallest unit shown (the second, or its fraction) and carries it into minutes, hours, and days; LibreOffice cuts it off
+h:mm	45306.6543	15:42			
+h:mm	-1234.5678	10:22			
+h:mm	0.000123	0:00			
+h:mm:ss	45306.6543	15:42:11		"15:42:12"	Excel rounds a time to the smallest unit shown (the second, or its fraction) and carries it into minutes, hours, and days; LibreOffice cuts it off
+h:mm:ss	-1234.5678	10:22:22			
+h:mm:ss	0.000123	0:00:10		"0:00:11"	Excel rounds a time to the smallest unit shown (the second, or its fraction) and carries it into minutes, hours, and days; LibreOffice cuts it off
+m/d/yyyy h:mm	45306.6543	1/15/2024 15:42			
+m/d/yyyy h:mm	-1234.5678	8/12/1896 10:22			
+m/d/yyyy h:mm	0.000123	12/30/1899 0:00			
+#,##0_);(#,##0)	45306.6543	45,307 			
+#,##0_);(#,##0)	-1234.5678	(1,235)			
+#,##0_);(#,##0)	0.000123	0 			
+#,##0_);[Red](#,##0)	45306.6543	45,307 			
+#,##0_);[Red](#,##0)	-1234.5678	(1,235)	FF0000		
+#,##0_);[Red](#,##0)	0.000123	0 			
+#,##0.00_);(#,##0.00)	45306.6543	45,306.65 			
+#,##0.00_);(#,##0.00)	-1234.5678	(1,234.57)			
+#,##0.00_);(#,##0.00)	0.000123	0.00 			
+#,##0.00_);[Red](#,##0.00)	45306.6543	45,306.65 			
+#,##0.00_);[Red](#,##0.00)	-1234.5678	(1,234.57)	FF0000		
+#,##0.00_);[Red](#,##0.00)	0.000123	0.00 			
+mm:ss	45306.6543	42:11		"42:12"	Excel rounds a time to the smallest unit shown (the second, or its fraction) and carries it into minutes, hours, and days; LibreOffice cuts it off
+mm:ss	-1234.5678	22:22			
+mm:ss	0.000123	00:10		"00:11"	Excel rounds a time to the smallest unit shown (the second, or its fraction) and carries it into minutes, hours, and days; LibreOffice cuts it off
+[h]:mm:ss	45306.6543	1087359:42:12			
+[h]:mm:ss	-1234.5678	-29629:37:38			
+[h]:mm:ss	0.000123	0:00:11			
+mmss.0	45306.6543	4211.5			
+mmss.0	-1234.5678	2222.1			
+mmss.0	0.000123	0010.6			
+##0.0E+0	45306.6543	45.3E+3			
+##0.0E+0	-1234.5678	-1.2E+3			
+@	45306.6543	45306.6543			
+@	-1234.5678	-1234.5678			
+@	0.000123	0.000123			
+0E	5	#REJECTED			
+*	5	#REJECTED			
+[]0	5	#REJECTED			
+mm.00	5	#REJECTED			
+0.00 h	5	#REJECTED			
+E+00	5	#REJECTED			
+[Color0]0	5	#REJECTED			
+[Color57]0	5	5	729FCF	#REJECTED	Excel refuses this code; LibreOffice reads it leniently
+0;[<0]0	5	#REJECTED			
+	5	#REJECTED			
+[Red	5		FF0000	#REJECTED	Excel refuses this code; LibreOffice reads it leniently
+0x	5	5x		#REJECTED	Excel refuses this code; LibreOffice reads it leniently
+"abc	5	"abc		#REJECTED	Excel refuses this code; LibreOffice reads it leniently
+0;0;0;0;0	5	5		#REJECTED	Excel refuses this code; LibreOffice reads it leniently
+\	5	\\		#REJECTED	Excel refuses this code; LibreOffice reads it leniently
+0@	5	5		#REJECTED	Excel refuses this code; LibreOffice reads it leniently
+_	5			#REJECTED	Excel refuses this code; LibreOffice reads it leniently
+0E5	5	#REJECTED			
+#@	5	5		#REJECTED	Excel refuses this code; LibreOffice reads it leniently
+0.0E+	5	#REJECTED			
+[<]0	5	5		#REJECTED	Excel refuses this code; LibreOffice reads it leniently
+[>=1;0	5	#REJECTED			
+General0	5	#REJECTED			
+0;0;[>1]0	5	#REJECTED			
+h:mm#	5	#REJECTED			
+x	5	x		#REJECTED	Excel refuses this code; LibreOffice reads it leniently
+yyyy0	5	#REJECTED			

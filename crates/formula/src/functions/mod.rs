@@ -11,7 +11,6 @@ use std::sync::LazyLock;
 
 mod criteria;
 mod dates;
-pub mod format;
 mod info;
 mod logic;
 mod lookup;
