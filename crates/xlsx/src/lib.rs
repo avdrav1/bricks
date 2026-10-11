@@ -6,7 +6,9 @@
 mod detect;
 pub mod export;
 mod import;
+pub mod losses;
 
 pub use detect::{kind, refusal, Kind};
 pub use export::{check_limits, save_xlsx, write_xlsx, ExportSheet, MAX_COLS, MAX_ROWS};
 pub use import::{import, value_text, ImportError, Imported, ImportedSheet, Progress};
+pub use losses::{Loss, Losses};

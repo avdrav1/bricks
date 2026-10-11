@@ -2,6 +2,7 @@
 //! directory, which is then mapped and indexed like any CSV file. A formula cell's raw text
 //! is its formula (`=SUM(A1:A3)`); the result the file stored is kept beside it.
 
+use crate::losses::{self, Losses};
 use calamine::{
     CellErrorType, Data, DataRef, Dimensions, ExcelDateTime, Reader, SheetType, Xlsx, XlsxError,
 };
@@ -58,6 +59,8 @@ pub struct Imported {
     /// Defined names and their formulas, without `=`; Excel's built-in `_xlnm.` names
     /// (print areas and the like) left out.
     pub names: Vec<(String, String)>,
+    /// The content the workbook holds that a save would drop.
+    pub losses: Losses,
 }
 
 #[derive(Debug)]
@@ -129,7 +132,12 @@ pub fn import(path: &Path, cancel: &AtomicBool, progress: &Progress) -> Result<I
             cached,
         });
     }
-    Ok(Imported { sheets, names })
+    let losses = losses::scan(path)?;
+    Ok(Imported {
+        sheets,
+        names,
+        losses,
+    })
 }
 
 fn import_sheet(
