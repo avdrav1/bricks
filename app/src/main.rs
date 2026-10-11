@@ -268,7 +268,8 @@ fn follow_import(
         };
         session.importing.take();
         match result {
-            Ok(Ok(imported)) => {
+            Ok(Ok(mut imported)) => {
+                session.set_losses(std::mem::take(&mut imported.losses));
                 grid.replace_workbook(workbook_of(imported));
                 grid.set_loading(false);
             }
@@ -621,6 +622,12 @@ struct Session {
     checked: Cell<Option<(u8, Encoding)>>,
     /// What the file is: CSV, or an Excel workbook (XLSX-1).
     kind: Cell<DocKind>,
+    /// What the workbook holds that Bricks drops on save (XLSX-2), and whether the user
+    /// agreed to save over it all the same.
+    losses: RefCell<xlsx::Losses>,
+    confirmed: Cell<bool>,
+    /// The bar naming those losses, once the window has one.
+    losses_bar: RefCell<Option<LossesBar>>,
     /// The import of an Excel workbook in flight (XLSX-1), and how far it got.
     importing: RefCell<Option<jobs::Job<Result<Imported, ImportError>>>>,
     import_progress: RefCell<Arc<xlsx::Progress>>,
@@ -645,6 +652,9 @@ impl Session {
             restore: RefCell::new(None),
             checked: Cell::new(None),
             kind: Cell::new(DocKind::Csv),
+            losses: RefCell::new(xlsx::Losses::default()),
+            confirmed: Cell::new(false),
+            losses_bar: RefCell::new(None),
             importing: RefCell::new(None),
             import_progress: RefCell::new(Arc::default()),
         }
@@ -719,6 +729,25 @@ impl Session {
         Workbook::single(name, table, origin)
     }
 
+    /// The file read just now holds `losses` (XLSX-2): the bar says so, and saving over
+    /// it asks first again.
+    fn set_losses(&self, losses: xlsx::Losses) {
+        if let Some(bar) = self.losses_bar.borrow().as_ref() {
+            bar.show(&losses);
+        }
+        self.confirmed.set(false);
+        self.losses.replace(losses);
+    }
+
+    /// The file is a macro workbook (.xlsm): Bricks never saves over it (XLSX-2).
+    fn is_xlsm(&self) -> bool {
+        self.path
+            .borrow()
+            .as_deref()
+            .and_then(Path::extension)
+            .is_some_and(|e| e.eq_ignore_ascii_case("xlsm"))
+    }
+
     /// How Ctrl+S writes the file: as it was read (XLSX-1).
     fn format(&self, grid: &GridView) -> Format {
         match self.kind.get() {
@@ -733,7 +762,9 @@ impl Session {
     /// Ctrl+S has to ask where and how: an untitled table, or a CSV file that has more
     /// sheets now than a CSV file holds (XLSX-1).
     fn needs_save_as(&self, grid: &GridView) -> bool {
-        self.path.borrow().is_none() || (self.kind.get() == DocKind::Csv && grid.sheet_count() > 1)
+        self.path.borrow().is_none()
+            || (self.kind.get() == DocKind::Csv && grid.sheet_count() > 1)
+            || self.is_xlsm()
     }
 
     /// The user's header choice wins over detection on a fresh reading of the file.
@@ -834,27 +865,32 @@ fn build_window(
     let grid = GridView::new(book, &vadj, &hadj);
 
     let layout = gtk::Grid::new();
-    layout.attach(&grid, 0, 0, 1, 1);
+    // What a save would drop from the workbook (XLSX-2), over the grid.
+    let losses = LossesBar::new();
+    layout.attach(&losses.root, 0, 0, 2, 1);
+    losses.show(&session.losses.borrow());
+    session.losses_bar.replace(Some(losses));
+    layout.attach(&grid, 0, 1, 1, 1);
     layout.attach(
         &gtk::Scrollbar::new(gtk::Orientation::Vertical, Some(&vadj)),
         1,
-        0,
+        1,
         1,
         1,
     );
     layout.attach(
         &gtk::Scrollbar::new(gtk::Orientation::Horizontal, Some(&hadj)),
         0,
-        1,
+        2,
         1,
         1,
     );
     let find = FindBar::new(&grid);
-    layout.attach(&find.0.root, 0, 2, 2, 1);
+    layout.attach(&find.0.root, 0, 3, 2, 1);
     let tabs = sheets::SheetTabs::new(&grid);
-    layout.attach(tabs.root(), 0, 3, 2, 1);
+    layout.attach(tabs.root(), 0, 4, 2, 1);
     let bar = StatusBar::new();
-    layout.attach(&bar.root, 0, 4, 2, 1);
+    layout.attach(&bar.root, 0, 5, 2, 1);
 
     let window = gtk::ApplicationWindow::builder()
         .application(app)
@@ -1023,7 +1059,7 @@ fn build_window(
                     if shift || session.needs_save_as(&grid) {
                         save_as(&window, &grid, &session, &save, false);
                     } else {
-                        start_save(&grid, &session, &save, None, false);
+                        save_or_ask(&window, &grid, &session, &save, None, false);
                     }
                 }
                 Key::z if !shift => {
@@ -1088,7 +1124,7 @@ fn build_window(
                     Ok(2) if session.needs_save_as(&grid) => {
                         save_as(&window, &grid, &session, &save, true)
                     }
-                    Ok(2) => start_save(&grid, &session, &save, None, true),
+                    Ok(2) => save_or_ask(&window, &grid, &session, &save, None, true),
                     _ => {}
                 }
             });
@@ -1569,13 +1605,14 @@ fn check_saved_workbook(
         let path = path.clone();
         move |cancel| xlsx::import(&path, cancel.flag(), &xlsx::Progress::default())
     });
-    let (grid, save) = (grid.downgrade(), save.clone());
+    let (grid, save, session) = (grid.downgrade(), save.clone(), session.clone());
     glib::spawn_future_local(async move {
         let result = job.finished().await;
         let Some(grid) = grid.upgrade() else { return };
         grid.set_saving(false);
         match result {
-            Ok(Ok(imported)) => {
+            Ok(Ok(mut imported)) => {
+                session.set_losses(std::mem::take(&mut imported.losses));
                 let (settings, active, filters) = (
                     grid.sheet_settings(),
                     grid.active_position(),
@@ -1676,6 +1713,12 @@ fn save_as(
     note.add_css_class("dim-label");
     note.set_wrap(true);
     note.set_visible(sheets > 1);
+    if session.is_xlsm() {
+        // A macro workbook isn't saved over: it goes to an .xlsx file (XLSX-2).
+        note.set_text("Bricks can't keep macros: save as .xlsx");
+        note.set_visible(true);
+        formats.set_selected(1);
+    }
     let delimiters = gtk::DropDown::from_strings(&SAVE_DELIMITERS.map(|(n, _)| n));
     delimiters.set_selected(
         SAVE_DELIMITERS
@@ -1868,8 +1911,123 @@ fn choose_save_file(
         }
         let Some(grid) = grid.upgrade() else { return };
         let target = Target { path, format };
-        start_save(&grid, &session, &save, Some(target), close_after);
+        if session.is_xlsm()
+            && session.path.borrow().as_deref().map(canonical) == Some(canonical(&target.path))
+        {
+            alert(
+                Some(window.upcast_ref()),
+                "Bricks can't save over a macro workbook",
+                "It can't keep the macros. Save it as an .xlsx file instead.",
+            );
+            return;
+        }
+        save_or_ask(&window, &grid, &session, &save, Some(target), close_after);
     });
+}
+
+/// Save, but first ask before saving over a workbook that holds what Bricks drops
+/// (XLSX-2): Save (and don't ask again for this file), Save As Copy…, or Cancel.
+fn save_or_ask(
+    window: &gtk::ApplicationWindow,
+    grid: &GridView,
+    session: &Rc<Session>,
+    save: &Rc<RefCell<SaveState>>,
+    target: Option<Target>,
+    close_after: bool,
+) {
+    let format = target
+        .as_ref()
+        .map_or_else(|| session.format(grid), |t| t.format);
+    let over_itself = match (&target, session.path.borrow().as_deref()) {
+        (None, Some(_)) => true,
+        (Some(t), Some(own)) => canonical(&t.path) == canonical(own),
+        (_, None) => false,
+    };
+    let losses = session.losses.borrow().clone();
+    if format != Format::Xlsx || !over_itself || losses.is_empty() || session.confirmed.get() {
+        start_save(grid, session, save, target, close_after);
+        return;
+    }
+    let dialog = gtk::AlertDialog::builder()
+        .message(format!("Save over “{}”?", session.name()))
+        .detail(format!(
+            "Bricks keeps values, formulas, and sheets. It will drop: {}.",
+            losses.sentence()
+        ))
+        .buttons(["Cancel", "Save As Copy…", "Save"])
+        .cancel_button(0)
+        .default_button(1)
+        .modal(true)
+        .build();
+    let (window, grid, session, save) = (
+        window.clone(),
+        grid.downgrade(),
+        session.clone(),
+        save.clone(),
+    );
+    glib::spawn_future_local(async move {
+        let choice = dialog.choose_future(Some(&window)).await;
+        let Some(grid) = grid.upgrade() else { return };
+        match choice {
+            Ok(2) => {
+                session.confirmed.set(true);
+                start_save(&grid, &session, &save, target, close_after);
+            }
+            Ok(1) => save_as(&window, &grid, &session, &save, close_after),
+            _ => {}
+        }
+    });
+}
+
+/// The bar over the grid naming what a save would drop from the workbook (XLSX-2).
+struct LossesBar {
+    root: gtk::Revealer,
+    label: gtk::Label,
+}
+
+impl LossesBar {
+    fn new() -> Self {
+        let label = gtk::Label::new(None);
+        label.set_wrap(true);
+        label.set_xalign(0.0);
+        label.set_hexpand(true);
+        let close = gtk::Button::from_icon_name("window-close-symbolic");
+        close.add_css_class("flat");
+        close.set_tooltip_text(Some("Hide"));
+        close.set_focus_on_click(false);
+        let row = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .spacing(8)
+            .margin_start(10)
+            .margin_end(6)
+            .margin_top(4)
+            .margin_bottom(4)
+            .build();
+        row.append(&label);
+        row.append(&close);
+        let root = gtk::Revealer::builder().child(&row).build();
+        close.connect_clicked({
+            let root = root.downgrade();
+            move |_| {
+                if let Some(r) = root.upgrade() {
+                    r.set_reveal_child(false);
+                }
+            }
+        });
+        Self { root, label }
+    }
+
+    fn show(&self, losses: &xlsx::Losses) {
+        if losses.is_empty() {
+            self.root.set_reveal_child(false);
+            return;
+        }
+        self.label.set_text(&format!(
+            "Bricks shows this workbook's values, formulas, and sheets. Saving will drop: {}.",
+            losses.sentence()
+        ));
+        self.root.set_reveal_child(true);
+    }
 }
 
 /// The name Save As starts with: the file's own, with `.tsv` for tab-separated output,
