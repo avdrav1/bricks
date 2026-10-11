@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/csv-engine",
+    "crates/formula",
     "crates/data-model",
     "crates/grid",
     "crates/commands",
@@ -20,6 +21,7 @@ rust-version = "1.92"
 [workspace.dependencies]
 csv-engine = { path = "crates/csv-engine" }
 data-model = { path = "crates/data-model" }
+formula = { path = "crates/formula" }
 grid = { path = "crates/grid" }
 commands = { path = "crates/commands" }
 file-format = { path = "crates/file-format" }

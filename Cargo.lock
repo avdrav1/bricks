@@ -34,6 +34,7 @@ dependencies = [
  "csv-engine",
  "data-model",
  "file-format",
+ "formula",
  "grid",
  "gtk4",
  "jobs",
@@ -143,6 +144,7 @@ name = "data-model"
 version = "0.1.1"
 dependencies = [
  "csv-engine",
+ "formula",
  "memchr",
  "rayon",
 ]
@@ -211,6 +213,10 @@ dependencies = [
  "data-model",
  "encoding_rs",
 ]
+
+[[package]]
+name = "formula"
+version = "0.1.1"
 
 [[package]]
 name = "futures-channel"

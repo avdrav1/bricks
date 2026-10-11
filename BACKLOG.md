@@ -82,7 +82,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | DEC-6 | M5 | P0 | done | - | Workbook model: XLSX sheets as indexed CSV copies; references address file rows | ADR 0006 accepted |
 | DEC-7 | M5 | P0 | done | - | Formula engine: lazy evaluation over raw cells with a revision cache | ADR 0007 accepted |
 | DEC-8 | M5 | P0 | done | - | Multiple sheets: one workbook per window, one undo history | ADR 0008 accepted |
-| FML-1 | M5 | P0 | todo | DEC-7 | Formula language: parse, render, A1 references, sheet names, errors | Every grammar case round-trips parse then render; a bad formula reports the character where it fails |
+| FML-1 | M5 | P0 | done | DEC-7 | Formula language: parse, render, A1 references, sheet names, errors | Every grammar case round-trips parse then render; a bad formula reports the character where it fails |
 | FML-2 | M5 | P0 | todo | FML-1 | Evaluator: values, coercion, operators, cycles, deep chains | Operator and coercion cases match LibreOffice; a 1,000,000-row running total evaluates without overflow; a cycle gives #CIRC! |
 | FML-3 | M5 | P0 | todo | FML-2, DEC-6 | Workbook and calculation in data-model: formula cells, cached results, computed values for jobs | A CSV with =B2*2 shows its result; an edit changes it; the saved file keeps =B2*2; SUM(D:D) over the 1 GB file computes in the background in under 5 s |
 | FML-4 | M5 | P0 | todo | FML-3, DEC-8 | Grid shows formula results; edits and undo go through the workbook | Typing =B2*2 shows the result and Ctrl+Z removes it; over-budget results show … then their value; scroll p99 with 60 visible formulas under 16 ms |
@@ -104,6 +104,9 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-10 FML-1:** new crate `crates/formula` (no dependencies): `parse`, `render`/`render_xlsx`, the AST, references (`column_name` moved here from the app, `column_index`, `parse_reference`, `format_reference`, `adjust`, `names_sheet`), and `scalar` (the number/ISO date grammars moved from `data-model/src/infer.rs`, plus serial dates on LibreOffice's 1899-12-30 epoch).
+  - Decisions: a range is stored with its corners ordered (`B5:A1` renders `A1:B5`, as Excel stores it); `A1:A1` stays a range. Sheet names that read as a cell (`Q2`, `A1`) are quoted when rendered (`'Q2'!B2`), as Excel writes them; unquoted they still parse. Numbers of magnitude ≥ 1e16 or < 1e-6 render with an exponent (`1E+20`). "unclosed string" and "unclosed parenthesis" point at the opening quote or parenthesis.
+  - Acceptance: `crates/formula/tests/grammar.rs`: 95 parse→render→parse cases, 25 error cases with their character and message, adjustment cases for every `Change` rule, column names 0..20,000 round-trip.
 - **2026-10-10 decision:** M5 is XLSX, formulas, and multiple sheets (user decision), replacing invariant 8's V0.1 non-goals for those three. Design in ADRs 0006 (workbook model), 0007 (formula engine), 0008 (sheets and undo). User choices: own engine on Bricks' model; XLSX save writes values, formulas, sheets and drops the rest with warnings; CSV cells starting with = evaluate; a CSV with 2+ sheets saves as .xlsx; core ~120 functions; formula bar with name box.
 - **2026-10-10 PKG-4:** the app is Bricks now: command `bricks`, the window title, the app menu entry, dialogs ("Bricks closed unexpectedly…"), `--version`, and log lines (`bricks: …`).
   - Decided with the user: a full rename (not just the command), shipped as v0.1.1.

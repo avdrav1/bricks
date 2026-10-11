@@ -11,6 +11,7 @@ use data_model::{
     ReplaceError, RereadError, RowId, RowSet, SaveJob, SaveJobError, SearchError, SearchProgress,
     SortError, SortOrder, Step, TableSource, Test, PASTE_MAX_CELLS,
 };
+use formula::column_name;
 use grid::{Bounds, GridCache, Key, Mods, Selection, Sizes, Viewport};
 use gtk::{gdk, gio, glib, graphene, pango, prelude::*, subclass::prelude::*};
 use std::cell::{Cell, RefCell};
@@ -2886,40 +2887,4 @@ fn nav_key(key: gdk::Key, state: gdk::ModifierType) -> Option<(Key, Mods)> {
         return None;
     }
     Some((nav, mods))
-}
-
-/// Spreadsheet column name: 0 -> A, 25 -> Z, 26 -> AA.
-pub fn column_name(mut col: u32, out: &mut String) {
-    out.clear();
-    let mut letters = [0u8; 7];
-    let mut i = letters.len();
-    loop {
-        i -= 1;
-        letters[i] = b'A' + (col % 26) as u8;
-        if col < 26 {
-            break;
-        }
-        col = col / 26 - 1;
-    }
-    out.push_str(std::str::from_utf8(&letters[i..]).unwrap());
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn column_names() {
-        let mut s = String::new();
-        for (c, want) in [
-            (0, "A"),
-            (25, "Z"),
-            (26, "AA"),
-            (51, "AZ"),
-            (52, "BA"),
-            (701, "ZZ"),
-            (702, "AAA"),
-        ] {
-            super::column_name(c, &mut s);
-            assert_eq!(s, want);
-        }
-    }
 }

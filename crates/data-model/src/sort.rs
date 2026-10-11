@@ -16,10 +16,11 @@
 //! each row with its current position. Text keys hold the first 8 bytes; rows whose long
 //! values share those are compared whole afterwards.
 
-use crate::infer::{instant, value_type};
+use crate::infer::value_type;
 use crate::rowmap::{unpack, RowOrder};
 use crate::{CellRef, Col, ColId, CsvTable, Edit, InferredType};
 use csv_engine::RowIndex;
+use formula::scalar::instant;
 use rayon::prelude::*;
 use std::borrow::Cow;
 use std::cmp::Ordering;
