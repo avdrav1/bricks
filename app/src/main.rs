@@ -966,12 +966,13 @@ fn build_window(
     // its own text undo, and the grid lets Esc through when no editor is open.
     let keys = gtk::EventControllerKey::new();
     keys.connect_key_pressed({
-        let (window, grid, save, session, find) = (
+        let (window, grid, save, session, find, tabs) = (
             window.downgrade(),
             grid.downgrade(),
             save.clone(),
             session.clone(),
             find.clone(),
+            tabs.clone(),
         );
         move |_, key, _, mods| {
             use gtk::gdk::{Key, ModifierType};
@@ -991,10 +992,16 @@ fn build_window(
                     return glib::Propagation::Stop;
                 }
             }
+            let shift = mods.contains(ModifierType::SHIFT_MASK);
+            // Shift+F11: a new sheet, as in Excel (SHEET-1).
+            if key == Key::F11 && shift && !mods.contains(ModifierType::CONTROL_MASK) {
+                grid.add_sheet();
+                tabs.refresh();
+                return glib::Propagation::Stop;
+            }
             if !mods.contains(ModifierType::CONTROL_MASK) {
                 return glib::Propagation::Proceed;
             }
-            let shift = mods.contains(ModifierType::SHIFT_MASK);
             match key {
                 // The next or previous sheet (XLSX-1).
                 Key::Page_Down | Key::KP_Page_Down => {

@@ -233,6 +233,9 @@ mod imp {
         pub loading: Cell<bool>,
         /// Each sheet's cursor, scroll, and sizes while another sheet shows (XLSX-1).
         pub sheet_ui: RefCell<HashMap<SheetId, SheetUi>>,
+        /// The sheet whose cursor, scroll, and sizes the fields above hold (SHEET-1): an
+        /// undo can make another sheet active, and its own come back then.
+        pub ui_sheet: Cell<Option<SheetId>>,
     }
 
     #[glib::object_subclass]
@@ -545,6 +548,7 @@ impl GridView {
     pub fn new(book: Workbook, vadj: &gtk::Adjustment, hadj: &gtk::Adjustment) -> Self {
         let g: Self = glib::Object::new();
         let imp = g.imp();
+        imp.ui_sheet.set(Some(book.active_id()));
         imp.book.replace(book);
         imp.vadj.replace(Some(vadj.clone()));
         imp.hadj.replace(Some(hadj.clone()));
@@ -1346,7 +1350,8 @@ impl GridView {
             let Some(next) = next else { return false };
             next.sheet()
         };
-        if let Some(id) = sheet {
+        let exists = |id: SheetId| imp.book.borrow().sheet(id).is_some();
+        if let Some(id) = sheet.filter(|&id| exists(id)) {
             if !self.switch_sheet(id) {
                 return false;
             }
@@ -1359,13 +1364,20 @@ impl GridView {
                 undo.redo(&mut book)
             };
             let Some(cmd) = cmd else { return false };
-            let table = book.active();
-            cmd.focus().and_then(|at| {
-                let row = table.row_of(at.row)?;
-                let col = table.col_of(at.col)?;
-                Some(grid::Cell { row, col })
-            })
+            cmd.focus()
         };
+        // A step that added or removed a sheet can leave another one active; then the
+        // step's sheet shows, if it is there now (a redone Add Sheet).
+        self.follow_active();
+        if let Some(id) = sheet.filter(|&id| exists(id)) {
+            self.switch_sheet(id);
+        }
+        let focus = focus.and_then(|at| {
+            let table = self.table();
+            let row = table.row_of(at.row)?;
+            let col = table.col_of(at.col)?;
+            Some(grid::Cell { row, col })
+        });
         self.after_change(focus);
         true
     }
@@ -2611,6 +2623,7 @@ impl GridView {
         };
         // Unmapping a big file and freeing its index takes a while (0.2 s for 1 GB, SAVE-3):
         // a worker does it, not the UI thread.
+        imp.ui_sheet.set(Some(book.active_id()));
         let old = imp.book.replace(book);
         let _ = std::thread::Builder::new()
             .name("drop-table".into())
@@ -2862,6 +2875,21 @@ impl GridView {
         if !self.commit_edit(true) {
             return false;
         }
+        imp.book.borrow_mut().set_active(id);
+        self.follow_active();
+        true
+    }
+
+    /// Bring the cursor, scroll, and sizes in line with the workbook's active sheet after
+    /// it changed (a switch, or an undo that added or removed a sheet): the sheet shown so
+    /// far keeps its own for when it comes back.
+    fn follow_active(&self) {
+        let imp = self.imp();
+        let active = imp.book.borrow().active_id();
+        let shown = imp.ui_sheet.replace(Some(active));
+        if shown == Some(active) {
+            return;
+        }
         let value = |adj: &RefCell<Option<gtk::Adjustment>>| {
             adj.borrow().as_ref().map_or(0.0, |a| a.value())
         };
@@ -2873,9 +2901,15 @@ impl GridView {
             row_heights: imp.row_heights.take(),
             col_widths: imp.col_widths.take(),
         };
-        imp.sheet_ui.borrow_mut().insert(current, ui);
-        imp.book.borrow_mut().set_active(id);
-        let ui = imp.sheet_ui.borrow_mut().remove(&id).unwrap_or_default();
+        if let Some(shown) = shown {
+            // Kept even for a removed sheet: an undo brings it back as it was.
+            imp.sheet_ui.borrow_mut().insert(shown, ui);
+        }
+        let ui = imp
+            .sheet_ui
+            .borrow_mut()
+            .remove(&active)
+            .unwrap_or_default();
         imp.sizing.replace(ui.sizing);
         imp.row_heights.replace(ui.row_heights);
         imp.col_widths.replace(ui.col_widths);
@@ -2907,6 +2941,103 @@ impl GridView {
         self.set_selection(ui.selection);
         self.update_description();
         self.queue_draw();
+    }
+
+    /// Run a change to the sheets as one undoable step (SHEET-1), then show the sheet
+    /// the workbook makes active.
+    fn execute_book(&self, cmd: SheetEdit) {
+        let imp = self.imp();
+        {
+            let mut book = imp.book.borrow_mut();
+            imp.undo.borrow_mut().execute(Box::new(cmd), &mut book);
+        }
+        self.follow_active();
+        self.after_change(None);
+    }
+
+    /// Shift+F11 (SHEET-1): a new empty sheet after the active one, named `SheetN`, shown.
+    /// One undoable step; refused while a job runs.
+    pub fn add_sheet(&self) -> Option<SheetId> {
+        let imp = self.imp();
+        if self.busy() || !self.commit_edit(true) {
+            return None;
+        }
+        let (edit, id) = {
+            let mut book = imp.book.borrow_mut();
+            let name = book.new_sheet_name();
+            let sheet = book.new_sheet(name, CsvTable::untitled(), Origin::New);
+            let id = sheet.id;
+            let at = book.index_of(book.active_id()).map_or(0, |i| i + 1);
+            let sheet = Box::new(sheet);
+            (BookEdit::Insert { at, sheet }, id)
+        };
+        self.execute_book(SheetEdit::new("Add sheet", vec![edit], Some(id)));
+        self.switch_sheet(id);
+        Some(id)
+    }
+
+    /// Rename sheet `id` (SHEET-1) as one undoable step. Refused, with the reason, for a
+    /// name Excel wouldn't take (empty, too long, a forbidden character, another sheet's).
+    pub fn rename_sheet(&self, id: SheetId, name: &str) -> Result<(), &'static str> {
+        let name = name.trim();
+        {
+            let book = self.imp().book.borrow();
+            book.check_sheet_name(name, Some(id))?;
+            if book.sheet(id).is_none_or(|s| s.name == name) {
+                return Ok(());
+            }
+        }
+        if self.busy() {
+            return Err("Wait for the running job to finish");
+        }
+        let edit = BookEdit::Rename {
+            id,
+            name: name.to_owned(),
+        };
+        self.execute_book(SheetEdit::new("Rename sheet", vec![edit], Some(id)));
+        Ok(())
+    }
+
+    /// Delete sheet `id` (SHEET-1) as one undoable step: undo brings it back with its
+    /// edits. Refused for the only sheet and while a job runs.
+    pub fn delete_sheet(&self, id: SheetId) -> bool {
+        let at = {
+            let book = self.imp().book.borrow();
+            match book.index_of(id) {
+                Some(at) if book.sheets().len() > 1 => at,
+                _ => return false,
+            }
+        };
+        if self.busy() || !self.commit_edit(true) {
+            return false;
+        }
+        let show = self.active_sheet();
+        let show = (show != id).then_some(show);
+        self.execute_book(SheetEdit::new(
+            "Delete sheet",
+            vec![BookEdit::Remove { at }],
+            show,
+        ));
+        true
+    }
+
+    /// Move sheet `id` to position `to` (SHEET-1), as one undoable step.
+    pub fn move_sheet(&self, id: SheetId, to: usize) -> bool {
+        let from = {
+            let book = self.imp().book.borrow();
+            match book.index_of(id) {
+                Some(from) if to < book.sheets().len() && to != from => from,
+                _ => return false,
+            }
+        };
+        if self.busy() {
+            return false;
+        }
+        self.execute_book(SheetEdit::new(
+            "Move sheet",
+            vec![BookEdit::Move { from, to }],
+            Some(id),
+        ));
         true
     }
 
@@ -2961,6 +3092,7 @@ impl GridView {
                 &mut book,
             );
         }
+        self.follow_active();
         let id = imp.book.borrow().sheets().get(active).map(|s| s.id);
         if let Some(id) = id {
             self.switch_sheet(id);
