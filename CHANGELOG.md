@@ -2,6 +2,41 @@
 
 Releases are added by the ship-it skill.
 
+## v0.2.0 (2026-10-11)
+
+Milestone M5: XLSX workbooks, formulas, multiple sheets, and cell styles. Bricks opens .xlsx files with every sheet, shows their fonts, colours, fills, borders, alignment, number formats, and merged cells, lets you edit values, formulas, sheets, and formats, and saves by patching the original file so charts, comments, conditional formats, and macros (in .xlsm) survive.
+
+- DEC-6: Workbook model: XLSX sheets as indexed CSV copies; references address file rows
+- DEC-7: Formula engine: lazy evaluation over raw cells with a revision cache
+- DEC-8: Multiple sheets: one workbook per window, one undo history
+- FML-1: Formula language: parse, render, A1 references, sheet names, errors
+- FML-2: Evaluator: values, coercion, operators, cycles, deep chains
+- FML-3: Workbook and calculation in data-model: formula cells, cached results, computed values for jobs
+- FML-4: Grid shows formula results; edits and undo go through the workbook
+- XLSX-1: Open and save .xlsx: every sheet as a tab, typed values, formulas with results, names, crash recovery
+- SHEET-1: Add, rename, delete, and move sheets; each step undoable
+- SHEET-2: References across sheets; renaming a sheet updates them; deleting one gives #REF!
+- XLSX-2: Warn about workbook content Bricks drops; ask before saving over it
+- FML-5: Functions: math, statistics, logic, information
+- FML-6: Functions: text, including TEXT format codes
+- FML-7: Functions: lookup and reference
+- FML-8: Functions: dates and times
+- FML-9: Formula bar and name box
+- FML-10: Formulas follow inserted, deleted, and sorted rows and columns
+- FML-11: Sort, filter, find, type inference, and copy use formula results
+- FML-12: Copy and paste formulas inside Bricks with relative references shifted
+- BENCH-2: XLSX and formula rows in the benchmark table
+- DEC-9: Styles model: workbook style pool, per-column style runs, Excel layering
+- DEC-10: XLSX save patches the original package
+- STYLE-1: Read styles, merges, column widths, and row heights from .xlsx
+- STYLE-2: Excel number formats for display and TEXT
+- STYLE-3: Grid shows fonts, colours, fills, borders, alignment, wrap, number formats, widths, and heights
+- STYLE-4: Merged cells: drawing, navigation, merge and unmerge
+- STYLE-5: Save .xlsx by patching the original package
+- STYLE-6: Edit formatting: format bar, menu, and shortcuts, each undoable
+- STYLE-7: Copy and paste carry formats inside Bricks
+- BENCH-3: Styled XLSX rows in the benchmark table
+
 ## v0.1.0 (2026-10-10)
 
 First release: the large-CSV editor (milestones S0 to M3) plus the M4 desktop work and the curl installer.
