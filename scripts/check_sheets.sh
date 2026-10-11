@@ -12,7 +12,9 @@
 #   3. Ctrl+Z renames it back; Ctrl+Z again takes Sheet2 away;
 #   4. x typed in Sheet1 A1; Ctrl+Page Up and Down: each sheet shows its own cursor cell;
 #   5. Ctrl+S opens Save As, saying a CSV file holds one sheet; choosing the file there
-#      saves /tmp/t.xlsx with both sheets.
+#      saves /tmp/t.xlsx with both sheets;
+#   6. (SHEET-2) =t!A2*10 on Sheet1 shows 20; renaming t to Data keeps it showing 20
+#      (the reference follows), and Ctrl+Z gives the tab its name back.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -65,6 +67,14 @@ session() {
   keys -k Return; sleep 6; shot 5-saved
   echo "xlsx: $(ls /tmp/t.xlsx 2>&1)"
   echo "sheets: $(unzip -p /tmp/t.xlsx xl/workbook.xml 2>/dev/null | grep -o "<sheet name=\"[^\"]*\"" | tr "\n" " ")"
+
+  echo "== 6 cross-sheet"
+  keys -k Right; keys "=t!A2*10"; keys -k Return; keys -k Up; sleep 1; shown formula
+  wtype -s 400 -M ctrl -k Tab -m ctrl -s 300 -k F2 -s 600 "Data" -s 300 -k Return -s 600
+  sleep 2; shown renamed
+  # Undo shows the renamed sheet; the formula is on the next one.
+  keys -M ctrl z -m ctrl; sleep 1; shown undone
+  keys -M ctrl -k Page_Down -m ctrl; shown again
   pkill -x bricks
   swaymsg exit >/dev/null 2>&1 || true
 }
@@ -95,6 +105,11 @@ check "4: and Sheet1 comes back as it was" "4 own cursors" "^back: A1: x$"
 check "5: Ctrl+S asks for .xlsx" "5 save as" "A CSV file holds one sheet"
 check "5: the workbook saves as .xlsx" "5 save as" "^xlsx: /tmp/t.xlsx$"
 check "5: with both sheets" "5 save as" "^sheets: <sheet name=\"t\" <sheet name=\"Sheet1\""
+check "6: a reference to another sheet shows its cell" "6 cross-sheet" "^formula: B1: 20$"
+check "6: renaming that sheet keeps the reference working" "6 cross-sheet" "^renamed: B1: 20$"
+check "6: the tab has its new name" "6 cross-sheet" "^renamed: Data$"
+check "6: Ctrl+Z gives the old name back" "6 cross-sheet" "^undone: t$"
+check "6: and the reference still works" "6 cross-sheet" "^again: B1: 20$"
 if [ $fail = 0 ]; then echo "SHEETS OK"; else
   echo "SHEETS CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

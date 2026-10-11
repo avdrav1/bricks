@@ -77,6 +77,12 @@ pub struct ScanJob {
     rows: u64,
 }
 
+/// Formula rewrites a sheet or structure change needs (SHEET-2, FML-10), computed on the
+/// job pool from a workbook snapshot.
+pub struct RewriteJob {
+    job: jobs::Job<Option<Vec<(SheetId, Edit)>>>,
+}
+
 /// What a sheet looked like when another sheet was shown (XLSX-1): it comes back as it was.
 #[derive(Default)]
 pub struct SheetUi {
@@ -233,6 +239,9 @@ mod imp {
         pub loading: Cell<bool>,
         /// Each sheet's cursor, scroll, and sizes while another sheet shows (XLSX-1).
         pub sheet_ui: RefCell<HashMap<SheetId, SheetUi>>,
+        /// Formulas being rewritten for a change that waits for them (SHEET-2, FML-10).
+        /// Edits wait for it, as for a sort.
+        pub rewriting: RefCell<Option<RewriteJob>>,
         /// The sheet whose cursor, scroll, and sizes the fields above hold (SHEET-1): an
         /// undo can make another sheet active, and its own come back then.
         pub ui_sheet: Cell<Option<SheetId>>,
@@ -263,6 +272,11 @@ mod imp {
                         .build(),
                     // The cell cursor or the selected range moved (FML-9's formula bar).
                     glib::subclass::Signal::builder("cursor-changed").build(),
+                    // A change was refused: a title and why (SHEET-2: too many formulas
+                    // to rewrite).
+                    glib::subclass::Signal::builder("refused")
+                        .param_types([String::static_type(), String::static_type()])
+                        .build(),
                 ]
             })
         }
@@ -1868,6 +1882,10 @@ impl GridView {
         if let Some(s) = imp.sorting.borrow().as_ref() {
             return Some(("Sorting", share(&s.done, s.rows)));
         }
+        if imp.rewriting.borrow().is_some() {
+            // No count to show: these jobs are short.
+            return Some(("Updating formulas", f64::NAN));
+        }
         if let Some(f) = imp.filtering.borrow().as_ref() {
             return Some(("Filtering", share(&f.done, f.rows)));
         }
@@ -1891,6 +1909,7 @@ impl GridView {
         let imp = self.imp();
         imp.saving.get()
             || imp.loading.get()
+            || imp.rewriting.borrow().is_some()
             || imp.sorting.borrow().is_some()
             || imp.filtering.borrow().is_some()
             || imp.searching.borrow().is_some()
@@ -2635,6 +2654,9 @@ impl GridView {
         if let Some(old) = imp.scanning.take() {
             old.job.cancel();
         }
+        if let Some(old) = imp.rewriting.take() {
+            old.job.cancel();
+        }
         imp.sheet_ui.borrow_mut().clear();
         // Types of the old table don't belong to the new one; the status tick infers them
         // again once it is indexed.
@@ -2990,34 +3012,117 @@ impl GridView {
         if self.busy() {
             return Err("Wait for the running job to finish");
         }
-        let edit = BookEdit::Rename {
-            id,
-            name: name.to_owned(),
-        };
-        self.execute_book(SheetEdit::new("Rename sheet", vec![edit], Some(id)));
+        let from = self.imp().book.borrow().sheet(id).map(|s| s.name.clone());
+        let Some(from) = from else { return Ok(()) };
+        let to = name.to_owned();
+        // References to the sheet follow its new name, in the same undo step (SHEET-2).
+        self.with_rewrites(
+            {
+                let (from, to) = (from.clone(), to.clone());
+                move |book, cancel| {
+                    let change = formula::Change::RenameSheet {
+                        from: &from,
+                        to: &to,
+                    };
+                    book.sheet_rewrites(&change, cancel)
+                }
+            },
+            move |g, mut edits| {
+                edits.push(BookEdit::Rename { id, name: to });
+                g.execute_book(SheetEdit::new("Rename sheet", edits, Some(id)));
+            },
+        );
         Ok(())
     }
 
-    /// Delete sheet `id` (SHEET-1) as one undoable step: undo brings it back with its
-    /// edits. Refused for the only sheet and while a job runs.
-    pub fn delete_sheet(&self, id: SheetId) -> bool {
-        let at = {
-            let book = self.imp().book.borrow();
-            match book.index_of(id) {
-                Some(at) if book.sheets().len() > 1 => at,
-                _ => return false,
+    /// Compute the formula rewrites a change needs on the job pool from a workbook
+    /// snapshot ("Updating formulas"; edits wait), then make the change with them as one
+    /// step: `finish` gets them as a `BookEdit` (none when no formula changes). Without
+    /// formulas anywhere it all happens now. More than [`data_model::REPLACE_MAX_CELLS`]
+    /// rewritten cells is refused.
+    fn with_rewrites(
+        &self,
+        compute: impl FnOnce(&mut Workbook, &std::sync::atomic::AtomicBool) -> Option<Vec<(SheetId, Edit)>>
+            + Send
+            + 'static,
+        finish: impl FnOnce(&Self, Vec<BookEdit>) + 'static,
+    ) {
+        let imp = self.imp();
+        let any = imp
+            .book
+            .borrow()
+            .sheets()
+            .iter()
+            .any(|s| s.table.has_formulas());
+        if !any {
+            finish(self, Vec::new());
+            return;
+        }
+        let mut snapshot = imp.book.borrow().snapshot();
+        let job = jobs::spawn(move |cancel| compute(&mut snapshot, cancel.flag()));
+        imp.rewriting.replace(Some(RewriteJob { job: job.clone() }));
+        let g = self.downgrade();
+        glib::spawn_future_local(async move {
+            let result = job.finished().await;
+            let Some(g) = g.upgrade() else { return };
+            let imp = g.imp();
+            if !matches!(&*imp.rewriting.borrow(), Some(r) if r.job.is(&job)) {
+                return;
             }
-        };
+            imp.rewriting.take();
+            let Ok(Some(rewrites)) = result else { return };
+            let n = data_model::rewrite_count(&rewrites);
+            if n > data_model::REPLACE_MAX_CELLS {
+                let why = format!(
+                    "This would rewrite {} formulas; Bricks rewrites at most {} at once.",
+                    crate::status::group_digits(n),
+                    crate::status::group_digits(data_model::REPLACE_MAX_CELLS)
+                );
+                g.emit_by_name::<()>("refused", &[&"Too many formulas to rewrite", &why]);
+                return;
+            }
+            let edits = if rewrites.is_empty() {
+                Vec::new()
+            } else {
+                vec![BookEdit::Sheets(rewrites)]
+            };
+            finish(&g, edits);
+        });
+    }
+
+    /// Delete sheet `id` (SHEET-1) as one undoable step: undo brings it back with its
+    /// edits, and references to it get back their text (SHEET-2). Refused for the only
+    /// sheet and while a job runs.
+    pub fn delete_sheet(&self, id: SheetId) -> bool {
+        {
+            let book = self.imp().book.borrow();
+            if book.sheet(id).is_none() || book.sheets().len() < 2 {
+                return false;
+            }
+        }
         if self.busy() || !self.commit_edit(true) {
             return false;
         }
         let show = self.active_sheet();
         let show = (show != id).then_some(show);
-        self.execute_book(SheetEdit::new(
-            "Delete sheet",
-            vec![BookEdit::Remove { at }],
-            show,
-        ));
+        let Some(name) = self.imp().book.borrow().sheet(id).map(|s| s.name.clone()) else {
+            return false;
+        };
+        // References to the sheet become #REF!, in the same undo step (SHEET-2).
+        self.with_rewrites(
+            move |book, cancel| {
+                let change = formula::Change::DeleteSheet { name: &name };
+                book.sheet_rewrites(&change, cancel)
+            },
+            move |g, mut edits| {
+                // Positions may have moved while the rewrites ran: remove by id.
+                let Some(at) = g.imp().book.borrow().index_of(id) else {
+                    return;
+                };
+                edits.push(BookEdit::Remove { at });
+                g.execute_book(SheetEdit::new("Delete sheet", edits, show));
+            },
+        );
         true
     }
 

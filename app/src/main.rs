@@ -936,6 +936,18 @@ fn build_window(
             }
         ),
     );
+    // A change refused for its size (SHEET-2): say why.
+    grid.connect_closure(
+        "refused",
+        false,
+        glib::closure_local!(
+            #[weak]
+            window,
+            move |_: GridView, title: String, why: String| {
+                alert(Some(window.upcast_ref()), &title, &why);
+            }
+        ),
+    );
     let delimiter = delimiter_dropdown(session, &grid);
     let open = gtk::Button::from_icon_name("document-open-symbolic");
     open.set_tooltip_text(Some("Open… (Ctrl+O)"));

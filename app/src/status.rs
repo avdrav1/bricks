@@ -54,7 +54,8 @@ pub struct Facts<'a> {
     /// The file is an Excel workbook (XLSX-1): no delimiter or encoding to name.
     pub workbook: bool,
     pub edits: usize,
-    /// A running sort or filter ("Sorting", "Filtering") and its share done (0..=1).
+    /// A running sort or filter ("Sorting", "Filtering") and its share done (0..=1), or
+    /// NaN when it has no count to show.
     pub job: Option<(&'a str, f64)>,
     pub save: SaveView<'a>,
     pub file_changed: bool,
@@ -91,8 +92,13 @@ pub fn status(f: &Facts) -> Status {
 
     let mut save = Vec::new();
     if let Some((what, done)) = f.job {
-        let pct = (done.clamp(0.0, 1.0) * 100.0).floor();
-        save.push(format!("{what} {pct:.0}%"));
+        if done.is_nan() {
+            // A job with nothing to count (SHEET-2's formula rewrites).
+            save.push(what.to_owned());
+        } else {
+            let pct = (done.clamp(0.0, 1.0) * 100.0).floor();
+            save.push(format!("{what} {pct:.0}%"));
+        }
     }
     let cells = |n: u64| format!("{} cell{}", group_digits(n), if n == 1 { "" } else { "s" });
     match f.clip {
