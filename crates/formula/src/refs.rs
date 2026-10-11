@@ -122,6 +122,16 @@ pub fn names_sheet(expr: &Expr, name: &str) -> bool {
     found
 }
 
+/// The text of formula `raw` (with its `=`) moved `rows` down and `cols` right, as a
+/// paste moves it: relative references follow, absolute ones stay, and a reference
+/// pushed off the sheet becomes `#REF!` (`=A2*2` moved one row down gives `=A3*2`).
+/// `None` if `raw` isn't a formula that parses.
+pub fn shift_formula(raw: &str, rows: i64, cols: i64) -> Option<String> {
+    let mut expr = crate::parse(raw.strip_prefix('=').filter(|f| !f.is_empty())?).ok()?;
+    adjust(&mut expr, "", &Change::Shift { rows, cols });
+    Some(format!("={}", crate::render(&expr)))
+}
+
 fn same_sheet(a: &str, b: &str) -> bool {
     a.eq_ignore_ascii_case(b) || a.to_lowercase() == b.to_lowercase()
 }

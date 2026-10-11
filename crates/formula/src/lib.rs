@@ -22,7 +22,8 @@ pub use eval::{evaluate, unknown_functions, Context, Interrupt};
 pub use exact::{ExactIndex, Key};
 pub use parse::{parse, ParseError};
 pub use refs::{
-    adjust, column_index, column_name, format_reference, names_sheet, parse_reference, Axis, Change,
+    adjust, column_index, column_name, format_reference, names_sheet, parse_reference,
+    shift_formula, Axis, Change,
 };
 pub use render::{render, render_xlsx};
 pub use value::{literal, result_text, Array, Value};
