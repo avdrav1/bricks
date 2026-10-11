@@ -20,17 +20,21 @@ impl Reshape {
     /// Wrap an edit from `CsvTable::insert_rows`, `delete_rows`, `insert_cols`, or
     /// `delete_cols`.
     pub fn new(edit: Edit, cursor: CellRef) -> Self {
-        let label = match edit {
+        Self {
+            label: Self::label_of(&edit),
+            edit,
+            cursor,
+            focus: None,
+        }
+    }
+
+    /// The undo label of a row or column insert or delete.
+    pub fn label_of(edit: &Edit) -> &'static str {
+        match edit {
             Edit::InsertRows { .. } => "Insert rows",
             Edit::DeleteRows { .. } | Edit::DeleteRowRanges(_) => "Delete rows",
             Edit::InsertCols { .. } => "Insert columns",
             _ => "Delete columns",
-        };
-        Self {
-            edit,
-            label,
-            cursor,
-            focus: None,
         }
     }
 

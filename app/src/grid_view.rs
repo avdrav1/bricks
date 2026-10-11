@@ -44,9 +44,13 @@ pub struct CopyJob {
     rows: u64,
 }
 
+/// A sort's result: the new row order, and the formulas whose relative rows follow their
+/// moved rows (FML-10).
+type Sorted = Option<(Edit, Vec<(CellRef, Option<Box<str>>)>)>;
+
 /// A sort running on the job pool (SORT-1): its result, and file rows read so far.
 pub struct SortJob {
-    job: jobs::Job<Result<Option<Edit>, SortError>>,
+    job: jobs::Job<Result<Sorted, SortError>>,
     done: Arc<AtomicU64>,
     rows: u64,
 }
@@ -1671,8 +1675,27 @@ impl GridView {
                 col: table.col_id(cur.col),
             }
         };
-        self.execute(Box::new(Reshape::new(edit, cursor)));
-        self.after_change(None);
+        let (sheet, formulas) = {
+            let book = imp.book.borrow();
+            let any = book.sheets().iter().any(|s| s.table.has_formulas());
+            (book.active_id(), any)
+        };
+        if !formulas {
+            self.execute(Box::new(Reshape::new(edit, cursor)));
+            self.after_change(None);
+            return;
+        }
+        // Formulas follow the rows and columns, in the same undo step (FML-10).
+        let label = Reshape::label_of(&edit);
+        let structural = edit.clone();
+        self.with_rewrites(
+            move |book, cancel| book.structure_rewrites(sheet, &structural, cancel),
+            move |g, rewrites| {
+                let mut edits = vec![BookEdit::Sheets(vec![(sheet, edit)])];
+                edits.extend(rewrites);
+                g.execute_book(SheetEdit::new(label, edits, Some(sheet)).with_focus(cursor));
+            },
+        );
     }
 
     /// Delete (EDIT-5): empty the selected cells as one undoable step, however many there
@@ -1963,7 +1986,17 @@ impl GridView {
         let started = Instant::now();
         let job = jobs::spawn({
             let done = done.clone();
-            move |cancel| snapshot.sort_rows(col, order, cancel.flag(), &done)
+            move |cancel| -> Result<Sorted, SortError> {
+                let edit = snapshot.sort_rows(col, order, cancel.flag(), &done)?;
+                // A moved formula's relative references follow it, as in Excel (FML-10).
+                let rewrites = match &edit {
+                    Some(Edit::Reorder(new)) if snapshot.has_formulas() => {
+                        snapshot.sort_rewrites(new)
+                    }
+                    _ => Vec::new(),
+                };
+                Ok(edit.map(|e| (e, rewrites)))
+            }
         });
         imp.sorting.replace(Some(SortJob {
             job: job.clone(),
@@ -1989,7 +2022,18 @@ impl GridView {
                 return;
             }
             imp.sorting.take();
-            let Ok(Ok(Some(edit))) = result else { return };
+            let Ok(Ok(Some((edit, rewrites)))) = result else {
+                return;
+            };
+            if rewrites.len() as u64 > data_model::REPLACE_MAX_CELLS {
+                let why = format!(
+                    "Sorting would rewrite {} formulas; Bricks rewrites at most {} at once.",
+                    crate::status::group_digits(rewrites.len() as u64),
+                    crate::status::group_digits(data_model::REPLACE_MAX_CELLS)
+                );
+                g.emit_by_name::<()>("refused", &[&"Too many formulas to rewrite", &why]);
+                return;
+            }
             let focus = {
                 let table = g.table();
                 CellRef {
@@ -1997,7 +2041,11 @@ impl GridView {
                     col: table.col_id(col),
                 }
             };
-            g.execute(Box::new(Batch::new("Sort", vec![edit], focus)));
+            let mut edits = vec![edit];
+            if !rewrites.is_empty() {
+                edits.push(Edit::Cells(rewrites));
+            }
+            g.execute(Box::new(Batch::new("Sort", edits, focus)));
             g.after_change(None);
         });
     }
