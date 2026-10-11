@@ -636,7 +636,7 @@ Initial priorities:
 
 Likely first distribution:
 
-- curl installer (`curl -fsSL <site>/install.sh | sh`), per user, for Arch, Ubuntu, and Fedora (the AUR was dropped on 2026-10-10)
+- curl installer (`curl -fsSL https://spreadsheet-6w6.pages.dev/install.sh | sh`), per user, for Arch, Ubuntu, and Fedora (the AUR was dropped on 2026-10-10)
 
 Future distribution:
 
