@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Record how LibreOffice Calc shows values under Excel number format codes (STYLE-2).
 
-Reads crates/formula/tests/data/formats.tsv (columns: code, value, excel, why) and writes
-crates/formula/tests/data/formats-libreoffice.tsv (columns: code, value, text, color,
+Reads apps/bricks/crates/formula/tests/data/formats.tsv (columns: code, value, excel, why) and writes
+apps/bricks/crates/formula/tests/data/formats-libreoffice.tsv (columns: code, value, text, color,
 excel, why).
 
 - `value` is a number (set with setValue), an ISO date or date-time (setValue of its serial,
@@ -35,7 +35,7 @@ from com.sun.star.lang import Locale
 
 PORT = int(os.environ.get("LO_PORT", "2100"))
 ROOT = Path(__file__).resolve().parent.parent
-DATA = ROOT / "crates/formula/tests/data"
+DATA = ROOT / "apps/bricks/crates/formula/tests/data"
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?)?$")
 NO_COLOR = 0x123456  # a sentinel default no format code names
 

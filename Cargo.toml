@@ -1,33 +1,67 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/csv-engine",
-    "crates/formula",
-    "crates/data-model",
-    "crates/grid",
-    "crates/commands",
-    "crates/file-format",
-    "crates/jobs",
-    "crates/xlsx",
-    "app",
+    # Applications
+    "apps/bricks",
+    "apps/slate",
+    "apps/frame",
+    # Shared suite infrastructure
+    "crates/suite-core",
+    "crates/suite-ui",
+    "crates/suite-platform",
+    "crates/suite-file",
+    # Bricks-only crates
+    "apps/bricks/crates/csv-engine",
+    "apps/bricks/crates/formula",
+    "apps/bricks/crates/data-model",
+    "apps/bricks/crates/grid",
+    "apps/bricks/crates/commands",
+    "apps/bricks/crates/file-format",
+    "apps/bricks/crates/jobs",
+    "apps/bricks/crates/xlsx",
+    # Slate-only crates
+    "apps/slate/crates/document-model",
+    "apps/slate/crates/docx",
+    # Frame-only crates
+    "apps/frame/crates/presentation-model",
+    "apps/frame/crates/pptx",
 ]
 
+# `version` is Bricks' release version (scripts/ship.sh bumps it); Bricks and its crates
+# inherit it. Slate, Frame, and the suite-* crates set their own.
 [workspace.package]
 version = "0.2.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/avdrav1/bricks"
+repository = "https://github.com/avdrav1/cronkite"
 rust-version = "1.92"
 
 [workspace.dependencies]
-csv-engine = { path = "crates/csv-engine" }
-data-model = { path = "crates/data-model" }
-formula = { path = "crates/formula" }
-grid = { path = "crates/grid" }
-commands = { path = "crates/commands" }
-file-format = { path = "crates/file-format" }
-jobs = { path = "crates/jobs" }
-xlsx = { path = "crates/xlsx" }
+# Shared suite crates
+suite-core = { path = "crates/suite-core" }
+suite-ui = { path = "crates/suite-ui" }
+suite-platform = { path = "crates/suite-platform" }
+suite-file = { path = "crates/suite-file" }
+# Bricks crates
+csv-engine = { path = "apps/bricks/crates/csv-engine" }
+data-model = { path = "apps/bricks/crates/data-model" }
+formula = { path = "apps/bricks/crates/formula" }
+grid = { path = "apps/bricks/crates/grid" }
+commands = { path = "apps/bricks/crates/commands" }
+file-format = { path = "apps/bricks/crates/file-format" }
+jobs = { path = "apps/bricks/crates/jobs" }
+xlsx = { path = "apps/bricks/crates/xlsx" }
+# Slate crates
+document-model = { path = "apps/slate/crates/document-model" }
+docx = { path = "apps/slate/crates/docx" }
+# Frame crates
+presentation-model = { path = "apps/frame/crates/presentation-model" }
+pptx = { path = "apps/frame/crates/pptx" }
+# The suite's UI toolkit (docs/adr/0002-gtk4-for-the-suite.md); v4_14 matches Ubuntu 24.04's GTK.
+gtk = { package = "gtk4", version = "0.11", features = ["v4_14"] }
+# Every app logs through these.
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "ansi", "std"] }
 
 [workspace.lints.rust]
 unsafe_code = "warn"

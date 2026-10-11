@@ -1,0 +1,2 @@
+para	Default Paragraph Style	-	""	"Eto ochen prostoy1 text so snoskoy"
+run	-	"Eto ochen prostoy1 text so snoskoy"

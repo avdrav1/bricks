@@ -8,7 +8,7 @@
 # In an Arch container under headless sway; what the app shows is read through the
 # accessibility tree (scripts/a11y_helpers.py): the tab buttons, and the grid's
 # description of the cursor cell (`A1: 4`). /tmp/f.xlsx is a copy of the LibreOffice
-# fixture (crates/xlsx/tests/data/fixture.xlsx):
+# fixture (apps/bricks/crates/xlsx/tests/data/fixture.xlsx):
 #   1. the tabs Data, Q1 Sales, and Summary show;
 #   2. Ctrl+Page Down shows Q1 Sales: its A1 is `=Data!B2*2`;
 #   3. 42 typed in Q1 Sales!A1, Ctrl+S: no question, the saved sheet2.xml holds <v>42</v>,
@@ -22,9 +22,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 bin=$(realpath "${1:-target/release/bricks}")
 [ -x "$bin" ] || { echo "no binary at $bin (cargo build --release -p bricks)"; exit 1; }
-fixture=$(realpath crates/xlsx/tests/data/fixture.xlsx)
+fixture=$(realpath apps/bricks/crates/xlsx/tests/data/fixture.xlsx)
 # Data!B2, doubled, is what Q1 Sales!A1 shows.
-b2=$(awk -F'\t' '/^== /{s=$0} s=="== Data" && $1=="B2"{print $3}' crates/xlsx/tests/data/fixture-libreoffice.txt)
+b2=$(awk -F'\t' '/^== /{s=$0} s=="== Data" && $1=="B2"{print $3}' apps/bricks/crates/xlsx/tests/data/fixture-libreoffice.txt)
 want_a1=$(python3 -c "v=float('$b2')*2; print(int(v) if v==int(v) else v)")
 
 shots=()

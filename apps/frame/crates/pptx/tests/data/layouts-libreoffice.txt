@@ -1,0 +1,219 @@
+size	9144000	6858000
+slide	1	hidden=0
+background	solid FFFFFF 100
+shape	0	TitleTextShape	685800	2130480	7772400	1469880	0	0	0	Title 1
+fill	none
+line	none
+para	0	center	Centered Title
+run	44	0	0	0	0	000000	Calibri	Centered Title
+shape	0	SubtitleShape	1371600	3886200	6400800	1752480	0	0	0	Subtitle 2
+fill	none
+line	none
+para	0	center	subtitle
+run	32	0	0	0	0	8B8B8B	Calibri	subtitle
+slide	2	hidden=0
+background	solid FFFFFF 100
+shape	0	TitleTextShape	457200	274680	8229600	1143000	0	0	0	Title 1
+fill	none
+line	none
+para	0	center	Title
+run	44	0	0	0	0	000000	Calibri	Title
+shape	0	OutlinerShape	457200	1600200	8229600	4525920	0	0	0	Content Placeholder 2
+fill	none
+line	none
+para	0	left	Content
+run	32	0	0	0	0	000000	Calibri	Content
+para	1	left	Level 2
+run	28	0	0	0	0	000000	Calibri	Level 2
+para	2	left	Level 3
+run	24	0	0	0	0	000000	Calibri	Level 3
+para	3	left	Level 4
+run	20	0	0	0	0	000000	Calibri	Level 4
+para	4	left	Level 5
+run	20	0	0	0	0	000000	Calibri	Level 5
+para	5	left	Level 6
+run	20	0	0	0	0	000000	Calibri	Level 6
+para	6	left	Level 7
+run	20	0	0	0	0	000000	Calibri	Level 7
+para	7	left	Level 8
+run	20	0	0	0	0	000000	Calibri	Level 8
+para	8	left	Level 9
+run	20	0	0	0	0	000000	Calibri	Level 9
+slide	3	hidden=0
+background	solid FFFFFF 100
+shape	0	TitleTextShape	722160	4406760	7772400	1362240	0	0	0	Title 1
+fill	none
+line	none
+para	0	left	Section Title
+run	40	1	0	0	0	000000	Calibri	Section Title
+shape	0	OutlinerShape	722160	2906640	7772400	1500120	0	0	0	Text Placeholder 2
+fill	none
+line	none
+para	0	left	Section Header
+run	20	0	0	0	0	8B8B8B	Calibri	Section Header
+slide	4	hidden=0
+background	solid FFFFFF 100
+shape	0	TitleTextShape	457200	274680	8229600	1143000	0	0	0	Title 1
+fill	none
+line	none
+para	0	center	Title
+run	44	0	0	0	0	000000	Calibri	Title
+shape	0	OutlinerShape	457200	1600200	4038480	4525920	0	0	0	Content Placeholder 2
+fill	none
+line	none
+para	0	left	Left
+run	28	0	0	0	0	000000	Calibri	Left
+para	1	left	Level 2
+run	24	0	0	0	0	000000	Calibri	Level 2
+para	2	left	Level 3
+run	20	0	0	0	0	000000	Calibri	Level 3
+para	3	left	Level 4
+run	18	0	0	0	0	000000	Calibri	Level 4
+para	4	left	Level 5
+run	18	0	0	0	0	000000	Calibri	Level 5
+para	5	left	Level 6
+run	18	0	0	0	0	000000	Calibri	Level 6
+shape	0	OutlinerShape	4648320	1600200	4038480	4525920	0	0	0	Content Placeholder 3
+fill	none
+line	none
+para	0	left	Right
+run	28	0	0	0	0	000000	Calibri	Right
+para	1	left	Level 2
+run	24	0	0	0	0	000000	Calibri	Level 2
+para	2	left	Level 3
+run	20	0	0	0	0	000000	Calibri	Level 3
+para	3	left	Level 4
+run	18	0	0	0	0	000000	Calibri	Level 4
+para	4	left	Level 5
+run	18	0	0	0	0	000000	Calibri	Level 5
+slide	5	hidden=0
+background	solid FFFFFF 100
+shape	0	TitleTextShape	457200	274680	8229600	1143000	0	0	0	Title 1
+fill	none
+line	none
+para	0	center	Title
+run	44	0	0	0	0	000000	Calibri	Title
+shape	0	OutlinerShape	457200	1535040	4040280	639720	0	0	0	Text Placeholder 2
+fill	none
+line	none
+para	0	left	file1
+run	24	1	0	0	0	000000	Calibri	file1
+shape	0	OutlinerShape	457200	2174760	4040280	3951360	0	0	0	Content Placeholder 3
+fill	none
+line	none
+para	0	left	Comparison1
+run	24	0	0	0	0	000000	Calibri	Comparison1
+para	1	left	Level 2
+run	20	0	0	0	0	000000	Calibri	Level 2
+para	2	left	Level 3
+run	18	0	0	0	0	000000	Calibri	Level 3
+shape	0	OutlinerShape	4645080	1535040	4041720	639720	0	0	0	Text Placeholder 4
+fill	none
+line	none
+para	0	left	file2
+run	24	1	0	0	0	000000	Calibri	file2
+shape	0	OutlinerShape	4645080	2174760	4041720	3951360	0	0	0	Content Placeholder 5
+fill	none
+line	none
+para	0	left	Comparison2
+run	24	0	0	0	0	000000	Calibri	Comparison2
+para	1	left	Level 2
+run	20	0	0	0	0	000000	Calibri	Level 2
+para	2	left	Level 3
+run	18	0	0	0	0	000000	Calibri	Level 3
+slide	6	hidden=0
+background	solid FFFFFF 100
+shape	0	TitleTextShape	457200	274680	8229600	1143000	0	0	0	Title 1
+fill	none
+line	none
+para	0	center	Title Only
+run	44	0	0	0	0	000000	Calibri	Title Only
+slide	7	hidden=0
+background	solid FFFFFF 100
+shape	0	TitleTextShape	0	0	0	0	0	0	0	Title 1
+fill	none
+line	none
+para	0	left	Blank with Default Title
+run	18	0	0	0	0	000000	Calibri	Blank with Default Title
+shape	0	CustomShape	990720	2895480	1302480	369360	0	0	0	TextBox 3
+fill	none
+line	none
+para	0	left	Default Text
+run	18	0	0	0	0	000000	Calibri	Default Text
+shape	0	CustomShape	3657600	2971800	2048760	1477440	0	0	0	TextBox 4
+fill	none
+line	none
+para	0	left	Default
+run	18	0	0	0	0	000000	Calibri	Default
+para	0	left	Text with levels
+run	18	0	0	0	0	000000	Calibri	Text with levels
+para	0	left	Level 1
+run	18	0	0	0	0	000000	Calibri	Level 1
+para	1	left	Level 2
+run	18	0	0	0	0	000000	Calibri	Level 2
+para	2	left	Level 3
+run	18	0	0	0	0	000000	Calibri	Level 3
+slide	8	hidden=0
+background	solid FFFFFF 100
+shape	0	TitleTextShape	457200	272880	3008160	1162080	0	0	0	Title 1
+fill	none
+line	none
+para	0	left	Caption
+run	20	1	0	0	0	000000	Calibri	Caption
+shape	0	OutlinerShape	3575160	272880	5111640	5853240	0	0	0	Content Placeholder 2
+fill	none
+line	none
+para	0	left	Level 1
+run	32	0	0	0	0	000000	Calibri	Level 1
+para	1	left	Level 2
+run	28	0	0	0	0	000000	Calibri	Level 2
+para	2	left	Level 3
+run	24	0	0	0	0	000000	Calibri	Level 3
+para	3	left	Level 4
+run	20	0	0	0	0	000000	Calibri	Level 4
+para	4	left	Level 5
+run	20	0	0	0	0	000000	Calibri	Level 5
+shape	0	OutlinerShape	457200	1434960	3008160	4691160	0	0	0	Text Placeholder 3
+fill	none
+line	none
+para	0	left	Content with caption
+run	14	0	0	0	0	000000	Calibri	Content with caption
+slide	9	hidden=0
+background	solid FFFFFF 100
+shape	0	TitleTextShape	1792440	4800600	5486400	566640	0	0	0	Title 1
+fill	none
+line	none
+para	0	left	Picture with Caption
+run	20	1	0	0	0	000000	Calibri	Picture with Caption
+shape	0	GraphicObjectShape	1792440	612720	5486400	4114800	0	0	0	Picture Placeholder 4
+line	none
+picture	image/jpeg	192x176
+shape	0	OutlinerShape	1792440	5367240	5486400	804960	0	0	0	Text Placeholder 3
+fill	none
+line	none
+para	0	left	Some text
+run	14	0	0	0	0	000000	Calibri	Some text
+slide	10	hidden=0
+background	solid FFFFFF 100
+shape	0	TitleTextShape	457200	274680	8229600	1143000	0	0	0	Title 4
+fill	none
+line	none
+para	0	center	Headers & Footers
+run	44	0	0	0	0	000000	Calibri	Headers & Footers
+shape	0	OutlinerShape	457200	1600200	8229600	4525920	0	0	0	Content Placeholder 5
+fill	none
+line	none
+para	0	left	This slide has the following stuff:
+run	32	0	0	0	0	000000	Calibri	This slide has the following stuff:
+para	1	left	Header
+run	28	0	0	0	0	000000	Calibri	Header
+para	1	left	Date/Time placeholder
+run	28	0	0	0	0	000000	Calibri	Date/Time placeholder
+para	1	left	Slide Number
+run	28	0	0	0	0	000000	Calibri	Slide Number
+para	0	left	
+shape	0	DateTimeShape	457200	6356520	2133720	365040	0	0	0	Date Placeholder 6
+fill	none
+line	none
+para	0	left	Friday, October 21, 2011
+run	12	0	0	0	0	8B8B8B	Calibri	Friday, October 21, 2011

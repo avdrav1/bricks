@@ -7,14 +7,15 @@
 #   scripts/ship.sh build              release binary (built in Ubuntu 24.04) + tarball + latest.json in dist/
 #   scripts/ship.sh verify             the binary starts on clean Arch, Ubuntu 24.04, and Fedora
 #   scripts/ship.sh upload [--dry-run] tarball, checksum, latest.json -> Cloudflare R2
-#   scripts/ship.sh site   [--dry-run] download page -> Cloudflare Pages
+#   scripts/ship.sh site   [--dry-run] Bricks download page (sites/bricks) -> Cloudflare Pages
+#   scripts/ship.sh suite-site [--dry-run] suite install page (sites/cronkite) -> Cloudflare Pages
 #   scripts/ship.sh tag                annotated git tag vX.Y.Z (local only)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 [ -f .env.ship ] && set -a && . ./.env.ship && set +a
 APP=bricks
-ID=dev.bricks.Bricks  # desktop entry and icon names, as the app ID (APP_ID in app/src/main.rs)
+ID=dev.bricks.Bricks  # desktop entry and icon names, as the app ID (APP_ID in apps/bricks/src/main.rs)
 TARGET=x86_64-unknown-linux-gnu
 version() { sed -n '/^\[workspace.package\]/,/^\[/{s/^version = "\(.*\)"/\1/p}' Cargo.toml; }
 V=$(version)
@@ -33,7 +34,7 @@ preflight)
   b=$(git branch --show-current); [ "$b" = main ] || { echo "FAIL on branch $b, not main"; fail=1; }
   git rev-parse "v$V" >/dev/null 2>&1 && { echo "FAIL tag v$V already exists; bump first"; fail=1; }
   cargo fmt --all --check || { echo "FAIL fmt"; fail=1; }
-  cargo clippy --workspace --all-targets -- -D warnings || { echo "FAIL clippy"; fail=1; }
+  cargo clippy --workspace --all-targets --all-features -- -D warnings || { echo "FAIL clippy"; fail=1; }
   cargo test --workspace || { echo "FAIL tests"; fail=1; }
   command -v npx >/dev/null || { echo "FAIL npx not found (needed for wrangler)"; fail=1; }
   docker info >/dev/null 2>&1 || { echo "FAIL docker not usable (the release builds in a container)"; fail=1; }
@@ -64,7 +65,7 @@ build)
   rm -rf "dist/$NAME"; mkdir -p "dist/$NAME"
   cp "target/container/$TARGET/release/$APP" "dist/$NAME/"
   strip "dist/$NAME/$APP" || true
-  cp packaging/$ID.desktop packaging/$ID.svg README.md "dist/$NAME/"
+  cp packaging/$ID.desktop packaging/$ID.svg apps/bricks/README.md "dist/$NAME/"
   cp LICENSE* "dist/$NAME/" 2>/dev/null || true
   tar -C dist -czf "$TAR" "$NAME"
   (cd dist && sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256")
@@ -90,15 +91,29 @@ upload)
 site)
   need CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CF_PAGES_PROJECT
   [ -f dist/latest.json ] || { echo "run build first"; exit 1; }
-  rm -rf dist/site; cp -r site dist/site; cp dist/latest.json dist/site/
+  rm -rf dist/site; cp -r sites/bricks dist/site; cp dist/latest.json dist/site/
   # The installer reads latest.json from the bucket (PKG-1).
   need DOWNLOAD_BASE_URL
   sed -i "s|@DOWNLOAD_BASE_URL@|$DOWNLOAD_BASE_URL|" dist/site/install.sh
   run wr pages deploy dist/site --project-name "$CF_PAGES_PROJECT" --branch main --commit-dirty=true
   ;;
+suite-site)
+  # cronkite.cc: static, no release data, so it deploys only when sites/cronkite changes.
+  # The custom domain cronkite.cc is attached to the project once, in the dashboard.
+  need CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CF_SUITE_PAGES_PROJECT
+  rm -rf dist/cronkite-site; cp -r sites/cronkite dist/cronkite-site
+  # Match the name exactly: the table's domains column holds bricks.cronkite.cc.
+  if ! wr pages project list --json | python3 -c 'import json, sys
+sys.exit(sys.argv[1] not in [p["Project Name"] for p in json.load(sys.stdin)])' "$CF_SUITE_PAGES_PROJECT"; then
+    # --force: wrangler 4.149 otherwise hands new projects to Workers and fails on a plain
+    # folder of assets. Like `spreadsheet`, this is a classic Pages project.
+    run wr pages project create "$CF_SUITE_PAGES_PROJECT" --production-branch main --force
+  fi
+  run wr pages deploy dist/cronkite-site --project-name "$CF_SUITE_PAGES_PROJECT" --branch main --commit-dirty=true
+  ;;
 tag)
   git tag -a "v$V" -m "v$V"
   echo "tagged v$V locally; push with: git push origin main v$V"
   ;;
-*) sed -n '2,13p' "$0"; exit 1 ;;
+*) sed -n '2,12p' "$0"; exit 1 ;;
 esac

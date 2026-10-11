@@ -1,0 +1,49 @@
+//! Application-independent primitives shared by every app in the suite.
+//!
+//! No UI, OS, or file code lives here, and nothing here depends on another suite crate or
+//! on an app. A type belongs here only when at least two apps need the same thing.
+
+use std::fmt;
+
+/// Which application of the suite is running.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AppKind {
+    /// Spreadsheet; today a fast CSV editor.
+    Bricks,
+    /// Word processor.
+    Slate,
+    /// Presentation app (working name).
+    Frame,
+}
+
+impl AppKind {
+    /// Every application, in a stable order.
+    pub const ALL: [AppKind; 3] = [AppKind::Bricks, AppKind::Slate, AppKind::Frame];
+
+    /// The name shown to people: window titles, menus, messages.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            AppKind::Bricks => "Bricks",
+            AppKind::Slate => "Slate",
+            AppKind::Frame => "Frame",
+        }
+    }
+}
+
+impl fmt::Display for AppKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.display_name())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn application_names_are_correct() {
+        let names: Vec<_> = AppKind::ALL.iter().map(|a| a.display_name()).collect();
+        assert_eq!(names, ["Bricks", "Slate", "Frame"]);
+        assert_eq!(AppKind::Frame.to_string(), "Frame");
+    }
+}

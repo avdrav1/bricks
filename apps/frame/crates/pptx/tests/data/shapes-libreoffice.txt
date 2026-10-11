@@ -1,0 +1,177 @@
+size	9144000	6858000
+slide	1	hidden=0
+background	solid FFFFFF 100
+shape	0	CustomShape	914400	914400	2286000	369360	0	0	0	TextBox 3
+fill	none
+line	none
+para	0	left	Learning PPTX
+run	18	0	0	0	0	000000	Calibri	Learning PPTX
+shape	0	ConnectorShape	1066680	1828800	2134080	360	0	0	0	Straight Connector 5
+fill	none
+line	solid 4A7EBB 9360
+shape	0	CustomShape	595800	2674800	2354040	1733400	0	0	0	Freeform 6
+fill	solid 4F81BD 100
+line	solid 3A5F8B 25560
+para	0	center	Cloud
+run	18	0	0	0	0	FFFFFF	Calibri	Cloud
+shape	0	GraphicObjectShape	5105520	990720	1828800	1676520	0	0	0	Picture 1
+line	none
+picture	image/jpeg	192x176
+shape	0	TableShape	3809880	4724280	4723920	1218960	0	0	0	Table 2
+cell	0	0	solid 4F81BD 100	FFFFFF:6120 FFFFFF:19080 FFFFFF:6120 FFFFFF:6120
+para	0	left	Column1
+run	18	1	0	0	0	FFFFFF	Calibri	Column1
+cell	0	1	solid 4F81BD 100	FFFFFF:6120 FFFFFF:19080 FFFFFF:6120 FFFFFF:6120
+para	0	left	Column2
+run	18	1	0	0	0	FFFFFF	Calibri	Column2
+cell	0	2	solid 4F81BD 100	FFFFFF:6120 FFFFFF:19080 FFFFFF:6120 FFFFFF:6120
+para	0	left	Column3
+run	18	1	0	0	0	FFFFFF	Calibri	Column3
+cell	1	0	solid D0D8E7 100	FFFFFF:6120 FFFFFF:6120 FFFFFF:6120 FFFFFF:6120
+para	0	left	data1
+run	18	0	0	0	0	000000	Calibri	data1
+cell	1	1	solid D0D8E7 100	FFFFFF:6120 FFFFFF:6120 FFFFFF:6120 FFFFFF:6120
+para	0	left	data2
+run	18	0	0	0	0	000000	Calibri	data2
+cell	1	2	solid D0D8E7 100	FFFFFF:6120 FFFFFF:6120 FFFFFF:6120 FFFFFF:6120
+para	0	left	data3
+run	18	0	0	0	0	000000	Calibri	data3
+shape	0	ConnectorShape	5943600	2743200	360	1905120	0	0	0	Straight Arrow Connector 7
+fill	none
+line	solid 4A7EBB 9360
+shape	0	ConnectorShape	2361960	1828800	2743920	1371960	0	0	0	Elbow Connector 9
+fill	none
+line	solid 4A7EBB 9360
+slide	2	hidden=0
+background	solid FFFFFF 100
+shape	0	TitleTextShape	685800	2130480	7772400	1469880	0	0	0	Title 2
+fill	none
+line	solid 4F81BD 0
+para	0	center	PPTX Title
+run	44	0	0	0	0	D99694	Calibri	PPTX 
+run	44	0	0	1	0	D99694	Calibri	Title
+shape	0	SubtitleShape	1371600	3886200	6400800	1752480	0	0	0	Subtitle 3
+fill	none
+line	none
+para	0	center	Subtitle
+run	32	1	0	0	0	8B8B8B	Calibri	Subtitle
+para	0	center	And second line
+run	32	0	0	0	0	8B8B8B	Calibri	And second line
+slide	3	hidden=0
+background	solid FFFFFF 100
+shape	0	GroupShape	1523880	1371600	3276720	1932480	0	0	0	Group 4
+shape	1	CustomShape	1523880	1371600	1752480	762120	0	0	0	Rectangle 1
+fill	solid 4F81BD 100
+line	solid 3A5F8B 25560
+shape	1	CustomShape	3886200	1905120	914400	914400	0	0	0	Oval 2
+fill	solid 4F81BD 100
+line	solid 3A5F8B 25560
+shape	1	CustomShape	1828800	2819520	978480	484560	0	0	0	Right Arrow 3
+fill	solid 4F81BD 100
+line	solid 3A5F8B 25560
+slide	4	hidden=0
+background	solid FFFFFF 100
+shape	0	TableShape	1523880	1397160	6095520	2224800	0	0	0	Table 1
+cell	0	0	solid DCE6F2 100	000000:6120 000000:6120 000000:6120 000000:6120
+para	0	left	header1
+run	18	1	0	0	0	000000	Calibri	header1
+cell	0	1	solid DCE6F2 100	000000:6120 000000:6120 000000:6120 000000:6120
+para	0	left	header2
+run	18	1	0	0	0	000000	Calibri	header2
+cell	0	2	solid DCE6F2 100	000000:6120 000000:6120 000000:6120 000000:6120
+para	0	left	header3
+run	18	1	0	0	0	000000	Calibri	header3
+cell	1	0	none	000000:6120 000000:6120 000000:6120 000000:6120
+para	0	left	A1
+run	18	0	0	0	0	000000	Calibri	A1
+cell	1	1	none	000000:6120 000000:6120 000000:6120 000000:6120
+para	0	left	B1
+run	18	0	0	0	0	000000	Calibri	B1
+cell	1	2	none	000000:6120 000000:6120 000000:6120 000000:6120
+para	0	left	C1
+run	18	0	0	0	0	000000	Calibri	C1
+cell	2	0	none	000000:6120 000000:6120 000000:6120 000000:6120
+para	0	left	A2
+run	18	0	0	0	0	000000	Calibri	A2
+cell	2	1	none	000000:6120 000000:6120 000000:6120 000000:6120
+para	0	5	
+cell	2	2	none	000000:6120 000000:6120 000000:6120 000000:6120
+para	0	5	
+cell	3	0	none	000000:6120 000000:6120 000000:6120 000000:6120
+para	0	left	A3
+run	18	0	0	0	0	000000	Calibri	A3
+cell	3	1	none	000000:6120 000000:6120 000000:6120 000000:6120
+para	0	left	B3 and C3 are merged
+run	18	0	0	0	0	000000	Calibri	B3 and C3 are merged
+cell	3	2	solid 18A303 100	- - - -
+para	0	5	
+cell	4	0	none	000000:6120 000000:6120 000000:6120 000000:6120
+para	0	left	A4
+run	18	0	0	0	0	000000	Calibri	A4
+cell	4	1	none	000000:6120 000000:6120 000000:6120 000000:6120
+para	0	5	
+cell	4	2	solid 18A303 100	- - - -
+para	0	5	
+cell	5	0	none	000000:6120 000000:6120 000000:6120 000000:6120
+para	0	left	A5
+run	18	0	0	0	0	000000	Calibri	A5
+cell	5	1	none	000000:6120 000000:6120 000000:6120 000000:6120
+para	0	5	
+cell	5	2	solid 18A303 100	- - - -
+para	0	5	
+slide	5	hidden=0
+background	solid FFFFFF 100
+shape	0	TableShape	685800	2133720	7848360	1854000	0	0	0	Table 1
+cell	0	0	solid 4F81BD 100	FFFFFF:6120 FFFFFF:19080 FFFFFF:6120 FFFFFF:6120
+para	0	left	Link Type
+run	18	1	0	0	0	FFFFFF	Calibri	Link Type
+cell	0	1	solid 4F81BD 100	FFFFFF:6120 FFFFFF:19080 FFFFFF:6120 FFFFFF:6120
+para	0	left	Target URI
+run	18	1	0	0	0	FFFFFF	Calibri	Target URI
+cell	1	0	solid D0D8E7 100	FFFFFF:6120 FFFFFF:6120 FFFFFF:6120 FFFFFF:6120
+para	0	left	Web Page
+run	18	0	0	1	0	0000FF	Calibri	Web Page
+cell	1	1	solid D0D8E7 100	FFFFFF:6120 FFFFFF:6120 FFFFFF:6120 FFFFFF:6120
+para	0	left	http://poi.apache.org/
+run	18	0	0	0	0	000000	Calibri	http://poi.apache.org/
+cell	2	0	solid E9ECF3 100	FFFFFF:6120 FFFFFF:6120 FFFFFF:6120 FFFFFF:6120
+para	0	left	Place in this document
+run	18	0	0	1	0	0000FF	Calibri	Place in this document
+cell	2	1	solid E9ECF3 100	FFFFFF:6120 FFFFFF:6120 FFFFFF:6120 FFFFFF:6120
+para	0	left	/ppt/slides/slide2.xml
+run	18	0	0	0	0	000000	Calibri	/ppt/slides/slide2.xml
+cell	3	0	solid D0D8E7 100	FFFFFF:6120 FFFFFF:6120 FFFFFF:6120 FFFFFF:6120
+para	0	left	Email
+run	18	0	0	1	0	0000FF	Calibri	Email
+cell	3	1	solid D0D8E7 100	FFFFFF:6120 FFFFFF:6120 FFFFFF:6120 FFFFFF:6120
+para	0	left	mailto:dev@poi.apache.org?subject=Hi%20There
+run	18	0	0	0	0	000000	Calibri	mailto:dev@poi.apache.org?subject=Hi%20There
+cell	4	0	solid E9ECF3 100	FFFFFF:6120 FFFFFF:6120 FFFFFF:6120 FFFFFF:6120
+para	0	5	
+cell	4	1	solid E9ECF3 100	FFFFFF:6120 FFFFFF:6120 FFFFFF:6120 FFFFFF:6120
+para	0	5	
+shape	0	TitleTextShape	457200	274680	8229600	1143000	0	0	0	Title 2
+fill	none
+line	none
+para	0	center	Hyperlinks
+run	44	0	0	0	0	000000	Calibri	Hyperlinks
+slide	6	hidden=0
+background	solid FFFFFF 100
+shape	0	CustomShape	838080	914400	914400	914400	0	0	0	Rectangle 1
+fill	solid 4F81BD 100
+line	solid 3A5F8B 25560
+shape	0	CustomShape	2209680	914400	914400	914400	0	0	0	Rectangle 8
+fill	solid DCE6F2 100
+line	solid 3A5F8B 25560
+shape	0	CustomShape	3429000	914400	914400	914400	0	0	0	Rectangle 9
+fill	solid B9CDE5 100
+line	solid 3A5F8B 25560
+shape	0	CustomShape	4648320	914400	914400	914400	0	0	0	Rectangle 10
+fill	solid 95B3D7 100
+line	solid 3A5F8B 25560
+shape	0	CustomShape	5943600	914400	914400	914400	0	0	0	Rectangle 11
+fill	solid 376092 100
+line	solid 3A5F8B 25560
+shape	0	CustomShape	7543800	914400	914400	914400	0	0	0	Rectangle 12
+fill	solid 254061 100
+line	solid 3A5F8B 25560

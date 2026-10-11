@@ -1,8 +1,29 @@
+# Build output (Cargo.lock is committed: this is an application workspace)
 /target
+/spikes/*/target
+**/*.rs.bk
+*.profraw
+/perf.data*
+
+# Generated test data and release artifacts
 /dist
 /corpus
-/spikes/*/target
+
+# Release secrets and tooling state
 .env.ship
 .wrangler/
+
+# Editors
 *.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.code-workspace
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Python
 __pycache__/

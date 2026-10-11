@@ -1,6 +1,12 @@
 # CLAUDE.md
 
-Bricks: a fast, lightweight Linux spreadsheet in Rust (command `bricks`). V0.1 is the best large-CSV editor on Linux; Excel compatibility comes later. Product spec: `docs/SPEC.md`. Work queue: `BACKLOG.md`.
+Cronkite: a Linux-native office suite in Rust: one Cargo workspace, three apps. Repo: `github.com/avdrav1/cronkite`; suite page: `sites/cronkite/` (cronkite.cc). Suite architecture: `docs/architecture/overview.md`; suite ADRs: `docs/adr/`.
+
+- **Bricks** (`apps/bricks`, command `bricks`): a fast, lightweight spreadsheet. V0.1 is the best large-CSV editor on Linux; Excel compatibility comes later. Product spec: `apps/bricks/docs/SPEC.md`. Work queue: `BACKLOG.md`.
+- **Slate** (`apps/slate`, command `slate`): pageless word processor for .txt, .md, and .docx: one endless column, never paginated. Spec: `docs/specs/slate.md`; design: `docs/adr/0003-slate-document-model.md`, `docs/adr/0005-slate-is-pageless.md`. SL0 builds a read-only viewer.
+- **Frame** (`apps/frame`, command `frame`; working name): presentation app for .pptx, easier to use than PowerPoint: direct editing with one inspector, plus an outline view. Spec: `docs/specs/frame.md`; design: `docs/adr/0004-frame-presentation-model.md`, `docs/adr/0006-frame-editor.md`. FR0 builds a viewer with a slideshow.
+
+Everything below about stories, invariants, crates, benchmarks, and ADRs is Bricks' unless it says otherwise.
 
 ## How we work
 
@@ -20,7 +26,24 @@ Bricks: a fast, lightweight Linux spreadsheet in Rust (command `bricks`). V0.1 i
 7. **Filters never drop rows on save.** Sorting changes row order; filtering changes only the view.
 8. **Non-goals stay out:** charts, pivots, macros, scripting, plugins, collaboration. Formulas, multiple sheets, XLSX (ADRs 0006-0008), and cell styles (ADRs 0009-0010) are in scope from M5. Bricks keeps the charts, pivots, and macros it can't edit when it saves.
 
+## Suite rules
+
+- Shared crates live in `crates/suite-*`; each app's own crates live under `apps/<app>/crates/`.
+- `suite-core` depends on nothing in the workspace; within the workspace, `suite-ui`, `suite-platform`, and `suite-file` may depend only on `suite-core`. No shared crate depends on an app or an app's crates.
+- The suite's UI toolkit is GTK 4 (`docs/adr/0002-gtk4-for-the-suite.md`), declared once as `gtk` in `[workspace.dependencies]`. Only apps, `suite-ui`, and `suite-platform` may depend on it; `suite-core`, `suite-file`, and engine crates stay toolkit-free.
+- Code becomes shared only when at least two apps genuinely need it. Share infrastructure, not product models.
+- Suite-wide decisions go in `docs/adr/NNNN-title.md`.
+
 ## Crates
+
+| Crate | Owns |
+| --- | --- |
+| `suite-core` | `AppKind` and other app-independent primitives |
+| `suite-ui` | UI conventions shared by the apps |
+| `suite-platform` | OS integration (Linux) |
+| `suite-file` | format-independent file infrastructure (document names) |
+
+Bricks' crates, in `apps/bricks/crates/`:
 
 | Crate | Owns |
 | --- | --- |
@@ -32,14 +55,31 @@ Bricks: a fast, lightweight Linux spreadsheet in Rust (command `bricks`). V0.1 i
 | `commands` | `Command` trait, undo/redo |
 | `file-format` | atomic save |
 | `jobs` | background jobs: shared pool, cancel tokens, results to the UI loop (ADR 0005) |
-| `app` | windows, menus, dialogs, OS integration (toolkit set by DEC-1) |
+| `bricks` (`apps/bricks`) | windows, menus, dialogs, OS integration (toolkit set by DEC-1) |
+
+Slate's crates, in `apps/slate/crates/`:
+
+| Crate | Owns |
+| --- | --- |
+| `document-model` | Slate's document model (ADR 0003): blocks, runs, plain-text reader with encoding and line-ending detection, Markdown reader (`pulldown-cmark`) |
+| `docx` | DOCX reader: `word/document.xml` with styles, numbering, hyperlinks, pictures, and tables into the document model |
+| `slate` (`apps/slate`) | the GTK 4 viewer window: open, drop, the page as a read-only text view, alerts |
+
+Frame's crates, in `apps/frame/crates/`:
+
+| Crate | Owns |
+| --- | --- |
+| `presentation-model` | slides, shapes, frames, text, fills, outlines, pictures, tables, and backgrounds with every value resolved (ADR 0004); no dependencies |
+| `pptx` | PPTX reading: package, slide order, placeholder inheritance through layout and master, group transforms, text styles, theme colours and fonts, fills and outlines, pictures, tables with table styles, SmartArt drawings, notes |
+| `frame` (`apps/frame`) | windows, slide list, canvas and its slide renderer (GTK 4 snapshot, Pango), dialogs |
 
 ## Commands
 
 ```sh
 cargo fmt --all
-cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace
+cargo run -p bricks                      # or -p slate, -p frame
 cargo test --release --workspace -- --ignored  # perf acceptance tests (timing asserted in release only)
 python3 scripts/gen_corpus.py            # builds corpus/ (gitignored)
 python3 scripts/fetch_delimiter_sample.py  # 50 real-world files into corpus/realworld/ (ENG-4 test)
@@ -47,17 +87,21 @@ python3 scripts/lo_navigation.py         # re-record GRID-3's checklist from Lib
 python3 scripts/lo_functions.py          # re-record formula results from LibreOffice (FML-5..8)
 python3 scripts/lo_formats.py            # re-record number format results from LibreOffice (STYLE-2)
 python3 scripts/lo_xlsx.py fixture|dump FILE  # LibreOffice fixture workbook and dumps (XLSX-*)
+python3 scripts/lo_docx.py fixture|dump FILE  # Slate's LibreOffice fixture document and paragraph dumps (SLATE-3)
+scripts/check_slate.sh [BINARY]          # Slate viewer GUI check in docker: open, drop, show, refuse (SLATE-4)
 cargo run --release -p xlsx --example gen_corpus_xlsx  # corpus/rows_1m.xlsx (BENCH-2)
 cargo run --release -p xlsx --example gen_corpus_xlsx -- --styled   # corpus/styled_1m.xlsx (STYLE-3, BENCH-3)
-python3 -m unittest discover -s scripts  # script tests (corpus generator)
-cargo bench                              # prints the docs/BENCHMARKS.md table (needs corpus/)
-python3 scripts/backlog.py next|status   # backlog helper
+python3 scripts/lo_pptx.py fixture|dump FILE  # LibreOffice fixture deck and dumps (FRAME-*)
+scripts/check_frame.sh [BINARY]          # Frame's viewer in a container: decks, Page Down, drawing, Ctrl+O, drop, alerts, slideshow (FRAME-4, FRAME-5)
+python3 -m unittest discover -s scripts  # script tests (corpus generator, backlog helper)
+cargo bench                              # prints the apps/bricks/docs/BENCHMARKS.md table (needs corpus/)
+python3 scripts/backlog.py next [bricks|slate|frame]|status   # backlog helper; one milestone chain per app
 ```
 
 ## Performance
 
-Targets live in `docs/BENCHMARKS.md` and assume the reference box listed there. Report measured numbers in every perf-related commit. A change that regresses a benchmark more than 10% needs a note in BACKLOG.md.
+Targets live in `apps/bricks/docs/BENCHMARKS.md` and assume the reference box listed there. Report measured numbers in every perf-related commit. A change that regresses a benchmark more than 10% needs a note in BACKLOG.md.
 
 ## Decisions
 
-Architecture decisions go in `docs/decisions/NNNN-title.md` using `0000-template.md`. Read the relevant ADR before touching that area. Spikes live in `spikes/<story-id>/` and are throwaway.
+Bricks' architecture decisions go in `apps/bricks/docs/decisions/NNNN-title.md` using `0000-template.md`; suite-wide ones in `docs/adr/`. Read the relevant ADR before touching that area. Spikes live in `spikes/<story-id>/` and are throwaway.

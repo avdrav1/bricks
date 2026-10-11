@@ -1,0 +1,11 @@
+size	9144000	6858000
+slide	1	hidden=0
+background	solid FFFFFF 100
+shape	0	TitleTextShape	457200	274680	8229600	1143000	0	0	0	Title 3
+fill	none
+line	none
+para	0	center	My Bar Chart
+run	44	0	0	0	0	000000	Calibri	My Bar Chart
+shape	0	OLE2Shape	1523880	1397160	6095880	4064040	0	0	0	Chart 1
+fill	none
+line	none

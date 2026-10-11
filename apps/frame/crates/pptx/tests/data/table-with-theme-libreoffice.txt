@@ -1,0 +1,16 @@
+size	12192120	6858000
+slide	1	hidden=0
+background	solid FFFFFF 100
+shape	0	TableShape	2031840	719640	8127720	741600	0	0	0	Table 4
+cell	0	0	solid 4472C4 100	4472C4:3240 - 4472C4:3240 4472C4:3240
+para	0	left	Abc def
+run	18	1	0	0	0	FFFFFF	Arial	Abc 
+run	18	0	0	0	0	FF0000	Arial	def
+cell	1	0	none	4472C4:3240 4472C4:3240 4472C4:3240 4472C4:3240
+para	0	left	def hij klm nop
+run	18	1	0	0	0	000000	Arial	def
+run	18	0	0	0	0	000000	Arial	 
+run	18	0	1	0	0	000000	Arial	hij
+run	18	0	0	0	0	000000	Arial	 
+run	18	0	0	0	0	FFFF00	Arial	klm
+run	18	0	0	0	0	000000	Arial	 nop
