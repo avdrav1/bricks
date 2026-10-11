@@ -4,7 +4,7 @@
 //! times from the move to the end of the first frame that paints the target row at the top.
 //! Opens a real window, so it needs a graphical session and the corpus. Keep the window
 //! visible while it runs. Timing is asserted only in optimized builds:
-//! `cargo test --release -p spreadsheet --test jump_perf -- --ignored --nocapture`
+//! `cargo test --release -p bricks --test jump_perf -- --ignored --nocapture`
 
 use std::path::Path;
 use std::process::Command;
@@ -33,11 +33,11 @@ fn jump_to_row_1_9m_renders_under_100ms() {
         "missing {}; run python3 scripts/gen_corpus.py",
         path.display()
     );
-    let out = Command::new(env!("CARGO_BIN_EXE_spreadsheet"))
+    let out = Command::new(env!("CARGO_BIN_EXE_bricks"))
         .arg(&path)
         .args(["--bench-jump", "1900000", "--jumps", "100"])
         .output()
-        .expect("run spreadsheet");
+        .expect("run bricks");
     let line = String::from_utf8_lossy(&out.stdout).trim().to_owned();
     assert!(
         out.status.success() && line.starts_with('{'),

@@ -27,6 +27,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
 
 [[package]]
+name = "bricks"
+version = "0.1.0"
+dependencies = [
+ "commands",
+ "csv-engine",
+ "data-model",
+ "file-format",
+ "grid",
+ "gtk4",
+ "jobs",
+ "libc",
+]
+
+[[package]]
 name = "cairo-rs"
 version = "0.22.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -783,20 +797,6 @@ name = "smallvec"
 version = "1.16.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9395f0f0eee849a9b707b2f06bb92a6a422090e2123bb2ef8e87a0e61892a8e"
-
-[[package]]
-name = "spreadsheet"
-version = "0.1.0"
-dependencies = [
- "commands",
- "csv-engine",
- "data-model",
- "file-format",
- "grid",
- "gtk4",
- "jobs",
- "libc",
-]
 
 [[package]]
 name = "syn"

@@ -2,7 +2,7 @@
 # APP-8 acceptance: for a malformed file, a dialog shows the line number and the offending
 # text.
 #
-#   scripts/check_malformed.sh [BINARY]   (default target/release/spreadsheet)
+#   scripts/check_malformed.sh [BINARY]   (default target/release/bricks)
 #
 # In an Arch container under headless sway; the dialog's text is read through the
 # accessibility tree (scripts/a11y_helpers.py), as GTK shows it:
@@ -16,13 +16,13 @@
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-bin=$(realpath "${1:-target/release/spreadsheet}")
-[ -x "$bin" ] || { echo "no binary at $bin (cargo build --release -p spreadsheet)"; exit 1; }
+bin=$(realpath "${1:-target/release/bricks}")
+[ -x "$bin" ] || { echo "no binary at $bin (cargo build --release -p bricks)"; exit 1; }
 
 shots=()
 if [ -n "${SHOTS:-}" ]; then mkdir -p "$SHOTS"; shots=(-v "$(realpath "$SHOTS"):/shots"); fi
 # Arch's sway binary carries cap_sys_nice: exec fails without it in the container's set.
-out=$(docker run --rm --cap-add SYS_NICE -v "$bin:/usr/local/bin/spreadsheet:ro" \
+out=$(docker run --rm --cap-add SYS_NICE -v "$bin:/usr/local/bin/bricks:ro" \
   -v "$PWD/scripts/a11y_helpers.py:/a11y.py:ro" "${shots[@]}" archlinux:latest bash -c '
 set -uo pipefail
 pacman -Syu --noconfirm --needed sway wtype grim gtk4 ttf-dejavu dbus python-gobject at-spi2-core >/dev/null 2>&1
@@ -42,7 +42,7 @@ session() {
   WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 sway --unsupported-gpu -c /tmp/sway.conf >/tmp/sway.log 2>&1 &
   for i in $(seq 50); do ls /tmp/rt/wayland-[0-9] >/dev/null 2>&1 && break; sleep 0.1; done
   export WAYLAND_DISPLAY=$(basename $(ls /tmp/rt/wayland-[0-9] | head -1))
-  start() { spreadsheet "$@" >>/tmp/app.log 2>&1 & sleep 4; }
+  start() { bricks "$@" >>/tmp/app.log 2>&1 & sleep 4; }
   shot() { grim /shots/$1.png 2>/dev/null || true; }
   # The headless seat has no keyboard: each wtype adds a virtual one, and focus arrives
   # with it. Keys sent in the same instant can be lost, so wait before and after.
@@ -51,7 +51,7 @@ session() {
 
   echo "== 1 unclosed"
   start /tmp/unclosed.csv; shot 1-unclosed; shown
-  pkill -x spreadsheet; sleep 1
+  pkill -x bricks; sleep 1
 
   echo "== 2 many"
   start /tmp/many.csv; shot 2-many; shown
@@ -60,19 +60,19 @@ session() {
   echo "line 12: $(sed -n 12p /tmp/many.csv)"
   echo "line 13: $(sed -n 13p /tmp/many.csv)"
   shown after
-  pkill -x spreadsheet; sleep 1
+  pkill -x bricks; sleep 1
 
   echo "== 3 binary"
   start /tmp/archive.csv; shot 3-binary; shown
-  pkill -x spreadsheet; sleep 1
+  pkill -x bricks; sleep 1
 
   echo "== 4 clean"
   start /tmp/clean.csv; shot 4-clean; shown
-  pkill -x spreadsheet
+  pkill -x bricks
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
-echo "== app log"; grep "^spreadsheet:" /tmp/app.log | head -20
+echo "== app log"; grep "^bricks:" /tmp/app.log | head -20
 ' 2>&1) || true
 [ -n "${VERBOSE:-}" ] && sed 's/^/  /' <<<"$out"
 section() { awk -v s="== $1" '/^== /{on=($0 ~ "^" s)} on' <<<"$out"; }

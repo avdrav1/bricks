@@ -1,6 +1,6 @@
 ---
 name: ship-it
-description: Cut a release of the spreadsheet app and deploy it to Cloudflare: preflight checks, version bump, release build, tarball upload to R2, download page to Cloudflare Pages, git tag. Use whenever the user says "ship it", "release", "deploy", "cut a build", "publish a version", "push to Cloudflare", or asks to put a new build online, even if they don't name Cloudflare.
+description: Cut a release of the Bricks spreadsheet app and deploy it to Cloudflare: preflight checks, version bump, release build, tarball upload to R2, download page to Cloudflare Pages, git tag. Use whenever the user says "ship it", "release", "deploy", "cut a build", "publish a version", "push to Cloudflare", or asks to put a new build online, even if they don't name Cloudflare.
 ---
 
 # ship-it
@@ -53,7 +53,7 @@ scripts/ship.sh build    # compiles in an Ubuntu 24.04 container (needs docker)
 scripts/ship.sh verify   # starts the binary on clean Arch, Ubuntu 24.04, and Fedora
 ```
 
-Check the output: tarball exists, size is plausible, `dist/<name>/spreadsheet --version` prints the new version, and `verify` ends with `RELEASE OK`. Stop on any FAIL. Report size and sha256.
+Check the output: tarball exists, size is plausible, `dist/<name>/bricks --version` prints the new version, and `verify` ends with `RELEASE OK`. Stop on any FAIL. Report size and sha256.
 
 ## 4. Dry run, then confirm
 
@@ -66,7 +66,7 @@ Show the user what will happen in this shape and wait for a clear yes:
 
 ```
 Ready to ship vX.Y.Z
-- Upload spreadsheet-X.Y.Z-x86_64-linux.tar.gz (N MB) + checksum + latest.json to R2 bucket <bucket>
+- Upload bricks-X.Y.Z-x86_64-linux.tar.gz (N MB) + checksum + latest.json to R2 bucket <bucket>
 - Deploy download page to Pages project <project>
 - Tag vX.Y.Z locally
 Proceed?

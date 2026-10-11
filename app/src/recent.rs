@@ -1,5 +1,5 @@
 //! Recent files (APP-4): the last [`MAX`] files opened or saved, newest first. Kept in
-//! `$XDG_STATE_HOME/spreadsheet/recent` (default `~/.local/state/spreadsheet/recent`),
+//! `recent` in the state folder (`~/.local/state/bricks/recent`, see [`crate::state`]),
 //! one absolute path per line, so the list survives restarts. Every change reads the file
 //! again first: each launch is its own process, and two windows must not drop each other's
 //! files. Writes go to a temporary file renamed over the old one.
@@ -88,14 +88,7 @@ impl Recent {
 }
 
 fn default_store() -> PathBuf {
-    let state = std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .unwrap_or_else(|| {
-            let home = std::env::var_os("HOME").unwrap_or_default();
-            PathBuf::from(home).join(".local/state")
-        });
-    state.join("spreadsheet/recent")
+    crate::state::dir().join("recent")
 }
 
 /// How the menu shows `file`: its name, then its folder with the home folder as `~`.
@@ -137,7 +130,7 @@ mod tests {
     #[test]
     fn the_last_ten_files_survive_a_restart() {
         let d = dir("ten");
-        let store = d.0.join("state/spreadsheet/recent");
+        let store = d.0.join("state/bricks/recent");
         let file = |i: usize| d.0.join(format!("f{i}.csv"));
         let mut recent = Recent::load_from(store.clone());
         assert!(recent.files().is_empty(), "nothing yet, and no file needed");

@@ -5,7 +5,7 @@
 //! 1,000 cells, saves, and scrolls while the save runs (`--bench-save`). Needs a graphical
 //! session (Wayland, X11, or Broadway via `GDK_BACKEND`) and the corpus
 //! (`python3 scripts/gen_corpus.py`). Main-loop lateness is asserted only in optimized
-//! builds: `cargo test --release -p spreadsheet --test save_responsive -- --ignored --nocapture`
+//! builds: `cargo test --release -p bricks --test save_responsive -- --ignored --nocapture`
 //!
 //! Frame rates are printed, not asserted: Broadway paints at a few frames a second.
 
@@ -45,11 +45,11 @@ fn ui_stays_responsive_during_a_1gb_save() {
     let copy = std::env::temp_dir().join(format!("save-responsive-{}.csv", std::process::id()));
     std::fs::copy(&corpus, &copy).expect("copy corpus/rows_1024mb.csv (run gen_corpus.py)");
 
-    let out = Command::new(env!("CARGO_BIN_EXE_spreadsheet"))
+    let out = Command::new(env!("CARGO_BIN_EXE_bricks"))
         .arg(&copy)
         .args(["--bench-save", "1000"])
         .output()
-        .expect("run spreadsheet");
+        .expect("run bricks");
     let stdout = String::from_utf8_lossy(&out.stdout);
     let line = stdout
         .lines()

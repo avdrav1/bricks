@@ -1,5 +1,5 @@
 [package]
-name = "spreadsheet"
+name = "bricks"
 description = "A fast, lightweight spreadsheet for Linux"
 version.workspace = true
 edition.workspace = true
@@ -7,7 +7,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [[bin]]
-name = "spreadsheet"
+name = "bricks"
 path = "src/main.rs"
 bench = false
 

@@ -1,9 +1,10 @@
 [Desktop Entry]
 Type=Application
-Name=Spreadsheet
+Name=Bricks
+GenericName=Spreadsheet
 Comment=Open and edit large CSV files fast
-Exec=spreadsheet %f
-Icon=spreadsheet
+Exec=bricks %f
+Icon=dev.bricks.Bricks
 Terminal=false
 Categories=Office;Spreadsheet;
 MimeType=text/csv;text/tab-separated-values;

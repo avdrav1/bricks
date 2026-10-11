@@ -5,7 +5,7 @@
 //! key, and the last search must land on the first Portland, "1 of 2,725,768".
 //!
 //! Opens a real window, so it needs a graphical session (Broadway works) and the corpus:
-//! `cargo test --release -p spreadsheet --test find_typing -- --ignored --nocapture`
+//! `cargo test --release -p bricks --test find_typing -- --ignored --nocapture`
 
 use std::path::Path;
 use std::process::Command;
@@ -49,11 +49,11 @@ fn a_new_keystroke_cancels_the_running_search() {
         "missing {}; run python3 scripts/gen_corpus.py",
         path.display()
     );
-    let out = Command::new(env!("CARGO_BIN_EXE_spreadsheet"))
+    let out = Command::new(env!("CARGO_BIN_EXE_bricks"))
         .arg(&path)
         .args(["--bench-find", "portland"])
         .output()
-        .expect("run spreadsheet");
+        .expect("run bricks");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         out.status.success(),

@@ -2,7 +2,7 @@
 # APP-6 acceptance: the app follows the desktop's dark/light preference, live, and its
 # text is not blurry at 1.5x and 2x.
 #
-#   scripts/check_look.sh [BINARY]   (default target/release/spreadsheet)
+#   scripts/check_look.sh [BINARY]   (default target/release/bricks)
 #
 # In Arch (newest GTK: the app sets gtk-interface-color-scheme) and Ubuntu 24.04 (GTK
 # 4.14: the app sets the older dark-variant switch) containers:
@@ -18,8 +18,8 @@
 # ONLY=Arch or ONLY=Ubuntu runs one.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-bin=$(realpath "${1:-target/release/spreadsheet}")
-[ -x "$bin" ] || { echo "no binary at $bin (cargo build --release -p spreadsheet)"; exit 1; }
+bin=$(realpath "${1:-target/release/bricks}")
+[ -x "$bin" ] || { echo "no binary at $bin (cargo build --release -p bricks)"; exit 1; }
 
 # What runs inside each container, once its packages are in.
 scenario='
@@ -41,7 +41,7 @@ session() {
   sock=$(ls /tmp/rt/wayland-[0-9] 2>/dev/null | head -1) || true
   [ -n "$sock" ] || { echo "app: sway did not start: $(tail -3 /tmp/sway.log)"; }
   export WAYLAND_DISPLAY=$(basename "$sock") SWAYSOCK=$(ls /tmp/rt/sway-ipc.*.sock)
-  GSK_DEBUG=renderer GDK_BACKEND=wayland spreadsheet /tmp/t.csv >/tmp/app.log 2>&1 & app=$!; sleep 3
+  GSK_DEBUG=renderer GDK_BACKEND=wayland bricks /tmp/t.csv >/tmp/app.log 2>&1 & app=$!; sleep 3
   grim /shots/dark.png
   echo 2 > /tmp/scheme; kill -USR1 $portal; sleep 1.5; grim /shots/light.png
   echo 1 > /tmp/scheme; kill -USR1 $portal; sleep 1.5; grim /shots/dark-again.png
@@ -55,7 +55,7 @@ session() {
   unset WAYLAND_DISPLAY
   for s in 1 2; do
     Xvfb :9 -screen 0 $((1280 * s))x$((800 * s))x24 >/dev/null 2>&1 & x=$!; sleep 1
-    DISPLAY=:9 GDK_BACKEND=x11 GDK_SCALE=$s spreadsheet /tmp/t.csv >/dev/null 2>&1 & app=$!; sleep 3
+    DISPLAY=:9 GDK_BACKEND=x11 GDK_SCALE=$s bricks /tmp/t.csv >/dev/null 2>&1 & app=$!; sleep 3
     python3 $h grab :9 /shots/x11-$s.png; kill $app $x; sleep 0.5
   done
   python3 $h theme /shots/dark.png /shots/light.png /shots/dark-again.png
@@ -73,7 +73,7 @@ check() { # NAME IMAGE INSTALL [RENDERER]
   if [ -n "${SHOTS:-}" ]; then mkdir -p "$SHOTS/$name"; shots=(-v "$(realpath "$SHOTS/$name"):/shots"); fi
   # Arch's sway binary carries cap_sys_nice: exec fails without it in the container's set.
   # GSK_RENDERER picks GTK's renderer (cairo, ngl, vulkan); set, it overrides the default.
-  out=$(docker run --rm --cap-add SYS_NICE -e GSK_RENDERER="$renderer" -v "$bin:/usr/local/bin/spreadsheet:ro" \
+  out=$(docker run --rm --cap-add SYS_NICE -e GSK_RENDERER="$renderer" -v "$bin:/usr/local/bin/bricks:ro" \
     -v "$PWD/scripts:/scripts:ro" "${shots[@]}" "$image" \
     bash -c "$install >/dev/null 2>&1; $scenario" 2>&1) || true
   [ -n "${VERBOSE:-}" ] && grep -E "^/shots|^app:" <<<"$out" | sed "s/^/  $name /"

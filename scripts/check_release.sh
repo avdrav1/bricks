@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # PKG-3 acceptance: the release binary starts on clean Arch, Ubuntu 24.04, and Fedora.
 #
-#   scripts/check_release.sh dist/spreadsheet-X.Y.Z-x86_64-linux/spreadsheet
+#   scripts/check_release.sh dist/bricks-X.Y.Z-x86_64-linux/bricks
 #
 # For each distro: a fresh container gets only what a user would install (GTK 4's runtime,
 # from the distro's own packages), then the binary opens a small CSV under GTK's Broadway
@@ -30,11 +30,11 @@ checks=(
 fail=0
 for c in "${checks[@]}"; do
   IFS='|' read -r name image install <<<"$c"
-  out=$(docker run --rm -v "$bin:/usr/local/bin/spreadsheet:ro" -v "$csv:/tmp/t.csv:ro" "$image" sh -c "
+  out=$(docker run --rm -v "$bin:/usr/local/bin/bricks:ro" -v "$csv:/tmp/t.csv:ro" "$image" sh -c "
     $install || exit 3
     gtk4-broadwayd :5 >/dev/null 2>&1 & sleep 1
     GDK_BACKEND=broadway BROADWAY_DISPLAY=:5 GDK_DEBUG=no-portals timeout 60 \
-      spreadsheet /tmp/t.csv --bench-open 2>&1
+      bricks /tmp/t.csv --bench-open 2>&1
   " 2>&1) && status=0 || status=$?
   if [ $status = 0 ] && grep -q '^OPENED ' <<<"$out"; then
     echo "ok   $name: $(grep '^FIRST_FRAME ' <<<"$out" | cut -c1-80)"

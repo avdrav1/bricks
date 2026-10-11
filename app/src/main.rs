@@ -1,6 +1,6 @@
 //! Application shell: windows, menus, dialogs, OS integration. Toolkit: GTK4 (ADR 0001).
 //!
-//! Usage: `spreadsheet [FILE.csv] [--version] [--bench-scroll FRAMES | --bench-jump ROW [--jumps N] | --bench-save EDITS | --bench-find TEXT]`
+//! Usage: `bricks [FILE.csv] [--version] [--bench-scroll FRAMES | --bench-jump ROW [--jumps N] | --bench-save EDITS | --bench-find TEXT]`
 //!
 //! Without a file it shows a start window; Ctrl+O or an Open button picks one through the
 //! desktop's file dialog (xdg-desktop-portal via `gtk::FileDialog`, APP-1), and Ctrl+N or
@@ -26,6 +26,7 @@ mod grid_view;
 mod malformed;
 mod recent;
 mod recovery;
+mod state;
 mod status;
 mod theme;
 
@@ -40,7 +41,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-const APP_ID: &str = "dev.bricks.Spreadsheet";
+const APP_ID: &str = "dev.bricks.Bricks";
 
 #[derive(Clone)]
 enum Bench {
@@ -83,7 +84,7 @@ fn parse_args() -> Result<Args, String> {
             "--jumps" => jumps = number(&a, &mut it)?.max(1) as u32,
             // For the installer and release checks (PKG-1, PKG-3).
             "--version" => {
-                println!("spreadsheet {}", env!("CARGO_PKG_VERSION"));
+                println!("bricks {}", env!("CARGO_PKG_VERSION"));
                 std::process::exit(0);
             }
             "--bench-open" => bench = Some(Bench::Open),
@@ -114,7 +115,7 @@ fn main() -> glib::ExitCode {
     let args = match parse_args() {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("spreadsheet: {e}\nusage: spreadsheet [FILE.csv] [--version] [--bench-scroll FRAMES | --bench-jump ROW [--jumps N] | --bench-save EDITS | --bench-find TEXT]");
+            eprintln!("bricks: {e}\nusage: bricks [FILE.csv] [--version] [--bench-scroll FRAMES | --bench-jump ROW [--jumps N] | --bench-save EDITS | --bench-find TEXT]");
             return glib::ExitCode::from(2);
         }
     };
@@ -125,7 +126,7 @@ fn main() -> glib::ExitCode {
             .zip(canonical(&std::env::temp_dir()))
             .is_some_and(|(f, tmp)| f.starts_with(tmp));
         if !scratch {
-            eprintln!("spreadsheet: --bench-save only saves files under the temp directory");
+            eprintln!("bricks: --bench-save only saves files under the temp directory");
             return glib::ExitCode::from(2);
         }
     }
@@ -144,7 +145,7 @@ fn main() -> glib::ExitCode {
                 Some(opened)
             }
             Err(e) => {
-                eprintln!("spreadsheet: cannot open {}: {e}", path.display());
+                eprintln!("bricks: cannot open {}: {e}", path.display());
                 if args.bench.is_some() {
                     return glib::ExitCode::FAILURE;
                 }
@@ -178,7 +179,7 @@ fn main() -> glib::ExitCode {
         let clear_recent = gtk::gio::ActionEntry::builder("clear-recent")
             .activate(|_: &gtk::Application, _, _| {
                 if let Err(e) = recent::Recent::load().clear() {
-                    eprintln!("spreadsheet: cannot clear recent files: {e}");
+                    eprintln!("bricks: cannot clear recent files: {e}");
                 }
             })
             .build();
@@ -262,7 +263,7 @@ fn start_window(app: &gtk::Application) -> gtk::ApplicationWindow {
     new.set_halign(gtk::Align::Center);
     new.set_action_name(Some("app.new"));
     let hint = gtk::Label::new(Some(
-        "Ctrl+O, Ctrl+N, drop a file here, or run: spreadsheet FILE.csv",
+        "Ctrl+O, Ctrl+N, drop a file here, or run: bricks FILE.csv",
     ));
     hint.add_css_class("dim-label");
     let page = gtk::Box::builder()
@@ -292,7 +293,7 @@ fn start_window(app: &gtk::Application) -> gtk::ApplicationWindow {
     page.append(&hint);
     let window = gtk::ApplicationWindow::builder()
         .application(app)
-        .title("Spreadsheet")
+        .title("Bricks")
         .default_width(900)
         .default_height(600)
         .child(&page)
@@ -366,7 +367,7 @@ fn recent_menu() -> gtk::MenuButton {
 /// Put `path` at the top of the recent files; a failure only costs the list.
 fn remember(path: &Path) {
     if let Err(e) = recent::Recent::load().add(path) {
-        eprintln!("spreadsheet: cannot update recent files: {e}");
+        eprintln!("bricks: cannot update recent files: {e}");
     }
 }
 
@@ -1233,7 +1234,7 @@ fn finish_save(
             SaveState::Saved(took)
         }
         Err(e) => {
-            eprintln!("spreadsheet: save failed: {e}");
+            eprintln!("bricks: save failed: {e}");
             SaveState::Failed(e)
         }
     };

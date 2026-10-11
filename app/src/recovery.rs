@@ -1,5 +1,5 @@
-//! Where crash recovery journals live (APP-7): `$XDG_STATE_HOME/spreadsheet/recovery`
-//! (default `~/.local/state/spreadsheet/recovery`). Each open window with unsaved edits
+//! Where crash recovery journals live (APP-7): `recovery` in the state folder
+//! (`~/.local/state/bricks/recovery`, see [`crate::state`]). Each open window with unsaved edits
 //! keeps one journal, `<pid>-<n>.journal`, written atomically (temporary file, fsync,
 //! rename). Each process holds `owner-<pid>.lock` locked while it runs, so a journal whose
 //! owner's lock can be taken belongs to a process that ended without closing its windows:
@@ -32,13 +32,7 @@ static NEXT: AtomicU64 = AtomicU64::new(0);
 impl Store {
     /// The user's recovery directory.
     pub fn open() -> Self {
-        let state = std::env::var_os("XDG_STATE_HOME")
-            .map(PathBuf::from)
-            .filter(|p| p.is_absolute())
-            .unwrap_or_else(|| {
-                PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/state")
-            });
-        Self::at(state.join("spreadsheet/recovery"))
+        Self::at(crate::state::dir().join("recovery"))
     }
 
     pub fn at(dir: PathBuf) -> Self {

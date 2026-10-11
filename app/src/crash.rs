@@ -120,7 +120,7 @@ pub fn journal_tick(grid: &GridView, session: &Session, j: &Rc<RefCell<Journal>>
                 }
             }
             Ok(Err(e)) => {
-                eprintln!("spreadsheet: cannot write the recovery journal: {e}");
+                eprintln!("bricks: cannot write the recovery journal: {e}");
                 s.first = Some(Instant::now()); // try again in 5 s
             }
             Err(_) => s.first = Some(Instant::now()),
@@ -211,7 +211,7 @@ pub fn pending_tick(window: &gtk::ApplicationWindow, grid: &GridView, session: &
     let dialog = gtk::AlertDialog::builder()
         .message("Restore unsaved edits?")
         .detail(format!(
-            "Spreadsheet closed unexpectedly at {} while {} had {}.",
+            "Bricks closed unexpectedly at {} while {} had {}.",
             when(h.saved_ms),
             name(&h),
             changes(h.changes)
@@ -236,7 +236,7 @@ fn changed_since(window: &gtk::ApplicationWindow, crashed: Crashed) {
     let dialog = gtk::AlertDialog::builder()
         .message(format!("{} changed after the crash", name(h)))
         .detail(format!(
-            "Spreadsheet closed unexpectedly at {} with {}, but the file on disk has \
+            "Bricks closed unexpectedly at {} with {}, but the file on disk has \
              changed since, so they can't be put back onto it.",
             when(h.saved_ms),
             changes(h.changes)
@@ -271,7 +271,7 @@ fn restore(window: &gtk::ApplicationWindow, grid: &GridView, crashed: Crashed) {
         match result {
             Ok(()) => Store::open().remove(&crashed.journal),
             Err(e) => {
-                eprintln!("spreadsheet: cannot restore unsaved edits: {e}");
+                eprintln!("bricks: cannot restore unsaved edits: {e}");
                 alert(
                     Some(window.upcast_ref()),
                     "Cannot restore unsaved edits",

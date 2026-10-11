@@ -14,7 +14,7 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/YOUR_GITHUB/spreadsheet"
+repository = "https://github.com/avdrav1/bricks"
 rust-version = "1.92"
 
 [workspace.dependencies]

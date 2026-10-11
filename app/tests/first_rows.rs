@@ -5,7 +5,7 @@
 //! `FIRST_FRAME` line, printed at the end of the first frame that painted rows, along with
 //! how far indexing had got by then. Opens a real window, so it needs a graphical session
 //! and the corpus. Timing is asserted only in optimized builds:
-//! `cargo test --release -p spreadsheet --test first_rows -- --ignored --nocapture`
+//! `cargo test --release -p bricks --test first_rows -- --ignored --nocapture`
 
 use std::io::{BufRead, BufReader};
 use std::os::fd::AsRawFd;
@@ -53,12 +53,12 @@ fn first_rows_of_1gb_visible_in_under_500ms_before_indexing_finishes() {
     for _ in 0..RUNS {
         evict(&path);
         let t = Instant::now();
-        let mut child = Command::new(env!("CARGO_BIN_EXE_spreadsheet"))
+        let mut child = Command::new(env!("CARGO_BIN_EXE_bricks"))
             .arg(&path)
             .arg("--bench-open")
             .stdout(Stdio::piped())
             .spawn()
-            .expect("run spreadsheet");
+            .expect("run bricks");
         let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
         let first = lines
             .by_ref()

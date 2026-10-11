@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
-const APP: &str = env!("CARGO_BIN_EXE_spreadsheet");
+const APP: &str = env!("CARGO_BIN_EXE_bricks");
 const RUNS: usize = 3;
 
 struct Measured {

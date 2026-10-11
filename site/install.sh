@@ -1,30 +1,37 @@
 #!/bin/sh
-# Spreadsheet installer (PKG-1). Installs or updates the latest release for this user,
-# without sudo:
+# Bricks installer (PKG-1). Installs or updates the latest release for this user, without
+# sudo:
 #
-#   curl -fsSL https://<download page>/install.sh | sh
-#   curl -fsSL https://<download page>/install.sh | sh -s -- --uninstall
+#   curl -fsSL https://bricks.cronkite.cc/install.sh | sh
+#   curl -fsSL https://bricks.cronkite.cc/install.sh | sh -s -- --uninstall
 #
 # Puts the binary in ~/.local/bin, its icon and desktop entry in ~/.local/share, and makes
 # it the default for CSV and TSV files (~/.config/mimeapps.list), so double-clicking a CSV
 # opens it. The download is checked against the release's sha256 before anything is
 # installed. GTK 4 comes from the system: if it is missing, this says how to install it.
+# Releases before 0.1.1 were called Spreadsheet (`spreadsheet`): installing or uninstalling
+# removes what this installer put in place for it (PKG-4).
 set -eu
 
 # Where latest.json is: filled in when the page is deployed (scripts/ship.sh site).
-BASE_URL="${SPREADSHEET_DOWNLOAD_URL:-@DOWNLOAD_BASE_URL@}"
-APP=spreadsheet
+BASE_URL="${BRICKS_DOWNLOAD_URL:-@DOWNLOAD_BASE_URL@}"
+APP=bricks
+ID=dev.bricks.Bricks
 
 BIN_DIR="$HOME/.local/bin"
 DATA="${XDG_DATA_HOME:-$HOME/.local/share}"
 CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}"
-DESKTOP="$DATA/applications/$APP.desktop"
-ICON="$DATA/icons/hicolor/scalable/apps/$APP.svg"
+DESKTOP="$DATA/applications/$ID.desktop"
+ICON="$DATA/icons/hicolor/scalable/apps/$ID.svg"
 MIMEAPPS="$CONFIG/mimeapps.list"
 TYPES="text/csv text/tab-separated-values"
+# What the installer of releases before the rename put in place.
+OLD=spreadsheet
+OLD_DESKTOP="$DATA/applications/$OLD.desktop"
+OLD_ICON="$DATA/icons/hicolor/scalable/apps/$OLD.svg"
 
 say() { printf '%s\n' "$*"; }
-die() { printf 'spreadsheet install: %s\n' "$*" >&2; exit 1; }
+die() { printf 'bricks install: %s\n' "$*" >&2; exit 1; }
 
 fetch() { # URL FILE
   if command -v curl >/dev/null 2>&1; then curl -fsSL "$1" -o "$2"
@@ -41,12 +48,13 @@ sha256() {
 field() { sed -n "s/.*\"$1\" *: *\"\([^\"]*\)\".*/\1/p" "$2"; }
 
 # Make APP.desktop the default for each of $TYPES in mimeapps.list, or with no app, drop
-# the defaults that point at us (another app's stay). Every other line stays as it is.
+# the defaults that point at us, or at the app before the rename (another app's stay).
+# Every other line stays as it is.
 set_defaults() { # APP.desktop or empty
   mkdir -p "$CONFIG"
   [ -f "$MIMEAPPS" ] || : > "$MIMEAPPS"
   out="$MIMEAPPS.new.$$"
-  awk -v app="$1" -v ours="$APP.desktop" -v types="$TYPES" '
+  awk -v app="$1" -v ours="$ID.desktop" -v old="$OLD.desktop" -v types="$TYPES" '
     BEGIN { n = split(types, t, " "); for (i = 1; i <= n; i++) mine[t[i]] = 1 }
     function add() { if (app != "" && !done) { for (i = 1; i <= n; i++) print t[i] "=" app; done = 1 } }
     function flush() { for (; held > 0; held--) print "" }
@@ -54,7 +62,7 @@ set_defaults() { # APP.desktop or empty
     section == "[Default Applications]" {
       if ($0 == "") { held++; next } # blank lines go after our entries
       split($0, kv, "=")
-      if ((kv[1] in mine) && (app != "" || kv[2] == ours)) next
+      if ((kv[1] in mine) && (app != "" || kv[2] == ours || kv[2] == old)) next
     }
     { flush(); print }
     END {
@@ -72,11 +80,21 @@ refresh_caches() {
     gtk-update-icon-cache -q -t "$DATA/icons/hicolor" 2>/dev/null || true
 }
 
+# The old app, if this installer put it there: its desktop entry runs ~/.local/bin/spreadsheet.
+old_installed() {
+  [ -f "$OLD_DESKTOP" ] && grep -q "^Exec=$BIN_DIR/$OLD " "$OLD_DESKTOP"
+}
+
+remove_old() {
+  if old_installed; then rm -f "$BIN_DIR/$OLD" "$OLD_DESKTOP" "$OLD_ICON"; fi
+}
+
 uninstall() {
   rm -f "$BIN_DIR/$APP" "$DESKTOP" "$ICON"
+  remove_old
   [ -f "$MIMEAPPS" ] && set_defaults ""
   refresh_caches
-  say "Removed Spreadsheet. Your files and its recent-files list (~/.local/state/spreadsheet) are untouched."
+  say "Removed Bricks. Your files and its state (~/.local/state/bricks) are untouched."
 }
 
 # How to get GTK 4 on this system.
@@ -97,14 +115,14 @@ gtk_hint() {
 
 install_app() {
   [ "$(uname -m)" = x86_64 ] || die "releases are x86_64 only; this is $(uname -m)"
-  case "$BASE_URL" in @*) die "no download URL set (SPREADSHEET_DOWNLOAD_URL)" ;; esac
+  case "$BASE_URL" in @*) die "no download URL set (BRICKS_DOWNLOAD_URL)" ;; esac
   tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
   fetch "$BASE_URL/latest.json" "$tmp/latest.json" || die "cannot reach $BASE_URL/latest.json"
   version=$(field version "$tmp/latest.json")
   url=$(field url "$tmp/latest.json")
   want=$(field sha256 "$tmp/latest.json")
   [ -n "$version" ] && [ -n "$url" ] && [ -n "$want" ] || die "latest.json is not a release"
-  say "Downloading Spreadsheet $version"
+  say "Downloading Bricks $version"
   fetch "$url" "$tmp/release.tar.gz" || die "cannot download $url"
   got=$(sha256 "$tmp/release.tar.gz")
   [ "$got" = "$want" ] || die "checksum mismatch (expected $want, got $got); nothing installed"
@@ -115,25 +133,28 @@ install_app() {
   dir=$(dirname "$src")
 
   before=""
-  [ -x "$BIN_DIR/$APP" ] && before=$("$BIN_DIR/$APP" --version 2>/dev/null | cut -d' ' -f2 || true)
+  if [ -x "$BIN_DIR/$APP" ]; then before=$("$BIN_DIR/$APP" --version 2>/dev/null | cut -d' ' -f2 || true)
+  elif old_installed && [ -x "$BIN_DIR/$OLD" ]; then before=$("$BIN_DIR/$OLD" --version 2>/dev/null | cut -d' ' -f2 || true)
+  fi
   mkdir -p "$BIN_DIR" "$(dirname "$DESKTOP")" "$(dirname "$ICON")"
   # Replace, never write into, a binary that may be running.
   cp "$src" "$BIN_DIR/.$APP.new" && chmod 755 "$BIN_DIR/.$APP.new" && mv -f "$BIN_DIR/.$APP.new" "$BIN_DIR/$APP"
-  cp "$dir/$APP.svg" "$ICON"
+  cp "$dir/$ID.svg" "$ICON"
   # The full path, so it starts from a launcher even when ~/.local/bin isn't on its PATH.
-  sed "s|^Exec=$APP |Exec=$BIN_DIR/$APP |" "$dir/$APP.desktop" > "$DESKTOP"
-  set_defaults "$APP.desktop"
+  sed "s|^Exec=$APP |Exec=$BIN_DIR/$APP |" "$dir/$ID.desktop" > "$DESKTOP"
+  remove_old
+  set_defaults "$ID.desktop"
   refresh_caches
 
-  if [ -n "$before" ] && [ "$before" != "$version" ]; then say "Updated Spreadsheet $before -> $version"
-  else say "Installed Spreadsheet $version"; fi
+  if [ -n "$before" ] && [ "$before" != "$version" ]; then say "Updated Bricks $before -> $version"
+  else say "Installed Bricks $version"; fi
   say "  $BIN_DIR/$APP; CSV and TSV files open with it"
   case ":$PATH:" in *":$BIN_DIR:"*) ;; *) say "  $BIN_DIR is not on your PATH: start it from your app menu, or add it to PATH" ;; esac
 
   if ! err=$("$BIN_DIR/$APP" --version 2>&1 >/dev/null); then
     say ""
-    say "Spreadsheet needs GTK 4, which is missing or too old here ($err)."
-    say "Install it, then start Spreadsheet:"
+    say "Bricks needs GTK 4, which is missing or too old here ($err)."
+    say "Install it, then start Bricks:"
     gtk_hint
     exit 2
   fi

@@ -76,12 +76,26 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | APP-8 | M4 | P1 | done | ENG-3 | Clear errors for malformed files | Dialog shows line number and offending text |
 | PKG-3 | M4 | P0 | done | - | Portable release build: link against Ubuntu 24.04's glibc (build in a container) | The release binary starts on clean Arch, Ubuntu 24.04, and Fedora |
 | PKG-1 | M4 | P0 | done | APP-1, PKG-3 | curl installer (per user, no sudo): `install.sh` on the download site; .desktop file, icon, text/csv association; `--uninstall` | Piping `install.sh` from the site into `sh` installs on clean Arch, Ubuntu 24.04, Fedora; checksum verified; double-click opens CSVs; prints the distro's GTK 4 install command if missing |
+| PKG-4 | M4 | P0 | done | PKG-1 | Rename the app to Bricks: `bricks` command, window titles, app menu, state folder | `bricks` starts the app; installing over v0.1.0 leaves one app, named Bricks, with its recent files kept |
 | PKG-2 | M4 | P2 | todo | PKG-1 | Flatpak manifest | Builds on Flathub CI |
 
 ## Notes
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-10 PKG-4:** the app is Bricks now: command `bricks`, the window title, the app menu entry, dialogs ("Bricks closed unexpectedly…"), `--version`, and log lines (`bricks: …`).
+  - Decided with the user: a full rename (not just the command), shipped as v0.1.1.
+  - App ID `dev.bricks.Spreadsheet` → `dev.bricks.Bricks`. The desktop entry and icon take the app ID's name (`dev.bricks.Bricks.desktop` and `.svg`), so Wayland docks match the window to its entry. The old `spreadsheet.desktop` never matched `dev.bricks.Spreadsheet`. `GenericName=Spreadsheet` keeps it findable in app menus.
+  - Cargo package and binary: `bricks` (`cargo run -p bricks`). Tarball: `bricks-X.Y.Z-x86_64-linux.tar.gz`. Installer override: `BRICKS_DOWNLOAD_URL`.
+  - State folder: `~/.local/state/bricks`. `app/src/state.rs` resolves it once for recent files and recovery journals; on first use it moves `~/.local/state/spreadsheet` over if only the old one exists, so recent files and unrestored crash edits survive the upgrade. If both exist, the bricks one wins and the old one is left alone.
+  - Installer: installing or uninstalling removes v0.1.0's binary, desktop entry, icon, and `text/csv=spreadsheet.desktop` defaults. It only does so when `spreadsheet.desktop` is the one it wrote (`Exec=~/.local/bin/spreadsheet`), so another program called `spreadsheet` is left alone. An upgrade reports "Updated Bricks 0.1.0 -> X".
+  - Not renamed: the R2 bucket `spreadsheet-releases` and the Pages project `spreadsheet` (`wrangler.toml`). These are Cloudflare names, and renaming the project would change its pages.dev address under the bricks.cronkite.cc domain. The word "spreadsheet" stays where it means the kind of program.
+  - Acceptance: `scripts/check_install.sh` gains an upgrade scenario, run in GTK containers on Arch, Ubuntu 24.04, and Fedora (INSTALL OK on all three):
+    - The real v0.1.0 is installed with its own installer (from the `v0.1.0` tag) and opens a CSV.
+    - The new installer then reports "Updated Bricks 0.1.0 -> 9.9.9". The old binary, entry, icon, and CSV defaults are gone. `text/csv` opens `dev.bricks.Bricks.desktop`.
+    - `gio open` starts Bricks. Its recent list holds the new file and v0.1.0's, and `~/.local/state` holds only `bricks`.
+    - Negative control: the old installer fails 13 of the 15 checks. The 2 it passes are the v0.1.0 setup.
+  - `app/src/state.rs` unit tests: the old folder moves over with its contents; an existing bricks folder wins and the old one is left alone.
 - **2026-10-10 APP-8:** clear errors for malformed files. A dialog names the line and shows its text.
   - Decided with the user: report a quote that never closes, text after a closing quote (`"ab"c`), and binary data. A file with quote problems opens as read, then warns; a binary file is refused.
   - `data-model/src/check.rs`: `CsvTable::check_file` runs once a reading is indexed, on the job pool, with cancel. It parses rows by the same RFC 4180 rules as the index.

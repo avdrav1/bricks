@@ -3,7 +3,7 @@
 //! Opens a real window, so it needs a graphical session (Wayland or X11) and the corpus
 //! (`python3 scripts/gen_corpus.py`). Keep the window visible while it runs: a hidden
 //! window gets no frames. Frame timing is asserted only in optimized builds:
-//! `cargo test --release -p spreadsheet --test scroll_perf -- --ignored --nocapture`
+//! `cargo test --release -p bricks --test scroll_perf -- --ignored --nocapture`
 
 use std::path::Path;
 use std::process::Command;
@@ -40,11 +40,11 @@ fn bench(file: &str) -> Run {
         "missing {}; run python3 scripts/gen_corpus.py",
         path.display()
     );
-    let out = Command::new(env!("CARGO_BIN_EXE_spreadsheet"))
+    let out = Command::new(env!("CARGO_BIN_EXE_bricks"))
         .arg(&path)
         .args(["--bench-scroll", FRAMES])
         .output()
-        .expect("run spreadsheet");
+        .expect("run bricks");
     let line = String::from_utf8_lossy(&out.stdout).trim().to_owned();
     assert!(
         out.status.success() && line.starts_with('{'),

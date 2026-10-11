@@ -15,7 +15,7 @@ import gi
 gi.require_version("Atspi", "2.0")
 from gi.repository import Atspi  # noqa: E402
 
-APP = "spreadsheet"
+APP = "bricks"
 
 
 def app():

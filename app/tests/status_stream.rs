@@ -3,7 +3,7 @@
 //! `--bench-status` prints the status bar's row text on every status update (the first one
 //! as the window is built, then every 100 ms) and quits once indexing is complete. Opens a
 //! real window, so it needs a graphical session and the corpus:
-//! `cargo test --release -p spreadsheet --test status_stream -- --ignored --nocapture`
+//! `cargo test --release -p bricks --test status_stream -- --ignored --nocapture`
 
 use std::path::Path;
 use std::process::Command;
@@ -23,11 +23,11 @@ fn row_count_updates_while_indexing_streams() {
         "missing {}; run python3 scripts/gen_corpus.py",
         path.display()
     );
-    let out = Command::new(env!("CARGO_BIN_EXE_spreadsheet"))
+    let out = Command::new(env!("CARGO_BIN_EXE_bricks"))
         .arg(&path)
         .arg("--bench-status")
         .output()
-        .expect("run spreadsheet");
+        .expect("run bricks");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         out.status.success(),

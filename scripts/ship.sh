@@ -13,14 +13,15 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 [ -f .env.ship ] && set -a && . ./.env.ship && set +a
-APP=spreadsheet
+APP=bricks
+ID=dev.bricks.Bricks  # desktop entry and icon names, as the app ID (APP_ID in app/src/main.rs)
 TARGET=x86_64-unknown-linux-gnu
 version() { sed -n '/^\[workspace.package\]/,/^\[/{s/^version = "\(.*\)"/\1/p}' Cargo.toml; }
 V=$(version)
 NAME="$APP-$V-x86_64-linux"
 TAR="dist/$NAME.tar.gz"
 DRY=false; [ "${2:-}" = "--dry-run" ] && DRY=true
-BUILD_IMAGE=spreadsheet-build:ubuntu-24.04
+BUILD_IMAGE=bricks-build:ubuntu-24.04
 need() { for v in "$@"; do [ -n "${!v:-}" ] || { echo "missing env: $v (see .env.ship.example)"; exit 1; }; done; }
 run() { if $DRY; then echo "[dry-run] $*"; else "$@"; fi; }
 wr() { npx --yes wrangler@4 "$@"; }
@@ -63,7 +64,7 @@ build)
   rm -rf "dist/$NAME"; mkdir -p "dist/$NAME"
   cp "target/container/$TARGET/release/$APP" "dist/$NAME/"
   strip "dist/$NAME/$APP" || true
-  cp packaging/$APP.desktop packaging/$APP.svg README.md "dist/$NAME/"
+  cp packaging/$ID.desktop packaging/$ID.svg README.md "dist/$NAME/"
   cp LICENSE* "dist/$NAME/" 2>/dev/null || true
   tar -C dist -czf "$TAR" "$NAME"
   (cd dist && sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256")

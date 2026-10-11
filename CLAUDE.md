@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-A fast, lightweight Linux spreadsheet in Rust. V0.1 is the best large-CSV editor on Linux; Excel compatibility comes later. Product spec: `docs/SPEC.md`. Work queue: `BACKLOG.md`.
+Bricks: a fast, lightweight Linux spreadsheet in Rust (command `bricks`). V0.1 is the best large-CSV editor on Linux; Excel compatibility comes later. Product spec: `docs/SPEC.md`. Work queue: `BACKLOG.md`.
 
 ## How we work
 

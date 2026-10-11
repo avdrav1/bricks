@@ -1,4 +1,4 @@
-# Spreadsheet
+# Bricks
 
 A fast, lightweight spreadsheet for Linux, written in Rust. V0.1 goal: open, browse, edit, sort, filter, search, and save ~1 GB CSV files faster than LibreOffice Calc.
 
@@ -11,7 +11,7 @@ curl -fsSL https://bricks.cronkite.cc/install.sh | sh                    # insta
 curl -fsSL https://bricks.cronkite.cc/install.sh | sh -s -- --uninstall  # remove
 ```
 
-It puts `spreadsheet` in `~/.local/bin`, adds it to the app menu, and makes it the default for CSV and TSV files. The download is checked against the release's sha256 first.
+It puts `bricks` in `~/.local/bin`, adds Bricks to the app menu, and makes it the default for CSV and TSV files. The download is checked against the release's sha256 first. Releases before 0.1.1 were called Spreadsheet (`spreadsheet`); installing replaces that one, keeping its recent files.
 
 ## Start here
 
@@ -24,8 +24,8 @@ It puts `spreadsheet` in `~/.local/bin`, adds it to the app menu, and makes it t
 ## Run it
 
 ```sh
-cargo run --release -p spreadsheet -- path/to/file.csv
-cargo run --release -p spreadsheet                      # start window with an Open button
+cargo run --release -p bricks -- path/to/file.csv
+cargo run --release -p bricks                      # start window with an Open button
 ```
 
 Ctrl+O (or the folder button in the header bar) opens the desktop's file dialog through xdg-desktop-portal. Each file opens in its own window; opening a file that is already open brings its window forward. Ctrl+N (or New) starts an untitled table. Ctrl+Shift+S (or the Save As button) saves to another file and can change the delimiter (comma, tab, semicolon, pipe) and the encoding (UTF-8 with or without a BOM, UTF-16 LE/BE, Windows-1252); a character the encoding can't hold stops the save with a message, and the window then shows the new file. Ctrl+S on an untitled table asks where to save it.
