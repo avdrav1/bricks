@@ -19,6 +19,8 @@ members = [
     "apps/bricks/crates/file-format",
     "apps/bricks/crates/jobs",
     "apps/bricks/crates/xlsx",
+    # Slate-only crates
+    "apps/slate/crates/document-model",
 ]
 
 # `version` is Bricks' release version (scripts/ship.sh bumps it); Bricks and its crates
@@ -45,6 +47,8 @@ commands = { path = "apps/bricks/crates/commands" }
 file-format = { path = "apps/bricks/crates/file-format" }
 jobs = { path = "apps/bricks/crates/jobs" }
 xlsx = { path = "apps/bricks/crates/xlsx" }
+# Slate crates
+document-model = { path = "apps/slate/crates/document-model" }
 # The suite's UI toolkit (docs/adr/0002-gtk4-for-the-suite.md); v4_14 matches Ubuntu 24.04's GTK.
 gtk = { package = "gtk4", version = "0.11", features = ["v4_14"] }
 # Every app logs through these.

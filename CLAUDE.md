@@ -57,6 +57,12 @@ Bricks' crates, in `apps/bricks/crates/`:
 | `jobs` | background jobs: shared pool, cancel tokens, results to the UI loop (ADR 0005) |
 | `bricks` (`apps/bricks`) | windows, menus, dialogs, OS integration (toolkit set by DEC-1) |
 
+Slate's crates, in `apps/slate/crates/`:
+
+| Crate | Owns |
+| --- | --- |
+| `document-model` | Slate's document model (ADR 0003): blocks, runs, plain-text reader with encoding and line-ending detection |
+
 ## Commands
 
 ```sh
