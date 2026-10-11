@@ -260,3 +260,392 @@ ops	A1%	A1=50	value	0.5
 ops	"50"%		value	0.5		
 ops	"a"%		error	#VALUE!		
 ops	TRUE()%		value	0.01		
+FML-5	SUM(A1:A3)	A1=1;A2=2;A3=3	value	6.0		
+FML-5	SUM(A1:B2,5)	A1=1;A2=x;B1=TRUE;B2=4	value	11.0	value:10.0	Excel skips booleans in references; LibreOffice stores them as 1
+FML-5	SUM("3",TRUE)		error	#VALUE!	value:4.0	Excel reads number text typed as an argument; LibreOffice gives #VALUE!
+FML-5	SUM(A1:A3)	A1=1;A2=#N/A;A3=3	error	#N/A		
+FML-5	SUM("abc")		error	#VALUE!		
+FML-5	SUM(A1:A3)	A1=1E300;A2=1E300;A3=-1E300	value	1e+300		
+FML-5	SUMPRODUCT(A1:A3,B1:B3)	A1=1;A2=2;A3=3;B1=4;B2=5;B3=6	value	32.0		
+FML-5	SUMPRODUCT(A1:A3)	A1=1;A2=2;A3=3	value	6.0		
+FML-5	SUMPRODUCT(A1:A3,B1:B3)	A1=1;A2=x;A3=3;B1=4;B2=5;B3=y	value	4.0		
+FML-5	SUMPRODUCT(A1:A3,B1:B2)	A1=1;A2=2;A3=3;B1=4;B2=5	error	#VALUE!		
+FML-5	SUMPRODUCT({1,2;3,4},{5,6;7,8})		value	70.0		
+FML-5	SUMPRODUCT(A1:A2,B1:B2)	A1=1;A2=#DIV/0!;B1=4;B2=5	error	#DIV/0!		
+FML-5	SUMPRODUCT((A1:A3>1)*B1:B3)	A1=1;A2=2;A3=3;B1=4;B2=5;B3=6	value	11.0		
+FML-5	SUMPRODUCT(A1:A3*{1;2;3})	A1=1;A2=2;A3=3	value	14.0		
+FML-5	SUMPRODUCT(A1:B2,{1,2;3,4})	A1=1;A2=2;B1=3;B2=4	value	29.0		
+FML-5	SUMPRODUCT(A1:A2,{1,2})	A1=1;A2=2	error	#VALUE!		
+FML-5	SUMPRODUCT(5,2)		value	10.0		
+FML-5	SUMIF(A1:A4,">2")	A1=1;A2=2;A3=3;A4=4	value	7.0		
+FML-5	SUMIF(A1:A4,"b*",B1:B4)	A1=apple;A2=banana;A3=Berry;A4=cherry;B1=1;B2=2;B3=3;B4=4	value	5.0		
+FML-5	SUMIF(A1:A4,"<>banana",B1:B4)	A1=apple;A2=banana;A3=Berry;A4=cherry;B1=1;B2=2;B3=3;B4=4	value	8.0		
+FML-5	SUMIF(A1:A4,5,B1:B4)	A1=5;A2=5.0;A3=x;A4=6;B1=1;B2=2;B3=3;B4=4	value	3.0		
+FML-5	SUMIF(A1:A4,"5",B1:B4)	A1=5;A2=6;A3=x;A4=5;B1=1;B2=2;B3=3;B4=4	value	5.0		
+FML-5	SUMIF(A1:A4,"",B1:B4)	A1=5;A3=x;B1=1;B2=2;B3=3;B4=4	value	6.0		
+FML-5	SUMIF(A1:A4,"<>",B1:B4)	A1=5;A3=x;B1=1;B2=2;B3=3;B4=4	value	4.0		
+FML-5	SUMIF(A1:A4,">=2",B1:B1)	A1=1;A2=2;A3=3;A4=4;B1=10;B2=20;B3=30;B4=40	value	90.0		
+FML-5	SUMIF(A1:A3,"a",B1:B3)	A1=a;A2=A;A3=b;B1=1;B2=#N/A;B3=3	error	#N/A		
+FML-5	SUMIF(A1:A3,"b",B1:B3)	A1=a;A2=A;A3=b;B1=1;B2=#N/A;B3=3	value	3.0		
+FML-5	SUMIF(A1:A3,">2024-01-15",B1:B3)	A1=2024-01-01;A2=2024-02-01;A3=2024-03-01;B1=1;B2=2;B3=3	value	5.0		
+FML-5	SUMIF(A1:A3,"?a*",B1:B3)	A1=bat;A2=cart;A3=at;B1=1;B2=2;B3=3	value	3.0		
+FML-5	SUMIF(A1:A3,"~*",B1:B3)	A1=*;A2=x;A3=**;B1=1;B2=2;B3=3	value	1.0		
+FML-5	SUMIF(A1:A3,TRUE,B1:B3)	A1=TRUE;A2=1;A3=FALSE;B1=1;B2=2;B3=3	value	3.0	value:1.0	Excel matches TRUE only with booleans; LibreOffice stores them as 1
+FML-5	SUMIF(A1:A3,"<b",B1:B3)	A1=a;A2=c;A3=1;B1=1;B2=2;B3=3	value	1.0		
+FML-5	SUMIF(A1:A3,1/0,B1:B3)	A1=a;A2=c;A3=1;B1=1;B2=2;B3=3	error	#DIV/0!		
+FML-5	SUMIF(A1:A3,">1")	A1=1;A2="2";A3=3	value	3.0		
+FML-5	SUMIFS(C1:C4,A1:A4,"x",B1:B4,">1")	A1=x;A2=x;A3=y;A4=x;B1=1;B2=2;B3=3;B4=4;C1=10;C2=20;C3=30;C4=40	value	60.0		
+FML-5	SUMIFS(C1:C4,A1:A4,"x")	A1=x;A2=x;A3=y;A4=x;C1=10;C2=20;C3=30;C4=40	value	70.0		
+FML-5	SUMIFS(C1:C4,A1:A4,"x",B1:B3,">1")	A1=x;A2=x;A3=y;A4=x;B1=1;B2=2;B3=3;B4=4;C1=10;C2=20;C3=30;C4=40	error	Err:502	error:#VALUE!	LibreOffice's Err:502 has no Excel error value; Excel gives #VALUE! for ranges of different shapes
+FML-5	SUMIFS(C1:C4,A1:A4,"z")	A1=x;A2=x;A3=y;A4=x;C1=10;C2=20;C3=30;C4=40	value	0.0		
+FML-5	SUMIFS(C1:C4,A1:A4,"<>x",B1:B4,"")	A1=x;A2=x;A3=y;B1=1;B3=3;C1=10;C2=20;C3=30;C4=40	value	40.0		
+FML-5	PRODUCT(A1:A3)	A1=2;A2=3;A3=4	value	24.0		
+FML-5	PRODUCT(A1:A3,2)	A1=2;A2=x;A3=4	value	16.0		
+FML-5	PRODUCT(A1:A2)		value	0.0		
+FML-5	PRODUCT(A1,"x")	A1=2	error	#VALUE!		
+FML-5	ABS(-3.5)		value	3.5		
+FML-5	ABS(A1)	A1=-2	value	2.0		
+FML-5	ABS("x")		error	#VALUE!		
+FML-5	ABS(TRUE)		value	1.0		
+FML-5	ROUND(2.5,0)		value	3.0		
+FML-5	ROUND(-2.5,0)		value	-3.0		
+FML-5	ROUND(2.675,2)		value	2.68		
+FML-5	ROUND(1234.5678,-2)		value	1200.0		
+FML-5	ROUND(1.005,2)		value	1.01		
+FML-5	ROUND(-1.005,2)		value	-1.01		
+FML-5	ROUND("x",1)		error	#VALUE!		
+FML-5	ROUND(3.14159)		value	3.0		
+FML-5	ROUND(1.25,1.9)		value	1.3		
+FML-5	ROUNDUP(3.2,0)		value	4.0		
+FML-5	ROUNDUP(-3.2,0)		value	-4.0		
+FML-5	ROUNDUP(3.14159,3)		value	3.142		
+FML-5	ROUNDUP(1234,-2)		value	1300.0		
+FML-5	ROUNDUP(0.1+0.2,1)		value	0.3		
+FML-5	ROUNDUP(2.0000000001,0)		value	3.0		
+FML-5	ROUNDUP("x",0)		error	#VALUE!		
+FML-5	ROUNDDOWN(3.9,0)		value	3.0		
+FML-5	ROUNDDOWN(-3.9,0)		value	-3.0		
+FML-5	ROUNDDOWN(3.14159,3)		value	3.141		
+FML-5	ROUNDDOWN(1299,-2)		value	1200.0		
+FML-5	ROUNDDOWN(#N/A,1)		error	#N/A		
+FML-5	INT(3.7)		value	3.0		
+FML-5	INT(-3.2)		value	-4.0		
+FML-5	INT("x")		error	#VALUE!		
+FML-5	INT(A1)	A1=2024-01-01 12:00	value	45292.0		
+FML-5	INT(2.9999999999999996)		value	3.0		
+FML-5	TRUNC(-3.7)		value	-3.0		
+FML-5	TRUNC(3.14159,2)		value	3.14		
+FML-5	TRUNC(1299,-2)		value	1200.0		
+FML-5	TRUNC(2.9999999999999996)		value	3.0		
+FML-5	TRUNC("x")		error	#VALUE!		
+FML-5	MOD(7,3)		value	1.0		
+FML-5	MOD(-7,3)		value	2.0		
+FML-5	MOD(7,-3)		value	-2.0		
+FML-5	MOD(7,0)		error	#DIV/0!		
+FML-5	MOD(5.5,2)		value	1.5		
+FML-5	MOD(-1,2.5)		value	1.5		
+FML-5	MOD("x",2)		error	#VALUE!		
+FML-5	POWER(2,10)		value	1024.0		
+FML-5	POWER(-8,1/3)		value	-2.0		
+FML-5	POWER(0,-1)		error	#NUM!		
+FML-5	POWER(-2,0.5)		error	#NUM!		
+FML-5	POWER("x",2)		error	#VALUE!		
+FML-5	SQRT(16)		value	4.0		
+FML-5	SQRT(2)		value	1.4142135623730951		
+FML-5	SQRT(-1)		error	Err:502	error:#NUM!	LibreOffice's Err:502 has no Excel error value; Excel gives #NUM!
+FML-5	SQRT("x")		error	#VALUE!		
+FML-5	EXP(1)		value	2.718281828459045		
+FML-5	EXP(0)		value	1.0		
+FML-5	EXP(1000)		error	#NUM!		
+FML-5	EXP("x")		error	#VALUE!		
+FML-5	LN(EXP(2))		value	2.0		
+FML-5	LN(10)		value	2.302585092994046		
+FML-5	LN(0)		error	Err:502	error:#NUM!	LibreOffice's Err:502 has no Excel error value; Excel gives #NUM!
+FML-5	LN(-1)		error	Err:502	error:#NUM!	LibreOffice's Err:502 has no Excel error value; Excel gives #NUM!
+FML-5	LN("x")		error	#VALUE!		
+FML-5	LOG(100)		value	2.0		
+FML-5	LOG(8,2)		value	3.0		
+FML-5	LOG(10,1)		error	Err:502	error:#DIV/0!	LibreOffice's Err:502 has no Excel error value; Excel divides by LN(1) = 0
+FML-5	LOG(0)		error	Err:502	error:#NUM!	LibreOffice's Err:502 has no Excel error value; Excel gives #NUM!
+FML-5	LOG(8,-2)		error	Err:502	error:#NUM!	LibreOffice's Err:502 has no Excel error value; Excel gives #NUM!
+FML-5	LOG("x")		error	#VALUE!		
+FML-5	LOG10(1000)		value	3.0		
+FML-5	LOG10(0.01)		value	-2.0		
+FML-5	LOG10(0)		error	Err:502	error:#NUM!	LibreOffice's Err:502 has no Excel error value; Excel gives #NUM!
+FML-5	LOG10("x")		error	#VALUE!		
+FML-5	PI()		value	3.141592653589793		
+FML-5	PI()*2		value	6.283185307179586		
+FML-5	PI()*"x"		error	#VALUE!		
+FML-5	CEILING(2.5,1)		value	3.0		
+FML-5	CEILING(-2.5,-2)		value	-2.0	value:-4.0	Excel's CEILING is LibreOffice's CEILING.XCL (-4); LibreOffice's own CEILING differs
+FML-5	CEILING(-2.5,2)		error	Err:502	value:-2.0	Excel's CEILING is LibreOffice's CEILING.XCL (-2); LibreOffice's own CEILING gives Err:502
+FML-5	CEILING(2.5,-2)		error	Err:502	error:#NUM!	LibreOffice's Err:502 has no Excel error value; Excel gives #NUM!
+FML-5	CEILING(0.234,0.01)		value	0.24		
+FML-5	CEILING(5,0)		value	0.0		
+FML-5	CEILING(4.42,0.05)		value	4.45		
+FML-5	CEILING("x",1)		error	#VALUE!		
+FML-5	CEILING(7,3)		value	9.0		
+FML-5	FLOOR(2.5,1)		value	2.0		
+FML-5	FLOOR(-2.5,-2)		value	-4.0	value:-2.0	Excel's FLOOR is LibreOffice's FLOOR.XCL (-2); LibreOffice's own FLOOR differs
+FML-5	FLOOR(-2.5,2)		error	Err:502	value:-4.0	Excel's FLOOR is LibreOffice's FLOOR.XCL (-4); LibreOffice's own FLOOR gives Err:502
+FML-5	FLOOR(2.5,-2)		error	Err:502	error:#NUM!	LibreOffice's Err:502 has no Excel error value; Excel gives #NUM!
+FML-5	FLOOR(5,0)		value	0.0	error:#DIV/0!	Excel's FLOOR is LibreOffice's FLOOR.XCL (an error); Excel gives #DIV/0!
+FML-5	FLOOR(0.234,0.01)		value	0.23		
+FML-5	FLOOR(7,3)		value	6.0		
+FML-5	FLOOR("x",1)		error	#VALUE!		
+FML-5	SIGN(-4)		value	-1.0		
+FML-5	SIGN(0)		value	0.0		
+FML-5	SIGN(3.2)		value	1.0		
+FML-5	SIGN("x")		error	#VALUE!		
+FML-5	QUOTIENT(7,2)		value	3.0		
+FML-5	QUOTIENT(-7,2)		value	-3.0		
+FML-5	QUOTIENT(5.9,1.2)		value	4.0		
+FML-5	QUOTIENT(7,0)		error	Err:502	error:#DIV/0!	LibreOffice's Err:502 has no Excel error value; Excel gives #DIV/0!
+FML-5	QUOTIENT("x",2)		error	#VALUE!		
+FML-5	GCD(12,18)		value	6.0		
+FML-5	GCD(A1:A3)	A1=24;A2=36;A3=60	value	12.0		
+FML-5	GCD(0,5)		value	5.0		
+FML-5	GCD(7.9,14)		value	7.0		
+FML-5	GCD(-4,8)		error	Err:502	error:#NUM!	LibreOffice's Err:502 has no Excel error value; Excel gives #NUM!
+FML-5	GCD("x")		error	#VALUE!		
+FML-5	LCM(4,6)		value	12.0		
+FML-5	LCM(A1:A3)	A1=2;A2=3;A3=4	value	12.0		
+FML-5	LCM(0,5)		value	0.0		
+FML-5	LCM(4.5,6)		value	12.0		
+FML-5	LCM(2,1E10)		value	10000000000.0		
+FML-5	LCM(-4,6)		error	Err:502	error:#NUM!	LibreOffice's Err:502 has no Excel error value; Excel gives #NUM!
+FML-5	FACT(5)		value	120.0		
+FML-5	FACT(0)		value	1.0		
+FML-5	FACT(5.9)		value	120.0		
+FML-5	FACT(171)		error	#VALUE!		
+FML-5	FACT(-1)		error	Err:502	error:#NUM!	LibreOffice's Err:502 has no Excel error value; Excel gives #NUM!
+FML-5	FACT("x")		error	#VALUE!		
+FML-5	MROUND(10,3)		value	9.0		
+FML-5	MROUND(-10,-3)		value	-9.0		
+FML-5	MROUND(10,-3)		value	9.0		
+FML-5	MROUND(1.3,0.2)		value	1.4000000000000001		
+FML-5	MROUND(5,0)		value	0.0		
+FML-5	MROUND(2.5,5)		value	5.0		
+FML-5	MROUND("x",2)		error	#VALUE!		
+FML-5	EVEN(1.5)		value	2.0		
+FML-5	EVEN(-1.5)		value	-2.0		
+FML-5	EVEN(2)		value	2.0		
+FML-5	EVEN(0)		value	0.0		
+FML-5	EVEN("x")		error	#VALUE!		
+FML-5	ODD(1.5)		value	3.0		
+FML-5	ODD(-1.5)		value	-3.0		
+FML-5	ODD(2)		value	3.0		
+FML-5	ODD(0)		value	1.0		
+FML-5	ODD("x")		error	#VALUE!		
+FML-5	AVERAGE(A1:A4)	A1=1;A2=2;A3=x;A4=6	value	3.0		
+FML-5	AVERAGE(A1:A3,"3",TRUE)	A1=1;A2=2	error	#VALUE!	value:1.75	Excel reads number text and booleans typed as arguments; LibreOffice gives #VALUE!
+FML-5	AVERAGE(A1:A3)	A1=x	error	#DIV/0!		
+FML-5	AVERAGE(A1:A3)	A1=1;A2=#VALUE!	error	#VALUE!		
+FML-5	AVERAGE(A1:A3,"x")	A1=1	error	#VALUE!		
+FML-5	AVERAGEA(A1:A4)	A1=1;A2=2;A3=x;A4=TRUE	value	1.0		
+FML-5	AVERAGEA(A1:A3)		error	#DIV/0!		
+FML-5	AVERAGEA(A1:A3)	A1=1;A2=#N/A	error	#N/A		
+FML-5	AVERAGEA(A1:A2,3)	A1=1;A2=x	value	1.3333333333333333		
+FML-5	AVERAGEIF(A1:A4,">1")	A1=1;A2=2;A3=3;A4=x	value	2.5		
+FML-5	AVERAGEIF(A1:A4,"x",B1:B4)	A1=x;A2=y;A3=X;A4=x;B1=1;B2=2;B3=3;B4=t	value	2.0		
+FML-5	AVERAGEIF(A1:A4,">10")	A1=1;A2=2;A3=3	error	#DIV/0!		
+FML-5	AVERAGEIF(A1:A3,"<>2",B1:B3)	A1=1;A2=2;A3=3;B1=10;B2=20;B3=40	value	25.0		
+FML-5	AVERAGEIF(A1:A3,"<>x")	A1=x;A2=y	error	#DIV/0!		
+FML-5	AVERAGEIFS(C1:C4,A1:A4,"x",B1:B4,">=2")	A1=x;A2=x;A3=y;A4=x;B1=1;B2=2;B3=3;B4=4;C1=10;C2=20;C3=30;C4=40	value	30.0		
+FML-5	AVERAGEIFS(C1:C4,A1:A4,"q")	A1=x;A2=x;A3=y;A4=x;C1=10;C2=20;C3=30;C4=40	error	#DIV/0!		
+FML-5	AVERAGEIFS(C1:C4,A1:A2,"x")	A1=x;A2=x;A3=y;A4=x;C1=10;C2=20;C3=30;C4=40	error	Err:502	error:#VALUE!	LibreOffice's Err:502 has no Excel error value; Excel gives #VALUE! for ranges of different shapes
+FML-5	AVERAGEIFS(C1:C4,A1:A4,"<>y")	A1=x;A2=x;A3=y;C1=10;C2=20;C3=30;C4=40	value	23.333333333333332		
+FML-5	COUNT(A1:A5)	A1=1;A2=x;A3=TRUE;A4=2024-01-01;A5=#N/A	value	3.0	value:2.0	Excel skips booleans in references; LibreOffice stores them as 1
+FML-5	COUNT(A1:A5)	A1=1;A2=x;A4=2024-01-01;A5=#N/A	value	2.0		
+FML-5	COUNT(1,"2","x",TRUE)		value	3.0		
+FML-5	COUNT(A1:B2,5)	A1=1	value	2.0		
+FML-5	COUNT(A1:E5)	A1=1;E5=2;C3=x	value	2.0		
+FML-5	COUNTA(A1:A5)	A1=1;A2=x;A3=TRUE;A5=#N/A	value	4.0		
+FML-5	COUNTA(1,"",TRUE)		value	3.0		
+FML-5	COUNTA(A1:A3)		value	0.0		
+FML-5	COUNTA(A1:A2,B1)	A1=x	value	1.0		
+FML-5	COUNTBLANK(A1:B3)	A1=1;A2=x;B3=0	value	3.0		
+FML-5	COUNTBLANK(A1:A3)	A1=1;A2=2;A3=3	value	0.0		
+FML-5	COUNTBLANK(A1:E5)		value	25.0		
+FML-5	COUNTBLANK(A1:A3)	A1=#N/A	value	2.0		
+FML-5	COUNTIF(A1:A5,">=2")	A1=1;A2=2;A3=3;A4=x;A5=2024-01-01	value	3.0		
+FML-5	COUNTIF(A1:A5,"x*")	A1=xa;A2=XB;A3=y;A4=x;A5=1	value	3.0		
+FML-5	COUNTIF(A1:A5,"")	A1=1;A3=x	value	3.0		
+FML-5	COUNTIF(A1:A5,"<>")	A1=1;A3=x	value	2.0		
+FML-5	COUNTIF(A1:A5,"<>x")	A1=1;A3=x;A4=X	value	3.0		
+FML-5	COUNTIF(A1:A5,1)	A1=1;A2=1.0;A4=x;A5=1	value	3.0		
+FML-5	COUNTIF(A1:A5,"=1")	A1=1;A2=01;A4=x	value	1.0		
+FML-5	COUNTIF(A1:A5,"1")	A1=1;A2=01;A3=x	value	1.0		
+FML-5	COUNTIF(A1:A5,TRUE)	A1=TRUE;A2=true;A3=FALSE	value	2.0		
+FML-5	COUNTIF(A1:A5,"=")	A1=1;A3=x	value	3.0		
+FML-5	COUNTIF(A1:A5,#N/A)	A1=#N/A;A2=1	error	#N/A		
+FML-5	COUNTIF(A1:A5,"#N/A")	A1=#N/A;A2=1	value	1.0		
+FML-5	COUNTIF(A1:A5,A1)	A1=b;A2=B;A3=c	value	2.0		
+FML-5	COUNTIF(A1:A5,"<5")	A1=1;A2=10;A3=x;A4=4	value	2.0		
+FML-5	COUNTIF(A1:A5,">a")	A1=b;A2=a;A3=5	value	1.0		
+FML-5	COUNTIF(A1:A5,"a?c")	A1=abc;A2=ac;A3=aXc;A4=abbc	value	2.0		
+FML-5	COUNTIF(A1:A5,"2024-01-01")	A1=2024-01-01;A2=45292	value	2.0		
+FML-5	COUNTIF(A1:A5,0)	A1=0;A3=x	value	1.0		
+FML-5	COUNTIFS(A1:A5,">1",B1:B5,"y")	A1=1;A2=2;A3=3;A4=4;B1=y;B2=y;B3=n;B4=y	value	2.0		
+FML-5	COUNTIFS(A1:A5,">1")	A1=1;A2=2;A3=3;A4=4	value	3.0		
+FML-5	COUNTIFS(A1:A5,">1",B1:B4,"y")	A1=1;A2=2;A3=3;A4=4;B1=y;B2=y;B3=n;B4=y	error	Err:502	error:#VALUE!	LibreOffice's Err:502 has no Excel error value; Excel gives #VALUE! for ranges of different shapes
+FML-5	COUNTIFS(A1:A3,"",B1:B3,"")	A1=1;B2=2	value	1.0		
+FML-5	MIN(A1:A4)	A1=3;A2=-1;A3=x;A4=TRUE	value	-1.0		
+FML-5	MIN(A1:A3)	A1=x	value	0.0		
+FML-5	MIN(A1:A3,"-5")	A1=3;A2=1	error	Err:504	value:-5.0	Excel reads number text typed as an argument; LibreOffice gives Err:504
+FML-5	MIN(A1:A3)	A1=3;A2=#DIV/0!	error	#DIV/0!		
+FML-5	MAX(A1:A4)	A1=3;A2=-1;A3=x;A4=TRUE	value	3.0		
+FML-5	MAX(A1:A2,1/0)	A1=3	error	#DIV/0!		
+FML-5	MAX(A1:A3)	A1=2024-01-01;A2=5	value	45292.0		
+FML-5	MAX(A1:A3)		value	0.0		
+FML-5	MINIFS(B1:B4,A1:A4,"x")	A1=x;A2=y;A3=x;A4=x;B1=5;B2=1;B3=3;B4=7	value	3.0		
+FML-5	MINIFS(B1:B4,A1:A4,"z")	A1=x;A2=y;A3=x;A4=x;B1=5;B2=1;B3=3;B4=7	value	0.0		
+FML-5	MINIFS(B1:B4,A1:A3,"x")	A1=x;A2=y;A3=x;A4=x;B1=5;B2=1;B3=3;B4=7	error	Err:502	error:#VALUE!	LibreOffice's Err:502 has no Excel error value; Excel gives #VALUE! for ranges of different shapes
+FML-5	MINIFS(B1:B4,A1:A4,"x",B1:B4,">4")	A1=x;A2=y;A3=x;A4=x;B1=5;B2=1;B3=3;B4=7	value	5.0		
+FML-5	MAXIFS(B1:B4,A1:A4,"x")	A1=x;A2=y;A3=x;A4=x;B1=5;B2=9;B3=3;B4=7	value	7.0		
+FML-5	MAXIFS(B1:B4,A1:A4,"z")	A1=x;A2=y;A3=x;A4=x;B1=5;B2=9;B3=3;B4=7	value	0.0		
+FML-5	MAXIFS(B1:B4,A1:A4,"x",B1:B4,"<7")	A1=x;A2=y;A3=x;A4=x;B1=5;B2=9;B3=3;B4=7	value	5.0		
+FML-5	MAXIFS(B1:B4,A1:A4,"x")	A1=x;A2=y;A3=x;A4=x;B1=5;B2=#N/A;B3=x;B4=2	value	5.0		
+FML-5	MAXIFS(B1:B4,A1:A4,"y")	A1=x;A2=y;A3=x;A4=x;B1=5;B2=#N/A;B3=x;B4=2	error	#N/A		
+FML-5	MEDIAN(A1:A5)	A1=3;A2=1;A3=4;A4=1;A5=5	value	3.0		
+FML-5	MEDIAN(A1:A4)	A1=3;A2=1;A3=4;A4=2	value	2.5		
+FML-5	MEDIAN(A1:A3)	A1=x	error	#VALUE!		
+FML-5	MEDIAN(1,#N/A)		error	#N/A		
+FML-5	MODE(A1:A5)	A1=1;A2=2;A3=2;A4=3;A5=3	value	2.0		
+FML-5	MODE(A1:A3)	A1=1;A2=2;A3=3	error	#VALUE!		
+FML-5	MODE(A1:A3)	A1=x	error	#VALUE!		
+FML-5	MODE.SNGL(4,5,5,6)		value	5.0		
+FML-5	MODE(A1:A4,1/0)	A1=1;A2=1	error	#DIV/0!		
+FML-5	STDEV(A1:A5)	A1=2;A2=4;A3=4;A4=4;A5=5	value	1.0954451150103321		
+FML-5	STDEV(5)		error	#DIV/0!		
+FML-5	STDEV(A1:A3,TRUE)	A1=1;A2=x;A3=3	value	1.1547005383792517		
+FML-5	STDEV.S(1,2,3,4)		value	1.2909944487358056		
+FML-5	STDEV.S(A1:A2,#N/A)	A1=1;A2=2	error	#N/A		
+FML-5	STDEV.P(A1:A5)	A1=2;A2=4;A3=4;A4=4;A5=5	value	0.9797958971132712		
+FML-5	STDEV.P(5)		value	0.0		
+FML-5	STDEV.P(A1:A2)		error	#DIV/0!		
+FML-5	STDEV.P(1,#N/A)		error	#N/A		
+FML-5	VAR(A1:A5)	A1=2;A2=4;A3=4;A4=4;A5=5	value	1.2		
+FML-5	VAR(5)		error	#DIV/0!		
+FML-5	VAR.S(1,2,3,4)		value	1.6666666666666667		
+FML-5	VAR.S(A1:A3)	A1=x	error	#DIV/0!		
+FML-5	VAR(1,1/0)		error	#DIV/0!		
+FML-5	VAR.P(A1:A5)	A1=2;A2=4;A3=4;A4=4;A5=5	value	0.96		
+FML-5	VAR.P(5)		value	0.0		
+FML-5	VAR.P(A1:A2)		error	#DIV/0!		
+FML-5	VAR.P(1E15+1,1E15+2,1E15+3)		value	0.6666666666666666		
+FML-5	LARGE(A1:A5,2)	A1=3;A2=1;A3=4;A4=1;A5=5	value	4.0		
+FML-5	LARGE(A1:A5,1.5)	A1=3;A2=1;A3=4;A4=1;A5=5	value	4.0		
+FML-5	LARGE(A1:A5,6)	A1=3;A2=1;A3=4;A4=1;A5=5	error	#VALUE!		
+FML-5	LARGE(A1:A5,0)	A1=3;A2=1;A3=4;A4=1;A5=5	error	#VALUE!		
+FML-5	LARGE({1,5,3},2)		value	3.0		
+FML-5	LARGE(A1:A3,1)	A1=x;A2=#N/A	error	#N/A		
+FML-5	SMALL(A1:A5,2)	A1=3;A2=1;A3=4;A4=1;A5=5	value	1.0		
+FML-5	SMALL(A1:A5,5)	A1=3;A2=1;A3=4;A4=1;A5=5	value	5.0		
+FML-5	SMALL(A1:A5,-1)	A1=3;A2=1;A3=4;A4=1;A5=5	error	#VALUE!		
+FML-5	SMALL(A1:A3,1)	A1=x;A2=TRUE;A3=7	value	1.0	value:7.0	Excel skips booleans in references; LibreOffice stores them as 1
+FML-5	SMALL(5,1)		value	5.0		
+FML-5	RANK(3,A1:A5)	A1=3;A2=1;A3=4;A4=1;A5=5	value	3.0		
+FML-5	RANK(1,A1:A5,1)	A1=3;A2=1;A3=4;A4=1;A5=5	value	1.0		
+FML-5	RANK(2,A1:A5)	A1=3;A2=1;A3=4;A4=1;A5=5	error	#N/A		
+FML-5	RANK(5,A1:A5,0)	A1=3;A2=1;A3=x;A4=1;A5=5	value	1.0		
+FML-5	RANK("x",A1:A5)	A1=3	error	#VALUE!		
+FML-5	RANK(3,A1:A5)	A1=3;A2=#N/A	error	#N/A		
+FML-5	RANK(4,A1:A3,1)	A1=4;A2=4;A3=2	value	2.0		
+FML-5	IF(TRUE,1,2)		value	1.0		
+FML-5	IF(0,1,2)		value	2.0		
+FML-5	IF(A1>1,"big")	A1=0	bool	FALSE		
+FML-5	IF(A1>1,"big")	A1=3	text	big		
+FML-5	IF("x",1,2)		error	#VALUE!		
+FML-5	IF(#N/A,1,2)		error	#N/A		
+FML-5	IF(TRUE,1,1/0)		value	1.0		
+FML-5	IF("true",1,2)		value	1.0		
+FML-5	IF(A1,1,2)		value	2.0		
+FML-5	IF(TRUE,)		value	0.0		
+FML-5	IFS(A1>2,"a",A1>0,"b")	A1=1	text	b		
+FML-5	IFS(FALSE,1)		error	#N/A		
+FML-5	IFS(A1>2,"a")	A1=3	text	a		
+FML-5	IFS("x",1)		error	#VALUE!		
+FML-5	IFS(FALSE,1/0,TRUE,2)		value	2.0		
+FML-5	AND(TRUE,1)		bool	TRUE		
+FML-5	AND(TRUE,0)		bool	FALSE		
+FML-5	AND(A1:A3)	A1=TRUE;A2=x;A3=1	bool	TRUE		
+FML-5	AND(A1:A3)	A1=x	error	#VALUE!		
+FML-5	AND("x")		error	#VALUE!		
+FML-5	AND(A1:A3)	A1=TRUE;A2=#N/A	error	#N/A		
+FML-5	OR(FALSE,0)		bool	FALSE		
+FML-5	OR(FALSE,2)		bool	TRUE		
+FML-5	OR(A1:A3)	A1=FALSE;A2=x	bool	FALSE		
+FML-5	OR(A1:A3)		error	#VALUE!		
+FML-5	OR(#DIV/0!,TRUE)		error	#DIV/0!		
+FML-5	NOT(TRUE)		bool	FALSE		
+FML-5	NOT(0)		bool	TRUE		
+FML-5	NOT("x")		error	#VALUE!		
+FML-5	NOT(A1)		bool	TRUE		
+FML-5	NOT("false")		bool	TRUE		
+FML-5	XOR(TRUE,TRUE)		bool	FALSE		
+FML-5	XOR(TRUE,FALSE,TRUE)		bool	FALSE		
+FML-5	XOR(A1:A3)	A1=TRUE;A2=0;A3=x	bool	TRUE		
+FML-5	XOR("x")		error	#VALUE!		
+FML-5	XOR(1,#N/A)		error	#N/A		
+FML-5	IFERROR(1/0,"bad")		text	bad		
+FML-5	IFERROR(5,"bad")		value	5.0		
+FML-5	IFERROR(NA(),A1)	A1=3	value	3.0		
+FML-5	IFERROR(A1,"bad")		value	0.0		
+FML-5	IFNA(NA(),"none")		text	none		
+FML-5	IFNA(1/0,"none")		error	#DIV/0!		
+FML-5	IFNA(3,"none")		value	3.0		
+FML-5	IFNA(A1,"none")	A1=#N/A	text	none		
+FML-5	SWITCH(2,1,"a",2,"b","other")		text	b		
+FML-5	SWITCH(9,1,"a",2,"b","other")		text	other		
+FML-5	SWITCH(9,1,"a",2,"b")		error	#N/A		
+FML-5	SWITCH("B",A1,"x","b","y")	A1=a	text	y		
+FML-5	SWITCH(#N/A,1,"a")		error	#N/A		
+FML-5	ISBLANK(A1)		bool	TRUE		
+FML-5	ISBLANK(A1)	A1=x	bool	FALSE		
+FML-5	ISBLANK("")		bool	FALSE		
+FML-5	ISBLANK(A1)	A1=0	bool	FALSE		
+FML-5	ISNUMBER(A1)	A1=3	bool	TRUE		
+FML-5	ISNUMBER("3")		bool	FALSE		
+FML-5	ISNUMBER(A1)	A1=2024-01-01	bool	TRUE		
+FML-5	ISNUMBER(A1)		bool	FALSE		
+FML-5	ISNUMBER(TRUE)		bool	TRUE	bool:FALSE	Booleans aren't numbers in Excel; LibreOffice stores them as 1
+FML-5	ISTEXT("x")		bool	TRUE		
+FML-5	ISTEXT(A1)	A1=3	bool	FALSE		
+FML-5	ISTEXT(A1)	A1=00123	bool	TRUE		
+FML-5	ISTEXT(A1)		bool	FALSE		
+FML-5	ISLOGICAL(TRUE)		bool	FALSE	bool:TRUE	Booleans are their own type in Excel; LibreOffice's TRUE() is the number 1
+FML-5	ISLOGICAL(1)		bool	FALSE		
+FML-5	ISLOGICAL(A1)	A1=false	bool	TRUE		
+FML-5	ISLOGICAL("TRUE")		bool	FALSE		
+FML-5	ISERROR(1/0)		bool	TRUE		
+FML-5	ISERROR(NA())		bool	TRUE		
+FML-5	ISERROR(1)		bool	FALSE		
+FML-5	ISERROR(A1)	A1=#REF!	bool	TRUE		
+FML-5	ISERR(NA())		bool	FALSE		
+FML-5	ISERR(1/0)		bool	TRUE		
+FML-5	ISERR("x")		bool	FALSE		
+FML-5	ISNA(NA())		bool	TRUE		
+FML-5	ISNA(1/0)		bool	FALSE		
+FML-5	ISNA(A1)		bool	FALSE		
+FML-5	ISEVEN(4)		bool	TRUE		
+FML-5	ISEVEN(-3)		bool	FALSE		
+FML-5	ISEVEN(2.9)		bool	TRUE		
+FML-5	ISEVEN(NA())		error	#N/A		
+FML-5	ISODD(3)		bool	TRUE		
+FML-5	ISODD(-2)		bool	FALSE		
+FML-5	ISODD(3.5)		bool	TRUE		
+FML-5	ISODD(1/0)		error	#DIV/0!		
+FML-5	NA()		error	#N/A		
+FML-5	NA()+1		error	#N/A		
+FML-5	IFERROR(NA(),"caught")		text	caught		
+FML-5	N(5)		value	5.0		
+FML-5	N("x")		value	0.0		
+FML-5	N(TRUE)		value	1.0		
+FML-5	N(A1)	A1=2024-01-01	value	45292.0		
+FML-5	N(#N/A)		error	#N/A		
+FML-5	N(A1)		value	0.0		
+FML-5	MODE.SNGL(A1:A3)	A1=1;A2=2;A3=3	error	#VALUE!		
+FML-5	MODE.SNGL(A1:A2,#N/A)	A1=1;A2=1	error	#N/A		
+FML-5	STDEV.S(5)		error	#DIV/0!		
+FML-5	VAR.S(A1:A5)	A1=2;A2=4;A3=4;A4=4;A5=5	value	1.2		

@@ -214,7 +214,7 @@ pub(crate) fn zip(l: &Value, r: &Value, f: &dyn Fn(&Value, &Value) -> Value) -> 
     Value::Array(Arc::new(Array { rows, cols, values }))
 }
 
-fn unary(op: UnaryOp, v: &Value) -> Value {
+pub(crate) fn unary(op: UnaryOp, v: &Value) -> Value {
     match op {
         UnaryOp::Plus => v.clone(),
         UnaryOp::Neg => match to_number(v) {
@@ -249,7 +249,7 @@ pub fn power(a: f64, b: f64) -> Result<f64, ErrorKind> {
     }
 }
 
-fn binary(op: BinaryOp, l: &Value, r: &Value) -> Value {
+pub(crate) fn binary(op: BinaryOp, l: &Value, r: &Value) -> Value {
     use BinaryOp::*;
     match op {
         Add | Sub | Mul | Div | Pow => {

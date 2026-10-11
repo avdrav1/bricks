@@ -9,7 +9,11 @@ use crate::value::Value;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
+mod criteria;
+mod info;
+mod logic;
 mod math;
+mod stats;
 pub(crate) mod wildcard;
 
 /// A function's result, or why evaluation stopped.
@@ -87,6 +91,9 @@ fn register(m: &mut Registry) {
     add(m, "TRUE", 0, Some(0), |_, _| Ok(Value::Bool(true)));
     add(m, "FALSE", 0, Some(0), |_, _| Ok(Value::Bool(false)));
     math::register(m);
+    stats::register(m);
+    logic::register(m);
+    info::register(m);
 }
 
 /// Calls `f` with every value an argument supplies: each non-empty cell of a reference and
