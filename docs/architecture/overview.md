@@ -82,6 +82,6 @@ These are likely candidates, listed so the shape is visible. None exists yet, an
 | Suite-wide | `text-engine`, `rendering`, `undo`, `commands`, `pdf-export`, `charts`, `tables` |
 | Bricks | `bricks-model`, `csv-engine`, `xlsx` (the last two exist today as Bricks-only crates) |
 | Slate | `document-model` and `docx` exist (`apps/slate/crates/`, SLATE-1 to SLATE-3) |
-| Frame | `presentation-model`, `pptx` (planned by ADR 0004; built in FR0) |
+| Frame | `presentation-model`, `pptx` (exist today as Frame-only crates in `apps/frame/crates/`, ADR 0004) |
 
 Candidates already overlap with Bricks' own crates (`commands` holds Bricks' undo stack). Extracting one for the suite means generalizing it with a second app as its user, not moving it ahead of time.

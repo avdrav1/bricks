@@ -22,6 +22,9 @@ members = [
     # Slate-only crates
     "apps/slate/crates/document-model",
     "apps/slate/crates/docx",
+    # Frame-only crates
+    "apps/frame/crates/presentation-model",
+    "apps/frame/crates/pptx",
 ]
 
 # `version` is Bricks' release version (scripts/ship.sh bumps it); Bricks and its crates
@@ -51,6 +54,9 @@ xlsx = { path = "apps/bricks/crates/xlsx" }
 # Slate crates
 document-model = { path = "apps/slate/crates/document-model" }
 docx = { path = "apps/slate/crates/docx" }
+# Frame crates
+presentation-model = { path = "apps/frame/crates/presentation-model" }
+pptx = { path = "apps/frame/crates/pptx" }
 # The suite's UI toolkit (docs/adr/0002-gtk4-for-the-suite.md); v4_14 matches Ubuntu 24.04's GTK.
 gtk = { package = "gtk4", version = "0.11", features = ["v4_14"] }
 # Every app logs through these.

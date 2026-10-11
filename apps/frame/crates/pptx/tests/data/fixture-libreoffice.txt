@@ -1,0 +1,137 @@
+size	10080720	5670720
+slide	1	hidden=0
+background	none
+shape	0	TitleTextShape	504000	225720	9071640	947160	0	0	0	PlaceHolder 1
+fill	none
+line	none
+para	0	center	Frame fixture
+run	44	0	0	0	0	000000	Arial	Frame fixture
+shape	0	SubtitleShape	504000	1326240	9071640	3288960	0	0	0	PlaceHolder 2
+fill	none
+line	none
+para	0	center	Bold and italic and underlined, struck, red at 20 pt
+run	32	1	0	0	0	000000	Arial	Bold
+run	32	0	0	0	0	000000	Arial	 and 
+run	32	0	1	0	0	000000	Arial	italic
+run	32	0	0	0	0	000000	Arial	 and 
+run	32	0	0	1	0	000000	Arial	underlined
+run	32	0	0	0	0	000000	Arial	, 
+run	32	0	0	0	1	000000	Arial	struck
+run	32	0	0	0	0	000000	Arial	, 
+run	32	0	0	0	0	C00000	Arial	red
+run	20	0	0	0	0	000000	Arial	 at 20 pt
+notes	Speaker notes for the title slide.
+slide	2	hidden=0
+background	none
+shape	0	TitleTextShape	504000	225720	9071640	947160	0	0	0	PlaceHolder 1
+fill	none
+line	none
+para	0	center	Levels and alignment
+run	44	0	0	0	0	000000	Arial	Levels and alignment
+shape	0	OutlinerShape	504000	1326600	9071640	3288240	0	0	0	PlaceHolder 2
+fill	none
+line	none
+para	0	left	First level
+run	32	0	0	0	0	000000	Arial	First level
+para	1	left	Second level
+run	28	0	0	0	0	000000	Arial	Second level
+para	2	left	Third level
+run	24	0	0	0	0	000000	Arial	Third level
+para	0	left	Back to first
+run	32	0	0	0	0	000000	Arial	Back to first
+para	0	center	Centred
+run	32	0	0	0	0	000000	Arial	Centred
+para	0	right	Right\nafter a line break
+run	32	0	0	0	0	000000	Arial	Right
+run	32	0	0	0	0	000000	Arial	\n
+run	32	0	0	0	0	000000	Arial	after a line break
+notes	Notes on levels.
+slide	3	hidden=0
+background	none
+shape	0	TitleTextShape	504000	225720	9071640	947160	0	0	0	PlaceHolder 1
+fill	none
+line	none
+para	0	center	Shapes
+run	44	0	0	0	0	000000	Arial	Shapes
+shape	0	CustomShape	360000	1440000	1800000	1080000	0	0	0	
+fill	solid 4472C4 100
+line	solid 203864 36000
+shape	0	CustomShape	2520023	1440014	1800000	1080000	330	0	0	
+fill	solid 70AD47 100
+line	none
+shape	0	CustomShape	4679280	1440000	1800000	1080000	0	1	0	
+fill	solid CCD3E0 100
+line	solid 127A02 38160
+shape	0	CustomShape	6840000	1440000	1800000	1080000	0	0	0	
+fill	solid 117802 100
+line	solid 127A02 38160
+shape	0	CustomShape	360000	3060000	1800000	1080000	0	0	0	
+fill	solid E9706D 100
+line	solid 127A02 38160
+shape	0	CustomShape	2520000	3060000	1800000	1080000	0	0	0	
+fill	solid 8E03A3 50
+line	solid 127A02 38160
+shape	0	LineShape	4644360	3600000	3671280	360	0.01	0	0	
+fill	none
+line	solid FF0000 18000
+shape	0	CustomShape	360000	4680000	7200000	720000	0	0	0	
+fill	none
+line	none
+para	0	left	Text box: bold blue and theme in Liberation Serif
+run	24	0	0	0	0	000000	Arial	Text box: 
+run	18	1	0	0	0	0070C0	Arial	bold blue
+run	18	0	0	0	0	654E00	Arial	 and theme
+run	18	0	0	0	0	000000	Times New Roman	 in Liberation Serif
+slide	4	hidden=0
+background	none
+shape	0	TitleTextShape	504000	225720	9071640	947160	0	0	0	PlaceHolder 1
+fill	none
+line	none
+para	0	center	Picture, group, table
+run	44	0	0	0	0	000000	Arial	Picture, group, table
+shape	0	GraphicObjectShape	360000	1440000	2880000	2160000	0	0	0	
+line	none
+picture	image/png	40x30
+shape	0	GroupShape	6202080	810720	3075840	3958200	30	0	0	
+shape	1	CustomShape	6462387	1242201	2160000	1620000	30	0	0	
+fill	solid FFC000 100
+line	solid 127A02 38160
+shape	1	CustomShape	6857667	2717481	2160000	1620000	30	0	0	
+fill	solid 7030A0 100
+line	solid 127A02 38160
+shape	0	TableShape	360000	3960000	5400000	1620000	0	0	0	
+cell	0	0	solid 305496 100	- - - -
+para	0	left	R1C1
+run	18	0	0	0	0	FFFFFF	Arial	R1C1
+cell	0	1	solid 305496 100	- - - -
+para	0	left	R1C2
+run	18	0	0	0	0	FFFFFF	Arial	R1C2
+cell	0	2	solid 305496 100	- - - -
+para	0	left	R1C3
+run	18	0	0	0	0	FFFFFF	Arial	R1C3
+cell	1	0	solid 18A303 100	- - - -
+para	0	left	R2C1
+run	18	0	0	0	0	FFFFFF	Arial	R2C1
+cell	1	1	solid 18A303 100	FF0000:12600 FF0000:12600 FF0000:12600 FF0000:12600
+para	0	left	R2C2
+run	18	0	0	0	0	FFFFFF	Arial	R2C2
+cell	1	2	solid 18A303 100	- - - -
+para	0	left	R2C3
+run	18	0	0	0	0	FFFFFF	Arial	R2C3
+cell	2	0	solid D9D9D9 100	- - - -
+para	0	left	R3C1
+run	18	0	0	0	0	000000	Arial	R3C1
+cell	2	1	solid D9D9D9 100	- - - -
+para	0	left	R3C2
+run	18	0	0	0	0	000000	Arial	R3C2
+cell	2	2	solid D9D9D9 100	- - - -
+para	0	left	R3C3
+run	18	0	0	0	0	000000	Arial	R3C3
+notes	Notes on the picture slide.
+slide	5	hidden=1
+background	none
+shape	0	TitleTextShape	504000	225720	9071640	947160	0	0	0	PlaceHolder 1
+fill	none
+line	none
+para	0	center	Hidden slide
+run	44	0	0	0	0	000000	Arial	Hidden slide

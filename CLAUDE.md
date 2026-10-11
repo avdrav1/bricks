@@ -65,6 +65,13 @@ Slate's crates, in `apps/slate/crates/`:
 | `docx` | DOCX reader: `word/document.xml` with styles, numbering, hyperlinks, pictures, and tables into the document model |
 | `slate` (`apps/slate`) | the GTK 4 viewer window: open, drop, the page as a read-only text view, alerts |
 
+Frame's crates, in `apps/frame/crates/`:
+
+| Crate | Owns |
+| --- | --- |
+| `presentation-model` | slides, shapes, frames, and placeholders with every value resolved (ADR 0004); no dependencies |
+| `pptx` | PPTX reading: package, slide order, placeholder inheritance through layout and master, group transforms, notes |
+
 ## Commands
 
 ```sh
@@ -83,6 +90,7 @@ python3 scripts/lo_docx.py fixture|dump FILE  # Slate's LibreOffice fixture docu
 scripts/check_slate.sh [BINARY]          # Slate viewer GUI check in docker: open, drop, show, refuse (SLATE-4)
 cargo run --release -p xlsx --example gen_corpus_xlsx  # corpus/rows_1m.xlsx (BENCH-2)
 cargo run --release -p xlsx --example gen_corpus_xlsx -- --styled   # corpus/styled_1m.xlsx (STYLE-3, BENCH-3)
+python3 scripts/lo_pptx.py fixture|dump FILE  # LibreOffice fixture deck and dumps (FRAME-*)
 python3 -m unittest discover -s scripts  # script tests (corpus generator, backlog helper)
 cargo bench                              # prints the apps/bricks/docs/BENCHMARKS.md table (needs corpus/)
 python3 scripts/backlog.py next [bricks|slate|frame]|status   # backlog helper; one milestone chain per app
