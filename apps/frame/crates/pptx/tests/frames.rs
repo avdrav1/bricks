@@ -22,10 +22,10 @@ fn read(name: &str) -> presentation_model::Presentation {
 /// Whether LibreOffice's shape kind is what Frame read.
 fn same_kind(model: &ShapeKind, lo: &str) -> bool {
     match model {
-        ShapeKind::Picture => lo == "GraphicObjectShape",
-        ShapeKind::Table => lo == "TableShape",
-        ShapeKind::Unsupported { label } if label == "Chart" => lo == "OLE2Shape",
-        ShapeKind::Unsupported { .. } => !matches!(lo, "GraphicObjectShape" | "TableShape"),
+        ShapeKind::Picture(_) => lo == "GraphicObjectShape",
+        ShapeKind::Table(_) => lo == "TableShape",
+        ShapeKind::Unsupported { label, .. } if label == "Chart" => lo == "OLE2Shape",
+        ShapeKind::Unsupported { .. } => !matches!(lo, "TableShape"),
         ShapeKind::Geometry { .. } => !matches!(
             lo,
             "GraphicObjectShape" | "TableShape" | "OLE2Shape" | "GroupShape"

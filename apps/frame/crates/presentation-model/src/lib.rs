@@ -6,6 +6,8 @@
 //!
 //! Toolkit-free: no GTK, no I/O.
 
+use std::sync::Arc;
+
 /// EMU per inch.
 pub const EMU_PER_INCH: i64 = 914_400;
 /// EMU per typographic point.
@@ -28,6 +30,7 @@ pub struct Size {
 /// One slide.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Slide {
+    pub background: Background,
     /// Shapes in drawing order (z-order, bottom first): the master's and the layout's
     /// own shapes (see [`Layer`]) under the slide's.
     pub shapes: Vec<Shape>,
@@ -41,6 +44,54 @@ impl Slide {
     /// The slide's own shapes, without those it shows from its layout and master.
     pub fn own_shapes(&self) -> impl Iterator<Item = &Shape> {
         self.shapes.iter().filter(|s| s.layer == Layer::Slide)
+    }
+
+    /// All the text the slide shows, shape by shape (table cells in reading order), one
+    /// line per paragraph; empty paragraphs left out.
+    pub fn text(&self) -> String {
+        let mut lines = Vec::new();
+        let mut push = |t: &TextBody| {
+            lines.extend(
+                t.paragraphs
+                    .iter()
+                    .map(Paragraph::text)
+                    .filter(|l| !l.trim().is_empty()),
+            )
+        };
+        for shape in &self.shapes {
+            if let Some(t) = &shape.text {
+                push(t);
+            }
+            if let ShapeKind::Table(table) = &shape.kind {
+                for cell in table.rows.iter().flat_map(|r| &r.cells) {
+                    if !cell.merged {
+                        push(&cell.text);
+                    }
+                }
+            }
+        }
+        lines.join("\n")
+    }
+}
+
+/// What fills the slide behind its shapes.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Background {
+    Solid(Color),
+    /// A picture stretched over the slide.
+    Picture(Image),
+    /// A fill Frame doesn't draw (gradient, pattern, tiled picture): shown as `approx`,
+    /// with `label` (`Gradient`, ...) saying what it stands for.
+    Other {
+        label: String,
+        approx: Color,
+    },
+}
+
+impl Default for Background {
+    /// A slide that sets no background anywhere is white.
+    fn default() -> Self {
+        Background::Solid(Color::WHITE)
     }
 }
 
@@ -96,25 +147,33 @@ pub enum PlaceholderKind {
 /// What a shape is.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ShapeKind {
-    /// A shape drawn from geometry: `prst` is the preset name (`rect`, `ellipse`, ...),
-    /// `custom` for freeform geometry.
-    Geometry { preset: String },
+    /// A shape drawn from geometry: `preset` is the preset name (`rect`, `ellipse`, ...),
+    /// `custom` for freeform geometry; `adjust` its first adjust value as a fraction
+    /// (a rounded rectangle's corner radius over its shorter side, ...).
+    Geometry { preset: String, adjust: Option<f64> },
     /// A picture (`<p:pic>`).
-    Picture,
+    Picture(Picture),
     /// A table (`<a:tbl>` in a graphic frame).
-    Table,
+    Table(Table),
     /// Content Frame doesn't draw (`Chart`, `SmartArt`, `Video`, `Picture (EMF)`, ...):
-    /// shown as a labelled outline so nothing silently disappears.
-    Unsupported { label: String },
+    /// shown as a labelled outline so nothing silently disappears, or as `preview`, the
+    /// picture the file keeps for readers that can't show it (a video's poster frame, an
+    /// embedded object's preview).
+    Unsupported {
+        label: String,
+        preview: Option<Image>,
+    },
 }
 
 /// One shape on a slide.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Shape {
-    /// `cNvPr name`.
+    /// `cNvPr name` (a SmartArt part's model id when it has none).
     pub name: String,
     pub frame: Frame,
     pub kind: ShapeKind,
+    pub fill: Fill,
+    pub outline: Option<Outline>,
     /// The placeholder role, for placeholders.
     pub placeholder: Option<PlaceholderKind>,
     pub layer: Layer,
@@ -130,6 +189,160 @@ impl Shape {
             .map(TextBody::plain_text)
             .unwrap_or_default()
     }
+}
+
+/// What fills a shape.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum Fill {
+    #[default]
+    None,
+    Solid(Color),
+    /// A picture stretched over the shape's box.
+    Picture(Image),
+    /// A fill Frame doesn't draw (`Gradient`, `Pattern`): shown as `approx` with the label.
+    Unsupported {
+        label: String,
+        approx: Color,
+    },
+}
+
+/// A shape's or a table border's line.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Outline {
+    /// EMU; 0 is the thinnest line the screen shows.
+    pub width: i64,
+    pub color: Color,
+    pub dash: Dash,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Dash {
+    #[default]
+    Solid,
+    Dot,
+    Dash,
+    DashDot,
+    LongDash,
+}
+
+/// A picture's bytes as stored in the file.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Image {
+    pub format: ImageFormat,
+    pub bytes: Arc<[u8]>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageFormat {
+    Png,
+    Jpeg,
+    Gif,
+    Bmp,
+    Tiff,
+    Emf,
+    Wmf,
+    Svg,
+    Other,
+}
+
+impl ImageFormat {
+    /// The format of `bytes`, from their signature.
+    pub fn of(bytes: &[u8]) -> ImageFormat {
+        match bytes {
+            [0x89, b'P', b'N', b'G', ..] => ImageFormat::Png,
+            [0xFF, 0xD8, 0xFF, ..] => ImageFormat::Jpeg,
+            [b'G', b'I', b'F', b'8', ..] => ImageFormat::Gif,
+            [b'B', b'M', ..] => ImageFormat::Bmp,
+            [b'I', b'I', 42, 0, ..] | [b'M', b'M', 0, 42, ..] => ImageFormat::Tiff,
+            [1, 0, 0, 0, ..] if bytes.get(40..44) == Some(b" EMF") => ImageFormat::Emf,
+            [0xD7, 0xCD, 0xC6, 0x9A, ..] | [1, 0, 9, 0, ..] | [2, 0, 9, 0, ..] => ImageFormat::Wmf,
+            _ if is_svg(bytes) => ImageFormat::Svg,
+            _ => ImageFormat::Other,
+        }
+    }
+
+    /// Whether Frame draws this format (GDK's loaders read it everywhere Frame runs).
+    pub fn is_drawable(self) -> bool {
+        matches!(
+            self,
+            ImageFormat::Png | ImageFormat::Jpeg | ImageFormat::Gif | ImageFormat::Bmp
+        )
+    }
+
+    /// `EMF`, `PNG`, ...: how labels name it.
+    pub fn name(self) -> &'static str {
+        match self {
+            ImageFormat::Png => "PNG",
+            ImageFormat::Jpeg => "JPEG",
+            ImageFormat::Gif => "GIF",
+            ImageFormat::Bmp => "BMP",
+            ImageFormat::Tiff => "TIFF",
+            ImageFormat::Emf => "EMF",
+            ImageFormat::Wmf => "WMF",
+            ImageFormat::Svg => "SVG",
+            ImageFormat::Other => "unknown format",
+        }
+    }
+}
+
+fn is_svg(bytes: &[u8]) -> bool {
+    let head = &bytes[..bytes.len().min(512)];
+    let text = String::from_utf8_lossy(head);
+    let t = text.trim_start_matches('\u{feff}').trim_start();
+    (t.starts_with("<?xml") || t.starts_with("<svg") || t.starts_with("<!--"))
+        && text.contains("<svg")
+}
+
+/// A picture shape's content: the image and how much of it is cut off at each edge.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Picture {
+    pub image: Image,
+    pub crop: Crop,
+}
+
+/// Fractions of the image cut off at each edge (`srcRect`); negative values pad.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Crop {
+    pub left: f64,
+    pub top: f64,
+    pub right: f64,
+    pub bottom: f64,
+}
+
+/// A table: column widths, and rows of cells with resolved text, fills, and borders
+/// (table style applied).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Table {
+    /// Column widths, EMU.
+    pub columns: Vec<i64>,
+    pub rows: Vec<TableRow>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TableRow {
+    /// The row's height, EMU (rows grow with their text when drawn).
+    pub height: i64,
+    pub cells: Vec<TableCell>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TableCell {
+    pub text: TextBody,
+    pub fill: Option<Color>,
+    pub borders: Borders,
+    /// Columns and rows this cell spans (1 each for a plain cell).
+    pub col_span: u32,
+    pub row_span: u32,
+    /// Covered by a spanning cell to its left or above: not drawn on its own.
+    pub merged: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Borders {
+    pub top: Option<Outline>,
+    pub bottom: Option<Outline>,
+    pub left: Option<Outline>,
+    pub right: Option<Outline>,
 }
 
 /// An sRGB colour with straight alpha (255 is opaque).

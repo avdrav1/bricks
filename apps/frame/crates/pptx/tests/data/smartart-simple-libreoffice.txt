@@ -1,0 +1,43 @@
+size	1800360	1079640
+slide	1	hidden=0
+background	solid FFFFFF 100
+shape	0	GroupShape	-212760	69840	1440000	939960	0	0	0	Diagram 3
+shape	1	CustomShape	-212760	69840	1440000	939960	0	0	0	{071FA5A5-3F88-4F64-9BAE-49BCE673CEEF}
+fill	none
+line	none
+shape	1	CustomShape	262800	79200	488520	488520	0	0	0	{DB1843D3-471D-3D4F-8D9B-C7F506BC5FEE}
+fill	solid FFC000 50
+line	solid FFFFFF 12600
+para	0	center	abc
+run	11	0	0	0	0	000000	Calibri	abc
+shape	1	CustomShape	479160	295560	488520	488520	0	0	0	{C21E3514-2DBB-8145-BBE2-28ED23242DFE}
+fill	gradient
+line	solid FFFFFF 12600
+para	0	left	def
+run	11	1	1	0	0	FFFFFF	Calibri	def
+shape	1	CustomShape	262800	511560	488520	488520	0	0	0	{3CC3473F-D53A-6C4C-B553-25A353028A0A}
+fill	solid 3FE19B 50
+line	solid FFFFFF 12600
+para	0	right	ghi
+run	11	0	0	0	0	000000	Calibri	ghi
+shape	1	CustomShape	46800	295560	488520	488520	0	0	0	{B0DF3F4E-A375-EB49-AB27-EE2F66D1C44E}
+fill	bitmap
+line	solid FFFFFF 12600
+shape	0	CustomShape	949320	262800	819000	600120	0	0	0	TextBox 4
+fill	none
+line	none
+para	0	left	This file contains a SmartArt diagram
+run	3	0	0	0	0	000000	Calibri	This file contains a SmartArt diagram
+para	0	left	\nTesting:
+run	3	0	0	0	0	000000	Calibri	\n
+run	3	0	0	0	0	000000	Calibri	Testing:
+para	0	left	Gradient fill on shape (with 25% transparency set)
+run	3	0	0	0	0	000000	Calibri	Gradient fill on shape (with 25% transparency set)
+para	0	left	Image fill on shape
+run	3	0	0	0	0	000000	Calibri	Image fill on shape
+para	0	left	Text alignment inside text box
+run	3	0	0	0	0	000000	Calibri	Text alignment inside text box
+para	0	left	Text box positioning relative to shape (when text is centered it’s not in the center of the circles)
+run	3	0	0	0	0	000000	Calibri	Text box positioning relative to shape (when text is centered it’s not in the center of the circles)
+para	0	left	Shapes are styled with theme
+run	3	0	0	0	0	000000	Calibri	Shapes are styled with theme

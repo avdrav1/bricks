@@ -8,8 +8,10 @@
 
 mod color;
 mod detect;
+mod fill;
 mod package;
 mod read;
+mod table;
 mod text;
 mod xml;
 

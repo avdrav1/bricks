@@ -81,6 +81,9 @@ pub(crate) struct TextContext<'a> {
 pub(crate) struct FontRef {
     pub font: Option<String>,
     pub color: Option<Color>,
+    /// Table styles' `tcTxStyle b`/`i`.
+    pub bold: Option<bool>,
+    pub italic: Option<bool>,
 }
 
 /// A shape's text styles: `base` (default text style and master text style), its style
@@ -293,6 +296,12 @@ impl Styles<'_> {
         }
         if let Some(c) = self.font_ref.color {
             props.run.color = Some(c);
+        }
+        if let Some(b) = self.font_ref.bold {
+            props.run.bold = Some(b);
+        }
+        if let Some(i) = self.font_ref.italic {
+            props.run.italic = Some(i);
         }
         for s in &self.shape {
             apply(s, &mut props);

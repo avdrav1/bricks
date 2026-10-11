@@ -1,15 +1,19 @@
 //! From package parts to the model: slide order, shapes in z-order, placeholder
 //! inheritance (slide → layout → master), group transforms, text (through `text`),
-//! hidden slides, and notes.
+//! fills and outlines (through `fill`), pictures, tables (through `table`), SmartArt
+//! drawings, backgrounds, hidden slides, and notes.
 
 use crate::color::Palette;
+use crate::fill::{self, Looks};
 use crate::package::{Package, Part};
 use crate::text::{self, FontRef, Fonts, Styles, TextContext};
 use crate::xml::Element;
 use crate::Error;
 use presentation_model::{
-    Frame, Layer, PlaceholderKind, Presentation, Shape, ShapeKind, Size, Slide,
+    Background, Fill, Frame, Image, Layer, Picture, PlaceholderKind, Presentation, Shape,
+    ShapeKind, Size, Slide, TextBody,
 };
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::LazyLock;
@@ -21,11 +25,13 @@ const DEFAULT_SIZE: Size = Size {
 };
 
 pub(crate) struct Reader {
-    pkg: Package,
+    pkg: RefCell<Package>,
     masters: HashMap<String, Rc<Master>>,
     layouts: HashMap<String, Rc<Layout>>,
     /// `presentation.xml`'s `defaultTextStyle`.
     default_style: Option<Element>,
+    /// `tableStyles.xml`.
+    table_styles: Option<Rc<Part>>,
 }
 
 struct Master {
@@ -34,6 +40,9 @@ struct Master {
     fonts: Fonts,
     /// The theme's colour scheme through the master's colour map.
     palette: Palette,
+    /// The theme part: its `fmtScheme` (fill, line, and background styles) and the
+    /// relationships of the pictures those use.
+    theme: Option<Rc<Part>>,
 }
 
 struct Layout {
@@ -52,45 +61,84 @@ struct Placeholder {
     shape: Element,
 }
 
-/// What a shape on the slide being read inherits from.
+/// What reading the shapes of one part needs.
 struct Scope<'a> {
     layer: Layer,
+    /// The part the shapes are in (its relationships name pictures and diagrams).
+    part: &'a Part,
+    pkg: &'a RefCell<Package>,
     /// The layout slide placeholders inherit from (`None` on layouts and masters).
     layout: Option<&'a Layout>,
     master: Option<&'a Master>,
     default_style: Option<&'a Element>,
+    table_styles: Option<&'a Element>,
     text: &'a TextContext<'a>,
 }
 
+impl<'a> Scope<'a> {
+    fn looks(&self) -> Looks<'a> {
+        let theme = self.master.and_then(|m| m.theme.as_deref());
+        Looks {
+            palette: self.text.palette,
+            fmt: theme.and_then(|t| t.root.path(&["themeElements", "fmtScheme"])),
+            rels: &self.part.rels,
+            theme_rels: theme.map(|t| &t.rels),
+            pkg: self.pkg,
+        }
+    }
+
+    /// The same scope over another part (a SmartArt drawing).
+    fn on(&self, part: &'a Part) -> Scope<'a> {
+        Scope {
+            layer: self.layer,
+            part,
+            pkg: self.pkg,
+            layout: self.layout,
+            master: self.master,
+            default_style: self.default_style,
+            table_styles: self.table_styles,
+            text: self.text,
+        }
+    }
+}
+
 /// A group's transform: its frame on the slide (or in its parent group) and the child
-/// coordinate space (`chOff`, `chExt`) that frame shows.
-#[derive(Clone, Copy)]
+/// coordinate space (`chOff`, `chExt`) that frame shows; and its fill, for children
+/// with `grpFill`.
+#[derive(Clone)]
 struct Group {
     frame: Frame,
     ch_x: i64,
     ch_y: i64,
     ch_cx: i64,
     ch_cy: i64,
+    fill: Fill,
 }
 
 impl Reader {
     pub fn new(pkg: Package) -> Self {
         Reader {
-            pkg,
+            pkg: RefCell::new(pkg),
             masters: HashMap::new(),
             layouts: HashMap::new(),
             default_style: None,
+            table_styles: None,
         }
+    }
+
+    fn part(&self, name: &str) -> Result<Rc<Part>, Error> {
+        self.pkg.borrow_mut().part(name)
     }
 
     pub fn presentation(mut self) -> Result<Presentation, Error> {
         let main = self
             .pkg
+            .borrow_mut()
             .rels("")?
             .of_kind("officeDocument")
             .map(|r| r.target.clone())
             .unwrap_or_else(|| "ppt/presentation.xml".to_owned());
-        let pres = self.pkg.part(&main)?;
+        let pres = self.part(&main)?;
         let size = pres
             .root
             .child("sldSz")
@@ -102,6 +150,9 @@ impl Reader {
             })
             .unwrap_or(DEFAULT_SIZE);
         self.default_style = pres.root.child("defaultTextStyle").cloned();
+        if let Some(r) = pres.rels.of_kind("tableStyles") {
+            self.table_styles = self.part(&r.target).ok();
+        }
         let mut slides = Vec::new();
         for id in pres
             .root
@@ -112,20 +163,16 @@ impl Reader {
             let Some(rel) = id.rel_attr("id").and_then(|r| pres.rels.get(r)) else {
                 continue;
             };
-            let target = rel.target.clone();
             let number = slides.len() + 1;
-            slides.push(self.slide(&target, number)?);
+            slides.push(self.slide(&rel.target, number)?);
         }
         Ok(Presentation { size, slides })
     }
 
     fn slide(&mut self, path: &str, number: usize) -> Result<Slide, Error> {
-        let part = self.pkg.part(path)?;
+        let part = self.part(path)?;
         let layout = match part.rels.of_kind("slideLayout") {
-            Some(r) => {
-                let target = r.target.clone();
-                Some(self.layout(&target)?)
-            }
+            Some(r) => Some(self.layout(&r.target)?),
             None => None,
         };
         let root = &part.root;
@@ -151,48 +198,50 @@ impl Reader {
             slide_number: number,
         };
         let mut shapes = Vec::new();
-        let scope = |layer, layout| Scope {
+        let scope = |layer, part, layout| Scope {
             layer,
+            part,
+            pkg: &self.pkg,
             layout,
             master: master.as_deref(),
             default_style: self.default_style.as_ref(),
+            table_styles: self.table_styles.as_ref().map(|t| &t.root),
             text: &ctx,
         };
+        // The background: the slide's own, else its layout's, else its master's.
+        let mut background = Background::default();
+        let mut sources: Vec<&Part> = vec![&part];
+        if let Some(l) = &layout {
+            sources.push(&l.part);
+            sources.push(&l.master.part);
+        }
+        for p in sources {
+            if let Some(bg) = p.root.path(&["cSld", "bg"]) {
+                if let Some(b) = scope(Layer::Slide, p, None).looks().background(bg) {
+                    background = b;
+                }
+                break;
+            }
+        }
         if let Some(layout) = &layout {
             if root.flag("showMasterSp") != Some(false) {
                 if layout.show_master {
-                    let tree = sp_tree(&layout.master.part.root);
-                    collect(
-                        &scope(Layer::Master, None),
-                        tree,
-                        &mut Vec::new(),
-                        &mut shapes,
-                    );
+                    let m = &layout.master.part;
+                    let s = scope(Layer::Master, m, None);
+                    collect(&s, sp_tree(&m.root), &mut Vec::new(), &mut shapes);
                 }
-                let tree = sp_tree(&layout.part.root);
-                collect(
-                    &scope(Layer::Layout, None),
-                    tree,
-                    &mut Vec::new(),
-                    &mut shapes,
-                );
+                let s = scope(Layer::Layout, &layout.part, None);
+                collect(&s, sp_tree(&layout.part.root), &mut Vec::new(), &mut shapes);
             }
         }
-        let tree = sp_tree(root);
-        collect(
-            &scope(Layer::Slide, layout.as_deref()),
-            tree,
-            &mut Vec::new(),
-            &mut shapes,
-        );
+        let s = scope(Layer::Slide, &part, layout.as_deref());
+        collect(&s, sp_tree(root), &mut Vec::new(), &mut shapes);
         let notes = match part.rels.of_kind("notesSlide") {
-            Some(r) => {
-                let target = r.target.clone();
-                notes_text(&self.pkg.part(&target)?.root)
-            }
+            Some(r) => notes_text(&self.part(&r.target)?.root),
             None => String::new(),
         };
         Ok(Slide {
+            background,
             shapes,
             hidden: root.flag("show") == Some(false),
             notes,
@@ -203,7 +252,7 @@ impl Reader {
         if let Some(l) = self.layouts.get(path) {
             return Ok(l.clone());
         }
-        let part = self.pkg.part(path)?;
+        let part = self.part(path)?;
         let master_path = part
             .rels
             .of_kind("slideMaster")
@@ -224,12 +273,9 @@ impl Reader {
         if let Some(m) = self.masters.get(path) {
             return Ok(m.clone());
         }
-        let part = self.pkg.part(path)?;
+        let part = self.part(path)?;
         let theme = match part.rels.of_kind("theme") {
-            Some(r) => {
-                let target = r.target.clone();
-                Some(self.pkg.part(&target)?)
-            }
+            Some(r) => Some(self.part(&r.target)?),
             None => None,
         };
         let elements = theme.as_ref().and_then(|t| t.root.child("themeElements"));
@@ -240,6 +286,7 @@ impl Reader {
                 elements.and_then(|e| e.child("clrScheme")),
                 part.root.child("clrMap"),
             ),
+            theme: theme.clone(),
             part,
         });
         self.masters.insert(path.to_owned(), master.clone());
@@ -320,7 +367,7 @@ fn find<'a>(list: &'a [Placeholder], kind: &str, idx: Option<u32>) -> Option<&'a
 /// The shapes a slide placeholder inherits from, nearest first: its layout's, then that
 /// one's master's (found by the layout placeholder's type). A placeholder its layout has
 /// no match for (an orphan, such as a title on a Blank layout, often `idx="4294967295"`)
-/// inherits no shape, as in LibreOffice: only its master text style.
+/// inherits nothing, as in LibreOffice.
 fn inherited<'a>(scope: &Scope<'a>, ph: &Element) -> Vec<&'a Element> {
     let Some(layout) = scope.layout else {
         return Vec::new();
@@ -388,6 +435,24 @@ impl Group {
             ch_y: n(off, "y"),
             ch_cx: n(ext, "cx"),
             ch_cy: n(ext, "cy"),
+            fill: Fill::None,
+        }
+    }
+
+    /// A SmartArt drawing's space: its coordinates are offsets from the graphic frame.
+    fn translate(frame: Frame) -> Group {
+        Group {
+            frame: Frame {
+                rotation: 0.0,
+                flip_h: false,
+                flip_v: false,
+                ..frame
+            },
+            ch_x: 0,
+            ch_y: 0,
+            ch_cx: frame.cx,
+            ch_cy: frame.cy,
+            fill: Fill::None,
         }
     }
 
@@ -443,18 +508,30 @@ fn alternate(e: &Element) -> Option<&Element> {
 fn collect(scope: &Scope<'_>, tree: &Element, groups: &mut Vec<Group>, out: &mut Vec<Shape>) {
     for e in tree.elements() {
         match e.name.as_str() {
+            "graphicFrame" if graphic_uri(e).ends_with("/diagram") => {
+                smart_art(scope, e, groups, out);
+            }
             "sp" | "cxnSp" | "pic" | "graphicFrame" => {
                 if let Some(shape) = shape(scope, e, groups) {
                     out.push(shape);
                 }
             }
             "grpSp" => {
-                if let Some(x) = xfrm(e) {
-                    groups.push(Group::of(x));
-                    collect(scope, e, groups, out);
-                    groups.pop();
-                } else {
-                    collect(scope, e, groups, out);
+                let parent_fill = groups.last().map(|g| g.fill.clone()).unwrap_or_default();
+                let mut group = xfrm(e).map(Group::of);
+                if let Some(g) = &mut group {
+                    g.fill = e
+                        .child("grpSpPr")
+                        .and_then(|p| scope.looks().fill_in(p, None, &parent_fill))
+                        .unwrap_or(parent_fill);
+                }
+                match group {
+                    Some(g) => {
+                        groups.push(g);
+                        collect(scope, e, groups, out);
+                        groups.pop();
+                    }
+                    None => collect(scope, e, groups, out),
                 }
             }
             "AlternateContent" => {
@@ -465,6 +542,41 @@ fn collect(scope: &Scope<'_>, tree: &Element, groups: &mut Vec<Group>, out: &mut
             _ => {}
         }
     }
+}
+
+fn graphic_uri(frame: &Element) -> &str {
+    frame
+        .path(&["graphic", "graphicData"])
+        .and_then(|d| d.attr("uri"))
+        .unwrap_or_default()
+}
+
+/// A SmartArt graphic frame: the shapes of the drawing PowerPoint saved with it (the
+/// diagram data part names the drawing), placed in the frame. Without a drawing it is an
+/// unsupported shape.
+fn smart_art(scope: &Scope<'_>, e: &Element, groups: &mut Vec<Group>, out: &mut Vec<Shape>) {
+    let drawing = (|| {
+        let ids = e.path(&["graphic", "graphicData", "relIds"])?;
+        let data = scope.part.rels.get(ids.rel_attr("dm")?)?;
+        let data = scope.pkg.borrow_mut().part(&data.target).ok()?;
+        let rel_id = data
+            .root
+            .path(&["extLst", "ext", "dataModelExt"])?
+            .attr("relId")?;
+        let drawing = scope.part.rels.get(rel_id)?;
+        scope.pkg.borrow_mut().part(&drawing.target).ok()
+    })();
+    let Some(drawing) = drawing else {
+        if let Some(shape) = shape(scope, e, groups) {
+            out.push(shape);
+        }
+        return;
+    };
+    let frame = xfrm(e).map(frame_of).unwrap_or_default();
+    let tree = drawing.root.child("spTree").unwrap_or(&drawing.root);
+    groups.push(Group::translate(frame));
+    collect(&scope.on(&drawing), tree, groups, out);
+    groups.pop();
 }
 
 fn shape(scope: &Scope<'_>, e: &Element, groups: &[Group]) -> Option<Shape> {
@@ -478,29 +590,142 @@ fn shape(scope: &Scope<'_>, e: &Element, groups: &[Group]) -> Option<Shape> {
     let x = xfrm(e).or_else(|| parents.iter().find_map(|p| xfrm(p)));
     let frame = x.map(frame_of).unwrap_or_default();
     let frame = groups.iter().rev().fold(frame, |f, g| g.apply(f));
+    let looks = scope.looks();
+    let group_fill = groups.last().map(|g| g.fill.clone()).unwrap_or_default();
+    let sp_prs: Vec<&Element> = std::iter::once(e)
+        .chain(parents.iter().copied())
+        .filter_map(|s| s.child("spPr"))
+        .collect();
+    let style = e.child("style");
     let kind = match e.name.as_str() {
-        "pic" => ShapeKind::Picture,
-        "graphicFrame" => graphic_kind(e),
-        _ => ShapeKind::Geometry {
-            preset: std::iter::once(e)
+        "pic" => picture(e, &looks),
+        "graphicFrame" => graphic(scope, e, &looks),
+        _ => {
+            let geom = std::iter::once(e)
                 .chain(parents.iter().copied())
-                .find_map(preset)
-                .unwrap_or_else(|| "rect".to_owned()),
-        },
+                .find_map(geometry);
+            let (preset, adjust) = geom.unwrap_or_else(|| ("rect".to_owned(), None));
+            ShapeKind::Geometry { preset, adjust }
+        }
+    };
+    let (fill, outline) = match e.name.as_str() {
+        // A graphic frame's look is its content's.
+        "graphicFrame" => (Fill::None, None),
+        _ => (
+            looks.shape_fill(&sp_prs, style, &group_fill),
+            looks.outline(&sp_prs, style),
+        ),
     };
     let text = shape_text(scope, e, ph, &parents);
+    let c_nv = nv.and_then(|n| n.child("cNvPr"));
+    let name = c_nv
+        .and_then(|c| c.attr("name"))
+        .filter(|n| !n.is_empty())
+        .or_else(|| e.attr("modelId"))
+        .unwrap_or_default()
+        .to_owned();
     Some(Shape {
-        name: nv
-            .and_then(|n| n.child("cNvPr"))
-            .and_then(|c| c.attr("name"))
-            .unwrap_or_default()
-            .to_owned(),
+        name,
         frame,
         kind,
+        fill,
+        outline,
         placeholder: ph.map(|p| placeholder_kind(p.attr("type").unwrap_or("obj"))),
         layer: scope.layer,
         text,
     })
+}
+
+/// A picture shape: its image, or what it stands for (a video, an EMF picture).
+fn picture(e: &Element, looks: &Looks<'_>) -> ShapeKind {
+    let blip_fill = e.child("blipFill");
+    let image = blip_fill
+        .and_then(|b| b.child("blip"))
+        .and_then(|b| looks.image(b));
+    let nv_pr = nv_props(e).and_then(|n| n.child("nvPr"));
+    let media = nv_pr.and_then(|n| {
+        n.elements()
+            .find_map(|m| match m.name.as_str() {
+                "videoFile" | "quickTimeFile" => Some("Video"),
+                "audioFile" | "audioCd" | "wavAudioFile" => Some("Audio"),
+                _ => None,
+            })
+            .or_else(|| {
+                // PowerPoint 2010's embedded media: `<p14:media>` in an extension.
+                n.path(&["extLst", "ext", "media"]).map(|_| "Video")
+            })
+    });
+    match (media, image) {
+        (Some(label), image) => ShapeKind::Unsupported {
+            label: label.to_owned(),
+            preview: image.filter(|i| i.format.is_drawable()),
+        },
+        (None, Some(image)) if image.format.is_drawable() => ShapeKind::Picture(Picture {
+            image,
+            crop: blip_fill.map(fill::crop).unwrap_or_default(),
+        }),
+        (None, Some(image)) => ShapeKind::Unsupported {
+            label: format!("Picture ({})", image.format.name()),
+            preview: None,
+        },
+        (None, None) => ShapeKind::Unsupported {
+            label: "Picture (missing)".to_owned(),
+            preview: None,
+        },
+    }
+}
+
+/// A graphic frame: a table, or a labelled shape for charts, embedded objects (with the
+/// preview picture the file keeps for them), and anything else.
+fn graphic(scope: &Scope<'_>, e: &Element, looks: &Looks<'_>) -> ShapeKind {
+    let Some(data) = e.path(&["graphic", "graphicData"]) else {
+        return unsupported("Object", None);
+    };
+    match graphic_uri(e).rsplit('/').next().unwrap_or_default() {
+        "table" => match data.child("tbl") {
+            Some(tbl) => {
+                let base: Vec<&Element> = scope
+                    .default_style
+                    .into_iter()
+                    .chain(
+                        scope
+                            .master
+                            .and_then(|m| m.part.root.path(&["txStyles", "otherStyle"])),
+                    )
+                    .collect();
+                ShapeKind::Table(crate::table::table(
+                    tbl,
+                    looks,
+                    scope.text,
+                    &base,
+                    scope.table_styles,
+                ))
+            }
+            None => unsupported("Table", None),
+        },
+        "chart" | "chartex" => unsupported("Chart", None),
+        "ole" => {
+            let ole = data.child("oleObj").or_else(|| {
+                data.child("AlternateContent")
+                    .and_then(|a| a.child("Fallback").or_else(|| a.child("Choice")))
+                    .and_then(|b| b.child("oleObj"))
+            });
+            let preview = ole
+                .and_then(|o| o.path(&["pic", "blipFill", "blip"]))
+                .and_then(|b| looks.image(b))
+                .filter(|i| i.format.is_drawable());
+            unsupported("Embedded object", preview)
+        }
+        "diagram" => unsupported("SmartArt", None),
+        _ => unsupported("Object", None),
+    }
+}
+
+fn unsupported(label: &str, preview: Option<Image>) -> ShapeKind {
+    ShapeKind::Unsupported {
+        label: label.to_owned(),
+        preview,
+    }
 }
 
 /// A shape's text with its styles: the presentation default, the master text style for
@@ -511,7 +736,7 @@ fn shape_text(
     e: &Element,
     ph: Option<&Element>,
     parents: &[&Element],
-) -> Option<presentation_model::TextBody> {
+) -> Option<TextBody> {
     let tx_body = e.child("txBody")?;
     let linked = ph.filter(|_| !parents.is_empty());
     let master_style = match linked.map(|p| family(p.attr("type").unwrap_or("obj"))) {
@@ -555,33 +780,24 @@ fn font_ref(e: &Element, ctx: &TextContext<'_>) -> FontRef {
             _ => None,
         },
         color: ctx.palette.first(r, None),
+        ..FontRef::default()
     }
 }
 
-/// A shape's geometry: its preset name, or `custom` for freeform geometry.
-fn preset(shape: &Element) -> Option<String> {
+/// A shape's geometry: its preset name and first adjust value, or `custom` for freeform
+/// geometry.
+fn geometry(shape: &Element) -> Option<(String, Option<f64>)> {
     let sp_pr = shape.child("spPr")?;
     if let Some(p) = sp_pr.child("prstGeom") {
-        return Some(p.attr("prst").unwrap_or("rect").to_owned());
+        let adjust = p
+            .path(&["avLst", "gd"])
+            .and_then(|g| g.attr("fmla"))
+            .and_then(|f| f.strip_prefix("val "))
+            .and_then(|v| v.trim().parse::<f64>().ok())
+            .map(|v| v / 100_000.0);
+        return Some((p.attr("prst").unwrap_or("rect").to_owned(), adjust));
     }
-    sp_pr.child("custGeom").map(|_| "custom".to_owned())
-}
-
-fn graphic_kind(frame: &Element) -> ShapeKind {
-    let uri = frame
-        .path(&["graphic", "graphicData"])
-        .and_then(|d| d.attr("uri"))
-        .unwrap_or_default();
-    let label = match uri.rsplit('/').next().unwrap_or_default() {
-        "table" => return ShapeKind::Table,
-        "chart" | "chartex" => "Chart",
-        "diagram" => "SmartArt",
-        "ole" => "Embedded object",
-        _ => "Object",
-    };
-    ShapeKind::Unsupported {
-        label: label.to_owned(),
-    }
+    sp_pr.child("custGeom").map(|_| ("custom".to_owned(), None))
 }
 
 /// The text of a notes slide's body placeholder: its paragraphs joined by `\n`.

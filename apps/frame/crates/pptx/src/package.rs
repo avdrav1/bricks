@@ -6,6 +6,7 @@ use crate::Error;
 use std::collections::HashMap;
 use std::io::{Read, Seek};
 use std::rc::Rc;
+use std::sync::Arc;
 use zip::ZipArchive;
 
 pub(crate) trait ReadSeek: Read + Seek {}
@@ -14,6 +15,7 @@ impl<T: Read + Seek> ReadSeek for T {}
 pub(crate) struct Package {
     zip: ZipArchive<Box<dyn ReadSeek>>,
     parts: HashMap<String, Rc<Part>>,
+    media: HashMap<String, Arc<[u8]>>,
 }
 
 /// A parsed XML part and its relationships.
@@ -52,11 +54,22 @@ impl Package {
         Ok(Package {
             zip,
             parts: HashMap::new(),
+            media: HashMap::new(),
         })
     }
 
     pub fn has(&self, name: &str) -> bool {
         self.zip.index_for_name(name).is_some()
+    }
+
+    /// A media part's bytes (cached: slides share pictures).
+    pub fn media(&mut self, name: &str) -> Result<Arc<[u8]>, Error> {
+        if let Some(b) = self.media.get(name) {
+            return Ok(b.clone());
+        }
+        let bytes: Arc<[u8]> = self.bytes(name)?.into();
+        self.media.insert(name.to_owned(), bytes.clone());
+        Ok(bytes)
     }
 
     /// A part's bytes.

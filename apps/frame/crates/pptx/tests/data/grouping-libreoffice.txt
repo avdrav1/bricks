@@ -1,0 +1,215 @@
+size	9144000	6858000
+slide	1	hidden=0
+background	solid FFFFFF 100
+shape	0	CustomShape	5979960	2249640	2995560	1108080	0	0	0	Rectangle 6
+fill	solid C0C0C0 100
+line	solid 000000 9360
+shape	0	GroupShape	6870600	1463400	1344600	875160	0	0	0	Group 10
+shape	1	CustomShape	8029440	1855440	185760	349920	0	0	0	AutoShape 11
+fill	solid D60093 100
+line	solid D60093 9360
+shape	1	CustomShape	6870600	1855440	185760	349920	0	0	0	AutoShape 12
+fill	solid D60093 100
+line	solid D60093 9360
+shape	1	CustomShape	7106580	1502820	875160	795600	270	0	0	AutoShape 13
+fill	solid D60093 100
+line	solid D60093 9360
+shape	0	GroupShape	5029200	1463400	1344600	875160	0	0	0	Group 14
+shape	1	CustomShape	6188040	1855440	185760	349920	0	0	0	AutoShape 15
+fill	solid D60093 100
+line	solid D60093 9360
+shape	1	CustomShape	5029200	1855440	185760	349920	0	0	0	AutoShape 16
+fill	solid D60093 100
+line	solid D60093 9360
+shape	1	CustomShape	5264820	1502820	875160	795600	270	0	0	AutoShape 17
+fill	solid D60093 100
+line	solid D60093 9360
+shape	0	GroupShape	3181320	1463400	1344600	875160	0	0	0	Group 18
+shape	1	CustomShape	4340160	1855440	185760	349920	0	0	0	AutoShape 19
+fill	solid D60093 100
+line	solid D60093 9360
+shape	1	CustomShape	3181320	1855440	185760	349920	0	0	0	AutoShape 20
+fill	solid D60093 100
+line	solid D60093 9360
+shape	1	CustomShape	3416940	1502820	875160	795600	270	0	0	AutoShape 21
+fill	solid D60093 100
+line	solid D60093 9360
+shape	0	GroupShape	1333440	1463400	1344600	875160	0	0	0	Group 22
+shape	1	CustomShape	2492280	1855440	185760	349920	0	0	0	AutoShape 23
+fill	solid D60093 100
+line	solid D60093 9360
+shape	1	CustomShape	1333440	1855440	185760	349920	0	0	0	AutoShape 24
+fill	solid D60093 100
+line	solid D60093 9360
+shape	1	CustomShape	1569060	1502820	875160	795600	270	0	0	AutoShape 25
+fill	solid D60093 100
+line	solid D60093 9360
+shape	0	CustomShape	7939080	2200320	276120	42840	0	0	0	Rectangle 26
+fill	solid CCFFCC 100
+line	solid CCFFCC 9360
+shape	0	CustomShape	6095880	2200320	268200	42840	0	0	0	Rectangle 27
+fill	solid CCFFCC 100
+line	solid CCFFCC 9360
+shape	0	CustomShape	2408400	2200320	270000	42840	0	0	0	Rectangle 28
+fill	solid CCFFCC 100
+line	solid CCFFCC 9360
+shape	0	CustomShape	1341360	2205000	260280	44280	0	0	0	Rectangle 29
+fill	solid CCFFCC 100
+line	solid CCFFCC 9360
+shape	0	GroupShape	7132680	1422360	806400	820800	0	0	0	Group 30
+shape	1	CustomShape	7132680	2157840	806400	85320	0	0	0	Rectangle 31
+fill	solid CCFFCC 100
+line	solid CCFFCC 9360
+shape	1	CustomShape	7248600	1422360	576360	791640	0	0	0	AutoShape 32
+fill	solid CCFFCC 100
+line	solid CCFFCC 9360
+shape	1	CustomShape	7132680	1451520	806400	791640	0	0	0	AutoShape 33
+fill	solid CCFFCC 100
+line	solid CCFFCC 9360
+shape	0	GroupShape	5289480	1422360	806400	820800	0	0	0	Group 34
+shape	1	CustomShape	5289480	2157840	806400	85320	0	0	0	Rectangle 35
+fill	solid CCFFCC 100
+line	solid CCFFCC 9360
+shape	1	CustomShape	5405400	1422360	576360	791640	0	0	0	AutoShape 36
+fill	solid CCFFCC 100
+line	solid CCFFCC 9360
+shape	1	CustomShape	5289480	1451520	806400	791640	0	0	0	AutoShape 37
+fill	solid CCFFCC 100
+line	solid CCFFCC 9360
+shape	0	GroupShape	3444840	1428840	806400	814320	0	0	0	Group 38
+shape	1	CustomShape	3444840	2158560	806400	84600	0	0	0	Rectangle 39
+fill	solid CCFFCC 100
+line	solid CCFFCC 9360
+shape	1	CustomShape	3560760	1428840	576360	785520	0	0	0	AutoShape 40
+fill	solid CCFFCC 100
+line	solid CCFFCC 9360
+shape	1	CustomShape	3444840	1457640	806400	785520	0	0	0	AutoShape 41
+fill	solid CCFFCC 100
+line	solid CCFFCC 9360
+shape	0	GroupShape	1601640	1428840	806400	814320	0	0	0	Group 42
+shape	1	CustomShape	1601640	2158560	806400	84600	0	0	0	Rectangle 43
+fill	solid CCFFCC 100
+line	solid CCFFCC 9360
+shape	1	CustomShape	1717560	1428840	576360	785520	0	0	0	AutoShape 44
+fill	solid CCFFCC 100
+line	solid CCFFCC 9360
+shape	1	CustomShape	1601640	1457640	806400	785520	0	0	0	AutoShape 45
+fill	solid CCFFCC 100
+line	solid CCFFCC 9360
+shape	0	GroupShape	3505320	1447920	685800	838080	0	0	0	Group 46
+shape	1	CustomShape	3505320	2213640	685800	72360	0	0	0	Rectangle 47
+fill	solid FF0000 100
+line	solid FF0000 9360
+shape	1	CustomShape	3505320	1447920	685800	838080	0	0	0	AutoShape 48
+fill	solid FF0000 100
+line	solid FF0000 9360
+shape	0	GroupShape	7170840	1422360	730080	820800	0	0	0	Group 49
+shape	1	CustomShape	7170840	2172240	730080	70560	0	0	0	Rectangle 50
+fill	solid FF0000 100
+line	solid FF0000 9360
+shape	1	CustomShape	7170840	1422360	730080	820800	0	0	0	AutoShape 51
+fill	solid FF0000 100
+line	solid FF0000 9360
+shape	0	GroupShape	5327640	1428840	730080	814320	0	0	0	Group 52
+shape	1	CustomShape	5327640	2172960	730080	70200	0	0	0	Rectangle 53
+fill	solid FF0000 100
+line	solid FF0000 9360
+shape	1	CustomShape	5327640	1428840	730080	814320	0	0	0	AutoShape 54
+fill	solid FF0000 100
+line	solid FF0000 9360
+shape	0	CustomShape	1639800	2127240	730080	115920	0	0	0	Rectangle 55
+fill	solid FF0000 100
+line	solid FF0000 9360
+shape	0	CustomShape	1639800	1428840	730080	814320	0	0	0	AutoShape 56
+fill	solid FF0000 100
+line	solid FF0000 9360
+shape	0	CustomShape	7246800	2127240	576360	115920	0	0	0	Rectangle 57
+fill	solid CC0066 100
+line	solid CC0066 9360
+shape	0	CustomShape	5403960	2127240	576360	115920	0	0	0	Rectangle 58
+fill	solid CC0066 100
+line	solid CC0066 9360
+shape	0	CustomShape	3560760	2127240	576360	115920	0	0	0	Rectangle 59
+fill	solid CC0066 100
+line	solid CC0066 9360
+shape	0	CustomShape	1717560	2127240	576360	115920	0	0	0	Rectangle 60
+fill	solid CC0066 100
+line	solid CC0066 9360
+shape	0	CustomShape	7246800	1428840	576360	814320	0	0	0	AutoShape 61
+fill	solid CC0066 100
+line	solid CC0066 9360
+shape	0	CustomShape	5403960	1422360	576360	820800	0	0	0	AutoShape 62
+fill	solid CC0066 100
+line	solid CC0066 9360
+shape	0	CustomShape	3581280	1447920	533520	838080	0	0	0	AutoShape 63
+fill	solid CC0066 100
+line	solid CC0066 9360
+shape	0	CustomShape	1717560	1428840	576360	814320	0	0	0	AutoShape 64
+fill	solid CC0066 100
+line	solid CC0066 9360
+shape	0	CustomShape	1793880	1353960	422280	888840	0	0	0	Rectangle 65
+fill	solid C0C0C0 100
+line	solid 000000 9360
+shape	0	CustomShape	3637080	1353960	422280	888840	0	0	0	Rectangle 66
+fill	solid C0C0C0 100
+line	solid 000000 9360
+shape	0	CustomShape	5481720	1353960	422280	888840	0	0	0	Rectangle 67
+fill	solid C0C0C0 100
+line	solid 000000 9360
+shape	0	CustomShape	7324560	1353960	422280	888840	0	0	0	Rectangle 68
+fill	solid C0C0C0 100
+line	solid 000000 9360
+shape	0	CustomShape	181080	2243160	3732120	1114560	0	0	0	Rectangle 69
+fill	solid C0C0C0 100
+line	solid 000000 9360
+shape	0	CustomShape	4267080	2209680	272880	42840	0	0	0	Rectangle 70
+fill	solid CCFFCC 100
+line	solid CCFFCC 9360
+shape	0	CustomShape	2220840	2165400	154080	76320	0	0	0	Rectangle 71
+fill	solid CC0066 100
+line	solid CC0066 9360
+shape	0	CustomShape	1639800	2166840	154080	76320	0	0	0	Rectangle 74
+fill	solid CC0066 100
+line	solid CC0066 9360
+shape	0	CustomShape	5327640	2166840	154080	76320	0	0	0	Rectangle 75
+fill	solid CC0066 100
+line	solid CC0066 9360
+shape	0	CustomShape	5902200	2166840	154080	76320	0	0	0	Rectangle 76
+fill	solid CC0066 100
+line	solid CC0066 9360
+shape	0	CustomShape	7172280	2166840	154080	76320	0	0	0	Rectangle 77
+fill	solid CC0066 100
+line	solid CC0066 9360
+shape	0	CustomShape	7746840	2166840	154080	76320	0	0	0	Rectangle 78
+fill	solid CC0066 100
+line	solid CC0066 9360
+shape	0	CustomShape	1792440	2166840	423720	73080	0	0	0	Rectangle 83
+fill	solid CC99FF 100
+line	none
+shape	0	CustomShape	5481720	2166840	423720	73080	0	0	0	Rectangle 85
+fill	solid CC99FF 100
+line	none
+shape	0	CustomShape	7326360	2166840	423720	73080	0	0	0	Rectangle 86
+fill	solid CC99FF 100
+line	none
+shape	0	CustomShape	5016600	2198520	272880	42840	0	0	0	Rectangle 128
+fill	solid CCFFCC 100
+line	solid CCFFCC 9360
+shape	0	CustomShape	3181320	2190600	270000	42840	0	0	0	Rectangle 129
+fill	solid CCFFCC 100
+line	solid CCFFCC 9360
+shape	0	CustomShape	6870600	2190600	268200	42840	0	0	0	Rectangle 130
+fill	solid CCFFCC 100
+line	solid CCFFCC 9360
+shape	0	CustomShape	3505320	2165400	152280	76320	0	0	0	Rectangle 71
+fill	solid CC0066 100
+line	solid CC0066 9360
+shape	0	CustomShape	4038480	2165400	154080	76320	0	0	0	Rectangle 71
+fill	solid CC0066 100
+line	solid CC0066 9360
+shape	0	CustomShape	3637080	2163600	430200	74520	0	0	0	Rectangle 84
+fill	solid CC99FF 100
+line	none
+shape	0	CustomShape	3917880	2247840	430200	74520	0	0	0	Rectangle 84
+fill	solid FFFFFF 100
+line	none

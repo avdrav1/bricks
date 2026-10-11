@@ -16,5 +16,8 @@ compare Frame's reading with these dumps, so they need no LibreOffice.
   - `themes.pptx`: <https://github.com/apache/poi/blob/trunk/test-data/slideshow/themes.pptx>
   - `backgrounds.pptx`: <https://github.com/apache/poi/blob/trunk/test-data/slideshow/backgrounds.pptx>
   - `bar-chart.pptx`: <https://github.com/apache/poi/blob/trunk/test-data/slideshow/bar-chart.pptx>
+  - `smartart-simple.pptx`: <https://github.com/apache/poi/blob/trunk/test-data/slideshow/smartart-simple.pptx>
+  - `table-with-theme.pptx`: <https://github.com/apache/poi/blob/trunk/test-data/slideshow/table-with-theme.pptx>
+  - `grouping.pptx`: `sample_pptx_grouping_issues.pptx`, <https://github.com/apache/poi/blob/trunk/test-data/slideshow/sample_pptx_grouping_issues.pptx>
 
 To re-record a dump: `python3 scripts/lo_pptx.py dump apps/frame/crates/pptx/tests/data/NAME.pptx > apps/frame/crates/pptx/tests/data/NAME-libreoffice.txt`.
