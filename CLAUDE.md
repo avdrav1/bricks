@@ -3,8 +3,8 @@
 Cronkite: a Linux-native office suite in Rust: one Cargo workspace, three apps. Repo: `github.com/avdrav1/cronkite`; suite page: `sites/cronkite/` (cronkite.cc). Suite architecture: `docs/architecture/overview.md`; suite ADRs: `docs/adr/`.
 
 - **Bricks** (`apps/bricks`, command `bricks`): a fast, lightweight spreadsheet. V0.1 is the best large-CSV editor on Linux; Excel compatibility comes later. Product spec: `apps/bricks/docs/SPEC.md`. Work queue: `BACKLOG.md`.
-- **Slate** (`apps/slate`, command `slate`): word processor. Scaffold only.
-- **Frame** (`apps/frame`, command `frame`; working name): presentation app. Scaffold only.
+- **Slate** (`apps/slate`, command `slate`): word processor for .txt, .md, and .docx. Spec: `docs/specs/slate.md`; design: `docs/adr/0003-slate-document-model.md`. SL0 builds a read-only viewer.
+- **Frame** (`apps/frame`, command `frame`; working name): presentation app for .pptx. Spec: `docs/specs/frame.md`; design: `docs/adr/0004-frame-presentation-model.md`. FR0 builds a viewer with a slideshow.
 
 Everything below about stories, invariants, crates, benchmarks, and ADRs is Bricks' unless it says otherwise.
 
@@ -73,9 +73,9 @@ python3 scripts/lo_formats.py            # re-record number format results from 
 python3 scripts/lo_xlsx.py fixture|dump FILE  # LibreOffice fixture workbook and dumps (XLSX-*)
 cargo run --release -p xlsx --example gen_corpus_xlsx  # corpus/rows_1m.xlsx (BENCH-2)
 cargo run --release -p xlsx --example gen_corpus_xlsx -- --styled   # corpus/styled_1m.xlsx (STYLE-3, BENCH-3)
-python3 -m unittest discover -s scripts  # script tests (corpus generator)
+python3 -m unittest discover -s scripts  # script tests (corpus generator, backlog helper)
 cargo bench                              # prints the apps/bricks/docs/BENCHMARKS.md table (needs corpus/)
-python3 scripts/backlog.py next|status   # backlog helper
+python3 scripts/backlog.py next [bricks|slate|frame]|status   # backlog helper; one milestone chain per app
 ```
 
 ## Performance

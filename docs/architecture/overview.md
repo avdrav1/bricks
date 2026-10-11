@@ -4,8 +4,8 @@ Cronkite is a Linux-native office suite written in Rust: Bricks, Slate, and Fram
 
 ```text
 Bricks — spreadsheet / CSV editor
-Slate  — word processor
-Frame  — presentation app (working name)
+Slate  — word processor: .txt, .md, .docx (docs/specs/slate.md, ADR 0003)
+Frame  — presentation app (working name): .pptx (docs/specs/frame.md, ADR 0004)
 ```
 
 ## Guiding principle
@@ -79,7 +79,7 @@ These are likely candidates, listed so the shape is visible. None exists yet, an
 | --- | --- |
 | Suite-wide | `text-engine`, `rendering`, `undo`, `commands`, `pdf-export`, `charts`, `tables` |
 | Bricks | `bricks-model`, `csv-engine`, `xlsx` (the last two exist today as Bricks-only crates) |
-| Slate | `document-model`, `docx` |
-| Frame | `presentation-model`, `pptx` |
+| Slate | `document-model`, `docx` (planned by ADR 0003; built in SL0) |
+| Frame | `presentation-model`, `pptx` (planned by ADR 0004; built in FR0) |
 
 Candidates already overlap with Bricks' own crates (`commands` holds Bricks' undo stack). Extracting one for the suite means generalizing it with a second app as its user, not moving it ahead of time.

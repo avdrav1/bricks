@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Read and update BACKLOG.md.
 
-  backlog.py next              print the next story to build (JSON)
+  backlog.py next [APP]        print the next story to build (JSON); APP is bricks, slate,
+                               or frame (default: every app, in that order)
   backlog.py show ID           print one story (JSON)
   backlog.py set ID STATUS     set a story's status
   backlog.py status            milestone progress summary
@@ -14,7 +15,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 BACKLOG = ROOT / "BACKLOG.md"
-MILESTONES = ["S0", "M0", "M1", "M2", "M3", "M4", "M5"]
+# Each app's milestones, in order: a milestone unlocks when the previous one of the same
+# app has its gate checked.
+CHAINS = {
+    "bricks": ["S0", "M0", "M1", "M2", "M3", "M4", "M5"],
+    "slate": ["SL0", "SL1"],
+    "frame": ["FR0", "FR1"],
+}
+MILESTONES = [ms for chain in CHAINS.values() for ms in chain]
 STATUSES = {"todo", "in-progress", "review", "done", "blocked"}
 COLS = ["id", "ms", "pri", "status", "depends", "story", "acceptance"]
 
@@ -23,7 +31,7 @@ def load():
     text = BACKLOG.read_text()
     stories, gates = [], {}
     for line in text.splitlines():
-        m = re.match(r"- \[( |x)\] (S0|M\d):", line)
+        m = re.match(r"- \[( |x)\] (S0|M\d+|SL\d+|FR\d+):", line)
         if m:
             gates[m.group(2)] = m.group(1) == "x"
             continue
@@ -36,19 +44,31 @@ def load():
     return text, stories, gates
 
 
+def chain_of(ms):
+    return next(chain for chain in CHAINS.values() if ms in chain)
+
+
 def unlocked(ms, gates):
-    i = MILESTONES.index(ms)
-    return i == 0 or gates.get(MILESTONES[i - 1], False)
+    chain = chain_of(ms)
+    i = chain.index(ms)
+    return i == 0 or gates.get(chain[i - 1], False)
 
 
-def next_story():
+def next_story(app=None):
+    if app is None:
+        for name in CHAINS:
+            got = next_story(name)
+            if got["action"] != "complete":
+                return got
+        return {"action": "complete", "message": "Every non-P2 story is done."}
+    chain = CHAINS[app]
     _, stories, gates = load()
     done = {s["id"] for s in stories if s["status"] == "done"}
     for status in ("in-progress", "review"):
         for s in stories:
-            if s["status"] == status:
+            if s["status"] == status and s["ms"] in chain:
                 return {"action": "resume", **s}
-    for ms in MILESTONES:
+    for ms in chain:
         open_in_ms = [s for s in stories if s["ms"] == ms and s["status"] != "done" and s["pri"] != "P2"]
         if not open_in_ms:
             if not gates.get(ms, False):
@@ -56,7 +76,7 @@ def next_story():
                         "message": f"All {ms} stories are done. Verify the {ms} gate and ask the user to approve it."}
             continue
         if not unlocked(ms, gates):
-            prev = MILESTONES[MILESTONES.index(ms) - 1]
+            prev = chain[chain.index(ms) - 1]
             return {"action": "gate", "milestone": prev,
                     "message": f"{prev} gate is unchecked; {ms} is locked."}
         for pri in ("P0", "P1"):
@@ -65,7 +85,7 @@ def next_story():
                     return {"action": "start", **s}
         blocked = [{"id": s["id"], "waiting_on": [d for d in s["depends"] if d not in done]} for s in open_in_ms]
         return {"action": "stuck", "milestone": ms, "blocked": blocked}
-    return {"action": "complete", "message": "Every non-P2 story is done."}
+    return {"action": "complete", "message": f"Every non-P2 {app} story is done."}
 
 
 def set_status(sid, status):
@@ -99,8 +119,10 @@ def summary():
 
 if __name__ == "__main__":
     a = sys.argv[1:]
-    if not a or a[0] == "next":
+    if not a or (a[0] == "next" and len(a) == 1):
         print(json.dumps(next_story(), indent=2))
+    elif a[0] == "next" and len(a) == 2 and a[1] in CHAINS:
+        print(json.dumps(next_story(a[1]), indent=2))
     elif a[0] == "show" and len(a) == 2:
         _, stories, _ = load()
         hit = [s for s in stories if s["id"] == a[1]]
