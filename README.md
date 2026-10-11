@@ -4,11 +4,11 @@ A fast, lightweight spreadsheet for Linux, written in Rust. V0.1 goal: open, bro
 
 ## Install
 
-For your user, without sudo (x86_64 Linux with GTK 4.14 or newer: Arch, Ubuntu 24.04, Fedora, and newer):
+For your user, without sudo (x86_64 Linux with GTK 4.14 or newer: Arch, Ubuntu 24.04, Fedora, and newer). Download page: <https://spreadsheet-6w6.pages.dev>.
 
 ```sh
-curl -fsSL https://<download page>/install.sh | sh                    # install or update
-curl -fsSL https://<download page>/install.sh | sh -s -- --uninstall  # remove
+curl -fsSL https://spreadsheet-6w6.pages.dev/install.sh | sh                    # install or update
+curl -fsSL https://spreadsheet-6w6.pages.dev/install.sh | sh -s -- --uninstall  # remove
 ```
 
 It puts `spreadsheet` in `~/.local/bin`, adds it to the app menu, and makes it the default for CSV and TSV files. The download is checked against the release's sha256 first.
