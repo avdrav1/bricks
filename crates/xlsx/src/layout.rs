@@ -33,6 +33,7 @@ pub(crate) fn read_layout(
     // The next row and column when the file leaves out `r` (it may).
     let (mut row, mut next_col) = (0u64, 0u32);
     let mut events = 0u32;
+    let mut seen_view = false;
     loop {
         events += 1;
         if events == CHECK_EVENTS {
@@ -113,6 +114,11 @@ pub(crate) fn read_layout(
                     layout.default_row_height = num(&e, b"defaultRowHeight");
                     layout.default_col_width = num(&e, b"defaultColWidth");
                     layout.base_col_width = num(&e, b"baseColWidth");
+                }
+                // The first view is the one Excel opens with.
+                b"sheetView" if !seen_view => {
+                    seen_view = true;
+                    layout.hide_grid_lines = flag(&e, b"showGridLines") == Some(false);
                 }
                 b"mergeCell" => {
                     if let Some(area) = attr(&e, b"ref").and_then(|r| area(r.as_bytes())) {

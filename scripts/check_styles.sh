@@ -19,6 +19,11 @@
 #      A1:D1 (their mean x, measured along the yellow row 2 that spans A..H, lies in the
 #      middle third of A..D, whose share of A..H comes from the sheet's column widths);
 #      and after inserting a row above row 1, Right from A2 lands on E2.
+#   6. a hand-built workbook: "Title" in B2, centred across the yellow B2:H2 (Excel's
+#      Center Across Selection), has its glyphs' mean x in the middle fifth of the yellow
+#      run (centred in B2 alone it sits in the first tenth); and the same sheet with
+#      `showGridLines="0"` draws no grid lines: more than 1,000 pixels differ from it with
+#      grid lines on.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -39,6 +44,27 @@ printf "output HEADLESS-1 resolution 1280x720\ndefault_border none\n" > /tmp/swa
 cp /fixture.xlsx /tmp/f.xlsx
 printf "a,\n" > /tmp/n0.csv; printf "a,1\n" > /tmp/n1.csv; printf "a,b\n" > /tmp/n2.csv
 printf " \n" > /tmp/o0.csv; printf "This text is much longer than its column\n" > /tmp/o1.csv
+cat > /tmp/across.py <<"PY"
+# Writes /tmp/across0.xlsx (grid lines off) and /tmp/across1.xlsx (on): "Title" in B2,
+# B2:H2 yellow and centred across selection, text below in B4 and I4 (the grid shows
+# the columns up to the last value of the widest row).
+import zipfile
+parts = {
+    "[Content_Types].xml": """<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>""",
+    "_rels/.rels": """<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>""",
+    "xl/workbook.xml": """<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Across" sheetId="1" r:id="rId1"/></sheets></workbook>""",
+    "xl/_rels/workbook.xml.rels": """<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>""",
+    "xl/styles.xml": """<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFFF00"/></patternFill></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="0" fillId="2" borderId="0" xfId="0" applyFill="1" applyAlignment="1"><alignment horizontal="centerContinuous"/></xf></cellXfs></styleSheet>""",
+}
+run = "".join(f"<c r=\"{c}2\" s=\"1\"/>" for c in "CDEFGH")
+for name, view in (("across0", " showGridLines=\"0\""), ("across1", "")):
+    sheet = f"""<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView{view} workbookViewId="0"/></sheetViews><sheetData><row r="2"><c r="B2" s="1" t="inlineStr"><is><t>Title</t></is></c>{run}</row><row r="4"><c r="B4" t="inlineStr"><is><t>below</t></is></c><c r="I4" t="inlineStr"><is><t>end</t></is></c></row></sheetData></worksheet>"""
+    with zipfile.ZipFile(f"/tmp/{name}.xlsx", "w") as z:
+        for part, body in parts.items():
+            z.writestr(part, body)
+        z.writestr("xl/worksheets/sheet1.xml", sheet)
+PY
+python3 /tmp/across.py
 cat > /tmp/px.py <<"PY"
 import sys
 import gi
@@ -112,6 +138,23 @@ elif cmd == "centre":
                   if all(p[y * rs + x * n + k] < 90 for k in range(3))]
         if glyphs:
             print(f"centre: {(sum(glyphs) / len(glyphs) - left) / (right - left) * 1000:.0f}")
+elif cmd == "across":
+    # The dark glyph pixels inside the yellow run, as a share of its width in thousandths;
+    # and how many pixels the grid lines account for.
+    w, h, rs, n, p = load("/shots/across0.png")
+    yellow = [(x, y) for y in range(h) for x in range(w)
+              if p[y * rs + x * n:y * rs + x * n + 3] == b"\xff\xff\x00"]
+    if yellow:
+        top, bottom = min(y for _, y in yellow), max(y for _, y in yellow)
+        left, right = min(x for x, _ in yellow), max(x for x, _ in yellow)
+        glyphs = [x for y in range(top, bottom + 1) for x in range(left, right + 1)
+                  if all(p[y * rs + x * n + k] < 90 for k in range(3))]
+        if glyphs:
+            print(f"across: {(sum(glyphs) / len(glyphs) - left) / (right - left) * 1000:.0f}")
+    _, _, rsb, nb, pb = load("/shots/across1.png")
+    lines = sum(1 for y in range(h) for x in range(w)
+                if any(abs(p[y * rs + x * n + k] - pb[y * rsb + x * nb + k]) > 8 for k in range(3)))
+    print(f"grid: {lines}")
 else:
     for name in sys.argv[2:]:
         rgb, tol = int(name, 16), 0 if name in ("FFFF00", "C4FEBB", "127A02", "E9706D", "305496") else 30
@@ -157,7 +200,13 @@ session() {
   python3 /tmp/px.py centre
   go Styles!A1; keys -M ctrl -k KP_Add -m ctrl; sleep 2
   go Styles!A2; keys -k Right; sleep 0.5; shown inserted
-  pkill -x bricks
+  pkill -x bricks; sleep 1
+  echo "== 6 across"
+  for f in across0 across1; do
+    cp /tmp/$f.xlsx /tmp/a.xlsx; bricks /tmp/a.xlsx >>/tmp/app.log 2>&1 & sleep 5
+    shot $f; pkill -x bricks; sleep 1
+  done
+  python3 /tmp/px.py across
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -195,6 +244,13 @@ else
   echo "FAIL 5: the title centres across A1:D1 (${centre:-nothing}, want within ${third:-?})"; fail=1
 fi
 check "5: inserting a row above moves the merge" "5 merges" "^inserted: E2: ?$"
+across=$(section "6 across" | sed -n "s/^across: //p" | head -1)
+if [ -n "$across" ] && [ "$across" -ge 400 ] && [ "$across" -le 600 ]; then
+  echo "ok   6: the title centres across B2:H2 ($across)"
+else
+  echo "FAIL 6: the title centres across B2:H2 (${across:-nothing}, want 400..600)"; fail=1
+fi
+at_least "6: grid lines off draws none" "6 across" "grid" 1000
 if [ $fail = 0 ]; then echo "STYLES OK"; else
   echo "STYLES CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

@@ -36,6 +36,8 @@ const FILTER_W: f64 = 16.0;
 /// Rows loaded above and below the visible ones.
 const BUFFER_ROWS: u64 = 100;
 const PAD: f64 = 4.0;
+/// Most cells a centre-across-selection run reaches on each side of its text.
+const ACROSS_MAX: u64 = 256;
 /// Smallest sizes a drag can give a column or row.
 const MIN_COL_W: f64 = 16.0;
 const MIN_ROW_H: f64 = 8.0;
@@ -423,11 +425,19 @@ mod imp {
                     if let Some(font) = &look.font {
                         l.set_font_description(Some(font));
                     }
-                    l.set_attributes(look.attrs.as_ref());
                     if wrap > 0 {
+                        // Excel breaks a word too long for the cell without a hyphen.
+                        let attrs = look
+                            .attrs
+                            .as_ref()
+                            .and_then(pango::AttrList::copy)
+                            .unwrap_or_default();
+                        attrs.insert(pango::AttrInt::new_insert_hyphens(false));
+                        l.set_attributes(Some(&attrs));
                         l.set_width(wrap * pango::SCALE);
                         l.set_wrap(pango::WrapMode::WordChar);
                     } else {
+                        l.set_attributes(look.attrs.as_ref());
                         l.set_single_paragraph_mode(true);
                     }
                     l
@@ -549,8 +559,10 @@ mod imp {
             let row_y = |r: u64| HEADER_H + rows.pos(r);
             let row_end = |r: u64| row_y(r) + rows.size(r);
 
-            // Body: stripes, grid lines, cells. Stripes and inner lines stop at merges.
+            // Body: stripes, grid lines, cells. Stripes and inner lines stop at merges; a
+            // sheet saved with grid lines off shows only its cells' borders, as in Excel.
             snapshot.push_clip(&rect(rh_w, HEADER_H, body_w, body_h));
+            let grid_lines = !table.layout().hide_grid_lines;
             let mut holes: Vec<(f64, f64)> = Vec::new();
             for r in visible.clone() {
                 let (y, rh) = (row_y(r), rows.size(r));
@@ -566,6 +578,9 @@ mod imp {
                         snapshot.append_color(&stripe, &rect(x0, y, x1 - x0, rh));
                     });
                 }
+                if !grid_lines {
+                    continue;
+                }
                 holes.clear();
                 holes.extend(
                     merged
@@ -577,7 +592,7 @@ mod imp {
                     snapshot.append_color(&line, &rect(x0, y + rh - 1.0, x1 - x0, 1.0));
                 });
             }
-            for c in visible_cols.clone() {
+            for c in visible_cols.clone().filter(|_| grid_lines) {
                 let x = col_end(c as u32) - 1.0;
                 holes.clear();
                 holes.extend(
@@ -635,10 +650,16 @@ mod imp {
                 let (x1, y1) = (clamp_x(col_end(m.br.col)), clamp_y(row_end(m.br.row)));
                 (x0, x1 - x0, y0, y1 - y0)
             };
+            // Fills snap to whole pixels: neighbours sharing a fractional edge would each
+            // cover part of that pixel and leave a light seam between them.
+            let fill_rect = |x: f64, y: f64, w: f64, h: f64| {
+                let (x0, y0) = (x.round(), y.round());
+                rect(x0, y0, (x + w).round() - x0, (y + h).round() - y0)
+            };
             for (r, c, look) in &cells {
                 if let Some(fill) = look.fill {
                     let (x, y) = (rh_w + cols.pos(*c), HEADER_H + rows.pos(*r));
-                    snapshot.append_color(&fill, &rect(x, y, cols.size(*c), rows.size(*r)));
+                    snapshot.append_color(&fill, &fill_rect(x, y, cols.size(*c), rows.size(*r)));
                 }
             }
             for (m, look) in merged.iter().zip(&merged_looks) {
@@ -647,12 +668,32 @@ mod imp {
                     snapshot.append_color(&stripe, &rect(x, y, mw, mh));
                 }
                 if let Some(fill) = look.fill {
-                    snapshot.append_color(&fill, &rect(x, y, mw, mh));
+                    snapshot.append_color(&fill, &fill_rect(x, y, mw, mh));
                 }
             }
             let empty = |r: u64, c: u64| {
                 !covered(r, c) && cache.cell(r, c as u32).is_none_or(str::is_empty)
             };
+            // Centre across selection (`centerContinuous`): text centres over the run of
+            // empty cells beside it that have the same alignment, as in Excel; the cells
+            // keep their own fills and borders. Keyed by index into `cells`.
+            let mut across: Vec<(usize, f64, f64)> = Vec::new();
+            for (i, (r, c, look)) in cells.iter().enumerate() {
+                if look.horizontal != HAlign::CenterContinuous || empty(*r, *c) {
+                    continue;
+                }
+                let row = table.row_id(*r);
+                let (first, last) = across_run(*c, cols.count, |k| {
+                    let col = table.col_id(k as u32);
+                    empty(*r, k)
+                        && looks.get(table.style_of(CellRef { row, col })).horizontal
+                            == HAlign::CenterContinuous
+                });
+                if first != last {
+                    let x = rh_w + cols.pos(first);
+                    across.push((i, x, rh_w + cols.pos(last) + cols.size(last) - x));
+                }
+            }
             let digit_w = f64::from(self.layout("0").pixel_size().0.max(1));
             // Draws `raw` in `look` in the cell at (`x`, `y`), `cw` by `rh`; `spill` (its
             // row and column) lets text that doesn't fit overflow into empty neighbours.
@@ -787,12 +828,17 @@ mod imp {
                     snapshot.pop();
                 }
             };
-            for (r, c, look) in &cells {
+            let mut across = across.into_iter().peekable();
+            for (i, (r, c, look)) in cells.iter().enumerate() {
                 let Some(raw) = cache.cell(*r, *c as u32).filter(|t| !t.is_empty()) else {
                     continue;
                 };
-                let (x, cw) = (rh_w + cols.pos(*c), cols.size(*c));
                 let (y, rh) = (HEADER_H + rows.pos(*r), rows.size(*r));
+                if let Some((_, x, w)) = across.next_if(|a| a.0 == i) {
+                    draw_text(raw, look, (x, w), (y, rh), None);
+                    continue;
+                }
+                let (x, cw) = (rh_w + cols.pos(*c), cols.size(*c));
                 draw_text(raw, look, (x, cw), (y, rh), Some((*r, *c)));
             }
             // A merge's text is its anchor's, laid out across the whole merge (a centred
@@ -4708,14 +4754,33 @@ enum Align {
     Right,
 }
 
-/// The top of a line of text `th` high in a row at `y`, `rh` high. A default-height row
-/// keeps its text 3 px from the top, whatever the alignment.
+/// The top of a line of text `th` high in a row at `y`, `rh` high. Text keeps 3 px from
+/// the row's edges where the row has room; in a row barely taller than its text the inset
+/// shrinks, so the text stays whole rather than being pushed out past an edge. Text taller
+/// than its row is cut where Excel cuts it: at the bottom for top alignment, evenly when
+/// centred, at the top for bottom alignment.
 fn text_y(vertical: VAlign, y: f64, rh: f64, th: f64) -> f64 {
+    let room = rh - th;
+    let inset = (room / 2.0).clamp(0.0, 3.0);
     match vertical {
-        VAlign::Top => y + 3.0,
-        VAlign::Center | VAlign::Justify | VAlign::Distributed => y + ((rh - th) / 2.0).max(3.0),
-        VAlign::Bottom => y + (rh - th - 3.0).max(3.0),
+        VAlign::Top => y + inset,
+        VAlign::Center | VAlign::Justify | VAlign::Distributed => y + room / 2.0,
+        VAlign::Bottom => y + room - inset,
     }
+}
+
+/// The first and last columns of the centre-across-selection run around text in column
+/// `c` of `count`: neighbours join while `joins` says they are empty and centred across
+/// too, at most `ACROSS_MAX` on each side.
+fn across_run(c: u64, count: u64, mut joins: impl FnMut(u64) -> bool) -> (u64, u64) {
+    let (mut first, mut last) = (c, c);
+    while first > 0 && c - first < ACROSS_MAX && joins(first - 1) {
+        first -= 1;
+    }
+    while last + 1 < count && last - c < ACROSS_MAX && joins(last + 1) {
+        last += 1;
+    }
+    (first, last)
 }
 
 /// A merge on screen (STYLE-4): the grid cells it spans, and its anchor (top-left) cell.
@@ -5073,4 +5138,52 @@ fn nav_key(key: gdk::Key, state: gdk::ModifierType) -> Option<(Key, Mods)> {
         return None;
     }
     Some((nav, mods))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_keeps_three_pixels_where_the_row_has_room() {
+        for (v, top) in [
+            (VAlign::Top, 13.0),
+            (VAlign::Center, 17.0),
+            (VAlign::Bottom, 21.0),
+        ] {
+            assert_eq!(text_y(v, 10.0, 32.0, 18.0), top, "{v:?}");
+        }
+    }
+
+    #[test]
+    fn text_in_a_tight_row_stays_inside_it() {
+        // A 19.2 px Excel row (14.4 pt) and a 17 px line: 1.1 px each side, any alignment.
+        for v in [VAlign::Top, VAlign::Center, VAlign::Bottom] {
+            let top = text_y(v, 0.0, 19.2, 17.0);
+            assert!((top - 1.1).abs() < 1e-9, "{v:?}: {top}");
+        }
+    }
+
+    #[test]
+    fn text_taller_than_its_row_is_cut_on_the_aligned_side() {
+        assert_eq!(text_y(VAlign::Top, 0.0, 10.0, 14.0), 0.0);
+        assert_eq!(text_y(VAlign::Center, 0.0, 10.0, 14.0), -2.0);
+        assert_eq!(text_y(VAlign::Bottom, 0.0, 10.0, 14.0), -4.0);
+    }
+
+    #[test]
+    fn a_centred_across_run_stops_at_cells_that_do_not_join() {
+        // Columns 2..=5 join; text in 3 spans them all, but not 1 or 6.
+        assert_eq!(across_run(3, 10, |k| (2..=5).contains(&k)), (2, 5));
+        // Nothing joins: the text keeps its own cell.
+        assert_eq!(across_run(3, 10, |_| false), (3, 3));
+        // The sheet's first and last columns end it.
+        assert_eq!(across_run(0, 4, |_| true), (0, 3));
+    }
+
+    #[test]
+    fn a_centred_across_run_is_bounded() {
+        let (first, last) = across_run(1000, 16_384, |_| true);
+        assert_eq!((first, last), (1000 - ACROSS_MAX, 1000 + ACROSS_MAX));
+    }
 }

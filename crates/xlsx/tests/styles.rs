@@ -307,3 +307,44 @@ fn merges_widths_heights_and_hidden_match() {
         }
     }
 }
+
+/// A sheet saved with grid lines off reads that way, another sheet of the same book
+/// doesn't, and Excel's Center Across Selection reads as `CenterContinuous`.
+#[test]
+fn grid_lines_off_and_centre_across_read_per_sheet() {
+    use rust_xlsxwriter::{Format, FormatAlign, Workbook};
+    let mut book = Workbook::new();
+    let across = Format::new().set_align(FormatAlign::CenterAcross);
+    let plain = book.add_worksheet();
+    plain.write_string(0, 0, "grid").unwrap();
+    let bare = book.add_worksheet();
+    bare.set_screen_gridlines(false);
+    bare.write_string_with_format(1, 1, "Title", &across)
+        .unwrap();
+    bare.write_blank(1, 2, &across).unwrap();
+    let dir = std::env::temp_dir().join(format!("bricks-xlsx-grid-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("grid.xlsx");
+    book.save(&path).unwrap();
+    let imported = import(&path, &AtomicBool::new(false), &Progress::default()).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let hidden: Vec<bool> = imported
+        .sheets
+        .iter()
+        .map(|s| s.table.layout().hide_grid_lines)
+        .collect();
+    assert_eq!(hidden, [false, true]);
+    let table = &imported.sheets[1].table;
+    for col in [1, 2] {
+        let id = table.style_of(CellRef {
+            row: RowId(1),
+            col: ColId(col),
+        });
+        let xf = &imported.styles.xfs[id.0 as usize];
+        assert_eq!(
+            xf.align.horizontal,
+            HAlign::CenterContinuous,
+            "column {col}"
+        );
+    }
+}

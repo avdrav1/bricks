@@ -704,6 +704,8 @@ pub struct FileLayout {
     pub default_col_width: Option<f64>,
     /// `<sheetFormatPr baseColWidth>` in characters (Excel's default is 8).
     pub base_col_width: Option<u32>,
+    /// `<sheetView showGridLines="0">`: the sheet shows only its cells' borders.
+    pub hide_grid_lines: bool,
     /// Sorted by `first`.
     pub cols: Vec<ColSpec>,
     /// Rows whose spec differs from the default, as `(start, end, spec)` runs of source
