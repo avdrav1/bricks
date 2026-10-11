@@ -3,14 +3,14 @@
 use crate::editor::{self, Action, ClipCommand, Mode, ShapeCommand, Start};
 use crate::status::ClipView;
 
-use commands::{Batch, ClearCells, Command, OnSheet, Reshape, SetCell, UndoStack};
+use commands::{Batch, ClearCells, Command, OnSheet, Reshape, SetCell, SheetEdit, UndoStack};
 use csv_engine::RowIndex as _;
 use data_model::{
-    is_formula, parse_tsv, Budget, CellRef, CellValues, ColId, ColumnTypes, Compare, Copied,
-    CsvTable, DelimiterChoice, Edit, EditState, Filter, FilterError, FormulaCells, Hit,
-    InferredType, JournalError, Matches, PasteError, Query, ReplaceError, RereadError, RowId,
-    RowSet, SaveJob, SaveJobError, SearchError, SearchProgress, SheetId, ShownSheet, SortError,
-    SortOrder, Step, TableSource, Test, Workbook, PASTE_MAX_CELLS, UI_BUDGET,
+    is_formula, parse_tsv, BookEdit, BookState, Budget, CellRef, CellValues, ColId, ColumnTypes,
+    Compare, Copied, CsvTable, DelimiterChoice, Edit, Filter, FilterError, FormulaCells, Hit,
+    InferredType, JournalError, Matches, Origin, PasteError, Query, ReplaceError, RereadError,
+    RowId, RowSet, SaveJob, SaveJobError, SearchError, SearchProgress, SheetId, ShownSheet,
+    SortError, SortOrder, Step, TableSource, Test, Workbook, PASTE_MAX_CELLS, UI_BUDGET,
 };
 use formula::column_name;
 use grid::{Bounds, GridCache, Key, Mods, Selection, Sizes, Viewport};
@@ -75,6 +75,17 @@ pub struct ScanJob {
     job: jobs::Job<Option<FormulaCells>>,
     done: Arc<AtomicU64>,
     rows: u64,
+}
+
+/// What a sheet looked like when another sheet was shown (XLSX-1): it comes back as it was.
+#[derive(Default)]
+pub struct SheetUi {
+    selection: Selection,
+    vscroll: f64,
+    hscroll: f64,
+    sizing: Sizing,
+    row_heights: HashMap<RowId, f64>,
+    col_widths: HashMap<ColId, f64>,
 }
 
 /// A search's matches, and the match it went to (if any).
@@ -217,6 +228,11 @@ mod imp {
         /// The scan for the active sheet's formula cells (FML-4), if running: the job,
         /// file rows scanned, and rows in all.
         pub scanning: RefCell<Option<ScanJob>>,
+        /// A workbook is being imported (XLSX-1): nothing can change, and the body says
+        /// "Opening…".
+        pub loading: Cell<bool>,
+        /// Each sheet's cursor, scroll, and sizes while another sheet shows (XLSX-1).
+        pub sheet_ui: RefCell<HashMap<SheetId, SheetUi>>,
     }
 
     #[glib::object_subclass]
@@ -494,6 +510,14 @@ mod imp {
                 text_in("▾", x + cw - FILTER_W, 3.0, if on { &blue } else { &dim });
             }
             snapshot.pop();
+
+            if self.loading.get() {
+                // A workbook is being imported (XLSX-1).
+                let text = "Opening…";
+                let (tw, _) = self.layout(text).pixel_size();
+                let x = rh_w + ((body_w - f64::from(tw)) / 2.0).max(0.0);
+                text_in(text, x, HEADER_H + body_h / 2.0 - 10.0, &dim);
+            }
 
             // The in-cell editor (EDIT-2) sits over its cell, inside the body.
             let editor = self.editor.borrow();
@@ -1311,6 +1335,22 @@ impl GridView {
         if self.busy() {
             return false;
         }
+        // Undo shows the sheet the step happened on first (ADR 0008).
+        let sheet = {
+            let undo = imp.undo.borrow();
+            let next = if back {
+                undo.peek_undo()
+            } else {
+                undo.peek_redo()
+            };
+            let Some(next) = next else { return false };
+            next.sheet()
+        };
+        if let Some(id) = sheet {
+            if !self.switch_sheet(id) {
+                return false;
+            }
+        }
         let focus = {
             let (mut book, mut undo) = (imp.book.borrow_mut(), imp.undo.borrow_mut());
             let cmd = if back {
@@ -1838,6 +1878,7 @@ impl GridView {
     pub fn busy(&self) -> bool {
         let imp = self.imp();
         imp.saving.get()
+            || imp.loading.get()
             || imp.sorting.borrow().is_some()
             || imp.filtering.borrow().is_some()
             || imp.searching.borrow().is_some()
@@ -2464,12 +2505,14 @@ impl GridView {
     /// new table makes a running one moot.
     pub fn infer_types(&self) {
         let imp = self.imp();
-        let mut snapshot = {
-            let t = self.table();
-            if !t.is_complete() {
+        let (mut snapshot, sheet) = {
+            let book = imp.book.borrow();
+            let t = book.active();
+            // A sheet shown before keeps its types (XLSX-1).
+            if !t.is_complete() || t.has_types() {
                 return;
             }
-            t.snapshot()
+            (t.snapshot(), book.active_id())
         };
         let started = Instant::now();
         let job = jobs::spawn(move |cancel| snapshot.infer_types(cancel.flag()));
@@ -2492,7 +2535,10 @@ impl GridView {
                     started.elapsed()
                 );
             }
-            g.table_mut().set_types(types);
+            let mut book = imp.book.borrow_mut();
+            if let Some(s) = book.sheet_mut(sheet) {
+                s.table.set_types(types);
+            }
         });
     }
 
@@ -2500,12 +2546,13 @@ impl GridView {
     /// its file is indexed; a new workbook makes a running scan moot.
     pub fn scan_formulas(&self) {
         let imp = self.imp();
-        let (snapshot, rows) = {
-            let t = self.table();
+        let (snapshot, rows, sheet) = {
+            let book = imp.book.borrow();
+            let t = book.active();
             if !t.is_complete() || t.formulas_scanned() {
                 return;
             }
-            (t.snapshot(), t.index().row_count())
+            (t.snapshot(), t.index().row_count(), book.active_id())
         };
         let done = Arc::new(AtomicU64::new(0));
         let job = jobs::spawn({
@@ -2529,8 +2576,9 @@ impl GridView {
                 return;
             }
             imp.scanning.take();
-            if let Some(found) = found {
-                g.table_mut().set_formula_cells(found);
+            let mut book = imp.book.borrow_mut();
+            if let (Some(found), Some(s)) = (found, book.sheet_mut(sheet)) {
+                s.table.set_formula_cells(found);
             }
         });
     }
@@ -2574,6 +2622,7 @@ impl GridView {
         if let Some(old) = imp.scanning.take() {
             old.job.cancel();
         }
+        imp.sheet_ui.borrow_mut().clear();
         // Types of the old table don't belong to the new one; the status tick infers them
         // again once it is indexed.
         if let Some(old) = imp.inferring.take() {
@@ -2671,6 +2720,253 @@ impl GridView {
     /// The active sheet's name.
     pub fn sheet_name(&self) -> String {
         self.imp().book.borrow().active_sheet().name.clone()
+    }
+
+    pub fn sheet_count(&self) -> usize {
+        self.imp().book.borrow().sheets().len()
+    }
+
+    /// Position of the active sheet among the sheets.
+    pub fn active_position(&self) -> usize {
+        let book = self.imp().book.borrow();
+        book.index_of(book.active_id()).unwrap_or(0)
+    }
+
+    /// Each sheet's name, rows, and columns, for an .xlsx save's limits (XLSX-1).
+    pub fn sheet_sizes(&self) -> Vec<(String, u64, u32)> {
+        let book = self.imp().book.borrow();
+        let active = book.active_id();
+        book.sheets()
+            .iter()
+            .map(|s| {
+                let cols = if s.id == active {
+                    self.col_count()
+                } else {
+                    s.table.min_width()
+                };
+                (s.name.clone(), s.table.total_rows(), cols)
+            })
+            .collect()
+    }
+
+    /// The column widths the user set on each sheet, by view column, in pixels (XLSX-1).
+    pub fn sheet_widths(&self) -> HashMap<SheetId, Vec<(u32, u32)>> {
+        let imp = self.imp();
+        let book = imp.book.borrow();
+        let widths = |table: &CsvTable, set: &HashMap<ColId, f64>| -> Vec<(u32, u32)> {
+            let mut out: Vec<(u32, u32)> = set
+                .iter()
+                .filter_map(|(&id, &w)| Some((table.col_of(id)?, w.round() as u32)))
+                .collect();
+            out.sort_unstable();
+            out
+        };
+        let ui = imp.sheet_ui.borrow();
+        book.sheets()
+            .iter()
+            .map(|s| {
+                let w = if s.id == book.active_id() {
+                    widths(&s.table, &imp.col_widths.borrow())
+                } else {
+                    ui.get(&s.id)
+                        .map_or_else(Vec::new, |u| widths(&s.table, &u.col_widths))
+                };
+                (s.id, w)
+            })
+            .collect()
+    }
+
+    /// Each sheet's header row and the column types the user set, by position, to set
+    /// again on the workbook a save reads back (XLSX-1).
+    pub fn sheet_settings(&self) -> Vec<(bool, Vec<(u32, InferredType)>)> {
+        let book = self.imp().book.borrow();
+        book.sheets()
+            .iter()
+            .map(|s| {
+                let t = &s.table;
+                let types = (0..t.min_width())
+                    .filter_map(|c| t.type_override(c).map(|ty| (c, ty)))
+                    .collect();
+                (t.has_header(), types)
+            })
+            .collect()
+    }
+
+    /// Put back [`Self::sheet_settings`] by position.
+    pub fn restore_sheet_settings(&self, settings: Vec<(bool, Vec<(u32, InferredType)>)>) {
+        let ids: Vec<SheetId> = self.sheet_list().into_iter().map(|(id, _)| id).collect();
+        let active = self.active_sheet();
+        for (id, (header, types)) in ids.into_iter().zip(settings) {
+            if id == active {
+                if self.has_header() != header {
+                    self.set_header(header);
+                }
+                self.restore_type_overrides(types);
+                continue;
+            }
+            let mut book = self.imp().book.borrow_mut();
+            if let Some(s) = book.sheet_mut(id) {
+                s.table.set_header(header);
+                for (c, ty) in types {
+                    s.table.set_type_override(c, Some(ty));
+                }
+            }
+        }
+    }
+
+    /// The sheets, in order: id and name.
+    pub fn sheet_list(&self) -> Vec<(SheetId, String)> {
+        let book = self.imp().book.borrow();
+        book.sheets()
+            .iter()
+            .map(|s| (s.id, s.name.clone()))
+            .collect()
+    }
+
+    pub fn active_sheet(&self) -> SheetId {
+        self.imp().book.borrow().active_id()
+    }
+
+    /// Where the active sheet's rows come from.
+    pub fn active_origin(&self) -> Origin {
+        self.imp().book.borrow().active_sheet().origin
+    }
+
+    /// Changes when sheets are added, removed, renamed, or moved.
+    pub fn layout_revision(&self) -> u64 {
+        self.imp().book.borrow().layout_revision()
+    }
+
+    /// A workbook is being imported (XLSX-1): edits wait and the body says "Opening…".
+    pub fn set_loading(&self, on: bool) {
+        self.imp().loading.set(on);
+        self.queue_draw();
+    }
+
+    pub fn is_loading(&self) -> bool {
+        self.imp().loading.get()
+    }
+
+    /// Show sheet `id` (XLSX-1). The sheet shown so far keeps its cursor, scroll, and
+    /// sizes for when it comes back. Refused while a job runs or the open edit has a
+    /// formula that doesn't parse; whether sheet `id` shows now.
+    pub fn switch_sheet(&self, id: SheetId) -> bool {
+        let imp = self.imp();
+        let current = imp.book.borrow().active_id();
+        if current == id {
+            return true;
+        }
+        if self.busy() || imp.book.borrow().sheet(id).is_none() {
+            return false;
+        }
+        if !self.commit_edit(true) {
+            return false;
+        }
+        let value = |adj: &RefCell<Option<gtk::Adjustment>>| {
+            adj.borrow().as_ref().map_or(0.0, |a| a.value())
+        };
+        let ui = SheetUi {
+            selection: imp.selection.get(),
+            vscroll: value(&imp.vadj),
+            hscroll: value(&imp.hadj),
+            sizing: imp.sizing.take(),
+            row_heights: imp.row_heights.take(),
+            col_widths: imp.col_widths.take(),
+        };
+        imp.sheet_ui.borrow_mut().insert(current, ui);
+        imp.book.borrow_mut().set_active(id);
+        let ui = imp.sheet_ui.borrow_mut().remove(&id).unwrap_or_default();
+        imp.sizing.replace(ui.sizing);
+        imp.row_heights.replace(ui.row_heights);
+        imp.col_widths.replace(ui.col_widths);
+        // What showed belongs to the other sheet: its rows, titles, matches, and jobs.
+        imp.cache.borrow_mut().reset();
+        imp.titles.take();
+        imp.found.take();
+        imp.bounds_seen.set(None);
+        self.cancel_search();
+        if let Some(old) = imp.calculating.take() {
+            old.job.cancel();
+        }
+        if let Some(old) = imp.scanning.take() {
+            old.job.cancel();
+        }
+        if let Some(old) = imp.inferring.take() {
+            old.cancel();
+        }
+        // The status tick infers this sheet's types and scans its formulas, as for a
+        // newly opened table.
+        imp.generation.set(imp.generation.get() + 1);
+        self.refit_sizes();
+        self.update_adjustments();
+        for (adj, v) in [(&imp.vadj, ui.vscroll), (&imp.hadj, ui.hscroll)] {
+            if let Some(a) = adj.borrow().as_ref() {
+                a.set_value(v);
+            }
+        }
+        self.set_selection(ui.selection);
+        self.update_description();
+        self.queue_draw();
+        true
+    }
+
+    /// Put back a crashed session's sheets and unsaved edits (APP-7, XLSX-1), read from
+    /// its journal, as one undoable step; each sheet's header row as it was. The file must
+    /// be fully read; refused if the journal doesn't fit it.
+    pub fn restore_journal(&self, state: BookState) -> Result<(), JournalError> {
+        let headers: Vec<bool> = state.sheets.iter().map(|s| s.has_header).collect();
+        let active = state.active as usize;
+        let plan = self.imp().book.borrow().restore_plan(state)?;
+        self.restore_book(plan, active)?;
+        let ids: Vec<SheetId> = self.sheet_list().into_iter().map(|(id, _)| id).collect();
+        let active_id = self.active_sheet();
+        for (id, on) in ids.into_iter().zip(headers) {
+            if id == active_id {
+                if self.has_header() != on {
+                    self.set_header(on);
+                }
+            } else if let Some(s) = self.imp().book.borrow_mut().sheet_mut(id) {
+                s.table.set_header(on);
+            }
+        }
+        Ok(())
+    }
+
+    /// Ctrl+Page Down / Up: the next or previous sheet, if there is one.
+    pub fn switch_to_neighbor(&self, step: isize) -> bool {
+        let next = {
+            let book = self.imp().book.borrow();
+            let at = book.index_of(book.active_id()).unwrap_or(0) as isize + step;
+            usize::try_from(at)
+                .ok()
+                .and_then(|i| book.sheets().get(i))
+                .map(|s| s.id)
+        };
+        next.is_some_and(|id| self.switch_sheet(id))
+    }
+
+    /// Put back a crashed session's unsaved edits (APP-7, XLSX-1) as one undoable step,
+    /// "Restore unsaved edits": the sheet changes and every sheet's edits, from
+    /// [`Workbook::restore_plan`]; then show the sheet at position `active`.
+    pub fn restore_book(&self, plan: Vec<BookEdit>, active: usize) -> Result<(), JournalError> {
+        let imp = self.imp();
+        if self.busy() {
+            return Err(JournalError::Mismatch("another job is running"));
+        }
+        {
+            let mut book = imp.book.borrow_mut();
+            let show = book.active_id();
+            imp.undo.borrow_mut().execute(
+                Box::new(SheetEdit::new("Restore unsaved edits", plan, Some(show))),
+                &mut book,
+            );
+        }
+        let id = imp.book.borrow().sheets().get(active).map(|s| s.id);
+        if let Some(id) = id {
+            self.switch_sheet(id);
+        }
+        self.after_change(None);
+        Ok(())
     }
 
     /// Set the clock `TODAY()` and `NOW()` read; cells showing results redraw if it
@@ -2816,27 +3112,6 @@ impl GridView {
         self.grab_focus();
         self.queue_draw();
         true
-    }
-
-    /// Put back unsaved edits from a crash (APP-7) as one undoable step, "Restore unsaved
-    /// edits". The file must be fully indexed; refused if they don't fit it.
-    pub fn restore_edits(&self, state: EditState) -> Result<(), JournalError> {
-        if self.busy() {
-            return Err(JournalError::Mismatch("another job is running"));
-        }
-        let edit = self.table().restore_edit(state)?;
-        // The first file row and column; an untitled table has no rows to name yet.
-        let focus = CellRef {
-            row: RowId::source(0),
-            col: ColId::source(0),
-        };
-        self.execute(Box::new(Batch::new(
-            "Restore unsaved edits",
-            vec![edit],
-            focus,
-        )));
-        self.after_change(None);
-        Ok(())
     }
 
     /// Share of the file indexed so far (0..=1), or `None` once indexing is complete.

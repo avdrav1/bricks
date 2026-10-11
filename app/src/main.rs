@@ -26,6 +26,7 @@ mod grid_view;
 mod malformed;
 mod recent;
 mod recovery;
+mod sheets;
 mod state;
 mod status;
 mod theme;
@@ -42,6 +43,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use xlsx::{ImportError, Imported};
 
 const APP_ID: &str = "dev.bricks.Bricks";
 
@@ -191,7 +193,7 @@ fn main() -> glib::ExitCode {
     });
     let (opened, failed, bench) = (RefCell::new(opened), RefCell::new(failed), args.bench);
     app.connect_activate(move |app| match opened.take() {
-        Some((session, table)) => build_window(app, &session, table, bench.clone()),
+        Some((session, book)) => build_window(app, &session, book, bench.clone()),
         None if app.windows().is_empty() => {
             let window = start_window(app);
             if let Some((message, detail)) = failed.take() {
@@ -203,12 +205,97 @@ fn main() -> glib::ExitCode {
     app.run_with_args::<&str>(&[])
 }
 
-/// Map `path` and start indexing it.
-fn open_session(path: &Path) -> std::io::Result<(Rc<Session>, CsvTable)> {
+/// Map `path` and start indexing it; an .xlsx file starts importing (XLSX-1), and the
+/// window shows its sheets once that is done. Old Excel, password-protected, and
+/// OpenDocument files are refused with what to do instead.
+fn open_session(path: &Path) -> std::io::Result<(Rc<Session>, Workbook)> {
     let session = Rc::new(Session::new(Some(path.to_owned())));
-    let table = session.open()?;
-    malformed::refuse_binary(&table)?;
-    Ok((session, table))
+    match xlsx::kind(path)? {
+        xlsx::Kind::Text => {
+            let table = session.open()?;
+            malformed::refuse_binary(&table)?;
+            let book = session.workbook(table);
+            Ok((session, book))
+        }
+        xlsx::Kind::Xlsx => {
+            session.kind.set(DocKind::Xlsx);
+            session.import();
+            Ok((session, Workbook::default()))
+        }
+        kind => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            xlsx::refusal(kind).unwrap_or("Bricks can't open this kind of file."),
+        )),
+    }
+}
+
+/// The workbook an import read, its sheets' formula cells known.
+fn workbook_of(imported: Imported) -> Workbook {
+    let sheets = imported
+        .sheets
+        .into_iter()
+        .map(|s| {
+            let mut table = s.table;
+            table.set_formula_cells(s.formulas);
+            (s.name, table, Origin::Xlsx(s.index), s.cached)
+        })
+        .collect();
+    Workbook::from_sheets(sheets, imported.names)
+}
+
+/// Show the workbook `session`'s import reads once it is done (XLSX-1); until then the
+/// grid says "Opening…". A failed import says why and closes the window (Esc cancels it).
+fn follow_import(
+    app: &gtk::Application,
+    window: &gtk::ApplicationWindow,
+    grid: &GridView,
+    session: &Rc<Session>,
+) {
+    let Some(job) = session.importing.borrow().clone() else {
+        return;
+    };
+    grid.set_loading(true);
+    let (app, window, grid, session) = (
+        app.clone(),
+        window.downgrade(),
+        grid.downgrade(),
+        session.clone(),
+    );
+    glib::spawn_future_local(async move {
+        let result = job.finished().await;
+        let (Some(window), Some(grid)) = (window.upgrade(), grid.upgrade()) else {
+            return;
+        };
+        session.importing.take();
+        match result {
+            Ok(Ok(imported)) => {
+                grid.replace_workbook(workbook_of(imported));
+                grid.set_loading(false);
+            }
+            Ok(Err(ImportError::Cancelled)) | Err(jobs::Stopped::Cancelled) => window.close(),
+            failed => {
+                let why = match failed {
+                    Ok(Err(e)) => e.to_string(),
+                    _ => "the import stopped unexpectedly".to_owned(),
+                };
+                let path = session.path.borrow().clone().unwrap_or_default();
+                eprintln!("bricks: cannot open {}: {why}", path.display());
+                let _ = recent::Recent::load().remove(&path);
+                let last = app.windows().len() == 1;
+                window.close();
+                let parent = if last {
+                    Some(start_window(&app).upcast::<gtk::Window>())
+                } else {
+                    app.active_window()
+                };
+                alert(
+                    parent.as_ref(),
+                    &format!("Cannot open {}", path.display()),
+                    &why,
+                );
+            }
+        }
+    });
 }
 
 thread_local! {
@@ -238,7 +325,8 @@ fn window_for(path: &Path) -> Option<gtk::ApplicationWindow> {
 /// and column to fill it, and Save asks where to put it.
 fn new_window(app: &gtk::Application) {
     let session = Rc::new(Session::new(None));
-    build_window(app, &session, CsvTable::untitled(), None);
+    let book = session.workbook(CsvTable::untitled());
+    build_window(app, &session, book, None);
     close_start_window(app);
 }
 
@@ -375,14 +463,21 @@ fn remember(path: &Path) {
 
 const START_WINDOW: &str = "start";
 
-/// "CSV and text files" and "All files", the first as the default.
+/// "Spreadsheets" (CSV, text, and Excel workbooks) and "All files", the first as the
+/// default.
 fn file_filters() -> (gtk::gio::ListStore, gtk::FileFilter) {
     let csv = gtk::FileFilter::new();
-    csv.set_name(Some("CSV and text files"));
-    for mime in ["text/csv", "text/tab-separated-values", "text/plain"] {
+    csv.set_name(Some("Spreadsheets"));
+    for mime in [
+        "text/csv",
+        "text/tab-separated-values",
+        "text/plain",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-excel.sheet.macroEnabled.12",
+    ] {
         csv.add_mime_type(mime);
     }
-    for suffix in ["csv", "tsv", "tab", "psv", "txt"] {
+    for suffix in ["csv", "tsv", "tab", "psv", "txt", "xlsx", "xlsm"] {
         csv.add_suffix(suffix);
     }
     let all = gtk::FileFilter::new();
@@ -478,9 +573,9 @@ fn open_window(app: &gtk::Application, path: &Path, parent: Option<&gtk::Window>
         return true;
     }
     match open_session(path) {
-        Ok((session, table)) => {
+        Ok((session, book)) => {
             remember(path);
-            build_window(app, &session, table, None);
+            build_window(app, &session, book, None);
             close_start_window(app);
             true
         }
@@ -524,6 +619,18 @@ struct Session {
     restore: RefCell<Option<crash::Pending>>,
     /// The reading (delimiter, encoding) the malformed-file check last ran on (APP-8).
     checked: Cell<Option<(u8, Encoding)>>,
+    /// What the file is: CSV, or an Excel workbook (XLSX-1).
+    kind: Cell<DocKind>,
+    /// The import of an Excel workbook in flight (XLSX-1), and how far it got.
+    importing: RefCell<Option<jobs::Job<Result<Imported, ImportError>>>>,
+    import_progress: RefCell<Arc<xlsx::Progress>>,
+}
+
+/// What a session's file is (XLSX-1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DocKind {
+    Csv,
+    Xlsx,
 }
 
 impl Session {
@@ -537,7 +644,35 @@ impl Session {
             identity: Cell::new(None),
             restore: RefCell::new(None),
             checked: Cell::new(None),
+            kind: Cell::new(DocKind::Csv),
+            importing: RefCell::new(None),
+            import_progress: RefCell::new(Arc::default()),
         }
+    }
+
+    /// Import the session's .xlsx file on the job pool (XLSX-1), cancelling any earlier
+    /// import; [`follow_import`] or a save's check shows the result.
+    fn import(&self) -> jobs::Job<Result<Imported, ImportError>> {
+        let path = self.path.borrow().clone().unwrap_or_default();
+        self.identity.set(recovery::identity(&path));
+        let progress = Arc::new(xlsx::Progress::default());
+        self.import_progress.replace(progress.clone());
+        let job = jobs::spawn(move |cancel| xlsx::import(&path, cancel.flag(), &progress));
+        if let Some(old) = self.importing.replace(Some(job.clone())) {
+            old.cancel();
+        }
+        job
+    }
+
+    /// The import's share done (0..=1), while one runs.
+    fn import_share(&self) -> Option<f64> {
+        self.importing.borrow().as_ref()?;
+        let p = self.import_progress.borrow();
+        let (done, total) = (
+            p.rows.load(std::sync::atomic::Ordering::Relaxed),
+            p.rows_total.load(std::sync::atomic::Ordering::Relaxed),
+        );
+        Some(done as f64 / total.max(1) as f64)
     }
 
     /// The window title's file name: the file's, or "Untitled".
@@ -582,6 +717,23 @@ impl Session {
             Origin::New
         };
         Workbook::single(name, table, origin)
+    }
+
+    /// How Ctrl+S writes the file: as it was read (XLSX-1).
+    fn format(&self, grid: &GridView) -> Format {
+        match self.kind.get() {
+            DocKind::Xlsx => Format::Xlsx,
+            DocKind::Csv => Format::Csv {
+                delimiter: grid.delimiter(),
+                encoding: grid.encoding(),
+            },
+        }
+    }
+
+    /// Ctrl+S has to ask where and how: an untitled table, or a CSV file that has more
+    /// sheets now than a CSV file holds (XLSX-1).
+    fn needs_save_as(&self, grid: &GridView) -> bool {
+        self.path.borrow().is_none() || (self.kind.get() == DocKind::Csv && grid.sheet_count() > 1)
     }
 
     /// The user's header choice wins over detection on a fresh reading of the file.
@@ -674,12 +826,12 @@ fn header_toggle(session: &Rc<Session>, grid: &GridView) -> gtk::ToggleButton {
 fn build_window(
     app: &gtk::Application,
     session: &Rc<Session>,
-    table: CsvTable,
+    book: Workbook,
     bench: Option<Bench>,
 ) {
     let vadj = gtk::Adjustment::new(0.0, 0.0, 0.0, ROW_H, 0.0, 0.0);
     let hadj = gtk::Adjustment::new(0.0, 0.0, 0.0, 30.0, 0.0, 0.0);
-    let grid = GridView::new(session.workbook(table), &vadj, &hadj);
+    let grid = GridView::new(book, &vadj, &hadj);
 
     let layout = gtk::Grid::new();
     layout.attach(&grid, 0, 0, 1, 1);
@@ -699,8 +851,10 @@ fn build_window(
     );
     let find = FindBar::new(&grid);
     layout.attach(&find.0.root, 0, 2, 2, 1);
+    let tabs = sheets::SheetTabs::new(&grid);
+    layout.attach(tabs.root(), 0, 3, 2, 1);
     let bar = StatusBar::new();
-    layout.attach(&bar.root, 0, 3, 2, 1);
+    layout.attach(&bar.root, 0, 4, 2, 1);
 
     let window = gtk::ApplicationWindow::builder()
         .application(app)
@@ -729,6 +883,7 @@ fn build_window(
         }
     }
     accept_file_drops(app, &window);
+    follow_import(app, &window, &grid, session);
     // A typed formula that doesn't parse (FML-4): say where, and keep it in the editor.
     grid.connect_closure(
         "formula-error",
@@ -824,6 +979,10 @@ fn build_window(
                 return glib::Propagation::Proceed;
             };
             if key == Key::Escape {
+                if let Some(job) = session.importing.borrow().as_ref() {
+                    job.cancel();
+                    return glib::Propagation::Stop;
+                }
                 if let SaveState::Saving(r) = &*save.borrow() {
                     r.job.cancel();
                     return glib::Propagation::Stop;
@@ -837,6 +996,13 @@ fn build_window(
             }
             let shift = mods.contains(ModifierType::SHIFT_MASK);
             match key {
+                // The next or previous sheet (XLSX-1).
+                Key::Page_Down | Key::KP_Page_Down => {
+                    grid.switch_to_neighbor(1);
+                }
+                Key::Page_Up | Key::KP_Page_Up => {
+                    grid.switch_to_neighbor(-1);
+                }
                 Key::f | Key::F if !shift => {
                     grid.finish_editing();
                     find.open(false);
@@ -847,7 +1013,7 @@ fn build_window(
                 }
                 Key::s | Key::S => {
                     grid.finish_editing(); // save what was typed, as Calc does
-                    if shift || session.path.borrow().is_none() {
+                    if shift || session.needs_save_as(&grid) {
                         save_as(&window, &grid, &session, &save, false);
                     } else {
                         start_save(&grid, &session, &save, None, false);
@@ -912,7 +1078,7 @@ fn build_window(
                         discard.set(true);
                         window.close();
                     }
-                    Ok(2) if session.path.borrow().is_none() => {
+                    Ok(2) if session.needs_save_as(&grid) => {
                         save_as(&window, &grid, &session, &save, true)
                     }
                     Ok(2) => start_save(&grid, &session, &save, None, true),
@@ -929,7 +1095,7 @@ fn build_window(
     let (mut was_complete, mut generation) = (false, 0);
     let status_bench = matches!(bench, Some(Bench::Status));
     let mut tick = {
-        let (grid, window, session, app, save, find, journal) = (
+        let (grid, window, session, app, save, find, journal, tabs) = (
             grid.downgrade(),
             window.downgrade(),
             session.clone(),
@@ -937,6 +1103,7 @@ fn build_window(
             save.clone(),
             find.clone(),
             journal.clone(),
+            tabs.clone(),
         );
         move || {
             let (Some(grid), Some(window)) = (grid.upgrade(), window.upgrade()) else {
@@ -962,7 +1129,7 @@ fn build_window(
                 crash::journal_tick(&grid, &session, j);
                 crash::pending_tick(&window, &grid, &session);
             }
-            if session.restore.borrow().is_none() {
+            if session.restore.borrow().is_none() && grid.active_origin() == Origin::Csv {
                 malformed::tick(&window, &grid, &session);
             }
             if complete && !was_complete && std::env::var_os("BRICKS_TIMINGS").is_some() {
@@ -978,6 +1145,8 @@ fn build_window(
             }
             let can_switch =
                 grid.edit_count() == 0 && !matches!(*save.borrow(), SaveState::Saving(..));
+            // Only a CSV file has a delimiter to choose (XLSX-1).
+            delimiter.set_visible(grid.active_origin() == Origin::Csv);
             delimiter.set_sensitive(can_switch);
             delimiter.set_tooltip_text(Some(if can_switch {
                 "Delimiter"
@@ -992,8 +1161,9 @@ fn build_window(
             if delimiter.selected() != choice {
                 delimiter.set_selected(choice);
             }
-            let shown = bar.update(&grid, session.choice.get(), &save.borrow());
+            let shown = bar.update(&grid, &session, &save.borrow());
             find.tick(&grid);
+            tabs.refresh();
             let title = status::title(&session.name(), grid.edit_count());
             if window.title().as_deref() != Some(title.as_str()) {
                 window.set_title(Some(&title));
@@ -1128,11 +1298,17 @@ fn bench_open(app: &gtk::Application, grid: &GridView) {
     grid.add_tick_callback(|_, _| glib::ControlFlow::Continue);
 }
 
-/// Where and how a Save As writes (SAVE-2).
+/// Where and how a Save As writes (SAVE-2, XLSX-1).
 struct Target {
     path: PathBuf,
-    delimiter: u8,
-    encoding: Encoding,
+    format: Format,
+}
+
+/// What a save writes: a CSV file (one sheet), or an Excel workbook (XLSX-1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Format {
+    Csv { delimiter: u8, encoding: Encoding },
+    Xlsx,
 }
 
 /// A save running on the job pool (SAVE-3, ENG-8).
@@ -1181,26 +1357,63 @@ fn start_save(
     else {
         return;
     };
-    let job = match grid.save_job() {
-        Ok(job) => match &target {
-            Some(t) => job.with_format(t.delimiter, t.encoding),
-            None => job,
-        },
-        Err(_) => {
-            *save.borrow_mut() = SaveState::Failed("wait for indexing to finish".into());
-            return;
+    let format = target
+        .as_ref()
+        .map_or_else(|| session.format(grid), |t| t.format);
+    let progress = Arc::new(SaveProgress::default());
+    let (running, estimate) = match format {
+        // A CSV file holds one sheet: a workbook of more goes through Save As (XLSX-1).
+        Format::Csv { .. } if grid.sheet_count() > 1 => return,
+        Format::Csv {
+            delimiter,
+            encoding,
+        } => {
+            let job = match grid.save_job() {
+                Ok(job) if target.is_some() => job.with_format(delimiter, encoding),
+                Ok(job) => job,
+                Err(_) => {
+                    *save.borrow_mut() = SaveState::Failed("wait for indexing to finish".into());
+                    return;
+                }
+            };
+            let estimate = job.estimated_bytes();
+            let running = jobs::spawn({
+                let progress = progress.clone();
+                move |cancel| {
+                    let t = Instant::now();
+                    file_format::save_csv(&path, &job, &progress, cancel.flag())
+                        .map(|s| (s, t.elapsed()))
+                }
+            });
+            (running, estimate)
+        }
+        Format::Xlsx => {
+            if let Err(e) = xlsx::check_limits(&grid.sheet_sizes()) {
+                let window = grid.root().and_downcast::<gtk::Window>();
+                alert(
+                    window.as_ref(),
+                    "This workbook doesn't fit an .xlsx file",
+                    &e,
+                );
+                return;
+            }
+            if !grid.is_complete() {
+                *save.borrow_mut() = SaveState::Failed("wait for indexing to finish".into());
+                return;
+            }
+            let (book, widths) = (grid.workbook_snapshot(), grid.sheet_widths());
+            let estimate = book.sheets().iter().map(|s| s.table.total_rows()).sum();
+            let running = jobs::spawn({
+                let progress = progress.clone();
+                move |cancel| {
+                    let t = Instant::now();
+                    save_workbook(&path, book, &widths, &progress, cancel).map(|s| (s, t.elapsed()))
+                }
+            });
+            (running, estimate)
         }
     };
     grid.set_saving(true);
-    let progress = Arc::new(SaveProgress::default());
-    let estimate = job.estimated_bytes();
-    let running = jobs::spawn({
-        let progress = progress.clone();
-        move |cancel| {
-            let t = Instant::now();
-            file_format::save_csv(&path, &job, &progress, cancel.flag()).map(|s| (s, t.elapsed()))
-        }
-    });
     *save.borrow_mut() = SaveState::Saving(Running {
         job: running.clone(),
         target,
@@ -1220,35 +1433,88 @@ fn start_save(
     });
 }
 
+/// Write a workbook snapshot to `path` as .xlsx (XLSX-1): each sheet's formula results
+/// first (for the file's cached values), then the sheets.
+fn save_workbook(
+    path: &Path,
+    mut book: Workbook,
+    widths: &std::collections::HashMap<data_model::SheetId, Vec<(u32, u32)>>,
+    progress: &SaveProgress,
+    cancel: &jobs::CancelToken,
+) -> Result<SaveStats, file_format::SaveError> {
+    let ids: Vec<_> = book.sheets().iter().map(|s| s.id).collect();
+    let active = book.active_id();
+    let calculated = std::sync::atomic::AtomicU64::new(0);
+    let mut sheets = Vec::with_capacity(ids.len());
+    for id in ids {
+        let computed = book
+            .computed_for(id, cancel.shared(), &calculated)
+            .ok_or(file_format::SaveError::Cancelled)?;
+        let s = book.sheet(id).expect("listed above");
+        sheets.push(xlsx::ExportSheet {
+            name: s.name.clone(),
+            table: s.table.snapshot(),
+            computed,
+            widths: widths.get(&id).cloned().unwrap_or_default(),
+            active: id == active,
+        });
+    }
+    xlsx::save_xlsx(path, sheets, book.names(), progress, cancel.flag())
+}
+
 /// When a save has finished: reopen the saved file (its edits are now on disk; after a
-/// Save As, the new file with its delimiter and encoding) or report the error with the
-/// edits still in memory. A cancelled save changes nothing. Returns whether the save
-/// succeeded and asked for the window to close.
+/// Save As, the new file with its delimiter and encoding, or the workbook) or report the
+/// error with the edits still in memory. A cancelled save changes nothing. Returns whether
+/// the save succeeded and asked for the window to close.
 fn finish_save(
     grid: &GridView,
-    session: &Session,
-    save: &RefCell<SaveState>,
+    session: &Rc<Session>,
+    save: &Rc<RefCell<SaveState>>,
     result: Result<SaveResult, jobs::Stopped>,
 ) -> bool {
     let (target, close_after) = match &mut *save.borrow_mut() {
         SaveState::Saving(r) => (r.target.take(), r.close_after),
         _ => return false,
     };
-    grid.set_saving(false);
     let result = match result {
         Ok(Err(file_format::SaveError::Cancelled)) | Err(jobs::Stopped::Cancelled) => {
+            grid.set_saving(false);
             *save.borrow_mut() = SaveState::Cancelled;
             return false;
         }
         Ok(done) => done.map_err(|e| e.to_string()),
         Err(jobs::Stopped::Panicked) => Err("the save stopped unexpectedly".to_owned()),
     };
+    let format = target
+        .as_ref()
+        .map_or_else(|| session.format(grid), |t| t.format);
     if let (Ok(_), Some(t)) = (&result, target) {
         remember(&t.path);
         session.path.replace(Some(t.path));
-        session.encoding.set(Some(t.encoding));
-        session.choice.set(DelimiterChoice::Fixed(t.delimiter));
+        match t.format {
+            Format::Csv {
+                delimiter,
+                encoding,
+            } => {
+                session.kind.set(DocKind::Csv);
+                session.encoding.set(Some(encoding));
+                session.choice.set(DelimiterChoice::Fixed(delimiter));
+            }
+            Format::Xlsx => session.kind.set(DocKind::Xlsx),
+        }
     }
+    if format == Format::Xlsx {
+        match result {
+            Ok(done) => check_saved_workbook(grid, session, save, done, close_after),
+            Err(e) => {
+                grid.set_saving(false);
+                eprintln!("bricks: save failed: {e}");
+                *save.borrow_mut() = SaveState::Failed(e);
+            }
+        }
+        return false;
+    }
+    grid.set_saving(false);
     let next = match result
         .and_then(|done| session.open().map(|t| (done, t)).map_err(|e| e.to_string()))
     {
@@ -1275,6 +1541,68 @@ fn finish_save(
     let close = close_after && matches!(next, SaveState::Saved(_));
     *save.borrow_mut() = next;
     close
+}
+
+/// After an .xlsx save (XLSX-1): read the saved workbook back ("Checking the saved
+/// file…") and show it, so what the window shows is what the file holds. Each sheet's
+/// header row and column types come back by position, and the active sheet's filters.
+fn check_saved_workbook(
+    grid: &GridView,
+    session: &Rc<Session>,
+    save: &Rc<RefCell<SaveState>>,
+    (stats, took): (SaveStats, Duration),
+    close_after: bool,
+) {
+    let path = session.path.borrow().clone().unwrap_or_default();
+    if let SaveState::Saving(r) = &*save.borrow() {
+        r.progress.set_checking();
+    }
+    session.identity.set(recovery::identity(&path));
+    let job = jobs::spawn({
+        let path = path.clone();
+        move |cancel| xlsx::import(&path, cancel.flag(), &xlsx::Progress::default())
+    });
+    let (grid, save) = (grid.downgrade(), save.clone());
+    glib::spawn_future_local(async move {
+        let result = job.finished().await;
+        let Some(grid) = grid.upgrade() else { return };
+        grid.set_saving(false);
+        match result {
+            Ok(Ok(imported)) => {
+                let (settings, active, filters) = (
+                    grid.sheet_settings(),
+                    grid.active_position(),
+                    grid.filters(),
+                );
+                // The sheet that showed shows again, with the window's cursor and scroll.
+                let mut book = workbook_of(imported);
+                if let Some(id) = book.sheets().get(active).map(|s| s.id) {
+                    book.set_active(id);
+                }
+                grid.replace_workbook(book);
+                grid.restore_sheet_settings(settings);
+                grid.restore_filters(filters);
+                if std::env::var_os("BRICKS_TIMINGS").is_some() {
+                    eprintln!("saved {} rows as .xlsx in {took:?}", stats.rows);
+                }
+                *save.borrow_mut() = SaveState::Saved(took);
+                if close_after {
+                    if let Some(window) = grid.root().and_downcast::<gtk::Window>() {
+                        window.close();
+                    }
+                }
+            }
+            failed => {
+                let why = match failed {
+                    Ok(Err(e)) => e.to_string(),
+                    _ => "reading it back stopped".to_owned(),
+                };
+                eprintln!("bricks: the saved workbook can't be read back: {why}");
+                *save.borrow_mut() =
+                    SaveState::Failed(format!("the saved file can't be read back: {why}"));
+            }
+        }
+    });
 }
 
 /// Delimiters Save As offers, in dropdown order.
@@ -1318,9 +1646,10 @@ const SAVE_ENCODINGS: [(&str, Encoding); 5] = [
     ),
 ];
 
-/// Ctrl+Shift+S (SAVE-2): pick the delimiter and encoding (the file's own preselected),
-/// then the file, in the desktop's save dialog; the table is written there and the window
-/// shows that file from then on.
+/// Ctrl+Shift+S (SAVE-2, XLSX-1): pick the format (CSV, or an Excel workbook) and for
+/// CSV the delimiter and encoding (the file's own preselected), then the file, in the
+/// desktop's save dialog; the workbook is written there and the window shows that file
+/// from then on. A workbook of more than one sheet saves only as .xlsx.
 fn save_as(
     window: &gtk::ApplicationWindow,
     grid: &GridView,
@@ -1331,6 +1660,15 @@ fn save_as(
     if matches!(*save.borrow(), SaveState::Saving(..)) {
         return;
     }
+    let formats = gtk::DropDown::from_strings(&["CSV", "Excel workbook (.xlsx)"]);
+    let sheets = grid.sheet_count();
+    formats.set_selected(u32::from(session.kind.get() == DocKind::Xlsx || sheets > 1));
+    let note = gtk::Label::new(Some(
+        "A CSV file holds one sheet: save this workbook as .xlsx",
+    ));
+    note.add_css_class("dim-label");
+    note.set_wrap(true);
+    note.set_visible(sheets > 1);
     let delimiters = gtk::DropDown::from_strings(&SAVE_DELIMITERS.map(|(n, _)| n));
     delimiters.set_selected(
         SAVE_DELIMITERS
@@ -1359,16 +1697,38 @@ fn save_as(
         .margin_start(18)
         .margin_end(18)
         .build();
-    for (row, (label, dropdown)) in [("Delimiter", &delimiters), ("Encoding", &encodings)]
-        .into_iter()
-        .enumerate()
+    let mut csv_rows = Vec::new();
+    for (row, (label, dropdown)) in [
+        ("Format", &formats),
+        ("Delimiter", &delimiters),
+        ("Encoding", &encodings),
+    ]
+    .into_iter()
+    .enumerate()
     {
         let label = gtk::Label::new(Some(label));
         label.set_xalign(1.0);
         form.attach(&label, 0, row as i32, 1, 1);
         dropdown.set_hexpand(true);
         form.attach(dropdown, 1, row as i32, 1, 1);
+        if row > 0 {
+            csv_rows.push((label, dropdown.clone()));
+        }
     }
+    form.attach(&note, 0, 3, 2, 1);
+    // Delimiter and encoding are CSV's; a workbook of several sheets can't be CSV.
+    let show_format = move |formats: &gtk::DropDown| {
+        if formats.selected() == 0 && sheets > 1 {
+            formats.set_selected(1);
+        }
+        let csv = formats.selected() == 0;
+        for (label, dropdown) in &csv_rows {
+            label.set_visible(csv);
+            dropdown.set_visible(csv);
+        }
+    };
+    show_format(&formats);
+    formats.connect_selected_notify(show_format);
     let cancel = gtk::Button::with_label("Cancel");
     let choose = gtk::Button::with_label("Choose File…");
     choose.add_css_class("suggested-action");
@@ -1376,7 +1736,7 @@ fn save_as(
     buttons.set_halign(gtk::Align::End);
     buttons.append(&cancel);
     buttons.append(&choose);
-    form.attach(&buttons, 0, 2, 2, 1);
+    form.attach(&buttons, 0, 4, 2, 1);
     let dialog = gtk::Window::builder()
         .title("Save As")
         .transient_for(window)
@@ -1416,41 +1776,38 @@ fn save_as(
             save.clone(),
         );
         move |_| {
-            let delimiter = SAVE_DELIMITERS[delimiters.selected() as usize].1;
-            let encoding = SAVE_ENCODINGS[encodings.selected() as usize].1;
+            let format = if formats.selected() == 1 {
+                Format::Xlsx
+            } else {
+                Format::Csv {
+                    delimiter: SAVE_DELIMITERS[delimiters.selected() as usize].1,
+                    encoding: SAVE_ENCODINGS[encodings.selected() as usize].1,
+                }
+            };
             if let Some(d) = dialog.upgrade() {
                 d.close();
             }
             let (Some(window), Some(grid)) = (window.upgrade(), grid.upgrade()) else {
                 return;
             };
-            choose_save_file(
-                &window,
-                &grid,
-                &session,
-                &save,
-                delimiter,
-                encoding,
-                close_after,
-            );
+            choose_save_file(&window, &grid, &session, &save, format, close_after);
         }
     });
     dialog.present();
 }
 
 /// The second step of Save As: the desktop's save dialog, starting next to the current
-/// file with its name, the extension following the delimiter (`.tsv` for tabs).
+/// file with its name, the extension following the format (`.tsv` for tabs, `.xlsx`).
 fn choose_save_file(
     window: &gtk::ApplicationWindow,
     grid: &GridView,
     session: &Rc<Session>,
     save: &Rc<RefCell<SaveState>>,
-    delimiter: u8,
-    encoding: Encoding,
+    format: Format,
     close_after: bool,
 ) {
     let (filters, csv) = file_filters();
-    let name = suggested_name(&session.name(), session.path.borrow().is_none(), delimiter);
+    let name = suggested_name(&session.name(), session.path.borrow().is_none(), format);
     let builder = gtk::FileDialog::builder()
         .title("Save As")
         .modal(true)
@@ -1503,28 +1860,32 @@ fn choose_save_file(
             return;
         }
         let Some(grid) = grid.upgrade() else { return };
-        let target = Target {
-            path,
-            delimiter,
-            encoding,
-        };
+        let target = Target { path, format };
         start_save(&grid, &session, &save, Some(target), close_after);
     });
 }
 
-/// The name Save As starts with: the file's own, with `.tsv` for tab-separated output and
-/// `.csv` otherwise when it had one of those extensions; `Untitled.csv`/`.tsv` for a new
-/// table.
-fn suggested_name(name: &str, untitled: bool, delimiter: u8) -> String {
-    let ext = if delimiter == b'\t' { "tsv" } else { "csv" };
+/// The name Save As starts with: the file's own, with `.tsv` for tab-separated output,
+/// `.csv` otherwise when it had one of the extensions Bricks writes, and `.xlsx` for a
+/// workbook; `Untitled.csv`/`.tsv`/`.xlsx` for a new table.
+fn suggested_name(name: &str, untitled: bool, format: Format) -> String {
+    let ext = match format {
+        Format::Xlsx => "xlsx",
+        Format::Csv {
+            delimiter: b'\t', ..
+        } => "tsv",
+        Format::Csv { .. } => "csv",
+    };
     if untitled {
         return format!("{name}.{ext}");
     }
     let path = Path::new(name);
+    let ours = ["csv", "tsv", "xlsx", "xlsm"];
     match path.extension().and_then(|e| e.to_str()) {
-        Some(e) if e.eq_ignore_ascii_case("csv") || e.eq_ignore_ascii_case("tsv") => {
+        Some(e) if ours.iter().any(|o| e.eq_ignore_ascii_case(o)) => {
             path.with_extension(ext).to_string_lossy().into_owned()
         }
+        _ if format == Format::Xlsx => path.with_extension(ext).to_string_lossy().into_owned(),
         _ => name.to_owned(),
     }
 }
@@ -1925,16 +2286,20 @@ impl StatusBar {
     }
 
     /// Show the grid's current state; returns what is shown.
-    fn update(&self, grid: &GridView, choice: DelimiterChoice, save: &SaveState) -> status::Status {
+    fn update(&self, grid: &GridView, session: &Session, save: &SaveState) -> status::Status {
         let shown = status::status(&status::Facts {
             rows: grid.row_count(),
             of: grid.unfiltered_row_count(),
             indexing: grid.index_progress(),
             delimiter: grid.delimiter(),
-            detected: choice == DelimiterChoice::Auto,
+            detected: session.choice.get() == DelimiterChoice::Auto,
             encoding: grid.encoding(),
+            workbook: session.kind.get() == DocKind::Xlsx,
             edits: grid.edit_count(),
-            job: grid.job_progress(),
+            job: session
+                .import_share()
+                .map(|share| ("Opening", share))
+                .or_else(|| grid.job_progress()),
             save: match save {
                 SaveState::Idle => status::SaveView::Idle,
                 SaveState::Saving(r) if r.progress.is_checking() => status::SaveView::Checking,

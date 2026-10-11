@@ -189,6 +189,7 @@ mod tests {
     fn header(pid: u32, saved_ms: u64) -> JournalHeader {
         JournalHeader {
             path: Some("/tmp/x.csv".into()),
+            kind: data_model::FileKind::Csv,
             file_size: 1,
             file_mtime_ns: 2,
             delimiter: b',',
@@ -204,7 +205,7 @@ mod tests {
     fn write(store: &Store, journal: &Path, h: &JournalHeader) {
         store
             .write(journal, |f| {
-                data_model::CsvTable::untitled().write_journal(h, f)
+                data_model::Workbook::default().write_journal(h, f)
             })
             .unwrap();
     }

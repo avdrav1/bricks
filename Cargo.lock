@@ -49,6 +49,7 @@ dependencies = [
  "gtk4",
  "jobs",
  "libc",
+ "xlsx",
 ]
 
 [[package]]

@@ -10,8 +10,10 @@
 
 use crate::grid_view::GridView;
 use crate::recovery::{now_ms, Crashed, Store};
-use crate::{alert, build_window, canonical, close_start_window, remember, status, Session};
-use data_model::{read_journal, CsvTable, DelimiterChoice, JournalHeader};
+use crate::{
+    alert, build_window, canonical, close_start_window, remember, status, DocKind, Session,
+};
+use data_model::{read_book_journal, CsvTable, DelimiterChoice, FileKind, JournalHeader};
 use gtk::{glib, prelude::*};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -86,10 +88,14 @@ pub fn journal_tick(grid: &GridView, session: &Session, j: &Rc<RefCell<Journal>>
     if s.first.get_or_insert_with(Instant::now).elapsed() < WRITE_AFTER {
         return;
     }
-    let snapshot = grid.snapshot();
+    let snapshot = grid.workbook_snapshot();
     let (file_size, file_mtime_ns) = session.identity.get().unwrap_or((0, 0));
     let header = JournalHeader {
         path: session.path.borrow().clone(),
+        kind: match session.kind.get() {
+            DocKind::Csv => FileKind::Csv,
+            DocKind::Xlsx => FileKind::Xlsx,
+        },
         file_size,
         file_mtime_ns,
         delimiter: grid.delimiter(),
@@ -179,8 +185,9 @@ pub fn pending_tick(window: &gtk::ApplicationWindow, grid: &GridView, session: &
             changed_since(window, p.crashed);
             return;
         }
-        // Read the file as it was read when the edits were made.
-        if grid.delimiter() != h.delimiter || grid.encoding() != h.encoding {
+        // Read a CSV file as it was read when the edits were made.
+        let csv = h.kind == FileKind::Csv;
+        if csv && (grid.delimiter() != h.delimiter || grid.encoding() != h.encoding) {
             session.choice.set(DelimiterChoice::Fixed(h.delimiter));
             session.encoding.set(Some(h.encoding));
             match session.open() {
@@ -198,7 +205,7 @@ pub fn pending_tick(window: &gtk::ApplicationWindow, grid: &GridView, session: &
             return;
         }
     }
-    if grid.has_header() != h.has_header {
+    if h.kind == FileKind::Csv && grid.has_header() != h.has_header {
         session.header.set(Some(h.has_header));
         grid.set_header(h.has_header);
     }
@@ -252,18 +259,18 @@ fn changed_since(window: &gtk::ApplicationWindow, crashed: Crashed) {
     });
 }
 
-/// Read the journal on the job pool, then put its edits back as one undo step.
+/// Read the journal on the job pool, then put its sheets and edits back as one undo step.
 fn restore(window: &gtk::ApplicationWindow, grid: &GridView, crashed: Crashed) {
     let file = crashed.journal.clone();
     let job = jobs::spawn(move |_| {
         std::fs::File::open(&file)
             .map_err(data_model::JournalError::from)
-            .and_then(read_journal)
+            .and_then(read_book_journal)
     });
     let (window, grid) = (window.clone(), grid.clone());
     glib::spawn_future_local(async move {
         let result = match job.finished().await {
-            Ok(r) => r.and_then(|(_, state)| grid.restore_edits(state)),
+            Ok(r) => r.and_then(|(_, state)| grid.restore_journal(state)),
             Err(_) => Err(data_model::JournalError::Corrupt("reading it failed")),
         };
         match result {
@@ -349,16 +356,23 @@ fn restore_from_start(app: &gtk::Application, c: &Crashed, parent: Option<&gtk::
         crashed: c.clone(),
         ask: false,
     }));
-    let table = match &h.path {
-        None => CsvTable::untitled(),
-        Some(path) => {
+    let book = match (&h.path, h.kind) {
+        (None, _) => session.workbook(CsvTable::untitled()),
+        (Some(path), FileKind::Xlsx) => {
+            // The workbook is read again; its edits go back once that is done.
+            remember(path);
+            session.kind.set(DocKind::Xlsx);
+            session.import();
+            data_model::Workbook::default()
+        }
+        (Some(path), FileKind::Csv) => {
             session.choice.set(DelimiterChoice::Fixed(h.delimiter));
             session.encoding.set(Some(h.encoding));
             session.header.set(Some(h.has_header));
             match session.open() {
                 Ok(t) => {
                     remember(path);
-                    t
+                    session.workbook(t)
                 }
                 Err(e) => {
                     let detail = format!("{e}. The unsaved edits are kept for later.");
@@ -368,6 +382,6 @@ fn restore_from_start(app: &gtk::Application, c: &Crashed, parent: Option<&gtk::
             }
         }
     };
-    build_window(app, &session, table, None);
+    build_window(app, &session, book, None);
     close_start_window(app);
 }

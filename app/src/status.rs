@@ -51,6 +51,8 @@ pub struct Facts<'a> {
     /// The delimiter was detected (Auto), not chosen.
     pub detected: bool,
     pub encoding: Encoding,
+    /// The file is an Excel workbook (XLSX-1): no delimiter or encoding to name.
+    pub workbook: bool,
     pub edits: usize,
     /// A running sort or filter ("Sorting", "Filtering") and its share done (0..=1).
     pub job: Option<(&'a str, f64)>,
@@ -153,12 +155,17 @@ pub fn status(f: &Facts) -> Status {
         save.push("File changed on disk".to_owned());
     }
 
-    let mut format = delimiter_name(f.delimiter).to_owned();
-    if f.detected {
-        format.push_str(" (detected)");
-    }
-    format.push_str(" · ");
-    format.push_str(f.encoding.name());
+    let format = if f.workbook {
+        "Excel workbook".to_owned()
+    } else {
+        let mut format = delimiter_name(f.delimiter).to_owned();
+        if f.detected {
+            format.push_str(" (detected)");
+        }
+        format.push_str(" · ");
+        format.push_str(f.encoding.name());
+        format
+    };
 
     Status {
         rows,
@@ -244,6 +251,7 @@ mod tests {
             indexing: None,
             delimiter: b',',
             detected: true,
+            workbook: false,
             encoding: Encoding::UTF8,
             edits: 0,
             job: None,
@@ -358,6 +366,8 @@ mod tests {
             ..Encoding::UTF8
         };
         assert_eq!(status(&f).format, "Tab · UTF-8 with BOM");
+        f.workbook = true;
+        assert_eq!(status(&f).format, "Excel workbook");
     }
 
     #[test]
