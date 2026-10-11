@@ -876,23 +876,9 @@ fn file_dimension_cols(src: &[u8]) -> Option<u32> {
     }
 }
 
-/// The merged ranges a sheet has now.
+/// The merged ranges a sheet has now (STYLE-4 keeps them following structure edits).
 fn sheet_merges(table: &data_model::CsvTable) -> Vec<CellArea> {
-    table
-        .layout()
-        .merges
-        .iter()
-        .filter_map(|m| {
-            let (r1, r2) = table.file_rows_now(m.first_row, m.last_row)?;
-            let (c1, c2) = table.file_cols_now(m.first_col, m.last_col)?;
-            ((r1, c1) != (r2, c2)).then_some(CellArea {
-                first_row: r1,
-                first_col: c1,
-                last_row: r2,
-                last_col: c2,
-            })
-        })
-        .collect()
+    table.merges().to_vec()
 }
 
 /// A `<col>` element's attributes, comparable so equal neighbours join.

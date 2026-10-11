@@ -120,7 +120,10 @@ fn edited(test: &str) -> (PathBuf, Workbook) {
         .apply(Edit::set(at(0, 0), "=Data!B3*3"));
     let styles = &mut book.sheet_mut(STYLES).unwrap().table;
     let delete = styles.delete_rows(DELETED, 1).unwrap();
+    // As the app does it: the merges move in the same step (STYLE-4).
+    let merges = styles.merges_after(&delete);
     styles.apply(delete);
+    styles.apply(merges.expect("the merges below the row move up"));
     book.apply(BookEdit::Rename {
         id: SheetId(2),
         name: "Report".into(),

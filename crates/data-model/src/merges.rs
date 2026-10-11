@@ -4,7 +4,6 @@
 //! by Excel's rules in the same undo step ([`CsvTable::merges_after`]).
 
 use crate::rewrites::structure_changes;
-use crate::rowmap::RowOrder;
 use crate::{CellArea, CellRef, Col, CsvTable, Edit, Row, RowBlock, TableSource};
 use formula::{Axis, Change};
 use std::ops::{Range, RangeInclusive};
@@ -86,11 +85,6 @@ impl CsvTable {
             }
         };
         (!rows.is_empty()).then_some(rows)
-    }
-
-    /// Rows are in a sorted order (SORT-1), not file order with inserts and deletes.
-    pub fn is_sorted(&self) -> bool {
-        matches!(self.rows, Some(RowOrder::Sorted(_)))
     }
 
     /// A sort would move rows a merge covers: refuse it ("Unmerge cells before sorting").
