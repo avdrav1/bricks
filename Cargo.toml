@@ -8,6 +8,7 @@ members = [
     "crates/commands",
     "crates/file-format",
     "crates/jobs",
+    "crates/xlsx",
     "app",
 ]
 
@@ -26,6 +27,7 @@ grid = { path = "crates/grid" }
 commands = { path = "crates/commands" }
 file-format = { path = "crates/file-format" }
 jobs = { path = "crates/jobs" }
+xlsx = { path = "crates/xlsx" }
 
 [workspace.lints.rust]
 unsafe_code = "warn"

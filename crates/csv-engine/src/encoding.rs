@@ -111,13 +111,16 @@ pub fn open_text_as(path: &Path, encoding: Encoding) -> io::Result<Source> {
     if encoding.charset == Charset::Utf8 {
         return Source::open(path);
     }
-    let copy = decoded_copy_path()?;
+    let copy = scratch_path()?;
     let result = transcode(path, &copy, encoding).and_then(|()| Source::open(&copy));
     let _ = std::fs::remove_file(&copy); // the mapping stays valid after unlink
     result
 }
 
-fn decoded_copy_path() -> io::Result<PathBuf> {
+/// A fresh path for a scratch copy in the cache directory (`$XDG_CACHE_HOME/bricks`,
+/// created if missing): decoded copies of non-UTF-8 files, imported XLSX sheets. Callers
+/// map the copy and then remove it; the mapping stays valid after unlink.
+pub fn scratch_path() -> io::Result<PathBuf> {
     static N: AtomicU64 = AtomicU64::new(0);
     let base = std::env::var_os("XDG_CACHE_HOME")
         .map(PathBuf::from)
@@ -126,7 +129,7 @@ fn decoded_copy_path() -> io::Result<PathBuf> {
     let dir = base.join("bricks");
     std::fs::create_dir_all(&dir)?;
     Ok(dir.join(format!(
-        "decoded-{}-{}.utf8",
+        "copy-{}-{}",
         std::process::id(),
         N.fetch_add(1, Ordering::Relaxed)
     )))

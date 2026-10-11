@@ -1,0 +1,24 @@
+[package]
+name = "xlsx"
+description = "XLSX import into indexed sheet copies, XLSX export"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+calamine = "0.36"
+csv-engine.workspace = true
+data-model.workspace = true
+file-format.workspace = true
+formula.workspace = true
+memchr = "2.8.3"
+rust_xlsxwriter = { version = "0.99", features = ["constant_memory"] }
+zip = { version = "8", default-features = false, features = ["deflate"] }
+
+[lints]
+workspace = true
+
+[lib]
+# `cargo bench` runs only app/benches/corpus.rs (BENCH-1).
+bench = false

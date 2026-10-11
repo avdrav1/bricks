@@ -6,8 +6,10 @@ use crate::ast::{Area, Expr, Reference, UnaryOp};
 use crate::refs::push_column;
 use std::fmt::Write;
 
-/// Functions newer than Excel 2007, which XLSX files must name with an `_xlfn.` prefix.
-const XLFN: [&str; 16] = [
+/// Functions newer than Excel 2007, which XLSX files must name with an `_xlfn.` prefix;
+/// and BAHTTEXT, which LibreOffice reads from XLSX only with the prefix (and writes so).
+const XLFN: [&str; 17] = [
+    "BAHTTEXT",
     "CONCAT",
     "DAYS",
     "IFNA",

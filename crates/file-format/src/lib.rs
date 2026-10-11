@@ -67,7 +67,7 @@ pub fn save_atomic<W, V>(
     verify: V,
 ) -> Result<(), SaveError>
 where
-    W: FnOnce(&mut dyn Write) -> io::Result<()>,
+    W: FnOnce(&mut (dyn Write + Send)) -> io::Result<()>,
     V: FnOnce(&Path) -> Result<(), String>,
 {
     let tmp = temp_path(dest)?;
@@ -86,7 +86,7 @@ fn write_verify_rename<W, V>(
     verify: V,
 ) -> Result<(), SaveError>
 where
-    W: FnOnce(&mut dyn Write) -> io::Result<()>,
+    W: FnOnce(&mut (dyn Write + Send)) -> io::Result<()>,
     V: FnOnce(&Path) -> Result<(), String>,
 {
     let file = OpenOptions::new().write(true).create_new(true).open(tmp)?;

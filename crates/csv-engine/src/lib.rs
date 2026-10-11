@@ -12,7 +12,9 @@ mod source;
 mod testutil;
 
 pub use detect::{detect_dialect, detect_header, DETECT_SAMPLE_BYTES};
-pub use encoding::{detect_encoding, open_text, open_text_as, Charset, EncodeWriter, Encoding};
+pub use encoding::{
+    detect_encoding, open_text, open_text_as, scratch_path, Charset, EncodeWriter, Encoding,
+};
 pub use fields::{encode_field, split_fields, Field};
 pub use index::{IndexError, SparseRowIndex, STRIDE};
 pub use source::Source;

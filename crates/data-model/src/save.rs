@@ -45,6 +45,12 @@ impl SaveProgress {
         self.written.load(Ordering::Relaxed)
     }
 
+    /// Count `n` more units written: bytes for CSV, rows for XLSX (whose size isn't known
+    /// while it is written).
+    pub fn add_written(&self, n: u64) {
+        self.written.fetch_add(n, Ordering::Relaxed);
+    }
+
     /// Verification of the written file has started.
     pub fn set_checking(&self) {
         self.checking.store(true, Ordering::Relaxed);
