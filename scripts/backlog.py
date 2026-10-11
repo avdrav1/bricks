@@ -14,7 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 BACKLOG = ROOT / "BACKLOG.md"
-MILESTONES = ["S0", "M0", "M1", "M2", "M3", "M4"]
+MILESTONES = ["S0", "M0", "M1", "M2", "M3", "M4", "M5"]
 STATUSES = {"todo", "in-progress", "review", "done", "blocked"}
 COLS = ["id", "ms", "pri", "status", "depends", "story", "acceptance"]
 

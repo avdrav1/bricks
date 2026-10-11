@@ -15,6 +15,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 - [x] M2: editor round-trips edits, paste, inserts, and undo on 1 GB without full rewrites before save
 - [x] M3: all V0.1 benchmarks in docs/BENCHMARKS.md pass on reference hardware (V0.1 release)
 - [ ] M4: `curl -fsSL https://bricks.cronkite.cc/install.sh | sh` installs per user on clean Arch, Ubuntu 24.04, and Fedora VMs, and double-clicking a CSV opens it
+- [ ] M5: bricks opens the LibreOffice fixture workbook and a real-world .xlsx with formulas on 3+ sheets; after edits and Save, LibreOffice reopens it with the same values, formulas, and sheet names; the XLSX and formula rows in docs/BENCHMARKS.md pass on the reference box
 
 ## Stories
 
@@ -78,11 +79,32 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | PKG-1 | M4 | P0 | done | APP-1, PKG-3 | curl installer (per user, no sudo): `install.sh` on the download site; .desktop file, icon, text/csv association; `--uninstall` | Piping `install.sh` from the site into `sh` installs on clean Arch, Ubuntu 24.04, Fedora; checksum verified; double-click opens CSVs; prints the distro's GTK 4 install command if missing |
 | PKG-4 | M4 | P0 | done | PKG-1 | Rename the app to Bricks: `bricks` command, window titles, app menu, state folder | `bricks` starts the app; installing over v0.1.0 leaves one app, named Bricks, with its recent files kept |
 | PKG-2 | M4 | P2 | todo | PKG-1 | Flatpak manifest | Builds on Flathub CI |
+| DEC-6 | M5 | P0 | done | - | Workbook model: XLSX sheets as indexed CSV copies; references address file rows | ADR 0006 accepted |
+| DEC-7 | M5 | P0 | done | - | Formula engine: lazy evaluation over raw cells with a revision cache | ADR 0007 accepted |
+| DEC-8 | M5 | P0 | done | - | Multiple sheets: one workbook per window, one undo history | ADR 0008 accepted |
+| FML-1 | M5 | P0 | todo | DEC-7 | Formula language: parse, render, A1 references, sheet names, errors | Every grammar case round-trips parse then render; a bad formula reports the character where it fails |
+| FML-2 | M5 | P0 | todo | FML-1 | Evaluator: values, coercion, operators, cycles, deep chains | Operator and coercion cases match LibreOffice; a 1,000,000-row running total evaluates without overflow; a cycle gives #CIRC! |
+| FML-3 | M5 | P0 | todo | FML-2, DEC-6 | Workbook and calculation in data-model: formula cells, cached results, computed values for jobs | A CSV with =B2*2 shows its result; an edit changes it; the saved file keeps =B2*2; SUM(D:D) over the 1 GB file computes in the background in under 5 s |
+| FML-4 | M5 | P0 | todo | FML-3, DEC-8 | Grid shows formula results; edits and undo go through the workbook | Typing =B2*2 shows the result and Ctrl+Z removes it; over-budget results show … then their value; scroll p99 with 60 visible formulas under 16 ms |
+| XLSX-1 | M5 | P0 | todo | FML-4 | Open and save .xlsx: every sheet as a tab, typed values, formulas with results, names, crash recovery | The LibreOffice fixture workbook opens with the same values, formulas, and sheet names, saves, and LibreOffice reads the save back identically; a CSV saves as .xlsx; kill -9 with edits on two sheets restores both |
+| SHEET-1 | M5 | P0 | todo | XLSX-1 | Add, rename, delete, and move sheets; each step undoable | Add, rename, move, and delete sheets and undo each step; each sheet keeps its scroll, selection, and column widths; a CSV with two sheets saves only as .xlsx |
+| SHEET-2 | M5 | P0 | todo | SHEET-1 | References across sheets; renaming a sheet updates them; deleting one gives #REF! | ='Q1 Sales'!B2 shows that cell; renaming the sheet rewrites the reference; deleting it shows #REF!; Ctrl+Z restores both |
+| XLSX-2 | M5 | P0 | todo | XLSX-1 | Warn about workbook content Bricks drops; ask before saving over it | A workbook with formatting, a chart, comments, and merged cells opens with a bar naming them; Ctrl+S over it asks first |
+| FML-5 | M5 | P0 | todo | FML-3 | Functions: math, statistics, logic, information | Every case in the function fixture matches LibreOffice |
+| FML-6 | M5 | P0 | todo | FML-3 | Functions: text, including TEXT format codes | Every case in the function fixture matches LibreOffice |
+| FML-7 | M5 | P0 | todo | FML-3 | Functions: lookup and reference | Every case in the function fixture matches LibreOffice; VLOOKUP over 1,000,000 rows answers in under 1 s |
+| FML-8 | M5 | P0 | todo | FML-3 | Functions: dates and times | Every case in the function fixture matches LibreOffice |
+| FML-9 | M5 | P0 | todo | FML-4 | Formula bar and name box | The bar shows the selected cell's formula; editing it is one undo step; typing C5 or Sheet2!B3 in the name box goes there; a formula with a syntax error is refused with the character |
+| FML-10 | M5 | P0 | todo | FML-4 | Formulas follow inserted, deleted, and sorted rows and columns | Inserting a row above row 5 turns =SUM(A1:A10) into =SUM(A1:A11); deleting row 5 turns =A5 into =#REF!; sorting keeps =B2*2 on its own row; one Ctrl+Z restores each |
+| FML-11 | M5 | P0 | todo | FML-4 | Sort, filter, find, type inference, and copy use formula results | Sorting a formula column orders by result; a number filter on it works; find finds results; replace all skips formula cells and says how many |
+| FML-12 | M5 | P1 | todo | FML-10 | Copy and paste formulas inside Bricks with relative references shifted | Copying B2 (=A2*2) and pasting at B3 gives =A3*2; pasting into LibreOffice gives the value |
+| BENCH-2 | M5 | P0 | todo | XLSX-1, FML-11 | XLSX and formula rows in the benchmark table | cargo bench prints all new rows with measurements |
 
 ## Notes
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-10 decision:** M5 is XLSX, formulas, and multiple sheets (user decision), replacing invariant 8's V0.1 non-goals for those three. Design in ADRs 0006 (workbook model), 0007 (formula engine), 0008 (sheets and undo). User choices: own engine on Bricks' model; XLSX save writes values, formulas, sheets and drops the rest with warnings; CSV cells starting with = evaluate; a CSV with 2+ sheets saves as .xlsx; core ~120 functions; formula bar with name box.
 - **2026-10-10 PKG-4:** the app is Bricks now: command `bricks`, the window title, the app menu entry, dialogs ("Bricks closed unexpectedly…"), `--version`, and log lines (`bricks: …`).
   - Decided with the user: a full rename (not just the command), shipped as v0.1.1.
   - App ID `dev.bricks.Spreadsheet` → `dev.bricks.Bricks`. The desktop entry and icon take the app ID's name (`dev.bricks.Bricks.desktop` and `.svg`), so Wayland docks match the window to its entry. The old `spreadsheet.desktop` never matched `dev.bricks.Spreadsheet`. `GenericName=Spreadsheet` keeps it findable in app menus.

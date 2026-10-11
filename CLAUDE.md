@@ -13,12 +13,12 @@ Bricks: a fast, lightweight Linux spreadsheet in Rust (command `bricks`). V0.1 i
 
 1. **Raw values are authoritative.** Type inference affects sort, filter, and display only. `00123` stays `00123` on disk.
 2. **Never materialize the whole file.** No `Vec<Vec<String>>` of all rows. Source stays indexed; edits live in the overlay.
-3. **Layers stay separate:** source (csv-engine) -> overlay (data-model) -> view (sort/filter) -> grid -> app. Lower crates never depend on higher ones, and nothing below `app` depends on the UI toolkit.
+3. **Layers stay separate:** source (csv-engine) -> overlay (data-model, with formula) -> view (sort/filter) -> grid -> app. Lower crates never depend on higher ones, and nothing below `app` depends on the UI toolkit.
 4. **Nothing slow on the UI thread.** Parsing, indexing, sort, filter, search, save, inference run as background jobs with progress and cancel.
 5. **Every mutation is an undoable command** that stores the operation, not a snapshot.
 6. **Saving is atomic:** temp file in the same directory, verify, fsync, rename. A crash never corrupts the original.
 7. **Filters never drop rows on save.** Sorting changes row order; filtering changes only the view.
-8. **V0.1 non-goals stay out:** formulas, charts, pivots, multiple sheets, macros, scripting, styling, plugins, collaboration.
+8. **Non-goals stay out:** charts, pivots, macros, scripting, styling, plugins, collaboration. Formulas, multiple sheets, and XLSX are in scope from M5 (ADRs 0006-0008).
 
 ## Crates
 
@@ -26,6 +26,8 @@ Bricks: a fast, lightweight Linux spreadsheet in Rust (command `bricks`). V0.1 i
 | --- | --- |
 | `csv-engine` | parsing, dialect and encoding detection, row index, CSV writing |
 | `data-model` | cells, overlay, row map, inferred types, sort and filter views |
+| `formula` | formula language: parse, render, references, values, evaluation, functions; no dependencies |
+| `xlsx` | XLSX import into indexed sheet copies, XLSX export |
 | `grid` | toolkit-free viewport, selection, navigation |
 | `commands` | `Command` trait, undo/redo |
 | `file-format` | atomic save |
@@ -42,6 +44,9 @@ cargo test --release --workspace -- --ignored  # perf acceptance tests (timing a
 python3 scripts/gen_corpus.py            # builds corpus/ (gitignored)
 python3 scripts/fetch_delimiter_sample.py  # 50 real-world files into corpus/realworld/ (ENG-4 test)
 python3 scripts/lo_navigation.py         # re-record GRID-3's checklist from LibreOffice (needs LibreOffice)
+python3 scripts/lo_functions.py          # re-record formula results from LibreOffice (FML-5..8)
+python3 scripts/lo_xlsx.py fixture|dump FILE  # LibreOffice fixture workbook and dumps (XLSX-*)
+cargo run --release -p xlsx --example gen_corpus_xlsx  # corpus/rows_1m.xlsx (BENCH-2)
 python3 -m unittest discover -s scripts  # script tests (corpus generator)
 cargo bench                              # prints the docs/BENCHMARKS.md table (needs corpus/)
 python3 scripts/backlog.py next|status   # backlog helper
