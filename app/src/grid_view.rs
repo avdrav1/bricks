@@ -8,12 +8,12 @@ use commands::{Batch, ClearCells, Command, OnSheet, Reshape, SetCell, SheetEdit,
 use csv_engine::RowIndex as _;
 use data_model::HAlign;
 use data_model::{
-    is_formula, parse_tsv, BookEdit, BookState, Budget, CellRef, CellValues, ColId, ColumnTypes,
-    Compare, Computed, Copied, CsvTable, DelimiterChoice, Edit, Filter, FilterError, FormulaCells,
-    Hit, InferredType, JournalError, Matches, Origin, PasteError, Query, ReplaceError, RereadError,
-    RowId, RowSet, SaveJob, SaveJobError, SearchError, SearchProgress, SheetId, ShownSheet,
-    SortError, SortOrder, Step, StyleId, TableSource, Test, VAlign, Workbook, PASTE_MAX_CELLS,
-    UI_BUDGET,
+    is_formula, parse_tsv, BookEdit, BookState, Budget, CellArea, CellRef, CellValues, ColId,
+    ColumnTypes, Compare, Computed, Copied, CsvTable, DelimiterChoice, Edit, Filter, FilterError,
+    FormulaCells, Hit, InferredType, JournalError, Matches, MergeError, MergePlan, Origin,
+    PasteError, Query, ReplaceError, RereadError, RowId, RowSet, SaveJob, SaveJobError,
+    SearchError, SearchProgress, SheetId, ShownSheet, SortError, SortOrder, Step, StyleId,
+    TableSource, Test, VAlign, Workbook, MERGE_MAX_CELLS, PASTE_MAX_CELLS, UI_BUDGET,
 };
 use formula::{column_name, Formatted, NumberFormat, Value};
 use grid::{Bounds, GridCache, Key, Mods, Selection, Sizes, Viewport};
@@ -522,22 +522,61 @@ mod imp {
             let dim = gdk::RGBA::new(fg.red(), fg.green(), fg.blue(), 0.5);
             let mut buf = self.buf.borrow_mut();
 
-            // Body: stripes, grid lines, cells.
+            // Merged cells on screen (STYLE-4): each draws as one cell, the anchor's.
+            let merged = visible_merges(table, visible.clone(), visible_cols.clone());
+            let covered = |r: u64, c: u64| merged.iter().any(|m| m.covers(r, c as u32));
+            let clamp_x = |x: f64| x.clamp(rh_w - 4.0, w + 4.0);
+            let clamp_y = |y: f64| y.clamp(HEADER_H - 4.0, h + 4.0);
+            let col_x = |c: u32| rh_w + cols.pos(u64::from(c));
+            let col_end = |c: u32| col_x(c) + cols.size(u64::from(c));
+            let row_y = |r: u64| HEADER_H + rows.pos(r);
+            let row_end = |r: u64| row_y(r) + rows.size(r);
+
+            // Body: stripes, grid lines, cells. Stripes and inner lines stop at merges.
             snapshot.push_clip(&rect(rh_w, HEADER_H, body_w, body_h));
+            let mut holes: Vec<(f64, f64)> = Vec::new();
             for r in visible.clone() {
-                let (y, rh) = (HEADER_H + rows.pos(r), rows.size(r));
+                let (y, rh) = (row_y(r), rows.size(r));
                 if r % 2 == 1 {
-                    snapshot.append_color(&stripe, &rect(rh_w, y, body_w, rh));
+                    holes.clear();
+                    holes.extend(
+                        merged
+                            .iter()
+                            .filter(|m| m.tl.row <= r && r <= m.br.row)
+                            .map(|m| (col_x(m.tl.col), col_end(m.br.col))),
+                    );
+                    each_gap(rh_w, rh_w + body_w, &mut holes, |x0, x1| {
+                        snapshot.append_color(&stripe, &rect(x0, y, x1 - x0, rh));
+                    });
                 }
-                snapshot.append_color(&line, &rect(rh_w, y + rh - 1.0, body_w, 1.0));
+                holes.clear();
+                holes.extend(
+                    merged
+                        .iter()
+                        .filter(|m| m.tl.row <= r && r < m.br.row)
+                        .map(|m| (col_x(m.tl.col), col_end(m.br.col))),
+                );
+                each_gap(rh_w, rh_w + body_w, &mut holes, |x0, x1| {
+                    snapshot.append_color(&line, &rect(x0, y + rh - 1.0, x1 - x0, 1.0));
+                });
             }
             for c in visible_cols.clone() {
-                let (x, cw) = (rh_w + cols.pos(c), cols.size(c));
-                snapshot.append_color(&line, &rect(x + cw - 1.0, HEADER_H, 1.0, body_h));
+                let x = col_end(c as u32) - 1.0;
+                holes.clear();
+                holes.extend(
+                    merged
+                        .iter()
+                        .filter(|m| u64::from(m.tl.col) <= c && c < u64::from(m.br.col))
+                        .map(|m| (clamp_y(row_y(m.tl.row)), clamp_y(row_end(m.br.row)))),
+                );
+                each_gap(HEADER_H, HEADER_H + body_h, &mut holes, |y0, y1| {
+                    snapshot.append_color(&line, &rect(x, y0, 1.0, y1 - y0));
+                });
             }
 
             // Cells (STYLE-3): fills, then text, then borders, so text can overflow into
-            // empty neighbours and borders sit on top.
+            // empty neighbours and borders sit on top. Cells a merge covers draw nothing:
+            // the merge draws once over them all.
             let pool = book.styles().clone();
             let base = obj.pango_context().font_description().unwrap_or_default();
             let mut looks = self.looks.borrow_mut();
@@ -549,6 +588,9 @@ mod imp {
             for r in visible.clone().take_while(|&r| r < table.row_count()) {
                 let row = table.row_id(r);
                 for c in visible_cols.clone() {
+                    if covered(r, c) {
+                        continue;
+                    }
                     let look = if styled {
                         let col = table.col_id(c as u32);
                         looks.get(table.style_of(CellRef { row, col }))
@@ -558,20 +600,49 @@ mod imp {
                     cells.push((r, c, look));
                 }
             }
+            let merged_looks: Vec<Rc<Look>> = merged
+                .iter()
+                .map(|m| {
+                    if styled {
+                        looks.get(table.style_of(m.anchor))
+                    } else {
+                        plain.clone()
+                    }
+                })
+                .collect();
+            // A merge's rectangle, clamped to just outside the body: one can span far more
+            // rows than are on screen.
+            let merged_rect = |m: &Merged| {
+                let (x0, y0) = (clamp_x(col_x(m.tl.col)), clamp_y(row_y(m.tl.row)));
+                let (x1, y1) = (clamp_x(col_end(m.br.col)), clamp_y(row_end(m.br.row)));
+                (x0, x1 - x0, y0, y1 - y0)
+            };
             for (r, c, look) in &cells {
                 if let Some(fill) = look.fill {
                     let (x, y) = (rh_w + cols.pos(*c), HEADER_H + rows.pos(*r));
                     snapshot.append_color(&fill, &rect(x, y, cols.size(*c), rows.size(*r)));
                 }
             }
-            let empty = |r: u64, c: u64| cache.cell(r, c as u32).is_none_or(str::is_empty);
+            for (m, look) in merged.iter().zip(&merged_looks) {
+                let (x, mw, y, mh) = merged_rect(m);
+                if m.tl.row % 2 == 1 {
+                    snapshot.append_color(&stripe, &rect(x, y, mw, mh));
+                }
+                if let Some(fill) = look.fill {
+                    snapshot.append_color(&fill, &rect(x, y, mw, mh));
+                }
+            }
+            let empty = |r: u64, c: u64| {
+                !covered(r, c) && cache.cell(r, c as u32).is_none_or(str::is_empty)
+            };
             let digit_w = f64::from(self.layout("0").pixel_size().0.max(1));
-            for (r, c, look) in &cells {
-                let Some(raw) = cache.cell(*r, *c as u32).filter(|t| !t.is_empty()) else {
-                    continue;
-                };
-                let (x, cw) = (rh_w + cols.pos(*c), cols.size(*c));
-                let (y, rh) = (HEADER_H + rows.pos(*r), rows.size(*r));
+            // Draws `raw` in `look` in the cell at (`x`, `y`), `cw` by `rh`; `spill` (its
+            // row and column) lets text that doesn't fit overflow into empty neighbours.
+            let draw_text = |raw: &str,
+                             look: &Look,
+                             (x, cw): (f64, f64),
+                             (y, rh): (f64, f64),
+                             spill_from: Option<(u64, u64)>| {
                 let value = formula::literal(raw);
                 let formatted = look
                     .format
@@ -634,7 +705,7 @@ mod imp {
                         draw(&ch.to_string().repeat(n), x + PAD + f64::from(lw));
                     }
                     snapshot.pop();
-                    continue;
+                    return;
                 }
                 let layout = self.styled_layout(text, look, wrap);
                 let (tw, th) = layout.pixel_size();
@@ -642,14 +713,16 @@ mod imp {
                 // Text that doesn't fit spills into empty neighbours, as in Excel: numbers and
                 // wrapped text don't.
                 let (mut x0, mut x1) = (x, x + cw);
-                if wrap == 0 && !number && tw + 2.0 * PAD + indent > cw {
+                if let Some((r, c)) =
+                    spill_from.filter(|_| wrap == 0 && !number && tw + 2.0 * PAD + indent > cw)
+                {
                     let spill = |mut k: u64, step: i64, room: &mut f64| {
                         let mut width = 0.0;
                         while *room > 0.0 {
                             let next = k as i64 + step;
                             if next < visible_cols.start as i64
                                 || next >= visible_cols.end as i64
-                                || !empty(*r, next as u64)
+                                || !empty(r, next as u64)
                             {
                                 break;
                             }
@@ -662,13 +735,13 @@ mod imp {
                     };
                     let mut room = tw + 2.0 * PAD + indent - cw;
                     match align {
-                        Align::Left => x1 += spill(*c, 1, &mut room),
-                        Align::Right => x0 -= spill(*c, -1, &mut room),
+                        Align::Left => x1 += spill(c, 1, &mut room),
+                        Align::Right => x0 -= spill(c, -1, &mut room),
                         Align::Center => {
                             room /= 2.0;
                             let mut other = room;
-                            x1 += spill(*c, 1, &mut room);
-                            x0 -= spill(*c, -1, &mut other);
+                            x1 += spill(c, 1, &mut room);
+                            x0 -= spill(c, -1, &mut other);
                         }
                     }
                 }
@@ -695,13 +768,28 @@ mod imp {
                 if clip {
                     snapshot.pop();
                 }
-            }
-            for (r, c, look) in cells
-                .iter()
-                .filter(|(_, _, l)| l.borders.iter().any(Option::is_some))
-            {
+            };
+            for (r, c, look) in &cells {
+                let Some(raw) = cache.cell(*r, *c as u32).filter(|t| !t.is_empty()) else {
+                    continue;
+                };
                 let (x, cw) = (rh_w + cols.pos(*c), cols.size(*c));
                 let (y, rh) = (HEADER_H + rows.pos(*r), rows.size(*r));
+                draw_text(raw, look, (x, cw), (y, rh), Some((*r, *c)));
+            }
+            // A merge's text is its anchor's, laid out across the whole merge (a centred
+            // title centres over every column it spans). An anchor scrolled out of the
+            // loaded rows has no text here yet; a filtered-out one shows none.
+            for (m, look) in merged.iter().zip(&merged_looks) {
+                let raw = cache.cell(m.tl.row, m.tl.col).filter(|t| !t.is_empty());
+                let Some(raw) = raw.filter(|_| m.anchor_shown) else {
+                    continue;
+                };
+                let (x, y) = (col_x(m.tl.col), row_y(m.tl.row));
+                let (mw, mh) = (col_end(m.br.col) - x, row_end(m.br.row) - y);
+                draw_text(raw, look, (x, mw), (y, mh), None);
+            }
+            let borders = |look: &Look, x: f64, y: f64, cw: f64, rh: f64| {
                 let [top, bottom, left, right] = look.borders;
                 for (line, x, y, len, across) in [
                     (top, x - 1.0, y - 1.0, cw + 1.0, true),
@@ -713,36 +801,44 @@ mod imp {
                         draw_line(snapshot, &line, x, y, len, across);
                     }
                 }
+            };
+            for (r, c, look) in cells
+                .iter()
+                .filter(|(_, _, l)| l.borders.iter().any(Option::is_some))
+            {
+                let (x, cw) = (rh_w + cols.pos(*c), cols.size(*c));
+                let (y, rh) = (HEADER_H + rows.pos(*r), rows.size(*r));
+                borders(look, x, y, cw, rh);
+            }
+            // A merge has its anchor's borders, around the whole merge.
+            for (m, look) in merged.iter().zip(&merged_looks) {
+                if look.borders.iter().any(Option::is_some) {
+                    let (x, mw, y, mh) = merged_rect(m);
+                    borders(look, x, y, mw, mh);
+                }
             }
             drop(cells);
 
             // Selection and cell cursor. Coordinates are clamped to just outside the body
-            // before narrowing to f32, so far-away edges stay exact.
+            // before narrowing to f32, so far-away edges stay exact. The selection covers
+            // the merges it touches; a cursor on a merge outlines all of it.
+            let merges = TableMerges(table);
             let sel = self.selection.get();
-            let (tl, br) = sel.range();
-            let (tl_col, br_col) = (u64::from(tl.col), u64::from(br.col));
-            let clamp_x = |x: f64| x.clamp(rh_w - 4.0, w + 4.0);
-            let clamp_y = |y: f64| y.clamp(HEADER_H - 4.0, h + 4.0);
-            let (x0, x1) = (
-                clamp_x(rh_w + cols.pos(tl_col)),
-                clamp_x(rh_w + cols.pos(br_col) + cols.size(br_col)),
-            );
-            let (y0, y1) = (
-                clamp_y(HEADER_H + rows.pos(tl.row)),
-                clamp_y(HEADER_H + rows.pos(br.row) + rows.size(br.row)),
-            );
+            let (tl, br) = sel.area(&merges);
+            let (x0, x1) = (clamp_x(col_x(tl.col)), clamp_x(col_end(br.col)));
+            let (y0, y1) = (clamp_y(row_y(tl.row)), clamp_y(row_end(br.row)));
             let accent = gdk::RGBA::new(0.21, 0.52, 0.89, 1.0);
-            if tl != br {
+            let (range_tl, range_br) = sel.range();
+            if range_tl != range_br {
                 let fill = gdk::RGBA::new(accent.red(), accent.green(), accent.blue(), 0.18);
                 snapshot.append_color(&fill, &rect(x0, y0, x1 - x0, y1 - y0));
             }
             let cur = sel.cursor();
-            let (cx, cy) = (
-                rh_w + cols.pos(u64::from(cur.col)),
-                HEADER_H + rows.pos(cur.row),
-            );
-            let (cw, ch) = (cols.size(u64::from(cur.col)), rows.size(cur.row));
-            if cy > HEADER_H - ch && cy < h && cx > rh_w - cw && cx < w {
+            let (cur_tl, cur_br) = grid::Merges::at(&merges, cur).unwrap_or((cur, cur));
+            let (cx, cx1) = (clamp_x(col_x(cur_tl.col)), clamp_x(col_end(cur_br.col)));
+            let (cy, cy1) = (clamp_y(row_y(cur_tl.row)), clamp_y(row_end(cur_br.row)));
+            let (cw, ch) = (cx1 - cx, cy1 - cy);
+            if cy1 > HEADER_H && cy < h && cx1 > rh_w && cx < w {
                 for (x, y, bw, bh) in [
                     (cx, cy, cw, 2.0),
                     (cx, cy + ch - 2.0, cw, 2.0),
@@ -902,6 +998,8 @@ impl GridView {
             ("delete-cols", Self::delete_cols),
             ("sort-asc", Self::sort_ascending),
             ("sort-desc", Self::sort_descending),
+            ("merge", Self::merge_selection),
+            ("unmerge", Self::unmerge_selection),
         ] {
             let action = gio::SimpleAction::new(name, None);
             action.connect_activate({
@@ -1272,28 +1370,29 @@ impl GridView {
         }
         let (cell, top_left) = self.cell_near(x, y);
         let mut sel = imp.selection.get();
-        let kind = match (x < imp.row_header_w.get(), y < HEADER_H) {
+        let kind = self.with_merges(|m| match (x < imp.row_header_w.get(), y < HEADER_H) {
             (true, true) => {
                 sel.select_all(b);
                 None
             }
             (true, false) => {
-                sel.click_row(cell.row, shift, top_left.col, b);
+                sel.click_row(cell.row, shift, top_left.col, b, m);
                 Some(Drag::Rows)
             }
             (false, true) => {
-                sel.click_col(cell.col, shift, top_left.row, b);
+                sel.click_col(cell.col, shift, top_left.row, b, m);
                 Some(Drag::Cols)
             }
             (false, false) if shift => {
-                sel.extend_to(cell);
+                sel.extend_to(cell, m);
                 Some(Drag::Cells)
             }
+            // A click on any cell of a merge selects the merge (`set_selection` fits it).
             (false, false) => {
                 sel = Selection::at(cell);
                 Some(Drag::Cells)
             }
-        };
+        });
         self.set_selection(sel);
         imp.drag.set(kind.map(|k| (k, x, y)));
         self.queue_draw();
@@ -1361,11 +1460,17 @@ impl GridView {
         }
         let (cell, _) = self.cell_near(x, y);
         let mut sel = imp.selection.get();
-        match kind {
-            Drag::Cells => sel.extend_to(cell),
-            Drag::Rows => sel.click_row(cell.row, true, 0, b),
-            Drag::Cols => sel.click_col(cell.col, true, 0, b),
-            Drag::Resize { .. } => return,
+        let moved = self.with_merges(|m| {
+            match kind {
+                Drag::Cells => sel.extend_to(cell, m),
+                Drag::Rows => sel.click_row(cell.row, true, 0, b, m),
+                Drag::Cols => sel.click_col(cell.col, true, 0, b, m),
+                Drag::Resize { .. } => return false,
+            }
+            true
+        });
+        if !moved {
+            return;
         }
         if sel != imp.selection.get() {
             self.set_selection(sel);
@@ -1390,36 +1495,48 @@ impl GridView {
             _ => bounds,
         };
         let mut sel = imp.selection.get();
-        sel.press(key, mods, within);
+        let reveal = self.with_merges(|m| {
+            sel.press(key, mods, within, m);
+            sel.reveal(m)
+        });
         self.set_selection(sel);
         // Paging scrolls the view by a page as well, like Calc.
         if let (Key::PageUp | Key::PageDown, Some(vadj)) = (key, imp.vadj.borrow().as_ref()) {
             let step = bounds.page_rows as f64 * ROW_H;
             vadj.set_value(vadj.value() + if key == Key::PageDown { step } else { -step });
         }
-        self.scroll_to(sel.reveal());
+        self.scroll_to(reveal);
         self.queue_draw();
     }
 
-    /// Scroll the least amount that shows the given row and column whole.
-    fn scroll_to(&self, (row, col): (Option<u64>, Option<u32>)) {
+    /// Scroll the least amount that shows the given rows and columns (first and last,
+    /// inclusive) whole, or at least their start when they don't fit.
+    fn scroll_to(&self, (rows, cols): grid::Reveal) {
         let imp = self.imp();
         let (body_w, body_h) = imp.body_size();
-        let reveal = |adj: &gtk::Adjustment, start: f64, size: f64, view: f64| {
+        let reveal = |adj: &gtk::Adjustment, start: f64, end: f64, view: f64| {
             if start < adj.value() {
                 adj.set_value(start);
-            } else if start + size > adj.value() + view {
-                adj.set_value(start + size - view);
+            } else if end > adj.value() + view {
+                adj.set_value((end - view).min(start));
             }
         };
         let sizing = imp.sizing.borrow();
-        if let (Some(v), Some(row)) = (imp.vadj.borrow().as_ref(), row) {
-            reveal(v, sizing.rows.start(row), sizing.rows.size(row), body_h);
+        if let (Some(v), Some((first, last))) = (imp.vadj.borrow().as_ref(), rows) {
+            let end = sizing.rows.start(last) + sizing.rows.size(last);
+            reveal(v, sizing.rows.start(first), end, body_h);
         }
-        if let (Some(hz), Some(col)) = (imp.hadj.borrow().as_ref(), col) {
-            let col = u64::from(col);
-            reveal(hz, sizing.cols.start(col), sizing.cols.size(col), body_w);
+        if let (Some(hz), Some((first, last))) = (imp.hadj.borrow().as_ref(), cols) {
+            let (first, last) = (u64::from(first), u64::from(last));
+            let end = sizing.cols.start(last) + sizing.cols.size(last);
+            reveal(hz, sizing.cols.start(first), end, body_w);
         }
+    }
+
+    /// Scroll to show `cell`, all of its merge if it is in one.
+    fn reveal_cell(&self, cell: grid::Cell) {
+        let spans = self.with_merges(|m| Selection::at(cell).reveal(m));
+        self.scroll_to(spans);
     }
 
     /// Double-click: edit the cell under widget point (`x`, `y`), keeping its value.
@@ -1435,6 +1552,8 @@ impl GridView {
             return;
         };
         self.set_selection(Selection::at(cell));
+        // On a merge, the anchor: the cell that holds the merge's text.
+        let cell = self.imp().selection.get().cursor();
         let value = self.cell_text(cell);
         self.open_editor(cell, &value, Mode::Editing);
     }
@@ -1471,7 +1590,7 @@ impl GridView {
             .get_or_insert_with(|| self.build_editor())
             .clone();
         imp.editing.set(Some((cell.row, cell.col, mode)));
-        self.scroll_to((Some(cell.row), Some(cell.col)));
+        self.reveal_cell(cell);
         entry.set_text(text);
         entry.set_visible(true);
         entry.grab_focus();
@@ -1488,13 +1607,17 @@ impl GridView {
             return;
         };
         let rh_w = imp.row_header_w.get();
+        // On a merge the editor covers all of it.
+        let cell = grid::Cell { row, col };
+        let (tl, br) = self.with_merges(|m| m.at(cell)).unwrap_or((cell, cell));
         let (x, y, w, h) = self.with_viewports(|rows, cols| {
-            let col = u64::from(col);
+            let (c0, c1) = (u64::from(tl.col), u64::from(br.col));
+            let (x, y) = (rh_w + cols.pos(c0), HEADER_H + rows.pos(tl.row));
             (
-                rh_w + cols.pos(col),
-                HEADER_H + rows.pos(row),
-                cols.size(col),
-                rows.size(row),
+                x,
+                y,
+                rh_w + cols.pos(c1) + cols.size(c1) - x,
+                HEADER_H + rows.pos(br.row) + rows.size(br.row) - y,
             )
         });
         let (min_w, _, _, _) = entry.measure(gtk::Orientation::Horizontal, -1);
@@ -1759,24 +1882,30 @@ impl GridView {
             })
         };
         let mut sel = self.imp().selection.get();
-        match &r.area {
-            formula::Area::Cell(a) => sel = Selection::at(cell(a)?),
-            formula::Area::Range(a, z) => {
-                sel = Selection::at(cell(a)?);
-                sel.extend_to(cell(z)?);
+        let reveal = self.with_merges(|m| -> Result<_, &'static str> {
+            match &r.area {
+                formula::Area::Cell(a) => {
+                    sel = Selection::at(cell(a)?);
+                    sel.fit(m);
+                }
+                formula::Area::Range(a, z) => {
+                    sel = Selection::at(cell(a)?);
+                    sel.extend_to(cell(z)?, m);
+                }
+                formula::Area::Cols { first, last, .. } => {
+                    sel.click_col(*first, false, 0, b, m);
+                    sel.click_col(*last, true, 0, b, m);
+                }
+                formula::Area::Rows { first, last, .. } => {
+                    let (first, last) = (table_row(*first)?, table_row(*last)?);
+                    sel.click_row(first, false, 0, b, m);
+                    sel.click_row(last, true, 0, b, m);
+                }
             }
-            formula::Area::Cols { first, last, .. } => {
-                sel.click_col(*first, false, 0, b);
-                sel.click_col(*last, true, 0, b);
-            }
-            formula::Area::Rows { first, last, .. } => {
-                let (first, last) = (table_row(*first)?, table_row(*last)?);
-                sel.click_row(first, false, 0, b);
-                sel.click_row(last, true, 0, b);
-            }
-        }
+            Ok(sel.reveal(m))
+        })?;
         self.set_selection(sel);
-        self.scroll_to(sel.reveal());
+        self.scroll_to(reveal);
         self.grab_focus();
         self.queue_draw();
         Ok(())
@@ -1873,7 +2002,7 @@ impl GridView {
                 col: cursor.col,
             };
             self.set_selection(Selection::at(cell));
-            self.scroll_to((Some(cell.row), Some(cell.col)));
+            self.reveal_cell(cell);
         }
         self.update_description();
         self.emit_by_name::<()>("changed", &[]);
@@ -1914,14 +2043,14 @@ impl GridView {
         self.reshape(edit);
     }
 
-    /// The rows the selection spans (first, count). `None` for whole columns: Ctrl+-
-    /// there deletes the columns.
+    /// The rows the selection spans (first, count), a merge's rows whole. `None` for whole
+    /// columns: Ctrl+- there deletes the columns.
     fn selected_rows(&self) -> Option<(u64, u64)> {
         let sel = self.imp().selection.get();
         if sel.whole_columns().is_some() {
             return None;
         }
-        let (tl, br) = sel.range();
+        let (tl, br) = self.selected_area();
         Some((tl.row, br.row - tl.row + 1))
     }
 
@@ -1951,10 +2080,127 @@ impl GridView {
         self.reshape(edit);
     }
 
-    /// The columns the selection spans (first, count).
+    /// The columns the selection spans (first, count), a merge's columns whole.
     fn selected_cols(&self) -> (u32, u32) {
-        let (tl, br) = self.imp().selection.get().range();
+        let (tl, br) = self.selected_area();
         (tl.col, br.col - tl.col + 1)
+    }
+
+    /// The selected rectangle grown over the merges it touches (STYLE-4).
+    fn selected_area(&self) -> grid::Area {
+        let sel = self.imp().selection.get();
+        self.with_merges(|m| sel.area(m))
+    }
+
+    /// The selection (merges whole) as positions among all rows and view columns: what
+    /// merges are kept in. `None` on the empty edge row alone.
+    fn selected_positions(&self) -> Option<CellArea> {
+        let (tl, br) = self.selected_area();
+        let t = self.table();
+        let n = t.row_count();
+        (tl.row < n).then(|| CellArea {
+            first_row: t.position(tl.row),
+            first_col: tl.col,
+            last_row: t.position(br.row.min(n - 1)),
+            last_col: br.col,
+        })
+    }
+
+    /// Merge Cells (STYLE-4): merge the selected range as one undoable step. Merges it
+    /// touches are absorbed, and any text but the top-left cell's is emptied, after
+    /// asking. Refused while rows are sorted or filtered: merges keep file order.
+    pub fn merge_selection(&self) {
+        let imp = self.imp();
+        if self.busy() || imp.editing.get().is_some() {
+            return;
+        }
+        let Some(area) = self.selected_positions() else {
+            return;
+        };
+        let plan = self.table_mut().merge_plan(area);
+        let refuse = |title: &str, why: &str| {
+            self.emit_by_name::<()>("refused", &[&title, &why]);
+        };
+        match plan {
+            Err(MergeError::OneCell) => {}
+            Err(MergeError::NotInFileOrder) => refuse(
+                "Can't merge cells",
+                "Merge cells in file order: clear the sort and filters first.",
+            ),
+            Err(MergeError::TooManyCells(n)) => refuse(
+                "Too many cells to merge",
+                &format!(
+                    "This range has {} cells; Bricks merges at most {} at once.",
+                    crate::status::group_digits(n),
+                    crate::status::group_digits(MERGE_MAX_CELLS)
+                ),
+            ),
+            Ok(plan) if !plan.drops_text => self.apply_merge(plan),
+            Ok(plan) => {
+                let dialog = gtk::AlertDialog::builder()
+                    .message("Merge cells?")
+                    .detail("Merging keeps only the top-left value.")
+                    .buttons(["Cancel", "Merge"])
+                    .cancel_button(0)
+                    .default_button(1)
+                    .modal(true)
+                    .build();
+                let window = self.root().and_downcast::<gtk::Window>();
+                let revision = self.revision();
+                let g = self.downgrade();
+                dialog.choose(window.as_ref(), gio::Cancellable::NONE, move |answer| {
+                    let Some(g) = g.upgrade() else { return };
+                    // Nothing can change under a modal dialog but a job finishing; then
+                    // the plan may be stale, and the merge waits for another try.
+                    if answer == Ok(1) && g.revision() == revision && !g.busy() {
+                        g.apply_merge(plan);
+                    }
+                });
+            }
+        }
+    }
+
+    fn apply_merge(&self, plan: MergePlan) {
+        let (focus, cell) = {
+            let t = self.table();
+            let focus = CellRef {
+                row: t.id_at(plan.area.first_row),
+                col: t.col_id(plan.area.first_col),
+            };
+            let row = t.merge_rows(&plan.area).map_or(0, |rows| rows.start);
+            let cell = grid::Cell {
+                row,
+                col: plan.area.first_col,
+            };
+            (focus, cell)
+        };
+        self.execute(Box::new(Batch::new("Merge cells", plan.edits, focus)));
+        self.after_change(Some(cell));
+    }
+
+    /// Unmerge Cells (STYLE-4): unmerge every merge the selection touches, as one
+    /// undoable step.
+    pub fn unmerge_selection(&self) {
+        let imp = self.imp();
+        if self.busy() || imp.editing.get().is_some() {
+            return;
+        }
+        let Some(area) = self.selected_positions() else {
+            return;
+        };
+        let (edit, focus) = {
+            let t = self.table();
+            let Some(edit) = t.unmerge(area) else {
+                return;
+            };
+            let focus = CellRef {
+                row: t.id_at(area.first_row),
+                col: t.col_id(area.first_col),
+            };
+            (edit, focus)
+        };
+        self.execute(Box::new(Batch::new("Unmerge cells", vec![edit], focus)));
+        self.after_change(None);
     }
 
     /// Run a row or column insert or delete as an undoable command. `None` (still
@@ -1983,8 +2229,11 @@ impl GridView {
             let any = book.sheets().iter().any(|s| s.table.has_formulas());
             (book.active_id(), any)
         };
+        // Merged cells move, grow, or shrink with the rows and columns (STYLE-4), in the
+        // same undo step. Edits wait while formulas are rewritten, so the list holds.
+        let merges = self.table().merges_after(&edit);
         if !formulas {
-            self.execute(Box::new(Reshape::new(edit, cursor)));
+            self.execute(Box::new(Reshape::new(edit, cursor).with_merges(merges)));
             self.after_change(None);
             return;
         }
@@ -1994,7 +2243,9 @@ impl GridView {
         self.with_rewrites(
             move |book, cancel| book.structure_rewrites(sheet, &structural, cancel),
             move |g, rewrites| {
-                let mut edits = vec![BookEdit::Sheets(vec![(sheet, edit)])];
+                let mut on_sheet = vec![(sheet, edit)];
+                on_sheet.extend(merges.map(|m| (sheet, m)));
+                let mut edits = vec![BookEdit::Sheets(on_sheet)];
                 edits.extend(rewrites);
                 g.execute_book(SheetEdit::new(label, edits, Some(sheet)).with_focus(cursor));
             },
@@ -2243,10 +2494,11 @@ impl GridView {
         };
         self.after_change(Some(anchor));
         let mut sel = Selection::at(anchor);
-        sel.extend_to(grid::Cell {
+        let end = grid::Cell {
             row: anchor.row + cells.len() as u64 - 1,
             col: anchor.col + width - 1,
-        });
+        };
+        self.with_merges(|m| sel.extend_to(end, m));
         self.set_selection(sel);
         self.queue_draw();
     }
@@ -2295,10 +2547,14 @@ impl GridView {
                 let sort = gio::Menu::new();
                 sort.append(Some("Sort Ascending"), Some("grid.sort-asc"));
                 sort.append(Some("Sort Descending"), Some("grid.sort-desc"));
+                let merge = gio::Menu::new();
+                merge.append(Some("Merge Cells"), Some("grid.merge"));
+                merge.append(Some("Unmerge Cells"), Some("grid.unmerge"));
                 let model = gio::Menu::new();
                 model.append_section(None, &rows);
                 model.append_section(None, &cols);
                 model.append_section(None, &sort);
+                model.append_section(None, &merge);
                 let menu = gtk::PopoverMenu::from_model(Some(&model));
                 menu.set_has_arrow(false);
                 menu.set_halign(gtk::Align::Start);
@@ -2327,13 +2583,21 @@ impl GridView {
             return;
         }
         let col = imp.selection.get().cursor().col;
-        let rows = {
+        let (rows, merged) = {
             let t = self.table();
             if !t.is_complete() {
                 return;
             }
-            t.index().row_count()
+            (t.index().row_count(), t.merges_block_sort())
         };
+        // Sorting would split merged cells across rows (STYLE-4): Excel refuses too.
+        if merged {
+            self.emit_by_name::<()>(
+                "refused",
+                &[&"Can't sort these rows", &"Unmerge cells before sorting."],
+            );
+            return;
+        }
         let get = self.job_table();
         let done = Arc::new(AtomicU64::new(0));
         let started = Instant::now();
@@ -2565,7 +2829,7 @@ impl GridView {
                         col: h.col,
                     };
                     g.set_selection(Selection::at(cell));
-                    g.scroll_to((Some(h.row), Some(h.col)));
+                    g.reveal_cell(cell);
                     g.queue_draw();
                     done(Found::Hit {
                         ordinal: h.ordinal,
@@ -3928,12 +4192,25 @@ impl GridView {
         });
     }
 
-    /// Move the cell cursor or the selected range; `cursor-changed` says so.
+    /// Move the cell cursor or the selected range; `cursor-changed` says so. On merged
+    /// cells the cursor goes to the merge's anchor and a range covers the merges it
+    /// touches (STYLE-4), wherever the selection came from.
     fn set_selection(&self, sel: Selection) {
         let imp = self.imp();
+        let mut sel = sel;
+        self.with_merges(|m| sel.fit(m));
         if imp.selection.replace(sel) != sel {
             self.emit_by_name::<()>("cursor-changed", &[]);
             self.update_description();
+        }
+    }
+
+    /// Run `f` with the active sheet's merged cells in grid rows and columns (STYLE-4);
+    /// none while the workbook is borrowed for a change.
+    fn with_merges<R>(&self, f: impl FnOnce(&dyn grid::Merges) -> R) -> R {
+        match self.imp().book.try_borrow() {
+            Ok(book) if !book.active().merges().is_empty() => f(&TableMerges(book.active())),
+            _ => f(&grid::NoMerges),
         }
     }
 
@@ -4000,7 +4277,7 @@ impl GridView {
         };
         let cell = grid::Cell { row, col: 0 };
         self.set_selection(Selection::at(cell));
-        self.scroll_to((Some(row), Some(0)));
+        self.reveal_cell(cell);
         self.grab_focus();
         self.queue_draw();
         true
@@ -4170,6 +4447,114 @@ fn text_y(vertical: VAlign, y: f64, rh: f64, th: f64) -> f64 {
         VAlign::Top => y + 3.0,
         VAlign::Center | VAlign::Justify | VAlign::Distributed => y + ((rh - th) / 2.0).max(3.0),
         VAlign::Bottom => y + (rh - th - 3.0).max(3.0),
+    }
+}
+
+/// A merge on screen (STYLE-4): the grid cells it spans, and its anchor (top-left) cell.
+struct Merged {
+    tl: grid::Cell,
+    br: grid::Cell,
+    anchor: CellRef,
+    /// The anchor's row is a table row (not filtered out), so its text shows.
+    anchor_shown: bool,
+}
+
+impl Merged {
+    fn covers(&self, row: u64, col: u32) -> bool {
+        (self.tl.row..=self.br.row).contains(&row) && (self.tl.col..=self.br.col).contains(&col)
+    }
+}
+
+/// The merges that reach into table rows `rows` and columns `cols`, in grid cells; even
+/// those whose anchor is scrolled away. Cheap without merges.
+fn visible_merges(
+    table: &CsvTable,
+    rows: std::ops::Range<u64>,
+    cols: std::ops::Range<u64>,
+) -> Vec<Merged> {
+    let end = rows.end.min(table.row_count());
+    if table.merges().is_empty() || rows.start >= end || cols.is_empty() {
+        return Vec::new();
+    }
+    let positions = table.position(rows.start)..=table.position(end - 1);
+    let cols = cols.start as u32..=(cols.end - 1) as u32;
+    table
+        .merges_in(positions, cols)
+        .filter_map(|m| {
+            let (tl, br) = TableMerges(table).area(&m)?;
+            (tl != br).then(|| Merged {
+                tl,
+                br,
+                anchor: CellRef {
+                    row: table.id_at(m.first_row),
+                    col: table.col_id(m.first_col),
+                },
+                anchor_shown: table.position(tl.row) == m.first_row,
+            })
+        })
+        .collect()
+}
+
+/// Call `f` with each span of `start..end` outside `holes` (spans, in any order).
+fn each_gap(start: f64, end: f64, holes: &mut [(f64, f64)], mut f: impl FnMut(f64, f64)) {
+    holes.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut at = start;
+    for &(a, b) in holes.iter() {
+        if a > at {
+            f(at, a.min(end));
+        }
+        at = at.max(b);
+        if at >= end {
+            return;
+        }
+    }
+    if at < end {
+        f(at, end);
+    }
+}
+
+/// A table's merged cells in grid rows and columns (STYLE-4), for navigation and drawing.
+/// Merges keep all-rows positions; table rows show positions in order, so a merge is a
+/// rectangle of table rows too (the ones a filter leaves).
+struct TableMerges<'a>(&'a CsvTable);
+
+impl TableMerges<'_> {
+    fn area(&self, m: &data_model::CellArea) -> Option<grid::Area> {
+        let rows = self.0.merge_rows(m)?;
+        Some((
+            grid::Cell {
+                row: rows.start,
+                col: m.first_col,
+            },
+            grid::Cell {
+                row: rows.end - 1,
+                col: m.last_col,
+            },
+        ))
+    }
+}
+
+impl grid::Merges for TableMerges<'_> {
+    fn at(&self, cell: grid::Cell) -> Option<grid::Area> {
+        let t = self.0;
+        if t.merges().is_empty() || cell.row >= t.row_count() {
+            return None;
+        }
+        self.area(&t.merge_at(t.position(cell.row), cell.col)?)
+    }
+
+    fn each_in(&self, tl: grid::Cell, br: grid::Cell, f: &mut dyn FnMut(grid::Area)) {
+        let t = self.0;
+        let n = t.row_count();
+        if t.merges().is_empty() || tl.row >= n {
+            return;
+        }
+        let rows = t.position(tl.row)..=t.position(br.row.min(n - 1));
+        for m in t.merges_in(rows, tl.col..=br.col) {
+            if let Some(area) = self.area(&m) {
+                f(area);
+            }
+        }
     }
 }
 

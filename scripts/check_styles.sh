@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# STYLE-3 acceptance: the grid draws cells in their styles.
+# STYLE-3 acceptance: the grid draws cells in their styles; STYLE-4: merged cells.
 #
 #   scripts/check_styles.sh [BINARY]   (default target/release/bricks)
 #
@@ -14,6 +14,11 @@
 #      red and blue text, and its dark-blue cell's white text;
 #   4. number formats show: B8 `1,234.50`, B9 `12.50%`, B10 `(1,234)` (accounting), B13
 #      `Dec 9, 2025`.
+#   5. merged cells (Styles!A1:D1 "Styled title", Styles!E8:G9): Right from A1 lands on
+#      E1; Go To F8 lands on E8, the anchor; the centred title's glyphs centre across
+#      A1:D1 (their mean x, measured along the yellow row 2 that spans A..H, lies in the
+#      middle third of A..D, whose share of A..H comes from the sheet's column widths);
+#      and after inserting a row above row 1, Right from A2 lands on E2.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -80,6 +85,33 @@ elif cmd == "overflow":
     xs = diff_xs("/shots/o1.png", "/shots/o0.png")
     if xs:
         print(f"overflow: {max(xs) - min(xs)}")
+elif cmd == "centre":
+    # The dark glyph pixels of the title in row 1, just above the yellow row 2 (A..H), as
+    # a share of A..H in thousandths; and the middle third of A..D as the same shares,
+    # from the column widths of the Styles sheet in Excel units (as Bricks sizes them).
+    import re
+    import zipfile
+    xml = zipfile.ZipFile("/tmp/f.xlsx").read("xl/worksheets/sheet4.xml").decode()
+    default = float(re.search(r"defaultColWidth=\"([0-9.]+)\"", xml).group(1))
+    widths = {}
+    for m in re.finditer(r"<col [^>]*>", xml):
+        tag = m.group(0)
+        lo, hi = int(re.search(r"min=\"(\d+)\"", tag).group(1)), int(re.search(r"max=\"(\d+)\"", tag).group(1))
+        for c in range(lo, hi + 1):
+            widths[c] = float(re.search(r"width=\"([0-9.]+)\"", tag).group(1))
+    px = lambda chars: int((256 * chars + 18) / 256 * 7)
+    cols = [px(widths.get(c, default)) for c in range(1, 9)]
+    share = sum(cols[:4]) / sum(cols)
+    print(f"merge third: {share / 3 * 1000:.0f} {share * 2 / 3 * 1000:.0f}")
+    w, h, rs, n, p = load("/shots/merged.png")
+    yellow = [(x, y) for y in range(h) for x in range(w)
+              if p[y * rs + x * n:y * rs + x * n + 3] == b"\xff\xff\x00"]
+    if yellow:
+        top, left, right = min(y for _, y in yellow), min(x for x, _ in yellow), max(x for x, _ in yellow)
+        glyphs = [x for y in range(max(0, top - 30), top - 2) for x in range(left, right + 1)
+                  if all(p[y * rs + x * n + k] < 90 for k in range(3))]
+        if glyphs:
+            print(f"centre: {(sum(glyphs) / len(glyphs) - left) / (right - left) * 1000:.0f}")
 else:
     for name in sys.argv[2:]:
         rgb, tol = int(name, 16), 0 if name in ("FFFF00", "C4FEBB", "127A02", "E9706D", "305496") else 30
@@ -114,6 +146,18 @@ session() {
   keys -M ctrl g -m ctrl -s 300 "Styles!J30" -s 300 -k Return; sleep 1; shot styles
   python3 /tmp/px.py /shots/styles.png FFFF00 C4FEBB 127A02 E9706D 305496 C00000 0070C0 FFFFFF
   pkill -x bricks
+  # 5: merged cells, on a fresh copy of the fixture.
+  cp /fixture.xlsx /tmp/f.xlsx
+  bricks /tmp/f.xlsx >>/tmp/app.log 2>&1 & sleep 6
+  echo "== 5 merges"
+  go() { keys -M ctrl g -m ctrl -s 300 "$1" -s 300 -k Return; sleep 0.5; }
+  go Styles!A1; keys -k Right; sleep 0.5; shown right
+  go Styles!F8; shown f8
+  go Styles!A12; sleep 1; shot merged
+  python3 /tmp/px.py centre
+  go Styles!A1; keys -M ctrl -k KP_Add -m ctrl; sleep 2
+  go Styles!A2; keys -k Right; sleep 0.5; shown inserted
+  pkill -x bricks
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -141,6 +185,16 @@ check "4: #,##0.00" "4 formats" "^shown: B8: 1,234\.50$"
 check "4: 0.00%" "4 formats" "^shown: B9: 12\.50%$"
 check "4: accounting" "4 formats" "^shown: B10: \(1,234\)$"
 check "4: a date format" "4 formats" "^shown: B13: Dec 9, 2025$"
+check "5: Right from A1 steps over B1:D1" "5 merges" "^right: E1: ?$"
+check "5: a covered cell selects its merge's anchor" "5 merges" "^f8: E8: "
+third=$(section "5 merges" | sed -n "s/^merge third: //p" | head -1)
+centre=$(section "5 merges" | sed -n "s/^centre: //p" | head -1)
+if [ -n "$third" ] && [ -n "$centre" ] && [ "$centre" -ge "${third% *}" ] && [ "$centre" -le "${third#* }" ]; then
+  echo "ok   5: the title centres across A1:D1 ($centre in $third)"
+else
+  echo "FAIL 5: the title centres across A1:D1 (${centre:-nothing}, want within ${third:-?})"; fail=1
+fi
+check "5: inserting a row above moves the merge" "5 merges" "^inserted: E2: ?$"
 if [ $fail = 0 ]; then echo "STYLES OK"; else
   echo "STYLES CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

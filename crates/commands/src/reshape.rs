@@ -1,13 +1,17 @@
 //! Row and column inserts and deletes as reversible commands (EDIT-3, EDIT-4). Like
 //! [`crate::SetCell`], the command holds one [`Edit`] and swaps it for the inverse the
 //! table returns: a delete's inverse holds the removed ids, so undo brings the rows or
-//! columns back with their edits.
+//! columns back with their edits. Merged cells that move with them (STYLE-4) come in the
+//! same step.
 
 use crate::Command;
 use data_model::{CellRef, CsvTable, Edit};
 
 pub struct Reshape {
     edit: Edit,
+    /// The [`Edit::Merges`] that goes with it ([`CsvTable::merges_after`]), if any. The
+    /// merge list doesn't depend on row order, so it swaps after `edit` both ways.
+    merges: Option<Edit>,
     label: &'static str,
     /// The cursor cell when the command was made: the other coordinate of the focus.
     cursor: CellRef,
@@ -23,9 +27,16 @@ impl Reshape {
         Self {
             label: Self::label_of(&edit),
             edit,
+            merges: None,
             cursor,
             focus: None,
         }
+    }
+
+    /// The merges move with the rows or columns in the same step (STYLE-4).
+    pub fn with_merges(mut self, merges: Option<Edit>) -> Self {
+        self.merges = merges;
+        self
     }
 
     /// The undo label of a row or column insert or delete.
@@ -59,6 +70,9 @@ impl Reshape {
                 _ => None,
             };
         self.edit = table.apply(edit);
+        if let Some(merges) = self.merges.take() {
+            self.merges = Some(table.apply(merges));
+        }
     }
 }
 
@@ -80,6 +94,8 @@ impl Command<CsvTable> for Reshape {
     }
 
     fn heap_bytes(&self) -> usize {
-        std::mem::size_of::<Self>() + self.edit.heap_bytes()
+        std::mem::size_of::<Self>()
+            + self.edit.heap_bytes()
+            + self.merges.as_ref().map_or(0, Edit::heap_bytes)
     }
 }

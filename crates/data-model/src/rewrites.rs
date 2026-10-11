@@ -68,37 +68,8 @@ impl Workbook {
         let Some(name) = self.sheet(sheet).map(|s| s.name.clone()) else {
             return Some(Vec::new());
         };
-        let name = name.as_str();
-        let (changes, gone): (Vec<Change>, Vec<(Axis, Range<u64>)>) = match edit {
-            Edit::InsertRows { at, rows } => {
-                let count = rows.iter().map(|r| r.len).sum();
-                (vec![insert(name, Axis::Rows, *at, count)], Vec::new())
-            }
-            Edit::DeleteRows { at, count } => (
-                vec![delete(name, Axis::Rows, *at..at + count)],
-                vec![(Axis::Rows, *at..at + count)],
-            ),
-            // Highest range first, so the lower ranges' positions still hold.
-            Edit::DeleteRowRanges(ranges) => (
-                ranges
-                    .iter()
-                    .rev()
-                    .map(|r| delete(name, Axis::Rows, r.clone()))
-                    .collect(),
-                ranges.iter().map(|r| (Axis::Rows, r.clone())).collect(),
-            ),
-            Edit::InsertCols { at, cols } => (
-                vec![insert(name, Axis::Cols, u64::from(*at), cols.len() as u64)],
-                Vec::new(),
-            ),
-            Edit::DeleteCols { at, count } => {
-                let span = u64::from(*at)..u64::from(*at) + u64::from(*count);
-                (
-                    vec![delete(name, Axis::Cols, span.clone())],
-                    vec![(Axis::Cols, span)],
-                )
-            }
-            _ => return Some(Vec::new()),
+        let Some((changes, gone)) = structure_changes(&name, edit) else {
+            return Some(Vec::new());
         };
         self.rewrite_formulas(
             &changes,
@@ -174,6 +145,46 @@ impl Workbook {
         }
         (!cancel.load(Ordering::Relaxed)).then_some(out)
     }
+}
+
+/// A structural edit's reference changes, in order, and the spans it takes out.
+pub(crate) type StructureChanges<'a> = (Vec<Change<'a>>, Vec<(Axis, Range<u64>)>);
+
+/// What a structural edit (row or column inserts and deletes) does to references on
+/// sheet `name`, as [`formula::adjust`] changes applied in order, and the rows or columns
+/// it takes out. `None` for other edits, which move nothing.
+pub(crate) fn structure_changes<'a>(name: &'a str, edit: &Edit) -> Option<StructureChanges<'a>> {
+    Some(match edit {
+        Edit::InsertRows { at, rows } => {
+            let count = rows.iter().map(|r| r.len).sum();
+            (vec![insert(name, Axis::Rows, *at, count)], Vec::new())
+        }
+        Edit::DeleteRows { at, count } => (
+            vec![delete(name, Axis::Rows, *at..at + count)],
+            vec![(Axis::Rows, *at..at + count)],
+        ),
+        // Highest range first, so the lower ranges' positions still hold.
+        Edit::DeleteRowRanges(ranges) => (
+            ranges
+                .iter()
+                .rev()
+                .map(|r| delete(name, Axis::Rows, r.clone()))
+                .collect(),
+            ranges.iter().map(|r| (Axis::Rows, r.clone())).collect(),
+        ),
+        Edit::InsertCols { at, cols } => (
+            vec![insert(name, Axis::Cols, u64::from(*at), cols.len() as u64)],
+            Vec::new(),
+        ),
+        Edit::DeleteCols { at, count } => {
+            let span = u64::from(*at)..u64::from(*at) + u64::from(*count);
+            (
+                vec![delete(name, Axis::Cols, span.clone())],
+                vec![(Axis::Cols, span)],
+            )
+        }
+        _ => return None,
+    })
 }
 
 fn insert(sheet: &str, axis: Axis, at: u64, count: u64) -> Change<'_> {

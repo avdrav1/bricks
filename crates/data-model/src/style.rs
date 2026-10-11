@@ -718,9 +718,16 @@ impl FileLayout {
 }
 
 impl CsvTable {
-    /// Styles and layout read from the file (STYLE-1).
-    pub fn set_file_styles(&mut self, styles: FileStyles, layout: FileLayout) {
+    /// Styles and layout read from the file (STYLE-1). The file's merges become the
+    /// table's merged ranges (STYLE-4), sorted; one-cell merges are dropped, as they merge
+    /// nothing.
+    pub fn set_file_styles(&mut self, styles: FileStyles, mut layout: FileLayout) {
+        layout
+            .merges
+            .retain(|m| m.first_row != m.last_row || m.first_col != m.last_col);
+        layout.merges.sort_by_key(|m| (m.first_row, m.first_col));
         self.file_styles = Arc::new(styles);
+        self.put_merges(Arc::new(layout.merges.clone()));
         self.layout = Arc::new(layout);
     }
 

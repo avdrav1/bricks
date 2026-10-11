@@ -5,7 +5,7 @@
 mod nav;
 mod sizes;
 
-pub use nav::{Bounds, Cell, Key, Mods, Selection};
+pub use nav::{Area, Bounds, Cell, Key, Merges, Mods, NoMerges, Reveal, Selection};
 pub use sizes::{Sizes, Viewport, MIN_SIZE};
 
 use data_model::{RowBlock, TableSource};

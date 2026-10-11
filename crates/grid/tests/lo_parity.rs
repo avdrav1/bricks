@@ -3,7 +3,7 @@
 //! LibreOffice Calc by `scripts/lo_navigation.py` is replayed here and must end on the same
 //! cursor cell and selection.
 
-use grid::{Bounds, Cell, Key, Mods, Selection};
+use grid::{Bounds, Cell, Key, Mods, NoMerges, Selection};
 
 const DATA: &str = include_str!("data/lo_navigation.tsv");
 /// The recording's sheet: 200 rows x 6 columns of data.
@@ -97,7 +97,7 @@ fn navigation_matches_libreoffice() {
         let mut sel = Selection::at(parse_cell(start));
         for k in keys.split(' ') {
             let (key, mods) = parse_key(k);
-            sel.press(key, mods, bounds);
+            sel.press(key, mods, bounds, &NoMerges);
         }
         let (top_left, bottom_right) = sel.range();
         let got = (

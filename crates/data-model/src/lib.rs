@@ -13,6 +13,7 @@ mod filter;
 mod formulas;
 mod infer;
 mod journal;
+mod merges;
 mod paste;
 mod patch;
 mod rewrites;
@@ -36,6 +37,7 @@ pub use journal::{
     read_book_journal, read_journal_header, BookState, EditState, FileKind, JournalError,
     JournalHeader, SheetState,
 };
+pub use merges::{MergeError, MergePlan, MERGE_MAX_CELLS};
 pub use paste::{parse_tsv, PasteError, PASTE_MAX_CELLS};
 pub use rewrites::rewrite_count;
 pub use rowmap::{RowOrder, Run};
@@ -54,6 +56,7 @@ pub use workbook::{BookEdit, CachedResults, Origin, Sheet, SheetId, Workbook};
 
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
+use std::sync::Arc;
 
 pub type Row = u64;
 pub type Col = u32;
@@ -162,6 +165,10 @@ pub enum Edit {
     /// the state before. Built by [`Workbook::restore_plan`] after
     /// [`CsvTable::check_edit_state`].
     Restore(Box<EditState>),
+    /// The merged ranges become this list (STYLE-4): Merge, Unmerge, and merges following
+    /// row and column inserts and deletes. The inverse holds the list before. Build it with
+    /// [`CsvTable::merge_plan`], [`CsvTable::unmerge`], or [`CsvTable::merges_after`].
+    Merges(Arc<Vec<CellArea>>),
 }
 
 impl Edit {
@@ -222,6 +229,7 @@ impl Edit {
             }
             Self::Reorder(order) => order.as_ref().map_or(0, RowOrder::heap_bytes),
             Self::Restore(state) => state.heap_bytes(),
+            Self::Merges(list) => list.capacity() * std::mem::size_of::<CellArea>(),
         }
     }
 }

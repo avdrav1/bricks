@@ -6,8 +6,8 @@ use crate::colmap::ColMap;
 use crate::filter::{Filter, RowSet};
 use crate::rowmap::{RowMap, RowOrder, Run};
 use crate::{
-    CellRef, Col, ColId, ColSet, Computed, Edit, EditOverlay, FileLayout, FileStyles, FormulaCells,
-    InferredType, Row, RowId,
+    CellArea, CellRef, Col, ColId, ColSet, Computed, Edit, EditOverlay, FileLayout, FileStyles,
+    FormulaCells, InferredType, Row, RowId,
 };
 use csv_engine::{
     detect_dialect, detect_header, open_text, open_text_as, split_fields, Dialect, Encoding, Field,
@@ -258,6 +258,11 @@ pub struct CsvTable {
     /// snapshots.
     pub(crate) file_styles: Arc<FileStyles>,
     pub(crate) layout: Arc<FileLayout>,
+    /// The merged ranges now (STYLE-4), sorted by first row then column, apart; the file's
+    /// to begin with. Shared by snapshots; [`Edit::Merges`] replaces the list.
+    pub(crate) merges: Arc<Vec<CellArea>>,
+    /// Rows the tallest merge spans past its first: how far back a lookup by row looks.
+    pub(crate) merge_reach: u64,
     spans: Vec<Range<u64>>,
     fields: Vec<Field>,
 }
@@ -295,6 +300,8 @@ impl CsvTable {
             computed: None,
             file_styles: Arc::default(),
             layout: Arc::default(),
+            merges: Arc::default(),
+            merge_reach: 0,
         }
     }
 
@@ -323,6 +330,8 @@ impl CsvTable {
             computed: self.computed.clone(),
             file_styles: self.file_styles.clone(),
             layout: self.layout.clone(),
+            merges: self.merges.clone(),
+            merge_reach: self.merge_reach,
         }
     }
 
@@ -614,7 +623,9 @@ impl CsvTable {
         });
         let sorted = usize::from(matches!(self.rows, Some(RowOrder::Sorted(_))));
         let cols = self.cols.as_ref().map_or(0, ColMap::changes);
-        self.overlay.len() + rows as usize + sorted + cols + self.cleared.len()
+        // Merged or unmerged cells, or merges moved by inserts and deletes (STYLE-4).
+        let merges = usize::from(*self.merges != self.layout.merges);
+        self.overlay.len() + rows as usize + sorted + cols + self.cleared.len() + merges
     }
 
     /// An edit inserting `count` empty rows before table row `row`, or at the end of the
@@ -779,6 +790,7 @@ impl CsvTable {
                 );
                 Edit::Reorder(std::mem::replace(&mut self.rows, order))
             }
+            Edit::Merges(list) => Edit::Merges(self.put_merges(list)),
         }
     }
 
