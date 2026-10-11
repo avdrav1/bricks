@@ -9,6 +9,7 @@
 pub mod ast;
 pub mod coerce;
 pub mod eval;
+pub mod exact;
 pub mod functions;
 pub mod parse;
 pub mod refs;
@@ -18,6 +19,7 @@ pub mod value;
 
 pub use ast::{Area, BinaryOp, CellAddr, ErrorKind, Expr, Reference, UnaryOp};
 pub use eval::{evaluate, unknown_functions, Context, Interrupt};
+pub use exact::{ExactIndex, Key};
 pub use parse::{parse, ParseError};
 pub use refs::{
     adjust, column_index, column_name, format_reference, names_sheet, parse_reference, Axis, Change,

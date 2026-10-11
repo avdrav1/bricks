@@ -976,3 +976,150 @@ FML-6	TEXT(45306.75,"mm/ss")
 FML-6	TEXT(A1,"hh:mm")	A1=2024-01-15T13:45:30		
 FML-6	TEXT("13:45","h:mm AM/PM")			
 FML-6	LEN(TRIM("a"&CHAR(9)&"  b"))			
+FML-7	VLOOKUP(4,A1:B4,2)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	VLOOKUP(5,A1:B4,2,FALSE)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	VLOOKUP(4,A1:B4,2,FALSE)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	VLOOKUP(0,A1:B4,2)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	VLOOKUP(100,A1:B4,2)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	VLOOKUP(4,A1:B4,2,)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	VLOOKUP("B*",B1:B4,1,FALSE)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	VLOOKUP("A",B1:B4,1,FALSE)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	VLOOKUP(5,A1:B4,1.9)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	VLOOKUP(5,A1:C4,3,FALSE)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	VLOOKUP("b",{"a",1;"b",2},2,FALSE)			
+FML-7	VLOOKUP(5,{1,"a";5,"b"},2)			
+FML-7	VLOOKUP(C5,A1:B4,2)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d;C5=#N/A		
+FML-7	VLOOKUP(C5,A1:B4,2,FALSE)	A1=0;A2=3;B1=a;B2=b		
+FML-7	VLOOKUP(5,A1:B4,2,"x")	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	VLOOKUP(6,A1:B4,2,TRUE)	A1=1;A2=x;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	VLOOKUP(4,A1:B4,2)	A1=1;A2=3;A3=#N/A;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	VLOOKUP(45293,A1:B4,2,FALSE)	A1=2024-01-01;A2=2024-01-02;B1=a;B2=b		
+FML-7	VLOOKUP("b",A1:B4,2)	A1=a;A2=c;A3=e;B1=1;B2=2;B3=3		
+FML-7	VLOOKUP("z",A1:B4,2)	A1=a;A2=c;A3=e;B1=1;B2=2;B3=3		
+FML-7	VLOOKUP(2,A1:B4,2)	A1=a;A2=c;A3=e;B1=1;B2=2;B3=3		
+FML-7	VLOOKUP(5,A:B,2,FALSE)	A1=1;A2=3;A4=5;B4=x		
+FML-7	VLOOKUP(5,A1:B4,2,FALSE)	A1=1;A2=#DIV/0!;A3=5;B3=y		
+FML-7	VLOOKUP(5,A1:B4,2,FALSE)	A1=1;A2=3;A3=5;B3=#REF!		
+FML-7	VLOOKUP(5,A1:B4,3,FALSE)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d	error:#REF!	A column index past the table is #REF! in Excel; LibreOffice gives Err:502 (invalid argument), which has no Excel error value
+FML-7	VLOOKUP(5,A1:B4,0)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d	error:#VALUE!	A column index below 1 is #VALUE! in Excel; LibreOffice gives Err:502 (invalid argument), which has no Excel error value
+FML-7	VLOOKUP("5",A1:B4,2,FALSE)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d	error:#N/A	Lookups never equate text with numbers (Excel); LibreOffice reads a numeric text lookup value as a number
+FML-7	VLOOKUP("B*",{"a",1;"bc",2},2,FALSE)		value:2	Excel applies wildcards to array constants too; LibreOffice's VLOOKUP doesn't
+FML-7	HLOOKUP(4,A1:D2,2)	A1=1;B1=3;C1=5;D1=7;A2=a;B2=b;C2=c;D2=d		
+FML-7	HLOOKUP(5,A1:D2,2,FALSE)	A1=1;B1=3;C1=5;D1=7;A2=a;B2=b;C2=c;D2=d		
+FML-7	HLOOKUP(0,A1:D2,2)	A1=1;B1=3;C1=5;D1=7;A2=a;B2=b;C2=c;D2=d		
+FML-7	HLOOKUP(2,A1:C2,1.5)	A1=1;B1=2;C1=3;A2=a;B2=b		
+FML-7	HLOOKUP("x",A1:C2,2,FALSE)	A1=X;A2=1;B1=y;B2=2		
+FML-7	HLOOKUP("e?",A1:D2,2,FALSE)	A1=ab;B1=cd;C1=ef;A2=1;B2=2;C2=3		
+FML-7	HLOOKUP(1/0,A1:D2,2)	A1=1;B1=3;C1=5;D1=7;A2=a;B2=b;C2=c;D2=d		
+FML-7	HLOOKUP(5,A1:D2,3,FALSE)	A1=1;B1=3;C1=5;D1=7;A2=a;B2=b;C2=c;D2=d	error:#REF!	A row index past the table is #REF! in Excel; LibreOffice gives Err:502 (invalid argument), which has no Excel error value
+FML-7	HLOOKUP(2,A1:C2,0)	A1=1;B1=2;C1=3	error:#VALUE!	A row index below 1 is #VALUE! in Excel; LibreOffice gives Err:502 (invalid argument), which has no Excel error value
+FML-7	HLOOKUP("c?",{"ab","cd";1,2},2,FALSE)		value:2	Excel applies wildcards to array constants too; LibreOffice's HLOOKUP doesn't
+FML-7	MATCH(4,A1:A4)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	MATCH(5,A1:A4,0)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	MATCH(4,A1:A4,0)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	MATCH(4,A1:A4,)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	MATCH(0,A1:A4)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	MATCH(4,A1:A4,-1)	A1=7;A2=5;A3=3;A4=1		
+FML-7	MATCH(8,A1:A4,-1)	A1=7;A2=5;A3=3;A4=1		
+FML-7	MATCH(0,A1:A4,-1)	A1=7;A2=5;A3=3;A4=1		
+FML-7	MATCH("c*",B1:B4,0)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	MATCH("C",B1:B4)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	MATCH("b",{"a","b","c"},0)			
+FML-7	MATCH("a?c",{"abc","ac"},0)			
+FML-7	MATCH("~*",B1:B4,0)	B1=a;B2=*;B3=c		
+FML-7	MATCH(4,A1:A4)	A1=1;A2=3;A3=x;A4=y		
+FML-7	MATCH("m",A1:A5)	A1=1;A2=3;A3=a;A4=q;A5=z		
+FML-7	MATCH(5,A:A,0)	A1=1;A2=3;A4=5		
+FML-7	MATCH(5,A1:A4,0)	A1=1;A2=3;A3=#N/A;A4=5		
+FML-7	MATCH(C1,A1:A4,0)	A1=x;A2=b;C1=B		
+FML-7	MATCH(0.3,{0.1,0.3},0)			
+FML-7	MATCH(0.1+0.2,{0.1,0.3},0)			
+FML-7	MATCH(1/0,A1:A4)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	MATCH(5,B1:E1,0)	B1=1;C1=5;D1=5		
+FML-7	MATCH(5,A1:B4,0)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d	error:#N/A	MATCH over a two-dimensional area is #N/A in Excel; LibreOffice gives Err:504 (parameter list error), which has no Excel error value
+FML-7	XLOOKUP(5,A1:A4,B1:B4)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	XLOOKUP(4,A1:A4,B1:B4)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	XLOOKUP(4,A1:A4,B1:B4,"none")	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	XLOOKUP(4,A1:A4,B1:B4,1/0)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	XLOOKUP(4,A1:A4,B1:B4,)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	XLOOKUP(4,A1:A4,B1:B4,,-1)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	XLOOKUP(4,A1:A4,B1:B4,,1)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	XLOOKUP(8,A1:A4,B1:B4,,-1)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	XLOOKUP(0,A1:A4,B1:B4,,1)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	XLOOKUP(8,A1:A4,B1:B4,,1)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	XLOOKUP("c*",B1:B4,A1:A4,,2)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	XLOOKUP("c*",B1:B4,A1:A4)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	XLOOKUP(5,A1:A4,B1:B4,,0,-1)	A1=5;A2=3;A3=5;B1=x;B2=y;B3=z		
+FML-7	XLOOKUP(4,A1:A4,B1:B4,,-1,-1)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	XLOOKUP(3,A1:D1,A2:D2)	A1=1;B1=3;C1=5;D1=7;A2=a;B2=b;C2=c;D2=d		
+FML-7	XLOOKUP("B",{"a","b"},{10,20})			
+FML-7	XLOOKUP(4,{7,5,3,1},{"a","b","c","d"},,1)			
+FML-7	XLOOKUP("x",{"a","x","x"},{1,2,3},,0,-1)			
+FML-7	XLOOKUP(7,A1:A4,C1:C4)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	XLOOKUP(5,A1:A3,B1:B3,,-1)	A1=1;A2=x;A3=5;B3=y		
+FML-7	XLOOKUP("x",A1:A4,B1:B4)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	XLOOKUP(5,A:A,B:B)	A1=1;A2=3;A4=5;B4=x		
+FML-7	XLOOKUP(5,A1:A4,B1:C4)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	XLOOKUP(5,A1:A4,B1:B3)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d	error:#VALUE!	Lookup and return arrays of different lengths are #VALUE! in Excel; LibreOffice gives Err:504 (parameter list error), which has no Excel error value
+FML-7	XLOOKUP(5,A1:B4,B1:B4)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d	error:#VALUE!	A two-dimensional lookup array is #VALUE! in Excel; LibreOffice gives Err:504 (parameter list error), which has no Excel error value
+FML-7	XLOOKUP(5,A1:A4,B1:B4,,3)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d	error:#VALUE!	Excel has match modes -1, 0, 1, 2 only; LibreOffice reads 3 as a regular expression match
+FML-7	XLOOKUP(5,A1:A4,B1:B4,,0,0)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d	error:#VALUE!	Search mode 0 is #VALUE! in Excel; LibreOffice gives Err:504 (parameter list error), which has no Excel error value
+FML-7	XLOOKUP(C5,A1:A4,B1:B4)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d;C5=#N/A		
+FML-7	XLOOKUP("5",A1:A4,B1:B4)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d	error:#N/A	Lookups never equate text with numbers (Excel); LibreOffice reads a numeric text lookup value as a number
+FML-7	XMATCH(5,A1:A4)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	XMATCH(4,A1:A4)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	XMATCH(4,A1:A4,)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	XMATCH(4,A1:A4,-1)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	XMATCH(4,A1:A4,1)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	XMATCH("?",B1:B4,2)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	XMATCH("?",B1:B4,2,-1)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	XMATCH("*",B1:B4)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	XMATCH(5,{1,5,5},0,-1)			
+FML-7	XMATCH("B",B1:E1)	B1=a;C1=b;D1=c		
+FML-7	XMATCH(1/0,A1:A4)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	XMATCH(5,A1:B4)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d	error:#VALUE!	A two-dimensional lookup array is #VALUE! in Excel; LibreOffice gives Err:504 (parameter list error), which has no Excel error value
+FML-7	XMATCH(5,A1:A4,4)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d	error:#VALUE!	Excel has match modes -1, 0, 1, 2 only; LibreOffice gives Err:504 (parameter list error), which has no Excel error value
+FML-7	INDEX(A1:B4,2,2)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	INDEX(A1:A4,3)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	INDEX(A1:D1,3)	A1=1;B1=2;C1=3;D1=4		
+FML-7	INDEX(A1:D1,5)	A1=1;B1=2;C1=3;D1=4		
+FML-7	INDEX({1,2,3},2)			
+FML-7	INDEX({1,2;3,4},2,1)			
+FML-7	INDEX({1,2;3,4},3,1)			
+FML-7	INDEX(A1:B4,5,1)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	INDEX(A1:B4,1,3)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	INDEX(A1:B4,2,0)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	INDEX(A1:A4,2,0)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	INDEX(A1:B4,2)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	INDEX(A1:B4,2.7,1.2)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	INDEX(5,1,1)			
+FML-7	INDEX(A1:B4,"x",1)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	INDEX(A1:B4,4,2)	A1=1		
+FML-7	INDEX(A1:B4,1,1,1)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	INDEX(A1:B4,1,1,2)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	INDEX(A:A,4)	A4=9		
+FML-7	INDEX(A1:B4,MATCH(5,A1:A4,0),2)	A1=1;A2=3;A3=5;B3=hit		
+FML-7	INDEX(A1:B4,-1,1)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d	error:#VALUE!	A negative index is #VALUE! in Excel; LibreOffice gives Err:502 (invalid argument), which has no Excel error value
+FML-7	INDEX(A1:B4,0,1)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d	error:#VALUE!	Bricks doesn't return a whole column from INDEX (row 0); LibreOffice and Excel intersect it with the formula's row
+FML-7	CHOOSE(2,"a","b")			
+FML-7	CHOOSE(1.9,"a","b")			
+FML-7	CHOOSE("2","a","b")			
+FML-7	CHOOSE("x","a","b")			
+FML-7	CHOOSE(1,A1:A4,B1:B4)	A1=1;A2=3;A3=5;A4=7;B1=a;B2=b;B3=c;B4=d		
+FML-7	CHOOSE(2,1/0,5)			
+FML-7	CHOOSE(C1,1)	C1=#N/A		
+FML-7	CHOOSE(2,"a",)			
+FML-7	CHOOSE(2,{1,2},{3,4})			
+FML-7	CHOOSE(0,"a","b")		error:#VALUE!	An index below 1 is #VALUE! in Excel; LibreOffice gives Err:502 (invalid argument), which has no Excel error value
+FML-7	CHOOSE(3,"a","b")		error:#VALUE!	An index past the last value is #VALUE! in Excel; LibreOffice gives Err:502 (invalid argument), which has no Excel error value
+FML-7	ROWS(A1:B4)			
+FML-7	ROWS(C3)			
+FML-7	ROWS({1,2;3,4})			
+FML-7	ROWS(A:A)			
+FML-7	ROWS(2:4)			
+FML-7	ROWS(1/0)			
+FML-7	COLUMNS(A1:B4)			
+FML-7	COLUMNS({1,2,3})			
+FML-7	COLUMNS(2:2)			
+FML-7	COLUMNS(A:C)			
+FML-7	COLUMNS(1/0)			

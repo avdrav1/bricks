@@ -13,6 +13,7 @@ mod criteria;
 pub mod format;
 mod info;
 mod logic;
+mod lookup;
 mod math;
 mod stats;
 mod text;
@@ -97,6 +98,7 @@ fn register(m: &mut Registry) {
     logic::register(m);
     info::register(m);
     text::register(m);
+    lookup::register(m);
 }
 
 /// Calls `f` with every value an argument supplies: each non-empty cell of a reference and

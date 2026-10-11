@@ -92,7 +92,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | XLSX-2 | M5 | P0 | todo | XLSX-1 | Warn about workbook content Bricks drops; ask before saving over it | A workbook with formatting, a chart, comments, and merged cells opens with a bar naming them; Ctrl+S over it asks first |
 | FML-5 | M5 | P0 | done | FML-3 | Functions: math, statistics, logic, information | Every case in the function fixture matches LibreOffice |
 | FML-6 | M5 | P0 | done | FML-3 | Functions: text, including TEXT format codes | Every case in the function fixture matches LibreOffice |
-| FML-7 | M5 | P0 | todo | FML-3 | Functions: lookup and reference | Every case in the function fixture matches LibreOffice; VLOOKUP over 1,000,000 rows answers in under 1 s |
+| FML-7 | M5 | P0 | done | FML-3 | Functions: lookup and reference | Every case in the function fixture matches LibreOffice; VLOOKUP over 1,000,000 rows answers in under 1 s |
 | FML-8 | M5 | P0 | todo | FML-3 | Functions: dates and times | Every case in the function fixture matches LibreOffice |
 | FML-9 | M5 | P0 | todo | FML-4 | Formula bar and name box | The bar shows the selected cell's formula; editing it is one undo step; typing C5 or Sheet2!B3 in the name box goes there; a formula with a syntax error is refused with the character |
 | FML-10 | M5 | P0 | todo | FML-4 | Formulas follow inserted, deleted, and sorted rows and columns | Inserting a row above row 5 turns =SUM(A1:A10) into =SUM(A1:A11); deleting row 5 turns =A5 into =#REF!; sorting keeps =B2*2 on its own row; one Ctrl+Z restores each |
@@ -104,6 +104,10 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-10 FML-7:** lookup and reference functions (`functions/lookup.rs`) and `Context::exact_index` (default `None`; the workbook builds an `ExactIndex` per sheet, area, and direction once per revision and caches it in `Calc`). Built in a parallel worktree from FML-3 and rebased after FML-6.
+  - Decisions: exact matches use exact numeric equality (LibreOffice's `MATCH(0.1+0.2,{0.1,0.3},0)` is #N/A); approximate matches binary-search over values of the target's type; an empty argument means FALSE or 0 (`VLOOKUP(x,t,2,)` is exact), as in LibreOffice.
+  - Bricks follows Excel (fixture overrides): an index past the table is #REF!, below 1 #VALUE!; `"5"` never matches the number 5; wildcards apply to array constants in VLOOKUP/HLOOKUP; MATCH over a 2-D area is #N/A; XLOOKUP/XMATCH shape and mode errors are #VALUE!; CHOOSE and INDEX out of range are #VALUE!. As the plan says, INDEX with row or column 0 and XLOOKUP binary-search modes ±2 are #VALUE!; a multi-column XLOOKUP result is #VALUE! (no spilling).
+  - Acceptance: 147 FML-7 rows match LibreOffice or their Excel override. `crates/data-model/tests/lookup_speed.rs` (release): one VLOOKUP over 1,000,000 rows 219.76 ms (target < 1 s), 10,000 exact VLOOKUPs into 1,000,000 rows 251.64 ms (target < 2 s); this machine, not the reference box.
 - **2026-10-10 FML-6:** text functions and TEXT format codes (`functions/text.rs`, `functions/format.rs` with `format::format(v, code)`). Built in a parallel worktree from FML-3 and rebased after FML-5.
   - Bricks follows Excel (fixture overrides): `CONCAT("a",TRUE)` is `aTRUE`; CHAR/CODE use Windows-1252 for 128–159 and Unicode otherwise (LibreOffice on Linux uses UTF-8, so `CHAR(233)` is U+FFFD there); `CHAR(0)` is #VALUE!; REPT stops at Excel's 32,767 characters; `TEXT(1E20,"General")` is `1E+20`; TEXTJOIN needs 3 arguments; LibreOffice's Err:502 for bad counts and positions is #VALUE!.
   - Bricks follows LibreOffice: FIND/SEARCH with empty find text are #VALUE!; `CODE("")` is 0; CLEAN also removes 127–159; CONCAT() of nothing is ""; `TEXT(12,"#.##")` is `12`; TEXT cuts seconds after 15-digit rounding and writes AM/PM in upper case; `TEXT(-1,"yyyy")` is 1899.

@@ -5,8 +5,8 @@ use crate::formulas::is_formula;
 use crate::workbook::same_name;
 use crate::{CellRef, Computed, RowBlock, RowPositions, SheetId, TableSource, Workbook};
 use formula::{
-    evaluate, literal, parse, result_text, unknown_functions, Context, ErrorKind, Expr, Interrupt,
-    Value,
+    evaluate, literal, parse, result_text, unknown_functions, Context, ErrorKind, ExactIndex, Expr,
+    Interrupt, Value,
 };
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -27,16 +27,19 @@ const CANCEL_EVERY: u64 = 4_096;
 const SHEET_COLS: u32 = 16_384;
 
 type Key = (SheetId, CellRef);
+/// A lookup area: sheet, rows, columns, and whether offsets count columns.
+type AreaKey = (SheetId, Range<u64>, Range<u32>, bool);
 
 /// Cells' values, as a job computes them for [`Workbook::store_values`].
 pub type CellValues = Vec<((SheetId, CellRef), Value)>;
 
-/// Results and parses, valid for one workbook revision.
+/// Results, parses, and exact-lookup indexes, valid for one workbook revision.
 #[derive(Default)]
 pub(crate) struct Calc {
     revision: u64,
     values: HashMap<Key, Value>,
     parsed: HashMap<Key, Option<Arc<Expr>>>,
+    indexes: HashMap<AreaKey, Arc<ExactIndex>>,
 }
 
 impl Calc {
@@ -44,6 +47,7 @@ impl Calc {
         if self.revision != revision {
             self.values.clear();
             self.parsed.clear();
+            self.indexes.clear();
             self.revision = revision;
         }
     }
@@ -467,6 +471,38 @@ impl Context for Eval<'_> {
         self.rng ^= self.rng << 25;
         self.rng ^= self.rng >> 27;
         (self.rng.wrapping_mul(0x2545_f491_4f6c_dd1d) >> 11) as f64 / (1u64 << 53) as f64
+    }
+
+    /// Built once per area and revision from [`Context::area`], so it costs the same
+    /// budget as a scan and evaluates formula cells in the area.
+    fn exact_index(
+        &mut self,
+        sheet: Option<&str>,
+        rows: Range<u64>,
+        cols: Range<u32>,
+        by_row: bool,
+    ) -> Result<Option<Arc<ExactIndex>>, Interrupt> {
+        let Some(idx) = self.sheet_index(sheet) else {
+            return Ok(None);
+        };
+        let key = (
+            self.book.sheets()[idx].id,
+            rows.clone(),
+            cols.clone(),
+            by_row,
+        );
+        if let Some(index) = self.calc.indexes.get(&key) {
+            return Ok(Some(index.clone()));
+        }
+        let mut index = ExactIndex::default();
+        let (r0, c0) = (rows.start, cols.start);
+        self.area(sheet, rows, cols, &mut |r, c, v| {
+            index.insert(v, if by_row { u64::from(c - c0) } else { r - r0 });
+            true
+        })?;
+        let index = Arc::new(index);
+        self.calc.indexes.insert(key, index.clone());
+        Ok(Some(index))
     }
 }
 

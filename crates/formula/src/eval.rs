@@ -7,6 +7,7 @@
 
 use crate::ast::{Area, BinaryOp, ErrorKind, Expr, Reference, UnaryOp};
 use crate::coerce::{approx_add, compare, to_number, to_text};
+use crate::exact::ExactIndex;
 use crate::functions;
 use crate::parse::MAX_ROW;
 use crate::value::{Array, Value};
@@ -49,6 +50,18 @@ pub trait Context {
     fn now(&self) -> f64;
     /// A random number in [0, 1).
     fn random(&mut self) -> f64;
+    /// An index of the first offset of each value in a one-row (`by_row`: offsets count
+    /// columns) or one-column (offsets count rows) area, for exact lookups; `None` makes
+    /// lookups scan the area instead.
+    fn exact_index(
+        &mut self,
+        _sheet: Option<&str>,
+        _rows: Range<u64>,
+        _cols: Range<u32>,
+        _by_row: bool,
+    ) -> Result<Option<Arc<ExactIndex>>, Interrupt> {
+        Ok(None)
+    }
 }
 
 /// Evaluates `expr` (a formula without its `=`).
