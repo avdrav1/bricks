@@ -94,7 +94,17 @@ mod imp {
                 return;
             }
             let (sw, sh) = (size.cx as f32 * scale, size.cy as f32 * scale);
-            let (x, y) = (((w - sw) / 2.0).floor(), ((h - sh) / 2.0).floor());
+            // A slide within a pixel of filling an axis fills it: no sliver of backdrop
+            // (a 1280x720 screen shows a 10080720x5670720 EMU slide 1279.94 px wide).
+            let snap = |avail: f32, len: f32| {
+                if avail - len < 1.0 {
+                    avail
+                } else {
+                    len.round()
+                }
+            };
+            let (tw, th) = (snap(w - 2.0 * margin, sw), snap(h - 2.0 * margin, sh));
+            let (x, y) = (((w - tw) / 2.0).floor(), ((h - th) / 2.0).floor());
             let ctx = self
                 .pango
                 .borrow_mut()
@@ -107,12 +117,14 @@ mod imp {
                 .clone();
             snapshot.save();
             snapshot.translate(&graphene::Point::new(x, y));
+            snapshot.scale(tw / sw, th / sh);
             crate::render::draw_slide(snapshot, &ctx, deck, slide, scale);
+            snapshot.scale(sw / tw, sh / th);
             if self.backdrop.get().is_none() {
                 // A hairline edge, so a white slide shows against a light theme.
                 let edge = gdk::RGBA::new(backdrop.red(), backdrop.green(), backdrop.blue(), 0.35);
                 let r =
-                    gtk::gsk::RoundedRect::from_rect(graphene::Rect::new(0.0, 0.0, sw, sh), 0.0);
+                    gtk::gsk::RoundedRect::from_rect(graphene::Rect::new(0.0, 0.0, tw, th), 0.0);
                 snapshot.append_border(&r, &[1.0; 4], &[edge; 4]);
             }
             snapshot.restore();

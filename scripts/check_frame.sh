@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# FRAME-4 acceptance: Frame's viewer window.
+# FRAME-4 acceptance: Frame's viewer window; FRAME-5: its slideshow.
 #
 #   scripts/check_frame.sh [BINARY]   (default target/release/frame)
 #
@@ -22,6 +22,12 @@
 #      wlr-virtual-pointer protocol, scripts/dnd_helpers.py);
 #   6. files that can't be read alert with the file name and the reason: a .ppt ("Save
 #      it as .pptx first") and a damaged .pptx.
+# FRAME-5 acceptance: the full-screen slideshow.
+#   7. on the fixture: Shift+F5 on slide 4 starts at slide 4; F5 on slide 3 starts at slide
+#      1 and fills the screen (corners and top edge white, the slide's background, >= 90%
+#      of the screen white); Space shows slide 2; Escape returns to the window on slide 2.
+#      Shift+F5 on slide 4, then Space: slide 5 is hidden, so the show ends, back on 4.
+#   8. a 4:3 deck (SampleShow.pptx) shows letterboxed in black on the 16:9 screen.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -91,7 +97,24 @@ def main(path, points):
         res = "no" if any(abs(got[k] - w[k]) > 12 for k in range(3)) else "yes"
         print(f"match {name}: {res} (got {bytes(got).hex().upper()} at {x},{y})")
 
-main(sys.argv[1], sys.argv[2:])
+def screen(path, points):
+    # Absolute points (the slideshow fills the screen) and the share of white pixels.
+    p = GdkPixbuf.Pixbuf.new_from_file(path)
+    w, h, rs, nc, px = p.get_width(), p.get_height(), p.get_rowstride(), p.get_n_channels(), p.get_pixels()
+    at = lambda x, y: tuple(px[y * rs + x * nc + k] for k in range(3))
+    white = sum(1 for y in range(0, h, 2) for x in range(0, w, 2) if min(at(x, y)) >= 250)
+    print(f"white: {white * 400 // (w * h)}")
+    for spec in points:
+        name, x, y, want = spec.split(":")
+        got = at(int(x), int(y))
+        wc = tuple(int(want[i:i + 2], 16) for i in (0, 2, 4))
+        res = "no" if any(abs(got[k] - wc[k]) > 12 for k in range(3)) else "yes"
+        print(f"match {name}: {res} (got {bytes(got).hex().upper()})")
+
+if sys.argv[1] == "screen":
+    screen(sys.argv[2], sys.argv[3:])
+else:
+    main(sys.argv[1], sys.argv[2:])
 PY
 session() {
   WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 sway --unsupported-gpu -c /tmp/sway.conf >/tmp/sway.log 2>&1 &
@@ -122,11 +145,30 @@ session() {
   python3 /tmp/px.py /shots/slide3.png fill:0.125:0.3492:4472C4
   keys -k Next; sleep 1; shot slide4
   python3 /tmp/px.py /shots/slide4.png red:0.1071:0.4444:FF0000 blue:0.25:0.4444:0000FF
+  echo "== 7 slideshow"
+  keys -M shift -k F5 -m shift; sleep 2; shown shiftf5
+  keys -k Escape; sleep 1
+  keys -k Home; sleep 0.5
+  keys -k Next -k Next; sleep 0.5
+  keys -k F5; sleep 2; shot show1; shown f5
+  python3 /tmp/px.py screen /shots/show1.png tl:2:2:FFFFFF tr:1277:2:FFFFFF bl:2:717:FFFFFF br:1277:717:FFFFFF top:640:2:FFFFFF
+  keys -k space; sleep 1; shot show2; shown space
+  keys -k Escape; sleep 1; shot back; shown escape
+  keys -k End; sleep 0.5
+  keys -k Up; sleep 0.5
+  keys -M shift -k F5 -m shift; sleep 2; shown last
+  keys -k space; sleep 1; shown past
   echo "== 4 open dialog"
   keys -M ctrl o -m ctrl; sleep 2
   keys -M ctrl l -m ctrl; keys "/tmp/f/shapes.pptx"; keys -k Return; sleep 3
   shot dialog
   shown
+  pkill -x frame; sleep 0.5
+
+  echo "== 8 letterbox"
+  frame /tmp/f/SampleShow.pptx >>/tmp/app.log 2>&1 & sleep 3
+  keys -k F5; sleep 2; shot letterbox
+  python3 /tmp/px.py screen /shots/letterbox.png left:40:360:000000 right:1240:360:000000 slide:640:40:FFFFFF
   pkill -x frame; sleep 0.5
 
   echo "== 5 drop"
@@ -186,6 +228,23 @@ check "6: a .ppt alerts with its name" "6 alerts" "^old\.ppt: Cannot open “old
 check "6: ... and says to save it as .pptx" "6 alerts" "^old\.ppt: .*Save it as \.pptx first\.$"
 check "6: a damaged deck alerts with its name" "6 alerts" "^damaged\.pptx: Cannot open “damaged\.pptx”$"
 check "6: ... and the reason" "6 alerts" "^damaged\.pptx: This isn.t a PowerPoint presentation"
+# FRAME-5: the slideshow.
+check "7: Shift+F5 starts the slideshow from the current slide" "7 slideshow" "^shiftf5: Slideshow slide 4$"
+check "7: F5 starts it from slide 1" "7 slideshow" "^f5: Slideshow slide 1$"
+check "7: ... showing slide 1" "7 slideshow" "^f5: Frame fixture$"
+for c in tl tr bl br top; do check "7: slide 1 fills the screen ($c)" "7 slideshow" "^match $c: yes"; done
+v=$(section "7 slideshow" | sed -n "s/^white: //p" | head -1)
+if [ -n "$v" ] && [ "$v" -ge 90 ]; then echo "ok   7: the screen is the white slide ($v% white)"; else echo "FAIL 7: the screen is the white slide (${v:-nothing}% white, want >= 90)"; fail=1; fi
+check "7: Space advances" "7 slideshow" "^space: Slideshow slide 2$"
+check "7: ... to slide 2" "7 slideshow" "^space: Levels and alignment$"
+check "7: Escape returns to the window on the slide shown" "7 slideshow" "^escape: Slide 2 of 5$"
+absent "7: ... and ends the slideshow" "7 slideshow" "^escape: Slideshow slide"
+check "7: Shift+F5 on slide 4" "7 slideshow" "^last: Slideshow slide 4$"
+check "7: Space past it skips the hidden slide 5 and ends the show on slide 4" "7 slideshow" "^past: Slide 4 of 5$"
+absent "7: ... no slideshow left" "7 slideshow" "^past: Slideshow slide"
+check "8: a 4:3 deck is letterboxed in black (left)" "8 letterbox" "^match left: yes"
+check "8: ... (right)" "8 letterbox" "^match right: yes"
+check "8: ... around the slide" "8 letterbox" "^match slide: yes"
 if [ $fail = 0 ]; then echo "FRAME OK"; else
   echo "FRAME CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

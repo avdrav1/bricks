@@ -239,6 +239,8 @@ pub fn open(app: &gtk::Application, path: &Path, bench: Option<u32>) {
 
 /// A deck's window once it's read: the slide list, the canvas, and the status bar.
 struct DeckWindow {
+    app: gtk::Application,
+    window: glib::WeakRef<gtk::ApplicationWindow>,
     deck: Rc<Deck>,
     canvas: SlideView,
     list: gtk::ListBox,
@@ -287,6 +289,123 @@ impl DeckWindow {
         let i = self.canvas.index() as isize + by;
         self.go(i.clamp(0, self.count().saturating_sub(1) as isize) as usize);
     }
+}
+
+/// The full-screen slideshow, from slide `start` (the next shown one when it's hidden):
+/// Space, Enter, Right, Down, Page Down, and a click go forward; Left, Up, Page Up, and
+/// Backspace back; Home and End to the first and last. Hidden slides are skipped. Escape,
+/// or going past the last slide, ends it, back in the deck's window on the slide shown.
+fn slideshow(view: &Rc<DeckWindow>, start: usize) {
+    let slides = &view.deck.presentation.slides;
+    let shown: Rc<Vec<usize>> = Rc::new((0..slides.len()).filter(|&i| !slides[i].hidden).collect());
+    if shown.is_empty() {
+        return;
+    }
+    let first = shown
+        .iter()
+        .position(|&i| i >= start)
+        .unwrap_or(shown.len() - 1);
+    let deck_window = view.window.upgrade();
+    let show = gtk::Window::builder()
+        .application(&view.app)
+        .title(format!(
+            "Slideshow: {}",
+            deck_window
+                .as_ref()
+                .and_then(|w| w.title())
+                .unwrap_or_default()
+        ))
+        .decorated(false)
+        .build();
+    show.set_transient_for(deck_window.as_ref());
+    let canvas = SlideView::new(&view.deck, shown[first], 0);
+    // Black around the slide where its shape differs from the screen's.
+    canvas.set_backdrop(gdk::RGBA::BLACK);
+    show.set_child(Some(&canvas));
+    let at = Rc::new(Cell::new(first));
+    let set = {
+        let (canvas, shown, deck, at) =
+            (canvas.clone(), shown.clone(), view.deck.clone(), at.clone());
+        move |pos: usize| {
+            at.set(pos);
+            let index = shown[pos];
+            canvas.set_index(index);
+            canvas.update_property(&[
+                gtk::accessible::Property::Label(&format!("Slideshow slide {}", index + 1)),
+                gtk::accessible::Property::Description(&deck.presentation.slides[index].text()),
+            ]);
+        }
+    };
+    set(first);
+    let set = Rc::new(set);
+    let forward = {
+        let (set, at, show, n) = (set.clone(), at.clone(), show.downgrade(), shown.len());
+        move || {
+            if at.get() + 1 < n {
+                set(at.get() + 1);
+            } else if let Some(show) = show.upgrade() {
+                show.close();
+            }
+        }
+    };
+    let forward = Rc::new(forward);
+    let keys = gtk::EventControllerKey::new();
+    keys.connect_key_pressed({
+        let (set, at, show, forward, n) = (
+            set.clone(),
+            at.clone(),
+            show.downgrade(),
+            forward.clone(),
+            shown.len(),
+        );
+        move |_, key, _, _| {
+            use gdk::Key;
+            match key {
+                Key::space
+                | Key::Return
+                | Key::KP_Enter
+                | Key::Right
+                | Key::KP_Right
+                | Key::Down
+                | Key::KP_Down
+                | Key::Page_Down
+                | Key::KP_Page_Down => forward(),
+                Key::Left
+                | Key::KP_Left
+                | Key::Up
+                | Key::KP_Up
+                | Key::Page_Up
+                | Key::KP_Page_Up
+                | Key::BackSpace => set(at.get().saturating_sub(1)),
+                Key::Home | Key::KP_Home => set(0),
+                Key::End | Key::KP_End => set(n - 1),
+                Key::Escape => {
+                    if let Some(show) = show.upgrade() {
+                        show.close();
+                    }
+                }
+                _ => return glib::Propagation::Proceed,
+            }
+            glib::Propagation::Stop
+        }
+    });
+    show.add_controller(keys);
+    let click = gtk::GestureClick::new();
+    click.connect_released(move |_, _, _, _| forward());
+    show.add_controller(click);
+    // However it ends, the deck's window comes back on the slide the show was on.
+    show.connect_close_request({
+        let (view, shown, at) = (view.clone(), shown.clone(), at.clone());
+        move |_| {
+            view.go(shown[at.get()]);
+            if let Some(w) = view.window.upgrade() {
+                w.present();
+            }
+            glib::Propagation::Proceed
+        }
+    });
+    show.fullscreen();
+    show.present();
 }
 
 fn thumbnail_row(deck: &Rc<Deck>, index: usize) -> gtk::ListBoxRow {
@@ -357,6 +476,8 @@ fn show_deck(
     window.set_child(Some(&page));
 
     let view = Rc::new(DeckWindow {
+        app: app.clone(),
+        window: window.downgrade(),
         deck: deck.clone(),
         canvas: canvas.clone(),
         list: list.clone(),
@@ -407,6 +528,27 @@ fn show_deck(
         }
     });
     window.add_controller(keys);
+    // F5 shows the slideshow from the first slide, Shift+F5 from the current one.
+    let from_start = gio::ActionEntry::builder("slideshow")
+        .activate({
+            let view = view.clone();
+            move |_: &gtk::ApplicationWindow, _, _| slideshow(&view, 0)
+        })
+        .build();
+    let from_here = gio::ActionEntry::builder("slideshow-here")
+        .activate({
+            let view = view.clone();
+            move |_: &gtk::ApplicationWindow, _, _| slideshow(&view, view.canvas.index())
+        })
+        .build();
+    window.add_action_entries([from_start, from_here]);
+    if let Some(bar) = window.titlebar().and_downcast::<gtk::HeaderBar>() {
+        let play = gtk::Button::from_icon_name("media-playback-start-symbolic");
+        play.set_action_name(Some("win.slideshow"));
+        play.set_tooltip_text(Some("Slideshow (F5)"));
+        play.update_property(&[gtk::accessible::Property::Label("Slideshow")]);
+        bar.pack_end(&play);
+    }
     view.go(0);
     if let Some(frames) = bench {
         bench_draw(app, &view, frames);

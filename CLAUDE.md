@@ -92,7 +92,7 @@ scripts/check_slate.sh [BINARY]          # Slate viewer GUI check in docker: ope
 cargo run --release -p xlsx --example gen_corpus_xlsx  # corpus/rows_1m.xlsx (BENCH-2)
 cargo run --release -p xlsx --example gen_corpus_xlsx -- --styled   # corpus/styled_1m.xlsx (STYLE-3, BENCH-3)
 python3 scripts/lo_pptx.py fixture|dump FILE  # LibreOffice fixture deck and dumps (FRAME-*)
-scripts/check_frame.sh [BINARY]          # Frame's viewer in a container: decks, Page Down, drawing, Ctrl+O, drop, alerts (FRAME-4)
+scripts/check_frame.sh [BINARY]          # Frame's viewer in a container: decks, Page Down, drawing, Ctrl+O, drop, alerts, slideshow (FRAME-4, FRAME-5)
 python3 -m unittest discover -s scripts  # script tests (corpus generator, backlog helper)
 cargo bench                              # prints the apps/bricks/docs/BENCHMARKS.md table (needs corpus/)
 python3 scripts/backlog.py next [bricks|slate|frame]|status   # backlog helper; one milestone chain per app
