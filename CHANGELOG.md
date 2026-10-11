@@ -2,6 +2,13 @@
 
 Releases are added by the ship-it skill.
 
+## v0.2.1 (2026-10-11)
+
+Fixes how real workbooks draw, and lists .xlsx and .xlsm in the desktop entry.
+
+- STYLE-8: Real-workbook drawing fixes: centre across selection, grid lines off, tight rows
+- XLSX-1: List .xlsx and .xlsm in the desktop entry (Open With)
+
 ## v0.2.0 (2026-10-11)
 
 Milestone M5: XLSX workbooks, formulas, multiple sheets, and cell styles. Bricks opens .xlsx files with every sheet, shows their fonts, colours, fills, borders, alignment, number formats, and merged cells, lets you edit values, formulas, sheets, and formats, and saves by patching the original file so charts, comments, conditional formats, and macros (in .xlsm) survive.
