@@ -2,7 +2,7 @@
 //! cell formats under the file's own indices, and each sheet's styles from the file as
 //! Excel layers them (cell, then row, then column).
 
-use crate::{CellRef, ColId, CsvTable, RowId};
+use crate::{ColId, CsvTable, RowId};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -513,13 +513,37 @@ fn run_at(runs: &[Run], row: u64) -> Option<StyleId> {
     runs.get(i).filter(|r| r.0 <= row).map(|r| r.2)
 }
 
+/// The runs of `runs` (sorted, apart) that meet `rows`.
+fn runs_in(runs: &[Run], rows: std::ops::Range<u64>) -> &[Run] {
+    let first = runs.partition_point(|r| r.1 <= rows.start);
+    let last = first + runs[first..].partition_point(|r| r.0 < rows.end);
+    &runs[first..last]
+}
+
 impl FileStyles {
     /// The style of the cell at source row `row`, source column `col`.
     pub fn at(&self, row: u64, col: u32) -> StyleId {
-        if let Some(s) = self.cells.get(col as usize).and_then(|c| run_at(c, row)) {
+        if let Some(s) = self.cell(row, col) {
             return s;
         }
         self.fallback(row, col)
+    }
+
+    /// The cell's own style, if the file gives it one other than its row's or column's.
+    pub fn cell(&self, row: u64, col: u32) -> Option<StyleId> {
+        self.cells.get(col as usize).and_then(|c| run_at(c, row))
+    }
+
+    /// Source column `col`'s cell runs that meet rows `rows`, sorted.
+    pub(crate) fn cell_runs(&self, col: u32, rows: std::ops::Range<u64>) -> &[Run] {
+        self.cells
+            .get(col as usize)
+            .map_or(&[][..], |runs| runs_in(runs, rows))
+    }
+
+    /// The row-style runs that meet rows `rows`, sorted.
+    pub(crate) fn row_runs(&self, rows: std::ops::Range<u64>) -> &[Run] {
+        runs_in(&self.rows, rows)
     }
 
     /// What a cell without its own style shows: its row's style, else its column's.
@@ -729,18 +753,6 @@ impl CsvTable {
         self.file_styles = Arc::new(styles);
         self.put_merges(Arc::new(layout.merges.clone()));
         self.layout = Arc::new(layout);
-    }
-
-    /// The style of the cell `row`, `col` (ids, so it follows sorts and inserts).
-    /// Inserted rows and columns take their column's or row's style.
-    pub fn style_of(&self, at: CellRef) -> StyleId {
-        let s = &self.file_styles;
-        match (at.row.is_inserted(), at.col.is_inserted()) {
-            (false, false) => s.at(at.row.0, at.col.0),
-            (true, false) => s.column(at.col.0),
-            (false, true) => s.row(at.row.0).unwrap_or_default(),
-            (true, true) => StyleId(0),
-        }
     }
 
     /// The file's styles of this table.

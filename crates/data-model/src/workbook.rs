@@ -4,7 +4,7 @@
 
 use crate::calc::Calc;
 use crate::table::next_revision;
-use crate::{CellRef, CsvTable, Edit, StylePool};
+use crate::{CellRef, CsvTable, Edit, FormatError, FormatTarget, StylePatch, StylePool};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -163,6 +163,38 @@ impl Workbook {
     /// The pool read from the file (STYLE-1).
     pub fn set_styles(&mut self, styles: StylePool) {
         self.styles = Arc::new(styles);
+    }
+
+    /// The pool, to add records to (STYLE-6): a new copy when snapshots share it, so a
+    /// job's snapshot keeps the pool it was taken with. Records are only ever appended.
+    pub fn styles_mut(&mut self) -> &mut StylePool {
+        Arc::make_mut(&mut self.styles)
+    }
+
+    /// The edit that applies `patch` to `target` on sheet `id`, its new style records
+    /// added to the pool ([`CsvTable::format_edit`]).
+    pub fn format_edit(
+        &mut self,
+        id: SheetId,
+        target: FormatTarget,
+        patch: &StylePatch,
+    ) -> Result<Edit, FormatError> {
+        let sheet = self
+            .sheets
+            .iter()
+            .find(|s| s.id == id)
+            .expect("a formatted sheet exists");
+        sheet
+            .table
+            .format_edit(Arc::make_mut(&mut self.styles), target, patch)
+    }
+
+    /// Some sheet has formatting a CSV file can't keep: formats the user set, or merged
+    /// cells other than the file's (STYLE-6).
+    pub fn has_formatting(&self) -> bool {
+        self.sheets
+            .iter()
+            .any(|s| s.table.has_user_styles() || s.table.merges() != s.table.layout().merges)
     }
 
     pub fn sheet(&self, id: SheetId) -> Option<&Sheet> {

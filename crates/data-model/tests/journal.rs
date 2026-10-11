@@ -1,17 +1,19 @@
-//! XLSX-1: the crash recovery journal holds the whole workbook. Sheets of every origin,
-//! with edits, renamed, reordered, added and removed, come back from the journal onto a
-//! freshly opened workbook and save the same bytes; journals of v0.1.x still restore; and
-//! damaged journals of either version are refused.
+//! XLSX-1, STYLE-6: the crash recovery journal holds the whole workbook. Sheets of every
+//! origin, with edits, formats, and merged cells, renamed, reordered, added and removed,
+//! come back from the journal onto a freshly opened workbook and save the same bytes and
+//! show the same styles; journals of v0.1.x and of XLSX-1 still restore; and damaged
+//! journals of any version are refused.
 
 use csv_engine::{Charset, Encoding};
 use data_model::{
-    read_book_journal, read_journal_header, BookEdit, BookState, CellRef, CsvTable,
-    DelimiterChoice, Edit, FileKind, JournalError, JournalHeader, Origin, SaveProgress, SheetId,
-    SortOrder, Workbook,
+    read_book_journal, read_journal_header, BookEdit, BookState, BorderPreset, CellArea, CellRef,
+    Color, CsvTable, DelimiterChoice, Edit, FileKind, FormatTarget, JournalError, JournalHeader,
+    Origin, SaveProgress, SheetId, SortOrder, StylePatch, TableSource, Workbook,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::Arc;
 
 const DATA: &str = "id,city,score\n1,Denver,10\n2,boston,3\n3,DENVER,7\n4,Austin,1\n5,Boston,9\n";
 const IMPORTED: &str = "a,b\n1,x\n2,y\n3,z\n";
@@ -266,7 +268,7 @@ fn journals_that_dont_fit_the_file_are_refused() {
         read_book_journal(&journal(&before, &header(Some(&data.0), FileKind::Xlsx))[..]).unwrap();
 
     // The .xlsx sheet the journal names isn't in the file any more.
-    let only_csv = Workbook::single("data".into(), open(&data.0), Origin::Csv);
+    let mut only_csv = Workbook::single("data".into(), open(&data.0), Origin::Csv);
     assert!(matches!(
         only_csv.restore_plan(state.clone()),
         Err(JournalError::Mismatch(
@@ -275,7 +277,7 @@ fn journals_that_dont_fit_the_file_are_refused() {
     ));
     // The file got shorter: the edits name rows it lacks.
     let small = file("fit-small", "id,city,score\n1,Denver,10\n");
-    let shorter = Workbook::from_sheets(
+    let mut shorter = Workbook::from_sheets(
         vec![
             ("data".into(), open(&small.0), Origin::Csv, HashMap::new()),
             (
@@ -318,7 +320,7 @@ fn damaged_journals_of_either_version_are_refused() {
     }
     assert!(corrupt(b"not a journal at all"));
     assert!(matches!(
-        read_journal_header(&b"BRICKSJ3........"[..]),
+        read_journal_header(&b"BRICKSJ9........"[..]),
         Err(JournalError::Corrupt("not a journal"))
     ));
 }
@@ -340,7 +342,7 @@ fn a_v1_journal_still_restores() {
     assert_eq!((h.pid, h.file_size), (777, 37));
     let (back_h, state) = read_book_journal(&bytes[..]).unwrap();
     assert_eq!(back_h, h);
-    let BookState { active, sheets } = state.clone();
+    let BookState { active, sheets, .. } = state.clone();
     assert_eq!(active, 0);
     assert_eq!(sheets.len(), 1);
     assert_eq!(
@@ -349,6 +351,151 @@ fn a_v1_journal_still_restores() {
     );
     assert!(sheets[0].has_header);
 
+    let mut book = Workbook::single("v1".into(), open(&fixture("v1.csv")), Origin::Csv);
+    for edit in book.restore_plan(state).unwrap() {
+        book.apply(edit);
+    }
+    assert_eq!(
+        saved(book.active()),
+        "id,name,qty\n1,green apple,3\nnew,,\n2,pear,5\n"
+    );
+}
+
+/// A sheet's look, cell by cell: what each style resolves to (ids may differ after a
+/// restore, records don't).
+fn looks(book: &Workbook) -> Vec<Vec<String>> {
+    let pool = book.styles();
+    book.sheets()
+        .iter()
+        .map(|s| {
+            let t = &s.table;
+            let mut out = Vec::new();
+            for r in 0..t.row_count() {
+                for c in 0..4 {
+                    let xf = pool.xf(t.style_of(at(t, r, c)));
+                    out.push(format!(
+                        "{:?} {:?} {:?} {:?} {:?}",
+                        pool.font(xf),
+                        pool.fill(xf),
+                        pool.border(xf),
+                        pool.custom_format(xf.num_fmt),
+                        xf.align
+                    ));
+                }
+            }
+            out
+        })
+        .collect()
+}
+
+fn formatted(book: &mut Workbook, id: SheetId, target: FormatTarget, patch: StylePatch) {
+    let edit = book.format_edit(id, target, &patch).unwrap();
+    book.apply(BookEdit::Sheets(vec![(id, edit)]));
+}
+
+/// STYLE-6 acceptance (data side): formats, merges, and the style records they need come
+/// back after a crash, onto a workbook whose pool grew meanwhile.
+#[test]
+fn formats_and_merges_come_back_from_the_journal() {
+    let data = file("formats", DATA);
+    let mut before = Workbook::single("data".into(), open(&data.0), Origin::Csv);
+    let csv = before.active_id();
+    formatted(
+        &mut before,
+        csv,
+        FormatTarget::Cells {
+            rows: 0..2,
+            cols: 0..2,
+        },
+        StylePatch {
+            bold: Some(true),
+            fill: Some(Some(Color::Rgb(0xFFCC00))),
+            ..StylePatch::default()
+        },
+    );
+    formatted(
+        &mut before,
+        csv,
+        FormatTarget::Cols(2..3),
+        StylePatch {
+            num_fmt: Some("0.0%".into()),
+            border: Some(BorderPreset::Outside),
+            ..StylePatch::default()
+        },
+    );
+    formatted(
+        &mut before,
+        csv,
+        FormatTarget::Rows {
+            rows: 3..4,
+            cols: 0..3,
+        },
+        StylePatch {
+            font_name: Some("DejaVu Serif".into()),
+            font_size: Some(1400),
+            ..StylePatch::default()
+        },
+    );
+    let merged = Arc::new(vec![CellArea {
+        first_row: 1,
+        first_col: 0,
+        last_row: 2,
+        last_col: 1,
+    }]);
+    before.apply(BookEdit::Sheets(vec![(csv, Edit::Merges(merged.clone()))]));
+    let mut added = before.new_sheet("Notes".into(), CsvTable::untitled(), Origin::New);
+    let e = added.table.insert_rows(0, 2).unwrap();
+    added.table.apply(e);
+    let added_id = added.id;
+    before.apply(BookEdit::Insert {
+        at: 1,
+        sheet: Box::new(added),
+    });
+    formatted(
+        &mut before,
+        added_id,
+        FormatTarget::Cells {
+            rows: 1..2,
+            cols: 1..2,
+        },
+        StylePatch {
+            italic: Some(true),
+            ..StylePatch::default()
+        },
+    );
+    let want = looks(&before);
+
+    let bytes = journal(&before, &header(Some(&data.0), FileKind::Csv));
+    let (_, state) = read_book_journal(&bytes[..]).unwrap();
+    let mut after = Workbook::single("data".into(), open(&data.0), Origin::Csv);
+    // A format made (and undone) before restoring grows the pool: the journal's records
+    // land at other ids.
+    let id = after.active_id();
+    let strike = StylePatch {
+        strike: Some(true),
+        ..StylePatch::default()
+    };
+    let edit = after
+        .format_edit(id, FormatTarget::Cols(0..1), &strike)
+        .unwrap();
+    let undo = after.apply(BookEdit::Sheets(vec![(id, edit)]));
+    after.apply(undo);
+    for edit in after.restore_plan(state).unwrap() {
+        after.apply(edit);
+    }
+    assert_eq!(looks(&after), want);
+    assert_eq!(after.sheets()[0].table.merges(), &merged[..]);
+    assert_eq!(after.edit_count(), before.edit_count());
+}
+
+/// A journal of XLSX-1 to STYLE-5 (`BRICKSJ2`, written by that code for `tests/data/v1.csv`:
+/// B2 edited, a row inserted and typed in, the last row deleted) still restores.
+#[test]
+fn a_v2_journal_still_restores() {
+    let bytes = std::fs::read(fixture("v2.journal")).unwrap();
+    let (h, state) = read_book_journal(&bytes[..]).unwrap();
+    assert_eq!((h.kind, h.pid), (FileKind::Csv, 778));
+    assert!(state.pool.is_none());
     let mut book = Workbook::single("v1".into(), open(&fixture("v1.csv")), Origin::Csv);
     for edit in book.restore_plan(state).unwrap() {
         book.apply(edit);

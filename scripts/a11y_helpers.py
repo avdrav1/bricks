@@ -4,6 +4,8 @@
     a11y_helpers.py text          every name, description, and text in the app's windows,
                                   one per line
     a11y_helpers.py press LABEL   activate the button labelled LABEL
+    a11y_helpers.py state LABEL   "on" or "off": whether the toggle button labelled LABEL
+                                  is pressed (STYLE-6's format bar)
 
 Used by scripts/check_malformed.sh (APP-8) to read dialog text exactly as GTK shows it.
 Needs python-gobject and at-spi2-core, inside the app's D-Bus session.
@@ -69,6 +71,17 @@ def main():
                 Atspi.Action.do_action(action, 0)
                 return
         sys.exit(f"no button {label!r}")
+    if len(sys.argv) == 3 and sys.argv[1] == "state":
+        label = sys.argv[2]
+        for node in walk(app()):
+            if node.get_role() == Atspi.Role.TOGGLE_BUTTON and node.get_name() == label:
+                states = node.get_state_set()
+                on = states.contains(Atspi.StateType.CHECKED) or states.contains(
+                    Atspi.StateType.PRESSED
+                )
+                print("on" if on else "off")
+                return
+        sys.exit(f"no toggle button {label!r}")
     sys.exit(__doc__)
 
 

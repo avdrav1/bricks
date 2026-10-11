@@ -4,6 +4,7 @@
 use crate::cleared::Cleared;
 use crate::colmap::ColMap;
 use crate::filter::{Filter, RowSet};
+use crate::format::UserStyles;
 use crate::rowmap::{RowMap, RowOrder, Run};
 use crate::{
     CellArea, CellRef, Col, ColId, ColSet, Computed, Edit, EditOverlay, FileLayout, FileStyles,
@@ -263,6 +264,9 @@ pub struct CsvTable {
     pub(crate) merges: Arc<Vec<CellArea>>,
     /// Rows the tallest merge spans past its first: how far back a lookup by row looks.
     pub(crate) merge_reach: u64,
+    /// The user's style layers (STYLE-6): cell, row, and column styles over the file's.
+    /// Cloned by snapshots; [`Edit::Styles`] changes them.
+    pub(crate) user_styles: UserStyles,
     spans: Vec<Range<u64>>,
     fields: Vec<Field>,
 }
@@ -302,6 +306,7 @@ impl CsvTable {
             layout: Arc::default(),
             merges: Arc::default(),
             merge_reach: 0,
+            user_styles: UserStyles::default(),
         }
     }
 
@@ -332,6 +337,7 @@ impl CsvTable {
             layout: self.layout.clone(),
             merges: self.merges.clone(),
             merge_reach: self.merge_reach,
+            user_styles: self.user_styles.clone(),
         }
     }
 
@@ -605,10 +611,12 @@ impl CsvTable {
                 .blocks()
                 .map(|(rows, cols)| std::mem::size_of_val(rows) + cols.heap_bytes())
                 .sum::<usize>()
+            + self.user_styles.heap_bytes()
     }
 
     /// Unsaved changes: edited cells, plus rows inserted and source rows deleted, plus one
-    /// for a sorted row order (SORT-1).
+    /// for a sorted row order (SORT-1), plus one per range or column the user formatted
+    /// (STYLE-6).
     pub fn changes(&self) -> usize {
         let rows = self.rows.as_ref().map_or(0, |m| {
             let (mut inserted, mut kept) = (0, 0);
@@ -625,7 +633,13 @@ impl CsvTable {
         let cols = self.cols.as_ref().map_or(0, ColMap::changes);
         // Merged or unmerged cells, or merges moved by inserts and deletes (STYLE-4).
         let merges = usize::from(*self.merges != self.layout.merges);
-        self.overlay.len() + rows as usize + sorted + cols + self.cleared.len() + merges
+        self.overlay.len()
+            + rows as usize
+            + sorted
+            + cols
+            + self.cleared.len()
+            + merges
+            + self.user_styles.len()
     }
 
     /// An edit inserting `count` empty rows before table row `row`, or at the end of the
@@ -791,6 +805,7 @@ impl CsvTable {
                 Edit::Reorder(std::mem::replace(&mut self.rows, order))
             }
             Edit::Merges(list) => Edit::Merges(self.put_merges(list)),
+            Edit::Styles(edit) => Edit::Styles(self.user_styles.apply(edit)),
         }
     }
 
@@ -1019,7 +1034,7 @@ impl CsvTable {
 }
 
 /// The row ids of `runs` as sorted, merged ranges of id values.
-fn id_ranges(runs: &[Run]) -> Vec<Range<u64>> {
+pub(crate) fn id_ranges(runs: &[Run]) -> Vec<Range<u64>> {
     let mut ids: Vec<Range<u64>> = runs.iter().map(|r| r.first.0..r.first.0 + r.len).collect();
     ids.sort_unstable_by_key(|r| r.start);
     let mut merged: Vec<Range<u64>> = Vec::with_capacity(ids.len());

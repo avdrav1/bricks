@@ -1,30 +1,41 @@
-//! Crash recovery journal (APP-7, XLSX-1). Everything the user changed that a save would
-//! write is the workbook's sheets (names, order, where each comes from) and each sheet's
-//! edit state ([`EditState`]): cell edits, the row order (sorts, inserted and deleted
-//! rows), the column order, and cleared blocks. The undo history can't stand in for it:
+//! Crash recovery journal (APP-7, XLSX-1, STYLE-6). Everything the user changed that a
+//! save would write is the workbook's sheets (names, order, where each comes from), each
+//! sheet's edit state ([`EditState`]: cell edits, the row order (sorts, inserted and
+//! deleted rows), the column order, and cleared blocks), its formats and merged cells,
+//! and the style records the workbook gained. The undo history can't stand in for it:
 //! its memory budget trims old steps. The app writes it, behind a header naming the file
 //! it belongs to ([`JournalHeader`]), and after a crash puts it back as one undoable step
 //! ([`Workbook::restore_plan`]).
 //!
-//! Format, little-endian: magic `BRICKSJ2`; the header; `sheet_count u32`, `active u32`
-//! (a position); per sheet its id, name, origin, header flag and state; then an FNV-1a
-//! hash of everything before it, so a cut or damaged journal is refused rather than
-//! half-applied. Journals of v0.1.x (`BRICKSJ1`: one table's state, no kind byte) are
-//! still read, as one sheet.
+//! Format, little-endian: magic `BRICKSJ3`; the header; `sheet_count u32`, `active u32`
+//! (a position); per sheet its id, name, origin, header flag, state, the user's style
+//! layers and the merged ranges; then the style pool's file counts and the records added
+//! after them; then an FNV-1a hash of everything before it, so a cut or damaged journal
+//! is refused rather than half-applied. Journals of earlier versions are still read:
+//! `BRICKSJ2` (no formats, merges, or pool) and v0.1.x's `BRICKSJ1` (one table's state,
+//! no kind byte), as one sheet.
 
 use crate::cleared::{Cleared, ColSet};
 use crate::colmap::ColMap;
+use crate::format::{intern, Runs, UserStyles};
 use crate::rowmap::{RowOrder, Run};
+use crate::style::{
+    Align, Baseline, Border, Color, Edge, FileCounts, Fill, Font, HAlign, LineStyle, Pattern,
+    StyleId, StylePool, Tint, Underline, VAlign, Xf,
+};
 use crate::workbook::{Origin, Sheet, SheetId, Workbook};
-use crate::{BookEdit, CellRef, ColId, CsvTable, Edit, EditOverlay, RowId};
+use crate::{BookEdit, CellArea, CellRef, ColId, CsvTable, Edit, EditOverlay, RowId};
 use csv_engine::{Charset, Encoding, RowIndex};
+use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::ops::Range;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-const MAGIC: &[u8; 8] = b"BRICKSJ2";
+const MAGIC: &[u8; 8] = b"BRICKSJ3";
+/// The journal of XLSX-1 to STYLE-5 (no formats), still read.
+const MAGIC_V2: &[u8; 8] = b"BRICKSJ2";
 /// The single-table journal of v0.1.x, still read.
 const MAGIC_V1: &[u8; 8] = b"BRICKSJ1";
 /// More sheets than any workbook has: a damaged count is refused.
@@ -89,13 +100,135 @@ pub struct SheetState {
     pub origin: Origin,
     pub has_header: bool,
     pub state: EditState,
+    pub formats: SheetFormats,
 }
 
-/// A journaled workbook: its sheets in order and the position of the active one.
+/// A sheet's formats as journaled (STYLE-6): the user's style layers and the merged
+/// ranges. Journals before `BRICKSJ3` have none, and leave the file's merges.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SheetFormats {
+    pub(crate) styles: UserStyles,
+    pub(crate) merges: Option<Vec<CellArea>>,
+}
+
+/// A journaled workbook: its sheets in order, the position of the active one, and the
+/// style records added to the file's (`None` before `BRICKSJ3`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct BookState {
     pub active: u32,
     pub sheets: Vec<SheetState>,
+    pub pool: Option<JournalPool>,
+}
+
+/// The style records a workbook gained after the file's ([`StylePool::from_file`]), and
+/// every number format code it has by id.
+#[derive(Debug, Clone, PartialEq)]
+pub struct JournalPool {
+    base: FileCounts,
+    fonts: Vec<Font>,
+    fills: Vec<Fill>,
+    borders: Vec<Border>,
+    xfs: Vec<Xf>,
+    num_fmts: Vec<(u32, Box<str>)>,
+}
+
+impl JournalPool {
+    fn of(pool: &StylePool) -> Self {
+        let base = pool.from_file;
+        let tail = |n: u32, len: usize| (n as usize).min(len);
+        Self {
+            base,
+            fonts: pool.fonts[tail(base.fonts, pool.fonts.len())..].to_vec(),
+            fills: pool.fills[tail(base.fills, pool.fills.len())..].to_vec(),
+            borders: pool.borders[tail(base.borders, pool.borders.len())..].to_vec(),
+            xfs: pool.xfs[tail(base.xfs, pool.xfs.len())..].to_vec(),
+            num_fmts: pool
+                .num_fmts
+                .iter()
+                .map(|(&id, code)| (id, code.clone()))
+                .collect(),
+        }
+    }
+
+    /// Cell formats in all, the file's and the journal's.
+    fn xf_count(&self) -> u64 {
+        u64::from(self.base.xfs) + self.xfs.len() as u64
+    }
+
+    /// The journal's records refer only to records it or the file has.
+    fn check(&self) -> Result<(), JournalError> {
+        let fits = |i: u32, base: u32, len: usize| u64::from(i) < u64::from(base) + len as u64;
+        let ok = self.xfs.iter().all(|x| {
+            fits(x.font, self.base.fonts, self.fonts.len())
+                && fits(x.fill, self.base.fills, self.fills.len())
+                && fits(x.border, self.base.borders, self.borders.len())
+        });
+        if ok {
+            Ok(())
+        } else {
+            Err(JournalError::Corrupt(
+                "a style names a record the journal lacks",
+            ))
+        }
+    }
+
+    /// Add the journal's records to `pool` (equal ones are reused); the id each of the
+    /// journal's cell formats has there, by journal id.
+    fn merge_into(&self, pool: &mut StylePool) -> impl Fn(StyleId) -> StyleId {
+        let base = self.base;
+        let fonts: Vec<u32> = self
+            .fonts
+            .iter()
+            .map(|f| intern(&mut pool.fonts, f.clone()))
+            .collect();
+        let fills: Vec<u32> = self
+            .fills
+            .iter()
+            .map(|f| intern(&mut pool.fills, f.clone()))
+            .collect();
+        let borders: Vec<u32> = self
+            .borders
+            .iter()
+            .map(|b| intern(&mut pool.borders, b.clone()))
+            .collect();
+        let num_fmts: HashMap<u32, u32> = self
+            .num_fmts
+            .iter()
+            .map(|(id, code)| {
+                let now = match pool.num_fmts.get(id) {
+                    Some(c) if c == code => *id,
+                    _ => pool.num_fmt_id(code),
+                };
+                (*id, now)
+            })
+            .collect();
+        let at = |base: u32, map: &[u32], i: u32| {
+            if i < base {
+                i
+            } else {
+                map[(i - base) as usize]
+            }
+        };
+        let xfs: Vec<StyleId> = self
+            .xfs
+            .iter()
+            .map(|x| {
+                let mut x = x.clone();
+                x.font = at(base.fonts, &fonts, x.font);
+                x.fill = at(base.fills, &fills, x.fill);
+                x.border = at(base.borders, &borders, x.border);
+                x.num_fmt = num_fmts.get(&x.num_fmt).copied().unwrap_or(x.num_fmt);
+                pool.intern(x)
+            })
+            .collect();
+        move |id: StyleId| {
+            if id.0 < base.xfs {
+                id
+            } else {
+                xfs[(id.0 - base.xfs) as usize]
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -258,14 +391,16 @@ fn write_header<W: Write>(w: &mut Writer<W>, h: &JournalHeader) -> io::Result<()
     w.u32(h.pid)
 }
 
-/// The header, and whether the journal is a v0.1.x one (`BRICKSJ1`).
-fn read_header_from<R: Read>(r: &mut Reader<R>) -> Result<(JournalHeader, bool), JournalError> {
+/// The header, and the journal's version (1 to 3).
+fn read_header_from<R: Read>(r: &mut Reader<R>) -> Result<(JournalHeader, u8), JournalError> {
     let magic = r.array::<8>()?;
-    let v1 = match &magic {
-        m if m == MAGIC => false,
-        m if m == MAGIC_V1 => true,
+    let version = match &magic {
+        m if m == MAGIC => 3,
+        m if m == MAGIC_V2 => 2,
+        m if m == MAGIC_V1 => 1,
         _ => return Err(JournalError::Corrupt("not a journal")),
     };
+    let v1 = version == 1;
     let path = r.blob()?;
     let titled = r.u8()? == 1;
     let kind = if v1 {
@@ -293,10 +428,10 @@ fn read_header_from<R: Read>(r: &mut Reader<R>) -> Result<(JournalHeader, bool),
         rows: r.u64()?,
         pid: r.u32()?,
     };
-    Ok((header, v1))
+    Ok((header, version))
 }
 
-/// Read only the header (either version): enough to list journals without reading their
+/// Read only the header (any version): enough to list journals without reading their
 /// state.
 pub fn read_journal_header(r: impl Read) -> Result<JournalHeader, JournalError> {
     read_header_from(&mut Reader::new(r)).map(|(h, _)| h)
@@ -441,6 +576,401 @@ fn read_state<R: Read>(r: &mut Reader<R>) -> Result<EditState, JournalError> {
     Ok(s)
 }
 
+fn write_runs<W: Write>(w: &mut Writer<W>, runs: &Runs) -> io::Result<()> {
+    w.u64(runs.len() as u64)?;
+    for (&s, &(e, st)) in runs {
+        w.u64(s)?;
+        w.u64(e)?;
+        w.u32(st.0)?;
+    }
+    Ok(())
+}
+
+fn read_runs<R: Read>(r: &mut Reader<R>) -> Result<Runs, JournalError> {
+    let mut runs = Runs::new();
+    let mut last = 0;
+    for i in 0..r.count(20)? {
+        let (s, e, st) = (r.u64()?, r.u64()?, StyleId(r.u32()?));
+        if s >= e || (i > 0 && s < last) {
+            return Err(JournalError::Corrupt("style runs out of order"));
+        }
+        last = e;
+        runs.insert(s, (e, st));
+    }
+    Ok(runs)
+}
+
+/// The user's style layers and the merged ranges, sorted so the same state always writes
+/// the same bytes.
+fn write_formats<W: Write>(w: &mut Writer<W>, t: &CsvTable) -> io::Result<()> {
+    let u = &t.user_styles;
+    let mut cells: Vec<_> = u.cells.iter().collect();
+    cells.sort_unstable_by_key(|(c, _)| **c);
+    w.u64(cells.len() as u64)?;
+    for (c, runs) in cells {
+        w.u32(c.0)?;
+        write_runs(w, runs)?;
+    }
+    write_runs(w, &u.rows)?;
+    let mut cols: Vec<_> = u.cols.iter().collect();
+    cols.sort_unstable_by_key(|(c, _)| **c);
+    w.u64(cols.len() as u64)?;
+    for (c, s) in cols {
+        w.u32(c.0)?;
+        w.u32(s.0)?;
+    }
+    w.u64(t.merges().len() as u64)?;
+    for m in t.merges() {
+        w.u64(m.first_row)?;
+        w.u32(m.first_col)?;
+        w.u64(m.last_row)?;
+        w.u32(m.last_col)?;
+    }
+    Ok(())
+}
+
+fn read_formats<R: Read>(r: &mut Reader<R>) -> Result<SheetFormats, JournalError> {
+    let mut styles = UserStyles::default();
+    for _ in 0..r.count(12)? {
+        let col = ColId(r.u32()?);
+        let runs = read_runs(r)?;
+        if !runs.is_empty() && styles.cells.insert(col, runs).is_some() {
+            return Err(JournalError::Corrupt("a column's styles twice"));
+        }
+    }
+    styles.rows = read_runs(r)?;
+    for _ in 0..r.count(8)? {
+        let col = ColId(r.u32()?);
+        styles.cols.insert(col, StyleId(r.u32()?));
+    }
+    let merges = (0..r.count(24)?)
+        .map(|_| {
+            Ok(CellArea {
+                first_row: r.u64()?,
+                first_col: r.u32()?,
+                last_row: r.u64()?,
+                last_col: r.u32()?,
+            })
+        })
+        .collect::<Result<Vec<_>, JournalError>>()?;
+    Ok(SheetFormats {
+        styles,
+        merges: Some(merges),
+    })
+}
+
+const LINES: [LineStyle; 14] = [
+    LineStyle::None,
+    LineStyle::Thin,
+    LineStyle::Medium,
+    LineStyle::Thick,
+    LineStyle::Dashed,
+    LineStyle::Dotted,
+    LineStyle::Double,
+    LineStyle::Hair,
+    LineStyle::MediumDashed,
+    LineStyle::DashDot,
+    LineStyle::MediumDashDot,
+    LineStyle::DashDotDot,
+    LineStyle::MediumDashDotDot,
+    LineStyle::SlantDashDot,
+];
+const HALIGNS: [HAlign; 8] = [
+    HAlign::General,
+    HAlign::Left,
+    HAlign::Center,
+    HAlign::Right,
+    HAlign::Fill,
+    HAlign::Justify,
+    HAlign::CenterContinuous,
+    HAlign::Distributed,
+];
+const VALIGNS: [VAlign; 5] = [
+    VAlign::Top,
+    VAlign::Center,
+    VAlign::Bottom,
+    VAlign::Justify,
+    VAlign::Distributed,
+];
+const UNDERLINES: [Underline; 5] = [
+    Underline::None,
+    Underline::Single,
+    Underline::Double,
+    Underline::SingleAccounting,
+    Underline::DoubleAccounting,
+];
+
+/// `v`'s position in `all`, every variant's list.
+fn code_of<T: PartialEq>(all: &[T], v: &T) -> u8 {
+    all.iter()
+        .position(|x| x == v)
+        .expect("every variant is listed") as u8
+}
+
+fn variant<T: Copy>(all: &[T], code: u8) -> Result<T, JournalError> {
+    all.get(code as usize)
+        .copied()
+        .ok_or(JournalError::Corrupt("an unknown style value"))
+}
+
+fn write_color<W: Write>(w: &mut Writer<W>, c: Color) -> io::Result<()> {
+    match c {
+        Color::Auto => w.u8(0),
+        Color::Rgb(rgb) => {
+            w.u8(1)?;
+            w.u32(rgb)
+        }
+        Color::Theme { index, tint } => {
+            w.u8(2)?;
+            w.u8(index)?;
+            w.u64(tint.value().to_bits())
+        }
+        Color::Indexed(n) => {
+            w.u8(3)?;
+            w.u8(n)
+        }
+    }
+}
+
+fn read_color<R: Read>(r: &mut Reader<R>) -> Result<Color, JournalError> {
+    Ok(match r.u8()? {
+        0 => Color::Auto,
+        1 => Color::Rgb(r.u32()?),
+        2 => Color::Theme {
+            index: r.u8()?,
+            tint: Tint::new(f64::from_bits(r.u64()?)),
+        },
+        3 => Color::Indexed(r.u8()?),
+        _ => return Err(JournalError::Corrupt("an unknown colour")),
+    })
+}
+
+fn write_opt_u8<W: Write>(w: &mut Writer<W>, v: Option<u8>) -> io::Result<()> {
+    w.u8(u8::from(v.is_some()))?;
+    w.u8(v.unwrap_or(0))
+}
+
+fn read_opt_u8<R: Read>(r: &mut Reader<R>) -> Result<Option<u8>, JournalError> {
+    let some = r.u8()? == 1;
+    let v = r.u8()?;
+    Ok(some.then_some(v))
+}
+
+fn read_text<R: Read>(r: &mut Reader<R>) -> Result<Box<str>, JournalError> {
+    String::from_utf8(r.blob()?)
+        .map(String::into_boxed_str)
+        .map_err(|_| JournalError::Corrupt("a style's text isn't UTF-8"))
+}
+
+fn write_font<W: Write>(w: &mut Writer<W>, f: &Font) -> io::Result<()> {
+    w.blob(f.name.as_bytes())?;
+    w.u32(f.size)?;
+    w.u8(u8::from(f.bold) | u8::from(f.italic) << 1 | u8::from(f.strike) << 2)?;
+    w.u8(code_of(&UNDERLINES, &f.underline))?;
+    write_color(w, f.color)?;
+    w.u8(match f.baseline {
+        None => 0,
+        Some(Baseline::Superscript) => 1,
+        Some(Baseline::Subscript) => 2,
+    })?;
+    write_opt_u8(w, f.family)?;
+    w.u8(u8::from(f.scheme.is_some()))?;
+    w.blob(f.scheme.as_deref().unwrap_or("").as_bytes())?;
+    write_opt_u8(w, f.charset)
+}
+
+fn read_font<R: Read>(r: &mut Reader<R>) -> Result<Font, JournalError> {
+    let name = read_text(r)?;
+    let size = r.u32()?;
+    let flags = r.u8()?;
+    let underline = variant(&UNDERLINES, r.u8()?)?;
+    let color = read_color(r)?;
+    let baseline = match r.u8()? {
+        0 => None,
+        1 => Some(Baseline::Superscript),
+        2 => Some(Baseline::Subscript),
+        _ => return Err(JournalError::Corrupt("an unknown baseline")),
+    };
+    let family = read_opt_u8(r)?;
+    let has_scheme = r.u8()? == 1;
+    let scheme = read_text(r)?;
+    Ok(Font {
+        name,
+        size,
+        bold: flags & 1 != 0,
+        italic: flags & 2 != 0,
+        underline,
+        strike: flags & 4 != 0,
+        color,
+        baseline,
+        family,
+        scheme: has_scheme.then_some(scheme),
+        charset: read_opt_u8(r)?,
+    })
+}
+
+fn write_fill<W: Write>(w: &mut Writer<W>, f: &Fill) -> io::Result<()> {
+    match f {
+        Fill::Pattern { pattern, fg, bg } => {
+            w.u8(0)?;
+            match pattern {
+                Pattern::None => w.u8(0)?,
+                Pattern::Solid => w.u8(1)?,
+                Pattern::Other(name) => {
+                    w.u8(2)?;
+                    w.blob(name.as_bytes())?;
+                }
+            }
+            write_color(w, *fg)?;
+            write_color(w, *bg)
+        }
+        Fill::Gradient { first } => {
+            w.u8(1)?;
+            write_color(w, *first)
+        }
+    }
+}
+
+fn read_fill<R: Read>(r: &mut Reader<R>) -> Result<Fill, JournalError> {
+    Ok(match r.u8()? {
+        0 => {
+            let pattern = match r.u8()? {
+                0 => Pattern::None,
+                1 => Pattern::Solid,
+                2 => Pattern::Other(read_text(r)?),
+                _ => return Err(JournalError::Corrupt("an unknown fill pattern")),
+            };
+            Fill::Pattern {
+                pattern,
+                fg: read_color(r)?,
+                bg: read_color(r)?,
+            }
+        }
+        1 => Fill::Gradient {
+            first: read_color(r)?,
+        },
+        _ => return Err(JournalError::Corrupt("an unknown fill")),
+    })
+}
+
+fn write_border<W: Write>(w: &mut Writer<W>, b: &Border) -> io::Result<()> {
+    for e in [&b.left, &b.right, &b.top, &b.bottom, &b.diagonal] {
+        w.u8(code_of(&LINES, &e.style))?;
+        write_color(w, e.color)?;
+    }
+    w.u8(u8::from(b.diagonal_up) | u8::from(b.diagonal_down) << 1)
+}
+
+fn read_border<R: Read>(r: &mut Reader<R>) -> Result<Border, JournalError> {
+    let mut edge = || -> Result<Edge, JournalError> {
+        Ok(Edge {
+            style: variant(&LINES, r.u8()?)?,
+            color: read_color(r)?,
+        })
+    };
+    let (left, right, top, bottom, diagonal) = (edge()?, edge()?, edge()?, edge()?, edge()?);
+    let flags = r.u8()?;
+    Ok(Border {
+        left,
+        right,
+        top,
+        bottom,
+        diagonal,
+        diagonal_up: flags & 1 != 0,
+        diagonal_down: flags & 2 != 0,
+    })
+}
+
+fn write_xf<W: Write>(w: &mut Writer<W>, x: &Xf) -> io::Result<()> {
+    for v in [x.num_fmt, x.font, x.fill, x.border, x.xf_id] {
+        w.u32(v)?;
+    }
+    let a = &x.align;
+    w.u8(code_of(&HALIGNS, &a.horizontal))?;
+    w.u8(code_of(&VALIGNS, &a.vertical))?;
+    w.u8(u8::from(a.wrap) | u8::from(a.shrink) << 1)?;
+    w.u8(a.indent)?;
+    w.u8(a.rotation)?;
+    w.u8(u8::from(x.locked) | u8::from(x.hidden) << 1 | u8::from(x.quote_prefix) << 2)
+}
+
+fn read_xf<R: Read>(r: &mut Reader<R>) -> Result<Xf, JournalError> {
+    let (num_fmt, font, fill, border, xf_id) = (r.u32()?, r.u32()?, r.u32()?, r.u32()?, r.u32()?);
+    let horizontal = variant(&HALIGNS, r.u8()?)?;
+    let vertical = variant(&VALIGNS, r.u8()?)?;
+    let flags = r.u8()?;
+    let (indent, rotation) = (r.u8()?, r.u8()?);
+    let marks = r.u8()?;
+    Ok(Xf {
+        num_fmt,
+        font,
+        fill,
+        border,
+        xf_id,
+        align: Align {
+            horizontal,
+            vertical,
+            wrap: flags & 1 != 0,
+            shrink: flags & 2 != 0,
+            indent,
+            rotation,
+        },
+        locked: marks & 1 != 0,
+        hidden: marks & 2 != 0,
+        quote_prefix: marks & 4 != 0,
+    })
+}
+
+fn write_list<W: Write, T>(
+    w: &mut Writer<W>,
+    items: &[T],
+    mut write: impl FnMut(&mut Writer<W>, &T) -> io::Result<()>,
+) -> io::Result<()> {
+    w.u64(items.len() as u64)?;
+    items.iter().try_for_each(|item| write(w, item))
+}
+
+fn read_list<R: Read, T>(
+    r: &mut Reader<R>,
+    min_bytes: u64,
+    mut read: impl FnMut(&mut Reader<R>) -> Result<T, JournalError>,
+) -> Result<Vec<T>, JournalError> {
+    (0..r.count(min_bytes)?).map(|_| read(r)).collect()
+}
+
+fn write_pool<W: Write>(w: &mut Writer<W>, p: &JournalPool) -> io::Result<()> {
+    for n in [p.base.fonts, p.base.fills, p.base.borders, p.base.xfs] {
+        w.u32(n)?;
+    }
+    write_list(w, &p.fonts, write_font)?;
+    write_list(w, &p.fills, write_fill)?;
+    write_list(w, &p.borders, write_border)?;
+    write_list(w, &p.xfs, write_xf)?;
+    write_list(w, &p.num_fmts, |w, (id, code)| {
+        w.u32(*id)?;
+        w.blob(code.as_bytes())
+    })
+}
+
+fn read_pool<R: Read>(r: &mut Reader<R>) -> Result<JournalPool, JournalError> {
+    let base = FileCounts {
+        fonts: r.u32()?,
+        fills: r.u32()?,
+        borders: r.u32()?,
+        xfs: r.u32()?,
+    };
+    let pool = JournalPool {
+        base,
+        fonts: read_list(r, 16, read_font)?,
+        fills: read_list(r, 3, read_fill)?,
+        borders: read_list(r, 11, read_border)?,
+        xfs: read_list(r, 26, read_xf)?,
+        num_fmts: read_list(r, 12, |r| Ok((r.u32()?, read_text(r)?)))?,
+    };
+    pool.check()?;
+    Ok(pool)
+}
+
 impl Workbook {
     /// Write the journal of every sheet (on a snapshot, off the UI thread).
     pub fn write_journal(&self, header: &JournalHeader, out: impl Write) -> io::Result<()> {
@@ -467,7 +997,9 @@ impl Workbook {
             }
             w.u8(u8::from(s.table.has_header()))?;
             write_state(&mut w, &s.table)?;
+            write_formats(&mut w, &s.table)?;
         }
+        write_pool(&mut w, &JournalPool::of(self.styles()))?;
         let hash = w.hash.0;
         w.inner.write_all(&hash.to_le_bytes())?;
         w.inner.flush()
@@ -476,18 +1008,22 @@ impl Workbook {
     /// The steps that turn this freshly opened workbook into the journaled one: sheets the
     /// journal lacks removed, sheets added in the crashed session put back (empty, then
     /// restored), names and order as journaled, and every sheet's edits as
-    /// [`Edit::Restore`]. Apply them in order (one undo step). Each state is checked first
+    /// [`Edit::Restore`], its formats as [`Edit::Styles`], and its merged cells as
+    /// [`Edit::Merges`]. Apply them in order (one undo step). Each state is checked first
     /// ([`CsvTable::check_edit_state`]) against the sheet with the same origin, so nothing is
-    /// half-applied. Header-row flags aren't part of the plan: the caller sets them from
-    /// `state`, and activates the sheet at `state.active`.
-    pub fn restore_plan(&self, state: BookState) -> Result<Vec<BookEdit>, JournalError> {
+    /// half-applied; the journal's style records are then added to the pool (it only
+    /// grows, so that needs no undo). Header-row flags aren't part of the plan: the caller
+    /// sets them from `state`, and activates the sheet at `state.active`.
+    pub fn restore_plan(&mut self, state: BookState) -> Result<Vec<BookEdit>, JournalError> {
         let untitled = CsvTable::untitled();
         // The fresh sheet each journal sheet becomes (`None`: added in the session).
         let mut matched: Vec<Option<SheetId>> = Vec::with_capacity(state.sheets.len());
         let mut used = vec![false; self.sheets().len()];
+        let xfs = state.pool.as_ref().map_or(0, JournalPool::xf_count);
         for s in &state.sheets {
             if s.origin == Origin::New {
                 untitled.check_edit_state(&s.state)?;
+                check_formats(&s.formats, xfs)?;
                 matched.push(None);
                 continue;
             }
@@ -500,9 +1036,18 @@ impl Workbook {
             };
             used[i] = true;
             self.sheets()[i].table.check_edit_state(&s.state)?;
+            check_formats(&s.formats, xfs)?;
             matched.push(Some(self.sheets()[i].id));
         }
-
+        if let Some(p) = &state.pool {
+            if self.styles().from_file != p.base {
+                return Err(JournalError::Mismatch("the file's styles changed"));
+            }
+        }
+        let restyle: Box<dyn Fn(StyleId) -> StyleId> = match &state.pool {
+            Some(p) => Box::new(p.merge_into(self.styles_mut())),
+            None => Box::new(|id| id),
+        };
         let mut plan = Vec::new();
         // The sheets, in order, as the plan so far leaves them.
         let mut order: Vec<SheetId> = self.sheets().iter().map(|s| s.id).collect();
@@ -550,6 +1095,19 @@ impl Workbook {
             }
             if !s.state.is_empty() {
                 restores.push((id, Edit::Restore(Box::new(s.state))));
+            }
+            let styles = s.formats.styles.as_edit(&restyle);
+            if !styles.is_empty() {
+                restores.push((id, Edit::Styles(styles)));
+            }
+            if let Some(list) = s.formats.merges {
+                let now = match m {
+                    Some(f) => self.sheet(*f).map_or(&[][..], |f| f.table.merges()),
+                    None => &[],
+                };
+                if list != now {
+                    restores.push((id, Edit::Merges(Arc::new(list))));
+                }
             }
         }
         if !restores.is_empty() {
@@ -642,12 +1200,29 @@ impl CsvTable {
     }
 }
 
-/// Read a whole journal (either version), after checking the hash: its header and the
+/// Whether journaled formats name only cell formats the journal's pool has (`xfs` in
+/// all). Rows and columns aren't checked: a style on a row that isn't there shows
+/// nowhere.
+fn check_formats(f: &SheetFormats, xfs: u64) -> Result<(), JournalError> {
+    let u = &f.styles;
+    let runs = u.cells.values().chain(std::iter::once(&u.rows));
+    let styles = runs
+        .flat_map(|r| r.values().map(|(_, s)| *s))
+        .chain(u.cols.values().copied());
+    for s in styles {
+        if u64::from(s.0) >= xfs {
+            return Err(JournalError::Corrupt("a format the journal lacks"));
+        }
+    }
+    Ok(())
+}
+
+/// Read a whole journal (any version), after checking the hash: its header and the
 /// workbook state. A v0.1.x journal reads as one sheet, named after its file.
 pub fn read_book_journal(r: impl Read) -> Result<(JournalHeader, BookState), JournalError> {
     let mut r = Reader::new(io::BufReader::new(r));
-    let (header, v1) = read_header_from(&mut r)?;
-    let book = if v1 {
+    let (header, version) = read_header_from(&mut r)?;
+    let book = if version == 1 {
         let name = header
             .path
             .as_deref()
@@ -665,10 +1240,12 @@ pub fn read_book_journal(r: impl Read) -> Result<(JournalHeader, BookState), Jou
                 },
                 has_header: header.has_header,
                 state: read_state(&mut r)?,
+                formats: SheetFormats::default(),
             }],
+            pool: None,
         }
     } else {
-        read_sheets(&mut r)?
+        read_sheets(&mut r, version)?
     };
     let want = r.hash.0;
     let mut got = [0; 8];
@@ -682,7 +1259,7 @@ pub fn read_book_journal(r: impl Read) -> Result<(JournalHeader, BookState), Jou
     Ok((header, book))
 }
 
-fn read_sheets<R: Read>(r: &mut Reader<R>) -> Result<BookState, JournalError> {
+fn read_sheets<R: Read>(r: &mut Reader<R>, version: u8) -> Result<BookState, JournalError> {
     let count = r.u32()?;
     if count == 0 || count > MAX_SHEETS {
         return Err(JournalError::Corrupt("impossible sheet count"));
@@ -707,13 +1284,28 @@ fn read_sheets<R: Read>(r: &mut Reader<R>) -> Result<BookState, JournalError> {
         };
         let has_header = r.u8()? == 1;
         let state = read_state(r)?;
+        let formats = if version >= 3 {
+            read_formats(r)?
+        } else {
+            SheetFormats::default()
+        };
         sheets.push(SheetState {
             id,
             name,
             origin,
             has_header,
             state,
+            formats,
         });
     }
-    Ok(BookState { active, sheets })
+    let pool = if version >= 3 {
+        Some(read_pool(r)?)
+    } else {
+        None
+    };
+    Ok(BookState {
+        active,
+        sheets,
+        pool,
+    })
 }

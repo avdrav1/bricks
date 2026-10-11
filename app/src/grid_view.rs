@@ -9,11 +9,12 @@ use csv_engine::RowIndex as _;
 use data_model::HAlign;
 use data_model::{
     is_formula, parse_tsv, BookEdit, BookState, Budget, CellArea, CellRef, CellValues, ColId,
-    ColumnTypes, Compare, Computed, Copied, CsvTable, DelimiterChoice, Edit, Filter, FilterError,
-    FormulaCells, Hit, InferredType, JournalError, Matches, MergeError, MergePlan, Origin,
-    PasteError, Query, ReplaceError, RereadError, RowId, RowSet, SaveJob, SaveJobError,
-    SearchError, SearchProgress, SheetId, ShownSheet, SortError, SortOrder, Step, StyleId,
-    TableSource, Test, VAlign, Workbook, MERGE_MAX_CELLS, PASTE_MAX_CELLS, UI_BUDGET,
+    ColumnTypes, Compare, Computed, Copied, CsvTable, DelimiterChoice, Edit, Fill, Filter,
+    FilterError, Font, FormatError, FormatTarget, FormulaCells, Hit, InferredType, JournalError,
+    Matches, MergeError, MergePlan, Origin, PasteError, Pattern, Query, ReplaceError, RereadError,
+    RowId, RowSet, SaveJob, SaveJobError, SearchError, SearchProgress, SheetId, ShownSheet,
+    SortError, SortOrder, Step, StyleId, StylePatch, TableSource, Test, Underline, VAlign,
+    Workbook, Xf, MERGE_MAX_CELLS, PASTE_MAX_CELLS, REPLACE_MAX_CELLS, UI_BUDGET,
 };
 use formula::{column_name, Formatted, NumberFormat, Value};
 use grid::{Bounds, GridCache, Key, Mods, Selection, Sizes, Viewport};
@@ -115,6 +116,14 @@ type JobTable = Box<dyn FnOnce(&jobs::CancelToken) -> Option<CsvTable> + Send>;
 pub struct RewriteJob {
     job: jobs::Job<Option<Vec<(SheetId, Edit)>>>,
 }
+
+/// A whole-row or whole-column format worked out on the job pool from a workbook
+/// snapshot (STYLE-6): the edit, and the pool with the records it needs.
+pub type FormatJob = jobs::Job<Result<(Edit, Arc<data_model::StylePool>), FormatError>>;
+
+/// Style runs past which a whole-row or whole-column format is worked out in a job: on
+/// the 1,048,576-row styled corpus (125,832 runs), eight whole columns took 13 ms.
+const FORMAT_JOB_RUNS: usize = 16_384;
 
 /// What a sheet looked like when another sheet was shown (XLSX-1): it comes back as it was.
 #[derive(Default)]
@@ -306,6 +315,8 @@ mod imp {
         /// Formulas being rewritten for a change that waits for them (SHEET-2, FML-10).
         /// Edits wait for it, as for a sort.
         pub rewriting: RefCell<Option<RewriteJob>>,
+        /// A whole-row or whole-column format being worked out (STYLE-6). Edits wait.
+        pub formatting: RefCell<Option<FormatJob>>,
         /// The sheet whose cursor, scroll, and sizes the fields above hold (SHEET-1): an
         /// undo can make another sheet active, and its own come back then.
         pub ui_sheet: Cell<Option<SheetId>>,
@@ -582,7 +593,8 @@ mod imp {
             let mut looks = self.looks.borrow_mut();
             let looks = looks.get_or_insert_with(|| Looks::new(pool.clone(), base.clone(), fg));
             looks.sync(&pool, &base, fg);
-            let styled = !table.file_styles().is_empty() || pool.xfs.len() > 1;
+            let styled =
+                !table.file_styles().is_empty() || table.has_user_styles() || pool.xfs.len() > 1;
             let plain = looks.get(StyleId(0));
             let mut cells: Vec<(u64, u64, Rc<Look>)> = Vec::new();
             for r in visible.clone().take_while(|&r| r < table.row_count()) {
@@ -1000,6 +1012,16 @@ impl GridView {
             ("sort-desc", Self::sort_descending),
             ("merge", Self::merge_selection),
             ("unmerge", Self::unmerge_selection),
+            ("bold", |g| g.toggle_font(FontToggle::Bold)),
+            ("italic", |g| g.toggle_font(FontToggle::Italic)),
+            ("underline", |g| g.toggle_font(FontToggle::Underline)),
+            ("strikethrough", |g| g.toggle_font(FontToggle::Strike)),
+            ("clear-formatting", |g| {
+                g.format_selection(&StylePatch {
+                    clear: true,
+                    ..StylePatch::default()
+                })
+            }),
         ] {
             let action = gio::SimpleAction::new(name, None);
             action.connect_activate({
@@ -2203,6 +2225,187 @@ impl GridView {
         self.after_change(None);
     }
 
+    /// Format the selection with `patch` as one undoable step (STYLE-6): whole columns or
+    /// rows when they are selected so (their column or row styles, and the cells with
+    /// their own style there), else the selected cells, merges whole. A cell range over
+    /// [`REPLACE_MAX_CELLS`] cells is refused. Whole rows or columns of a sheet with many
+    /// style runs are worked out on the job pool ("Formatting"; edits wait).
+    pub fn format_selection(&self, patch: &StylePatch) {
+        let imp = self.imp();
+        if self.busy() || imp.editing.get().is_some() {
+            return;
+        }
+        let sel = imp.selection.get();
+        let (tl, br) = self.selected_area();
+        let width = self.col_count();
+        let (target, focus) = {
+            let t = self.table();
+            let n = t.row_count();
+            let rows = tl.row..(br.row + 1).min(n);
+            let target = match (sel.whole_columns(), sel.is_whole_rows()) {
+                (Some(_), true) => FormatTarget::Cols(0..width),
+                (Some(_), false) => FormatTarget::Cols(tl.col..br.col + 1),
+                (None, true) => FormatTarget::Rows {
+                    rows,
+                    cols: 0..width,
+                },
+                (None, false) => FormatTarget::Cells {
+                    rows,
+                    cols: tl.col..br.col + 1,
+                },
+            };
+            let cur = sel.cursor();
+            let focus = CellRef {
+                row: if cur.row < n {
+                    t.row_id(cur.row)
+                } else {
+                    RowId::source(0)
+                },
+                col: t.col_id(cur.col),
+            };
+            (target, focus)
+        };
+        let (sheet, runs) = {
+            let book = imp.book.borrow();
+            (book.active_id(), book.active().style_runs())
+        };
+        if runs > FORMAT_JOB_RUNS && !matches!(target, FormatTarget::Cells { .. }) {
+            let mut snapshot = imp.book.borrow().snapshot();
+            let patch = patch.clone();
+            let job = jobs::spawn(move |_| {
+                let edit = snapshot.format_edit(sheet, target, &patch);
+                edit.map(|e| (e, snapshot.styles().clone()))
+            });
+            imp.formatting.replace(Some(job.clone()));
+            let revision = self.revision();
+            let g = self.downgrade();
+            glib::spawn_future_local(async move {
+                let result = job.finished().await;
+                let Some(g) = g.upgrade() else { return };
+                let imp = g.imp();
+                if !matches!(&*imp.formatting.borrow(), Some(j) if j.is(&job)) {
+                    return;
+                }
+                imp.formatting.take();
+                // Edits waited, so nothing changed; a new workbook makes it moot.
+                let Ok(result) = result else { return };
+                if g.revision() != revision {
+                    return;
+                }
+                let result = result.map(|(edit, pool)| {
+                    imp.book.borrow_mut().set_styles(Arc::unwrap_or_clone(pool));
+                    edit
+                });
+                g.finish_format(result, focus);
+            });
+            return;
+        }
+        let edit = imp.book.borrow_mut().format_edit(sheet, target, patch);
+        self.finish_format(edit, focus);
+    }
+
+    /// Run a format edit as one undoable step, or say why there is none.
+    fn finish_format(&self, edit: Result<Edit, FormatError>, focus: CellRef) {
+        let refuse = |title: &str, why: &str| {
+            self.emit_by_name::<()>("refused", &[&title, &why]);
+        };
+        match edit {
+            Err(FormatError::TooMany(n)) => refuse(
+                "Too many cells to format",
+                &format!(
+                    "This range has {} cells; Bricks formats at most {} at once. Select whole \
+                     columns or rows to format all of them.",
+                    crate::status::group_digits(n),
+                    crate::status::group_digits(REPLACE_MAX_CELLS)
+                ),
+            ),
+            Err(FormatError::BadNumberFormat) => refuse(
+                "Can't use that number format",
+                "Excel doesn't accept this number format code.",
+            ),
+            Ok(Edit::Styles(e)) if e.is_empty() => {}
+            Ok(edit) => {
+                self.execute(Box::new(Batch::new("Format cells", vec![edit], focus)));
+                self.after_change(None);
+            }
+        }
+    }
+
+    /// Ctrl+B, Ctrl+I, Ctrl+U, Ctrl+5: turn the font style on for the selection, or off
+    /// when the cursor cell has it, as in Excel.
+    pub fn toggle_font(&self, toggle: FontToggle) {
+        let font = self.cursor_format().font;
+        let patch = match toggle {
+            FontToggle::Bold => StylePatch {
+                bold: Some(!font.bold),
+                ..StylePatch::default()
+            },
+            FontToggle::Italic => StylePatch {
+                italic: Some(!font.italic),
+                ..StylePatch::default()
+            },
+            FontToggle::Underline => StylePatch {
+                underline: Some(if font.underline == Underline::None {
+                    Underline::Single
+                } else {
+                    Underline::None
+                }),
+                ..StylePatch::default()
+            },
+            FontToggle::Strike => StylePatch {
+                strike: Some(!font.strike),
+                ..StylePatch::default()
+            },
+        };
+        self.format_selection(&patch);
+    }
+
+    /// The cursor cell's format, for the format bar to show.
+    pub fn cursor_format(&self) -> CursorFormat {
+        let book = self.imp().book.borrow();
+        let t = book.active();
+        let cur = self.imp().selection.get().cursor();
+        let col = t.col_id(cur.col);
+        let style = if cur.row < t.row_count() {
+            t.style_of(CellRef {
+                row: t.row_id(cur.row),
+                col,
+            })
+        } else {
+            t.column_style(col)
+        };
+        let pool = book.styles();
+        let xf = pool.xf(style).clone();
+        let font = pool.font(&xf).clone();
+        let fill = match pool.fill(&xf) {
+            Some(Fill::Pattern {
+                pattern: Pattern::Solid,
+                fg,
+                ..
+            }) => pool.rgb(*fg),
+            Some(Fill::Gradient { first }) => pool.rgb(*first),
+            _ => None,
+        };
+        let code = pool
+            .custom_format(xf.num_fmt)
+            .or_else(|| formula::builtin_format(xf.num_fmt))
+            .unwrap_or("General")
+            .to_owned();
+        CursorFormat {
+            color: pool.rgb(font.color),
+            font,
+            fill,
+            code,
+            xf,
+        }
+    }
+
+    /// The workbook has formatting a CSV file can't keep (STYLE-6): a CSV session then
+    /// saves only as .xlsx.
+    pub fn has_formatting(&self) -> bool {
+        self.imp().book.borrow().has_formatting()
+    }
+
     /// Run a row or column insert or delete as an undoable command. `None` (still
     /// indexing, or no such rows) and a running save or open edit leave everything as
     /// it is.
@@ -2550,11 +2753,18 @@ impl GridView {
                 let merge = gio::Menu::new();
                 merge.append(Some("Merge Cells"), Some("grid.merge"));
                 merge.append(Some("Unmerge Cells"), Some("grid.unmerge"));
+                let format = gio::Menu::new();
+                format.append(Some("Bold"), Some("grid.bold"));
+                format.append(Some("Italic"), Some("grid.italic"));
+                format.append(Some("Underline"), Some("grid.underline"));
+                format.append(Some("Strikethrough"), Some("grid.strikethrough"));
+                format.append(Some("Clear Formatting"), Some("grid.clear-formatting"));
                 let model = gio::Menu::new();
                 model.append_section(None, &rows);
                 model.append_section(None, &cols);
                 model.append_section(None, &sort);
                 model.append_section(None, &merge);
+                model.append_submenu(Some("Format"), &format);
                 let menu = gtk::PopoverMenu::from_model(Some(&model));
                 menu.set_has_arrow(false);
                 menu.set_halign(gtk::Align::Start);
@@ -2707,6 +2917,9 @@ impl GridView {
             // No count to show: these jobs are short.
             return Some(("Updating formulas", f64::NAN));
         }
+        if imp.formatting.borrow().is_some() {
+            return Some(("Formatting", f64::NAN));
+        }
         if let Some(f) = imp.filtering.borrow().as_ref() {
             return Some(("Filtering", share(&f.done, f.rows)));
         }
@@ -2731,6 +2944,7 @@ impl GridView {
         imp.saving.get()
             || imp.loading.get()
             || imp.rewriting.borrow().is_some()
+            || imp.formatting.borrow().is_some()
             || imp.sorting.borrow().is_some()
             || imp.filtering.borrow().is_some()
             || imp.searching.borrow().is_some()
@@ -3507,6 +3721,9 @@ impl GridView {
         if let Some(old) = imp.rewriting.take() {
             old.job.cancel();
         }
+        if let Some(old) = imp.formatting.take() {
+            old.cancel();
+        }
         imp.sheet_ui.borrow_mut().clear();
         // Types of the old table don't belong to the new one; the status tick infers them
         // again once it is indexed.
@@ -4060,7 +4277,7 @@ impl GridView {
     pub fn restore_journal(&self, state: BookState) -> Result<(), JournalError> {
         let headers: Vec<bool> = state.sheets.iter().map(|s| s.has_header).collect();
         let active = state.active as usize;
-        let plan = self.imp().book.borrow().restore_plan(state)?;
+        let plan = self.imp().book.borrow_mut().restore_plan(state)?;
         self.restore_book(plan, active)?;
         let ids: Vec<SheetId> = self.sheet_list().into_iter().map(|(id, _)| id).collect();
         let active_id = self.active_sheet();
@@ -4337,6 +4554,28 @@ impl GridView {
 
 /// Cell text under number formats, by format code and text.
 type FormattedCache = HashMap<(Box<str>, String), Rc<Formatted>>;
+
+/// The font styles Ctrl+B, Ctrl+I, Ctrl+U, and Ctrl+5 turn on and off (STYLE-6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FontToggle {
+    Bold,
+    Italic,
+    Underline,
+    Strike,
+}
+
+/// The cursor cell's format, as the format bar shows it (STYLE-6).
+#[derive(Debug, Clone)]
+pub struct CursorFormat {
+    pub font: Font,
+    /// The font's colour as `0xRRGGBB`; `None` for automatic.
+    pub color: Option<u32>,
+    /// A solid fill's colour; `None` for no fill.
+    pub fill: Option<u32>,
+    pub xf: Xf,
+    /// The number format code (`General` for none).
+    pub code: String,
+}
 
 /// Excel's units on a sheet as Bricks draws them (STYLE-3): a row of the sheet's default
 /// height is Bricks' row height; a column's characters count Bricks' digit width in place

@@ -22,6 +22,7 @@
 
 mod crash;
 mod editor;
+mod format_bar;
 mod formula_bar;
 mod grid_view;
 mod looks;
@@ -35,9 +36,10 @@ mod theme;
 
 use csv_engine::{Charset, Encoding, IndexError};
 use data_model::{
-    CsvTable, DelimiterChoice, Origin, RereadError, SaveProgress, SaveStats, Step, Workbook,
+    CsvTable, DelimiterChoice, Origin, RereadError, SaveProgress, SaveStats, Step, StylePatch,
+    Workbook,
 };
-use grid_view::{GridView, ROW_H};
+use grid_view::{FontToggle, GridView, ROW_H};
 use gtk::{glib, prelude::*};
 use status::FindNote;
 use std::cell::{Cell, RefCell};
@@ -748,9 +750,11 @@ impl Session {
     }
 
     /// Ctrl+S has to ask where and how: an untitled table, or a CSV file that has more
-    /// sheets now than a CSV file holds (XLSX-1).
+    /// sheets now than a CSV file holds (XLSX-1), or formatting it can't keep (STYLE-6).
     fn needs_save_as(&self, grid: &GridView) -> bool {
-        self.path.borrow().is_none() || (self.kind.get() == DocKind::Csv && grid.sheet_count() > 1)
+        self.path.borrow().is_none()
+            || (self.kind.get() == DocKind::Csv
+                && (grid.sheet_count() > 1 || grid.has_formatting()))
     }
 
     /// The user's header choice wins over detection on a fresh reading of the file.
@@ -851,8 +855,9 @@ fn build_window(
     let grid = GridView::new(book, &vadj, &hadj);
 
     let layout = gtk::Grid::new();
-    // What a save would drop from the workbook (XLSX-2), over the grid.
-    // The formula bar and name box (FML-9), over the grid.
+    // The format bar (STYLE-6), then the formula bar and name box (FML-9), over the grid.
+    let format_bar = format_bar::FormatBar::new(&grid);
+    layout.attach(format_bar.root(), 0, 0, 2, 1);
     let formula_bar = formula_bar::FormulaBar::new(&grid);
     layout.attach(formula_bar.root(), 0, 1, 2, 1);
     layout.attach(&grid, 0, 2, 1, 1);
@@ -983,7 +988,7 @@ fn build_window(
     // its own text undo, and the grid lets Esc through when no editor is open.
     let keys = gtk::EventControllerKey::new();
     keys.connect_key_pressed({
-        let (window, grid, save, session, find, tabs, formula_bar) = (
+        let (window, grid, save, session, find, tabs, formula_bar, format_bar) = (
             window.downgrade(),
             grid.downgrade(),
             save.clone(),
@@ -991,6 +996,7 @@ fn build_window(
             find.clone(),
             tabs.clone(),
             formula_bar.clone(),
+            format_bar.clone(),
         );
         move |_, key, _, mods| {
             use gtk::gdk::{Key, ModifierType};
@@ -1029,7 +1035,26 @@ fn build_window(
             if !mods.contains(ModifierType::CONTROL_MASK) {
                 return glib::Propagation::Proceed;
             }
+            // Formatting (STYLE-6), as in Excel. Shifted digits arrive as their symbols.
+            let format = |code: &str| {
+                grid.format_selection(&StylePatch {
+                    num_fmt: Some(code.into()),
+                    ..StylePatch::default()
+                })
+            };
             match key {
+                Key::b | Key::B if !shift => grid.toggle_font(FontToggle::Bold),
+                Key::i | Key::I if !shift => grid.toggle_font(FontToggle::Italic),
+                Key::u | Key::U if !shift => grid.toggle_font(FontToggle::Underline),
+                Key::_5 if !shift => grid.toggle_font(FontToggle::Strike),
+                Key::_1 if !shift => format_bar.open_custom(),
+                Key::exclam | Key::_1 => format("#,##0.00"),
+                Key::numbersign | Key::_3 if shift => format("yyyy-mm-dd"),
+                Key::dollar | Key::_4 if shift => format("[$$-409]#,##0.00"),
+                Key::percent | Key::_5 => format("0.00%"),
+                Key::asciitilde | Key::grave | Key::dead_tilde | Key::dead_grave if shift => {
+                    format("General")
+                }
                 // The next or previous sheet (XLSX-1).
                 Key::Page_Down | Key::KP_Page_Down => {
                     grid.switch_to_neighbor(1);
@@ -1401,8 +1426,9 @@ fn start_save(
         .map_or_else(|| session.format(grid), |t| t.format);
     let progress = Arc::new(SaveProgress::default());
     let (running, estimate) = match format {
-        // A CSV file holds one sheet: a workbook of more goes through Save As (XLSX-1).
-        Format::Csv { .. } if grid.sheet_count() > 1 => return,
+        // A CSV file holds one sheet and no formatting: a workbook of more sheets, or with
+        // formats, goes through Save As (XLSX-1, STYLE-6).
+        Format::Csv { .. } if grid.sheet_count() > 1 || grid.has_formatting() => return,
         Format::Csv {
             delimiter,
             encoding,
@@ -1692,13 +1718,18 @@ fn save_as(
     }
     let formats = gtk::DropDown::from_strings(&["CSV", "Excel workbook (.xlsx)"]);
     let sheets = grid.sheet_count();
-    formats.set_selected(u32::from(session.kind.get() == DocKind::Xlsx || sheets > 1));
-    let note = gtk::Label::new(Some(
-        "A CSV file holds one sheet: save this workbook as .xlsx",
-    ));
+    let formatted = grid.has_formatting();
+    // A CSV file holds one sheet and no formatting (XLSX-1, STYLE-6).
+    let xlsx_only = sheets > 1 || formatted;
+    formats.set_selected(u32::from(session.kind.get() == DocKind::Xlsx || xlsx_only));
+    let note = gtk::Label::new(Some(if sheets > 1 {
+        "A CSV file holds one sheet: save this workbook as .xlsx"
+    } else {
+        "A CSV file can't keep formatting: save as .xlsx"
+    }));
     note.add_css_class("dim-label");
     note.set_wrap(true);
-    note.set_visible(sheets > 1);
+    note.set_visible(xlsx_only);
     if session.is_xlsm() {
         // An .xlsm name keeps the macros; an .xlsx one drops them (ADR 0010).
         note.set_text("Keep the .xlsm name to keep its macros: an .xlsx file drops them");
@@ -1754,7 +1785,7 @@ fn save_as(
     form.attach(&note, 0, 3, 2, 1);
     // Delimiter and encoding are CSV's; a workbook of several sheets can't be CSV.
     let show_format = move |formats: &gtk::DropDown| {
-        if formats.selected() == 0 && sheets > 1 {
+        if formats.selected() == 0 && xlsx_only {
             formats.set_selected(1);
         }
         let csv = formats.selected() == 0;

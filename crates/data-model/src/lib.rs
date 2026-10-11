@@ -10,6 +10,7 @@ mod colmap;
 mod computed;
 mod copy;
 mod filter;
+mod format;
 mod formulas;
 mod infer;
 mod journal;
@@ -31,11 +32,14 @@ pub use cleared::ColSet;
 pub use computed::Computed;
 pub use copy::{Copied, HTML_MAX_CELLS};
 pub use filter::{Compare, Filter, FilterError, RowSet, Test};
+pub use format::{
+    BorderPreset, Edges, FormatError, FormatTarget, StyleEdit, StylePatch, StyleRange, StyleRun,
+};
 pub use formulas::{is_formula, FormulaCells, RowPositions};
 pub use infer::{value_type, ColumnTypes, SAMPLE_HEAD, SAMPLE_SPREAD};
 pub use journal::{
     read_book_journal, read_journal_header, BookState, EditState, FileKind, JournalError,
-    JournalHeader, SheetState,
+    JournalHeader, JournalPool, SheetFormats, SheetState,
 };
 pub use merges::{MergeError, MergePlan, MERGE_MAX_CELLS};
 pub use paste::{parse_tsv, PasteError, PASTE_MAX_CELLS};
@@ -169,6 +173,9 @@ pub enum Edit {
     /// row and column inserts and deletes. The inverse holds the list before. Build it with
     /// [`CsvTable::merge_plan`], [`CsvTable::unmerge`], or [`CsvTable::merges_after`].
     Merges(Arc<Vec<CellArea>>),
+    /// The user's cell, row, and column styles over these ranges (STYLE-6). The inverse
+    /// holds what the user's layers had there. Build it with [`CsvTable::format_edit`].
+    Styles(StyleEdit),
 }
 
 impl Edit {
@@ -230,6 +237,7 @@ impl Edit {
             Self::Reorder(order) => order.as_ref().map_or(0, RowOrder::heap_bytes),
             Self::Restore(state) => state.heap_bytes(),
             Self::Merges(list) => list.capacity() * std::mem::size_of::<CellArea>(),
+            Self::Styles(edit) => edit.heap_bytes(),
         }
     }
 }

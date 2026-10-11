@@ -1,18 +1,21 @@
 //! A worksheet part on save (ADR 0010). With the file's part: everything but the cell
 //! data, dimension, columns, and merged ranges is copied as written; while rows and
 //! columns keep their order, so are unchanged cells, and only changed and formula cells
-//! are written. After inserts, deletes, or a sort every cell is written from the model,
-//! and range attributes (`sqref`, `ref`) follow their rows and columns. Without a part,
-//! the sheet is written whole.
+//! are written, and cells the user restyled (STYLE-6) get their new `s`. After inserts,
+//! deletes, or a sort every cell is written from the model, and range attributes
+//! (`sqref`, `ref`) follow their rows and columns. Without a part, the sheet is written
+//! whole.
 
 use super::cells::{cell_name, escape, write_cell, CellStyles};
 use super::SaveSheet;
 use crate::layout::cell_ref;
 use crate::xml::{attr, num};
-use data_model::{CellArea, CellRef, ColId, ColSpec, RowBlock, RowId, SaveProgress, StyleId};
+use data_model::{
+    CellArea, CellRef, ColId, ColSpec, RowBlock, RowId, SaveProgress, StyleId, StyleRun,
+};
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write as _;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -138,7 +141,7 @@ impl Writer<'_, '_, '_> {
                     .filter_map(|&c| table.col_of(ColId::source(c)))
                     .max()
                     .map_or(0, |c| c + 1);
-                table.view_cols(c).max(edited)
+                table.view_cols(c).max(edited).max(table.styled_width())
             }
             None => {
                 let mut block = RowBlock::full_text();
@@ -383,15 +386,15 @@ impl Writer<'_, '_, '_> {
         out
     }
 
-    /// The `<cols>` element: the file's column specs and styles where their columns are
-    /// now, and the widths the user set.
+    /// The `<cols>` element: the file's column specs and the columns' styles (the user's
+    /// over the file's) where their columns are now, and the widths the user set.
     fn cols(&mut self, p: &str) {
         let table = &self.sheet.table;
         let layout = table.layout();
         let styles = table.file_styles();
         let widths: HashMap<ColId, f64> = self.sheet.widths.iter().copied().collect();
         // Every file column a spec or a style covers (a style may run to column XFD),
-        // where it is now, and the columns the user sized.
+        // where it is now, and the columns the user sized or styled.
         let file_width = layout
             .cols
             .iter()
@@ -404,17 +407,26 @@ impl Writer<'_, '_, '_> {
             .filter_map(|&id| table.col_of(id))
             .max()
             .map_or(0, |c| c + 1);
-        let shown = table.view_cols(file_width).max(sized).min(16_384);
+        let shown = table
+            .view_cols(file_width)
+            .max(sized)
+            .max(table.user_column_style_width())
+            .min(16_384);
         // Neighbours that read the same join into one range.
         let mut ranges: Vec<(u32, u32, ColAttrs)> = Vec::new();
+        // A `<col>` without a width is drawn wide by LibreOffice: a styled column gets the
+        // sheet's default width (ECMA-376's from `baseColWidth` when the sheet has none).
+        let default_width = layout.default_col_width.unwrap_or_else(|| {
+            let base = f64::from(layout.base_col_width.unwrap_or(8));
+            ((base * 7.0 + 5.0) / 7.0 * 256.0).trunc() / 256.0
+        });
         for c in 0..shown {
             let id = table.col_id(c);
-            let style = if id.is_inserted() {
-                StyleId(0)
-            } else {
-                styles.column(id.0)
-            };
-            let a = ColAttrs::of(table.col_spec(id), style, widths.get(&id).copied());
+            let style = table.column_style(id);
+            let mut a = ColAttrs::of(table.col_spec(id), style, widths.get(&id).copied());
+            if a.width.is_none() && a.style != 0 {
+                a.width = Some(default_width.to_bits());
+            }
             match ranges.last_mut() {
                 Some(prev) if prev.1 + 1 == c && prev.2 == a => prev.1 = c,
                 _ => ranges.push((c, c, a)),
@@ -482,13 +494,7 @@ impl Writer<'_, '_, '_> {
     fn fresh_rows(&mut self, out: &mut dyn Write) -> Result<()> {
         let heights = self.heights();
         let total = self.sheet.table.total_rows();
-        let style_cols = {
-            let t = &self.sheet.table;
-            (0..t.file_styles().width())
-                .filter_map(|c| t.col_of(ColId::source(c)))
-                .max()
-                .map_or(0, |c| c + 1)
-        };
+        let style_cols = self.sheet.table.styled_width();
         let mut block = RowBlock::full_text();
         let mut start = 0;
         while start < total {
@@ -518,9 +524,7 @@ impl Writer<'_, '_, '_> {
         let table = &self.sheet.table;
         let id = table.id_at(r);
         let spec = table.row_spec(id).cloned().unwrap_or_default();
-        let row_style = (!id.is_inserted())
-            .then(|| table.file_styles().row(id.0))
-            .flatten();
+        let row_style = table.row_style(id);
         let height = heights.get(&id).copied();
         let mut row_attrs = String::new();
         if let Some(s) = row_style {
@@ -558,11 +562,7 @@ impl Writer<'_, '_, '_> {
             if text.is_empty() {
                 // A styled empty cell is written only where its row or column wouldn't
                 // give it that style anyway.
-                let fallback = match row_style {
-                    Some(s) => s,
-                    None if col.is_inserted() => StyleId(0),
-                    None => table.file_styles().column(col.0),
-                };
+                let fallback = row_style.unwrap_or_else(|| table.column_style(col));
                 if style == fallback {
                     continue;
                 }
@@ -591,8 +591,9 @@ impl Writer<'_, '_, '_> {
         }
     }
 
-    /// The file's rows, in file order, with changed and formula cells written anew and the
-    /// others copied as written. Reads up to and including `</sheetData>`.
+    /// The file's rows, in file order, with changed and formula cells written anew, cells
+    /// the user restyled given their new style, and the others copied as written. Reads
+    /// up to and including `</sheetData>`.
     fn rows_in_order(
         &mut self,
         out: &mut dyn Write,
@@ -600,7 +601,7 @@ impl Writer<'_, '_, '_> {
         src: &[u8],
         p: &str,
     ) -> Result<()> {
-        let mut edits = self.sheet.table.file_edits();
+        let mut extras = Extras::new(&self.sheet.table);
         let heights = self.heights();
         let mut next_row = 0u64;
         let mut events = 0u32;
@@ -619,16 +620,14 @@ impl Writer<'_, '_, '_> {
                         .map_err(|_| xml_error("not UTF-8"))?;
                     let r = num::<u64>(e, b"r").map_or(next_row, |r| r.saturating_sub(1));
                     next_row = r + 1;
-                    // Rows the file leaves out but that have edits now.
-                    while let Some((&er, _)) = edits.first_key_value() {
-                        if er >= r {
-                            break;
-                        }
-                        let cols = edits.pop_first().expect("a first entry").1;
-                        self.edited_row(er, &cols, &heights, p);
+                    // Rows the file leaves out but that have edits or formats now.
+                    while let Some(er) = extras.next(r) {
+                        let row = extras.take(er);
+                        self.extra_row(er, row, &heights, p);
+                        self.flush(out, false)?;
                     }
-                    let extra = edits.remove(&r).unwrap_or_default();
-                    self.file_row(reader, src, e, raw, empty, r, extra, &heights)?;
+                    let row = extras.take(r);
+                    self.file_row(reader, src, e, raw, empty, r, row, &heights)?;
                     self.progress.add_written(1);
                     self.flush(out, false)?;
                 }
@@ -637,28 +636,56 @@ impl Writer<'_, '_, '_> {
                 _ => self.push_bytes(&src[start..end])?,
             }
         }
-        for (r, cols) in std::mem::take(&mut edits) {
-            self.edited_row(r, &cols, &heights, p);
+        while let Some(r) = extras.next(u64::MAX) {
+            if self.cancel.load(Ordering::Relaxed) {
+                return Err(cancelled());
+            }
+            let row = extras.take(r);
+            self.extra_row(r, row, &heights, p);
+            self.flush(out, false)?;
         }
         Ok(())
     }
 
-    /// A row the file doesn't have, with the edited cells `cols`.
-    fn edited_row(&mut self, r: u64, cols: &[u32], heights: &HashMap<RowId, f64>, p: &str) {
+    /// A row the file doesn't have, with its edited and restyled cells and the row style
+    /// the user gave it.
+    fn extra_row(&mut self, r: u64, row: RowExtras, heights: &HashMap<RowId, f64>, p: &str) {
         let mut cells = String::new();
-        for &c in cols {
-            self.fresh_cell(r, c, &mut cells);
+        for (c, edited) in row.cells {
+            if edited || self.needs_cell(r, c) {
+                self.fresh_cell(r, c, &mut cells);
+            }
         }
-        if cells.is_empty() {
+        let style = row
+            .styled
+            .then(|| self.sheet.table.row_style(RowId::source(r)))
+            .flatten();
+        if cells.is_empty() && style.is_none() {
             return;
         }
         let _ = write!(self.buf, "<{p}row r=\"{}\"", r + 1);
+        if let Some(s) = style {
+            let _ = write!(self.buf, " s=\"{}\" customFormat=\"1\"", s.0);
+        }
         if let Some(h) = heights.get(&RowId::source(r)) {
             let _ = write!(self.buf, " ht=\"{h}\" customHeight=\"1\"");
+        }
+        if cells.is_empty() {
+            self.buf.push_str("/>");
+            return;
         }
         self.buf.push('>');
         self.buf.push_str(&cells);
         let _ = write!(self.buf, "</{p}row>");
+    }
+
+    /// A cell the file doesn't have at file row `r`, column `c` must be written for its
+    /// style: its row or column wouldn't give it.
+    fn needs_cell(&self, r: u64, c: u32) -> bool {
+        let t = &self.sheet.table;
+        let (row, col) = (RowId::source(r), ColId::source(c));
+        let fallback = t.row_style(row).unwrap_or_else(|| t.column_style(col));
+        t.style_of(CellRef { row, col }) != fallback
     }
 
     /// The cell at file row `r`, column `c`, written from the model.
@@ -687,7 +714,7 @@ impl Writer<'_, '_, '_> {
         raw_tag: &str,
         empty: bool,
         r: u64,
-        extra: Vec<u32>,
+        row: RowExtras,
         heights: &HashMap<RowId, f64>,
     ) -> Result<()> {
         let height = heights.get(&RowId::source(r)).copied();
@@ -696,7 +723,13 @@ impl Writer<'_, '_, '_> {
             sets.push(("ht", h.to_string()));
             sets.push(("customHeight", "1".into()));
         }
-        let rewrite = height.is_some() || !extra.is_empty();
+        if row.styled {
+            if let Some(s) = self.sheet.table.row_style(RowId::source(r)) {
+                sets.push(("s", s.0.to_string()));
+                sets.push(("customFormat", "1".into()));
+            }
+        }
+        let rewrite = !sets.is_empty() || !row.cells.is_empty();
         let tag = |empty: bool| -> String {
             let name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
             let mut out = format!("<{name}");
@@ -721,7 +754,7 @@ impl Writer<'_, '_, '_> {
             out.push_str(if empty { "/>" } else { ">" });
             out
         };
-        let mut extra = extra.into_iter().peekable();
+        let mut extra = row.cells.into_iter().peekable();
         let open = if rewrite {
             tag(false)
         } else if empty {
@@ -749,26 +782,45 @@ impl Writer<'_, '_, '_> {
                         } else {
                             read_cell(reader)?
                         };
-                        while let Some(&ec) = extra.peek() {
+                        while let Some(&(ec, edited)) = extra.peek() {
                             if ec >= col {
                                 break;
                             }
                             extra.next();
-                            self.fresh_cell(r, ec, &mut body);
+                            if edited || self.needs_cell(r, ec) {
+                                self.fresh_cell(r, ec, &mut body);
+                            }
                         }
-                        let edited = extra.peek() == Some(&col);
-                        if edited {
-                            extra.next();
-                        }
+                        let (edited, restyled) = match extra.peek() {
+                            Some(&(ec, edited)) if ec == col => {
+                                extra.next();
+                                (edited, true)
+                            }
+                            _ => (false, false),
+                        };
+                        let restyled = restyled
+                            || row.styled
+                            || self.sheet.table.has_user_column_style(ColId::source(col));
                         let keep_formula =
                             matches!(formula.as_deref(), Some("array" | "dataTable"));
+                        let utf8 = |b: &[u8]| -> Result<String> {
+                            std::str::from_utf8(b)
+                                .map(str::to_owned)
+                                .map_err(|_| xml_error("not UTF-8"))
+                        };
                         if edited || (formula.is_some() && !keep_formula) {
                             self.fresh_cell(r, col, &mut body);
+                        } else if restyled {
+                            // The cell as written, with the style it has now.
+                            let at = CellRef {
+                                row: RowId::source(r),
+                                col: ColId::source(col),
+                            };
+                            let style = self.sheet.table.style_of(at);
+                            body.push_str(&with_style(c, style, cell_empty));
+                            body.push_str(&utf8(&src[end..raw_end])?);
                         } else {
-                            body.push_str(
-                                std::str::from_utf8(&src[start..raw_end])
-                                    .map_err(|_| xml_error("not UTF-8"))?,
-                            );
+                            body.push_str(&utf8(&src[start..raw_end])?);
                         }
                     }
                     Event::End(e) if e.local_name().as_ref() == b"row" => break,
@@ -780,8 +832,10 @@ impl Writer<'_, '_, '_> {
                 }
             }
         }
-        for c in extra {
-            self.fresh_cell(r, c, &mut body);
+        for (c, edited) in extra {
+            if edited || self.needs_cell(r, c) {
+                self.fresh_cell(r, c, &mut body);
+            }
         }
         if empty && body.is_empty() {
             if rewrite {
@@ -796,6 +850,119 @@ impl Writer<'_, '_, '_> {
         let name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
         let _ = write!(self.buf, "</{name}>");
         Ok(())
+    }
+}
+
+/// A `<c>` start tag with style `style` instead of its own.
+fn with_style(c: &BytesStart<'_>, style: StyleId, empty: bool) -> String {
+    let name = String::from_utf8_lossy(c.name().as_ref()).into_owned();
+    let mut out = format!("<{name}");
+    for a in c.attributes().flatten() {
+        if a.key.local_name().as_ref() == b"s" {
+            continue;
+        }
+        let key = String::from_utf8_lossy(a.key.as_ref()).into_owned();
+        let v = crate::xml::value(a.clone())
+            .map(|v| v.into_owned())
+            .unwrap_or_default();
+        let _ = write!(out, " {key}=\"");
+        escape(&v, &mut out);
+        out.push('"');
+    }
+    if style != StyleId(0) {
+        let _ = write!(out, " s=\"{}\"", style.0);
+    }
+    out.push_str(if empty { "/>" } else { ">" });
+    out
+}
+
+/// What a patched save writes beside the file's own cells, row by row in file order:
+/// edited cells, and the cells and rows the user restyled.
+struct Extras {
+    /// Edited cells' columns by row.
+    edits: BTreeMap<u64, Vec<u32>>,
+    /// The user's cell style runs per file column.
+    cells: Vec<(u32, Walk)>,
+    /// The user's row style runs.
+    rows: Walk,
+    /// Rows before this one are done.
+    from: u64,
+}
+
+/// One row's extras: the columns it gets beside the file's cells (edited, else
+/// restyled), and whether the user styled the row.
+struct RowExtras {
+    cells: Vec<(u32, bool)>,
+    styled: bool,
+}
+
+/// Sorted runs of rows, walked in increasing row order.
+struct Walk {
+    runs: Vec<(u64, u64)>,
+    at: usize,
+}
+
+impl Walk {
+    /// In file order there are no inserted rows; the runs' ids are file rows.
+    fn of(runs: Vec<StyleRun>) -> Self {
+        let runs = runs
+            .into_iter()
+            .filter(|r| !RowId(r.0).is_inserted())
+            .map(|r| (r.0, r.1.min(1 << 63)))
+            .collect();
+        Self { runs, at: 0 }
+    }
+
+    /// The first row at or after `from` the runs cover; `from` never goes back.
+    fn next(&mut self, from: u64) -> Option<u64> {
+        while self.runs.get(self.at).is_some_and(|r| r.1 <= from) {
+            self.at += 1;
+        }
+        self.runs.get(self.at).map(|r| r.0.max(from))
+    }
+}
+
+impl Extras {
+    fn new(t: &data_model::CsvTable) -> Self {
+        Self {
+            edits: t.file_edits(),
+            cells: t
+                .user_cell_runs()
+                .into_iter()
+                .filter(|(c, _)| !c.is_inserted())
+                .map(|(c, runs)| (c.0, Walk::of(runs)))
+                .collect(),
+            rows: Walk::of(t.user_row_runs()),
+            from: 0,
+        }
+    }
+
+    /// The next row before `limit`, not yet done, that has extras.
+    fn next(&mut self, limit: u64) -> Option<u64> {
+        let from = self.from;
+        let edit = self.edits.range(from..).next().map(|(&r, _)| r);
+        let cells = self.cells.iter_mut().filter_map(|(_, w)| w.next(from));
+        let row = self.rows.next(from);
+        edit.into_iter()
+            .chain(cells)
+            .chain(row)
+            .min()
+            .filter(|&r| r < limit)
+    }
+
+    /// Row `r`'s extras; rows up to `r` are then done.
+    fn take(&mut self, r: u64) -> RowExtras {
+        let edited = self.edits.remove(&r).unwrap_or_default();
+        let mut cells: Vec<(u32, bool)> = edited.iter().map(|&c| (c, true)).collect();
+        for (c, walk) in &mut self.cells {
+            if walk.next(r) == Some(r) && !edited.contains(c) {
+                cells.push((*c, false));
+            }
+        }
+        cells.sort_unstable();
+        let styled = self.rows.next(r) == Some(r);
+        self.from = self.from.max(r + 1);
+        RowExtras { cells, styled }
     }
 }
 
