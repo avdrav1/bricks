@@ -1,6 +1,6 @@
-# Bricks, Slate, and Frame
+# Cronkite
 
-A Linux-native office suite written in Rust: one repository, one Cargo workspace, three independently runnable applications.
+A Linux-native office suite written in Rust: Bricks, Slate, and Frame. One repository, one Cargo workspace, three independently runnable applications. Install instructions: <https://cronkite.cc>.
 
 ## Applications
 
@@ -35,7 +35,9 @@ docs/architecture/    how the suite is put together
 docs/adr/             suite-wide architecture decisions
 docs/specs/           one product spec per app
 BACKLOG.md            Bricks' work queue, read by scripts/backlog.py
-scripts/, site/, packaging/   Bricks' tooling, download page, and packaging
+scripts/, packaging/  Bricks' tooling and packaging
+sites/bricks/         Bricks' download page and installer (bricks.cronkite.cc)
+sites/cronkite/       the suite's install page (cronkite.cc)
 ```
 
 Shared crates stay small; code becomes shared only when at least two apps genuinely need it. See [`docs/architecture/overview.md`](docs/architecture/overview.md).

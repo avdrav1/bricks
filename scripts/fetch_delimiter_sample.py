@@ -22,7 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "scripts" / "delimiter_sample.tsv"
 DELIMS = {"comma": ",", "semicolon": ";", "tab": "\t", "pipe": "|"}
-UA = "bricks-spreadsheet-test-corpus/0.1 (delimiter detection sample; github.com/avdrav1/bricks)"
+UA = "bricks-spreadsheet-test-corpus/0.1 (delimiter detection sample; github.com/avdrav1/cronkite)"
 SIZE = 256 * 1024
 
 

@@ -39,7 +39,7 @@ for kind in good bad; do
 done
 printf '{"version":"0.1.0","date":"2026-10-10","url":"http://127.0.0.1:%s/old/releases/%s","sha256":"%s","bytes":1}\n' \
   "$port" "$old_name" "$(sha256sum "$site/old/releases/$old_name" | cut -d' ' -f1)" > "$site/old/latest.json"
-cp site/install.sh "$site/install.sh"
+cp sites/bricks/install.sh "$site/install.sh"
 chmod -R a+rX "$site"
 python3 -m http.server "$port" --bind 127.0.0.1 --directory "$site" >/dev/null 2>&1 &
 server=$!

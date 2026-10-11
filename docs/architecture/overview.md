@@ -1,6 +1,6 @@
 # Architecture overview
 
-Bricks, Slate, and Frame are a Linux-native office suite written in Rust.
+Cronkite is a Linux-native office suite written in Rust: Bricks, Slate, and Frame.
 
 ```text
 Bricks — spreadsheet / CSV editor

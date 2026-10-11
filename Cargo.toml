@@ -27,7 +27,7 @@ members = [
 version = "0.2.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/avdrav1/bricks"
+repository = "https://github.com/avdrav1/cronkite"
 rust-version = "1.92"
 
 [workspace.dependencies]

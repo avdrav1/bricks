@@ -8,7 +8,7 @@ description: Cut a release of the Bricks spreadsheet app and deploy it to Cloudf
 The app is a native Linux binary, so Cloudflare hosts the release, not the app itself:
 
 - **R2** stores the tarball, its `.sha256`, and `latest.json` (version, URL, checksum).
-- **Pages** serves the download page in `site/`, which reads `latest.json`.
+- **Pages** serves the download page in `sites/bricks/`, which reads `latest.json`.
 
 Every step runs through `scripts/ship.sh`. Anything that leaves the machine (upload, site deploy, push) needs an explicit yes from the user in chat first, every time.
 
@@ -107,3 +107,5 @@ Not done: <push pending | none>
 ```
 
 The download page also serves `install.sh` (story PKG-1), which reads `latest.json`, so a site deploy is all a new version needs; nothing goes to a package registry.
+
+The suite page at cronkite.cc (`sites/cronkite/`) is not part of a release: it links to Bricks' installer and holds no version. Deploy it only when it changes, with the same yes first: `scripts/ship.sh suite-site --dry-run`, then `scripts/ship.sh suite-site` (Pages project `CF_SUITE_PAGES_PROJECT`). The cronkite.cc custom domain is attached to that project once, in the Cloudflare dashboard.

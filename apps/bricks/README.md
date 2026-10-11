@@ -67,7 +67,7 @@ apps/bricks/crates/jobs          background jobs
 apps/bricks/docs/                spec, benchmarks, architecture decisions
 crates/suite-*                   infrastructure shared with Slate and Frame
 BACKLOG.md                       the work queue, read by scripts/backlog.py
-site/                            download page deployed to Cloudflare Pages
+sites/bricks/                    download page and installer deployed to Cloudflare Pages
 scripts/                         backlog helper, corpus generator, release pipeline
 .claude/skills/                  next-story and ship-it skills for Claude Code
 ```
