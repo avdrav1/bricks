@@ -14,6 +14,7 @@ mod formulas;
 mod infer;
 mod journal;
 mod paste;
+mod rewrites;
 mod rowmap;
 mod save;
 mod search;
@@ -34,6 +35,7 @@ pub use journal::{
     JournalHeader, SheetState,
 };
 pub use paste::{parse_tsv, PasteError, PASTE_MAX_CELLS};
+pub use rewrites::rewrite_count;
 pub use rowmap::{RowOrder, Run};
 pub use save::{SaveJob, SaveJobError, SaveProgress, SaveStats};
 pub use search::{
