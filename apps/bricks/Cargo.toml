@@ -26,8 +26,8 @@ file-format.workspace = true
 formula.workspace = true
 jobs.workspace = true
 xlsx.workspace = true
-# UI toolkit per apps/bricks/docs/decisions/0001-ui-toolkit.md; v4_14 matches Ubuntu 24.04's GTK.
-gtk = { package = "gtk4", version = "0.11", features = ["v4_14"] }
+# UI toolkit: GTK 4 for the whole suite (docs/adr/0002-gtk4-for-the-suite.md).
+gtk.workspace = true
 
 [lints]
 workspace = true

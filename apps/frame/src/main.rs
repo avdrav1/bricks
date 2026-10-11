@@ -1,6 +1,6 @@
 //! Frame: a fast, lightweight Linux-native presentation app. "Frame" is a working name.
 //!
-//! A scaffold: it identifies itself and exits. The GUI toolkit is chosen in a later ADR.
+//! A scaffold: it identifies itself and exits. Its UI will be GTK 4 (docs/adr/0002-gtk4-for-the-suite.md).
 
 use std::io::IsTerminal;
 use std::process::ExitCode;

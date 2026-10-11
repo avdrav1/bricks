@@ -54,6 +54,7 @@ Rules:
 - No shared crate depends on an application or on an application's crates.
 - An app's crates never depend on another app's crates. If two apps need the same code, it moves to a shared crate first.
 - Apps depend only on the shared crates they use.
+- Only apps, `suite-ui`, and `suite-platform` may depend on the GUI toolkit (see below).
 
 ## Errors and logging
 
@@ -63,7 +64,7 @@ Rules:
 
 ## GUI toolkit
 
-Bricks uses GTK 4 (Bricks ADR 0001, `apps/bricks/docs/decisions/0001-ui-toolkit.md`). The suite has not chosen a toolkit: Slate, Frame, and the `suite-*` crates depend on none. The next decision is to evaluate the Linux GUI and rendering stack with a small comparative prototype covering the needs of all three apps; until then `suite-ui` stays toolkit-free.
+All three apps use GTK 4 through gtk4-rs, GTK 4.14 or newer ([ADR 0002](../adr/0002-gtk4-for-the-suite.md); Bricks' original evaluation is `apps/bricks/docs/decisions/0001-ui-toolkit.md`). `gtk` is declared once in `[workspace.dependencies]`. Apps may depend on it; `suite-ui` and `suite-platform` may once they hold code that needs it; `suite-core`, `suite-file`, and app engine crates never do. Bricks uses it today; Slate and Frame are still terminal scaffolds.
 
 ## Versions and editions
 

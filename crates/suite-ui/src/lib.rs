@@ -1,8 +1,9 @@
 //! User-interface conventions shared by every app in the suite.
 //!
 //! Menus, the command palette, toolbars, dialogs, themes, window chrome, and shortcut
-//! handling may move here once two apps need the same one. The GUI toolkit is not chosen
-//! yet (see docs/architecture/overview.md), so nothing here depends on one.
+//! handling may move here once two apps need the same one. The suite's toolkit is GTK 4
+//! (docs/adr/0002-gtk4-for-the-suite.md); this crate adds the `gtk` dependency when it first
+//! holds a widget.
 
 use suite_core::AppKind;
 

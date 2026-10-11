@@ -42,7 +42,7 @@ Shared crates stay small; code becomes shared only when at least two apps genuin
 
 ## Development
 
-Needs Rust stable (pinned by `rust-toolchain.toml`) and, for Bricks, GTK 4.14+ dev files (`gtk4` on Arch, `libgtk-4-dev` on Debian/Ubuntu).
+Needs Rust stable (pinned by `rust-toolchain.toml`) and GTK 4.14+ dev files (`gtk4` on Arch, `libgtk-4-dev` on Debian/Ubuntu): the suite's toolkit is GTK 4 ([ADR 0002](docs/adr/0002-gtk4-for-the-suite.md)).
 
 ```sh
 cargo build --workspace
