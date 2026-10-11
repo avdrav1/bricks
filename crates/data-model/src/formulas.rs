@@ -1,7 +1,7 @@
 //! Which cells hold formulas (FML-3): the file's, found by one parallel pass after
 //! indexing, plus the overlay's.
 
-use crate::{CellRef, ColId, Computed, CsvTable, RowBlock, RowId};
+use crate::{CellRef, ColId, Computed, CsvTable, RowBlock, RowId, RowOrder};
 use csv_engine::{split_fields, RowIndex};
 use rayon::prelude::*;
 use std::borrow::Cow;
@@ -73,6 +73,36 @@ pub struct RowPositions {
 }
 
 impl RowPositions {
+    /// Positions under `order` (`None`: file order) of a file of `file_rows` rows.
+    pub(crate) fn of(order: Option<&RowOrder>, file_rows: u64) -> Self {
+        let Some(order) = order else {
+            return Self {
+                file: Vec::new(),
+                inserted: Default::default(),
+                identity: Some(file_rows),
+            };
+        };
+        let mut file = vec![u64::MAX; file_rows as usize];
+        let mut inserted = std::collections::HashMap::new();
+        let mut at = 0;
+        order.for_each(|run| {
+            for i in 0..run.len {
+                let id = RowId(run.first.0 + i);
+                if id.is_inserted() {
+                    inserted.insert(id, at + i);
+                } else if let Some(slot) = file.get_mut(id.0 as usize) {
+                    *slot = at + i;
+                }
+            }
+            at += run.len;
+        });
+        Self {
+            file,
+            inserted,
+            identity: None,
+        }
+    }
+
     /// Position of row `id`; `None` once deleted.
     pub fn get(&self, id: RowId) -> Option<u64> {
         if let Some(rows) = self.identity {
@@ -106,32 +136,7 @@ impl CsvTable {
 
     /// Every row's position, for many lookups.
     pub fn row_positions(&self) -> RowPositions {
-        let Some(order) = &self.rows else {
-            return RowPositions {
-                file: Vec::new(),
-                inserted: Default::default(),
-                identity: Some(self.index.row_count()),
-            };
-        };
-        let mut file = vec![u64::MAX; self.index.row_count() as usize];
-        let mut inserted = std::collections::HashMap::new();
-        let mut at = 0;
-        order.for_each(|run| {
-            for i in 0..run.len {
-                let id = RowId(run.first.0 + i);
-                if id.is_inserted() {
-                    inserted.insert(id, at + i);
-                } else if let Some(slot) = file.get_mut(id.0 as usize) {
-                    *slot = at + i;
-                }
-            }
-            at += run.len;
-        });
-        RowPositions {
-            file,
-            inserted,
-            identity: None,
-        }
+        RowPositions::of(self.rows.as_ref(), self.index.row_count())
     }
 
     /// Results for formula cells as jobs see them (ADR 0007): set on a snapshot.
@@ -163,12 +168,16 @@ impl CsvTable {
     /// column): the file's that are not edited, cleared, or deleted, and the overlay's.
     /// `None` until the file is scanned.
     pub fn formula_cells_at(&self) -> Option<Vec<(CellRef, (u64, u32))>> {
-        if !self.formulas.complete {
-            return None;
-        }
+        self.formulas
+            .complete
+            .then(|| self.formula_cells_in(&self.formulas.file))
+    }
+
+    /// [`Self::formula_cells_at`] for the file's formula cells `file` (from a scan).
+    pub(crate) fn formula_cells_in(&self, file: &[(u64, u32)]) -> Vec<(CellRef, (u64, u32))> {
         let positions = self.row_positions();
         let mut out = Vec::new();
-        for &(row, col) in &self.formulas.file {
+        for &(row, col) in file {
             let at = CellRef {
                 row: RowId::source(row),
                 col: ColId::source(col),
@@ -192,7 +201,7 @@ impl CsvTable {
                 }
             }
         }
-        Some(out)
+        out
     }
 
     /// Every formula cell still in the table; `None` until the file is scanned.
