@@ -97,7 +97,7 @@ cargo run --release -p xlsx --example gen_corpus_xlsx  # corpus/rows_1m.xlsx (BE
 cargo run --release -p xlsx --example gen_corpus_xlsx -- --styled   # corpus/styled_1m.xlsx (STYLE-3, BENCH-3)
 python3 scripts/lo_pptx.py fixture|dump|layouts FILE  # LibreOffice fixture deck, dumps, and layout names (FRAME-*)
 python3 scripts/blank_deck.py           # Frame's built-in blank deck: apps/frame/crates/pptx/data/blank.pptx (FRAME-14)
-scripts/check_frame.sh [BINARY]          # Frame in a container: decks, drawing, Ctrl+O, drop, alerts, slideshow, editing, slides, save, shapes, inspector, insert, outline, new deck, with undo; the reference task counted against PowerPoint, read back by LibreOffice (FRAME-4 to FRAME-15)
+scripts/check_frame.sh [BINARY]          # Frame in a container: decks, drawing, Ctrl+O, drop, alerts, slideshow, editing, slides, save, shapes, inspector, insert, outline, new deck, with undo; the reference task counted against PowerPoint, read back by LibreOffice; the installer and a .pptx double-click (FRAME-4 to FRAME-15)
 python3 -m unittest discover -s scripts  # script tests (corpus generator, backlog helper)
 cargo bench                              # prints the apps/bricks/docs/BENCHMARKS.md table (needs corpus/)
 python3 scripts/backlog.py next [bricks|slate|frame]|status   # backlog helper; one milestone chain per app

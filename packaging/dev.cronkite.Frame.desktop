@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Frame
+GenericName=Presentation
+Comment=Make and show PowerPoint presentations
+Exec=frame %f
+Icon=dev.cronkite.Frame
+Terminal=false
+Categories=Office;Presentation;
+MimeType=application/vnd.openxmlformats-officedocument.presentationml.presentation;application/vnd.ms-powerpoint.presentation.macroEnabled.12;
+Keywords=slides;slideshow;pptx;powerpoint;

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # FRAME-4 acceptance: Frame's viewer window; FRAME-5: its slideshow; FRAME-6: text editing;
 # FRAME-7: adding, duplicating, deleting, and moving slides; FRAME-8: saving; FRAME-12:
-# inserting; FRAME-13: the outline; FRAME-14: new decks; FRAME-15: the reference task.
+# inserting; FRAME-13: the outline; FRAME-14: new decks; FRAME-15: the reference task;
+# FRAME-9: installing.
 #
 #   scripts/check_frame.sh [BINARY]   (default target/release/frame)
 #
@@ -110,6 +111,12 @@
 #      Picture… from the outline, Ctrl+S.
 #      Each count is below PowerPoint's (the BACKLOG.md note on FRAME-15), and LibreOffice
 #      on this machine (scripts/lo_pptx.py dump) reads each saved deck as the task.
+# FRAME-9 acceptance:
+#  19. the installer (sites/frame/install.sh) takes this binary, packaged with
+#      packaging/dev.cronkite.Frame.{desktop,svg} as a release served on localhost, and
+#      makes Frame the .pptx default with a menu entry running ~/.local/bin/frame;
+#      `gio open` on a .pptx (a file manager's double-click) shows it in that Frame;
+#      --uninstall removes the binary, entry, and icon, and keeps other apps' defaults.
 # Needs docker, and LibreOffice for 17 and 18. VERBOSE=1 prints the transcript; SHOTS=DIR
 # saves screenshots.
 set -euo pipefail
@@ -127,10 +134,11 @@ if [ -n "${SHOTS:-}" ]; then mkdir -p "$SHOTS"; shots=(-v "$(realpath "$SHOTS"):
 ref=$(mktemp -d); trap 'rm -rf "$ref"' EXIT
 # Arch's sway binary carries cap_sys_nice: exec fails without it in the container's set.
 out=$(docker run --rm --cap-add SYS_NICE -v "$bin:/usr/local/bin/frame:ro" -v "$data:/data:ro" \
-  -v "$PWD/scripts:/scripts:ro" -v "$ref:/out" "${shots[@]}" archlinux:latest bash -c '
+  -v "$PWD/scripts:/scripts:ro" -v "$PWD/packaging:/packaging:ro" -v "$PWD/sites:/sites:ro" \
+  -v "$ref:/out" "${shots[@]}" archlinux:latest bash -c '
 set -uo pipefail
 pacman -Syu --noconfirm --needed sway wtype grim gtk4 ttf-dejavu dbus python-gobject at-spi2-core \
-  python-pywayland wlr-protocols wayland pkgconf >/dev/null 2>&1
+  python-pywayland wlr-protocols wayland pkgconf curl shared-mime-info >/dev/null 2>&1
 mkdir -p /shots /tmp/rt /tmp/proto /tmp/f && chmod 700 /tmp/rt && touch /tmp/proto/__init__.py
 python -m pywayland.scanner -i /usr/share/wayland/wayland.xml \
   /usr/share/wlr-protocols/unstable/wlr-virtual-pointer-unstable-v1.xml -o /tmp/proto/wlr_proto >/dev/null
@@ -725,6 +733,35 @@ session() {
   echo "actions: $n"
   cp /tmp/f/outline-task.pptx /out/
   pkill -x frame; sleep 0.5
+
+  echo "== 19 install"
+  # A release as the installer takes it: latest.json beside a tarball of one folder with
+  # the binary, its desktop entry, and its icon (the layout of Bricks releases).
+  rel=frame-9.9.9-x86_64-linux
+  mkdir -p /tmp/site/$rel
+  cp /usr/local/bin/frame /packaging/dev.cronkite.Frame.desktop /packaging/dev.cronkite.Frame.svg /tmp/site/$rel/
+  tar -C /tmp/site -czf /tmp/site/$rel.tar.gz $rel
+  sha=$(sha256sum /tmp/site/$rel.tar.gz | cut -d" " -f1)
+  printf "{\"version\":\"9.9.9\",\"url\":\"http://127.0.0.1:8765/%s.tar.gz\",\"sha256\":\"%s\"}\n" \
+    $rel $sha > /tmp/site/latest.json
+  python3 -m http.server 8765 --bind 127.0.0.1 --directory /tmp/site >/dev/null 2>&1 & web=$!; sleep 1
+  mkdir -p ~/.config
+  printf "[Default Applications]\nimage/png=eog.desktop\napplication/vnd.openxmlformats-officedocument.presentationml.presentation=impress.desktop\n" \
+    > ~/.config/mimeapps.list
+  FRAME_DOWNLOAD_URL=http://127.0.0.1:8765 sh /sites/frame/install.sh 2>&1 | sed "s/^/install: /"
+  gio mime application/vnd.openxmlformats-officedocument.presentationml.presentation 2>&1 |
+    head -1 | sed "s/^/mime: /"
+  grep ^Exec= ~/.local/share/applications/dev.cronkite.Frame.desktop | sed "s/^/entry: /"
+  # gio open is what a file manager does on a double-click.
+  cp /tmp/f/layouts.pptx /tmp/f/clicked.pptx
+  gio open /tmp/f/clicked.pptx >>/tmp/app.log 2>&1; sleep 3; shot clicked; shown clicked
+  pgrep -a frame | sed "s/^[0-9]* /process: /"
+  pkill -x frame; sleep 0.5
+  sh /sites/frame/install.sh --uninstall | sed "s/^/uninstall: /"
+  ls ~/.local/bin/frame ~/.local/share/applications/dev.cronkite.Frame.desktop \
+    ~/.local/share/icons/hicolor/scalable/apps/dev.cronkite.Frame.svg 2>&1 | grep -c "No such" | sed "s/^/gone: /"
+  sed "s/^/after: /" ~/.config/mimeapps.list
+  kill $web
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -999,6 +1036,16 @@ for t in "17 task on the canvas:canvas-task" "18 task in the outline:outline-tas
     sed "s/^/       /" <<<"${got:-(nothing; is LibreOffice installed?)}"; fail=1
   fi
 done
+# FRAME-9: installing, and double-clicking a .pptx.
+check "19: the installer installs Frame" "19 install" "^install: Installed Frame 9\.9\.9$"
+check "19: ... as the default for .pptx" "19 install" "^mime: .*: dev\.cronkite\.Frame\.desktop$"
+check "19: ... its menu entry running the installed binary" "19 install" "^entry: Exec=/root/\.local/bin/frame %f$"
+check "19: double-clicking a .pptx (gio open) opens it in Frame" "19 install" "^clicked: clicked\.pptx$"
+check "19: ... showing its slides" "19 install" "^clicked: Slide 1 of 10$"
+check "19: ... the installed Frame" "19 install" "^process: /root/\.local/bin/frame /tmp/f/clicked\.pptx$"
+check "19: --uninstall removes the binary, menu entry, and icon" "19 install" "^gone: 3$"
+check "19: ... keeping other apps' defaults" "19 install" "^after: image/png=eog\.desktop$"
+absent "19: ... and dropping its .pptx default" "19 install" "^after: .*dev\.cronkite\.Frame"
 if [ $fail = 0 ]; then echo "FRAME OK"; else
   echo "FRAME CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1
