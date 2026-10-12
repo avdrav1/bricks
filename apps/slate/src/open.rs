@@ -66,9 +66,10 @@ fn kind(path: &Path) -> Result<Kind, OpenError> {
     }
 }
 
-/// Read the file at `path` and decode its pictures.
+/// Read the file at `path`, merge its runs for editing ([`document_edit::normalize`]), and
+/// decode its pictures.
 pub fn read(path: &Path) -> Result<Opened, OpenError> {
-    let doc = match kind(path)? {
+    let mut doc = match kind(path)? {
         Kind::Text => document_model::read_text(&std::fs::read(path)?),
         Kind::Markdown => {
             let mut doc = document_model::read_markdown(&std::fs::read(path)?);
@@ -90,6 +91,7 @@ pub fn read(path: &Path) -> Result<Opened, OpenError> {
             docx::read(path).map_err(|e| OpenError(sentence(&e.to_string())))?
         }
     };
+    document_edit::normalize(&mut doc);
     let mut textures = Textures::new();
     decode_pictures(&doc.blocks, &mut textures);
     let words = doc.word_count();

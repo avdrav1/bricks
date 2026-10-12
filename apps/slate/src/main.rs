@@ -10,8 +10,8 @@
 //! the user's settings.
 //!
 //! `slate FILE --bench-flow` measures the flow on FILE in a 1600x1000 window: re-wrapping
-//! after width changes and the frames of scrolling, printed as a JSON line (SLATE-11's
-//! acceptance test).
+//! after width changes and the frames of scrolling (SLATE-11's acceptance test);
+//! `--bench-typing` measures typing in it (SLATE-6's). Each prints a JSON line.
 
 mod bench;
 mod open;
@@ -28,7 +28,8 @@ use suite_core::AppKind;
 
 const APP: AppKind = AppKind::Slate;
 const APP_ID: &str = "dev.cronkite.Slate";
-const USAGE: &str = "usage: slate [FILE.txt|FILE.md|FILE.docx]... [--version] [--bench-flow]";
+const USAGE: &str =
+    "usage: slate [FILE.txt|FILE.md|FILE.docx]... [--version] [--bench-flow|--bench-typing]";
 const START_WINDOW: &str = "start";
 
 /// The page's text is one document font whatever the desktop's: Liberation Sans (metric-
@@ -57,7 +58,7 @@ thread_local! {
 }
 
 fn main() -> glib::ExitCode {
-    let (mut files, mut bench) = (Vec::new(), false);
+    let (mut files, mut bench) = (Vec::new(), None);
     for arg in std::env::args_os().skip(1) {
         match arg.to_str() {
             Some("--version") => {
@@ -68,7 +69,8 @@ fn main() -> glib::ExitCode {
                 println!("{USAGE}");
                 return glib::ExitCode::SUCCESS;
             }
-            Some("--bench-flow") => bench = true,
+            Some("--bench-flow") => bench = Some(bench::Mode::Flow),
+            Some("--bench-typing") => bench = Some(bench::Mode::Typing),
             Some(a) if a.starts_with('-') => {
                 eprintln!("slate: unknown option {a}\n{USAGE}");
                 return glib::ExitCode::from(2);
@@ -76,8 +78,8 @@ fn main() -> glib::ExitCode {
             _ => files.push(PathBuf::from(arg)),
         }
     }
-    if bench && files.len() != 1 {
-        eprintln!("slate: --bench-flow needs one file\n{USAGE}");
+    if bench.is_some() && files.len() != 1 {
+        eprintln!("slate: a benchmark needs one file\n{USAGE}");
         return glib::ExitCode::from(2);
     }
     tracing_subscriber::fmt()
@@ -190,6 +192,8 @@ fn header(title: &str) -> gtk::HeaderBar {
     let menu = gio::Menu::new();
     menu.append_section(None, &file);
     menu.append_section(Some("View"), &view);
+    menu.append_section(Some("Edit"), &edit_menu());
+    menu.append_section(Some("Format"), &format_menu());
     menu.append_section(None, &quit);
     // The primary menu: F10 opens it.
     let button = gtk::MenuButton::builder()
@@ -204,6 +208,79 @@ fn header(title: &str) -> gtk::HeaderBar {
     label.add_css_class("title");
     header.set_title_widget(Some(&label));
     header
+}
+
+/// A menu item for `action` with `accel` shown beside it (the page handles the keys).
+fn item(label: &str, action: &str, accel: &str) -> gio::MenuItem {
+    let item = gio::MenuItem::new(Some(label), Some(action));
+    item.set_attribute_value("accel", Some(&accel.to_variant()));
+    item
+}
+
+fn edit_menu() -> gio::Menu {
+    let menu = gio::Menu::new();
+    menu.append_item(&item("Undo", "win.undo", "<Control>z"));
+    menu.append_item(&item("Redo", "win.redo", "<Control><Shift>z"));
+    menu
+}
+
+/// Format: bold, italic, the paragraph's style, and lists; the window's page does them.
+fn format_menu() -> gio::Menu {
+    let menu = gio::Menu::new();
+    menu.append_item(&item("Bold", "win.bold", "<Control>b"));
+    menu.append_item(&item("Italic", "win.italic", "<Control>i"));
+    let styles = gio::Menu::new();
+    for level in 0..=6u8 {
+        let label = if level == 0 {
+            "Normal Text".to_owned()
+        } else {
+            format!("Heading {level}")
+        };
+        let item = item(&label, "win.style", &format!("<Control>{level}"));
+        item.set_action_and_target_value(Some("win.style"), Some(&level.to_variant()));
+        styles.append_item(&item);
+    }
+    menu.append_submenu(Some("Paragraph Style"), &styles);
+    menu.append_item(&item("Bulleted List", "win.bullets", "<Control><Shift>8"));
+    menu.append_item(&item("Numbered List", "win.numbers", "<Control><Shift>7"));
+    menu
+}
+
+/// The window's Edit and Format actions, done by `page`.
+fn add_page_actions(window: &gtk::ApplicationWindow, page: &view::Page) {
+    use view::Command;
+    let simple = |name: &str, command: Command| {
+        let page = page.downgrade();
+        gio::ActionEntry::builder(name)
+            .activate(move |_: &gtk::ApplicationWindow, _, _| {
+                if let Some(page) = page.upgrade() {
+                    page.command(command);
+                }
+            })
+            .build()
+    };
+    let style = {
+        let page = page.downgrade();
+        gio::ActionEntry::builder("style")
+            .parameter_type(Some(glib::VariantTy::BYTE))
+            .activate(move |_: &gtk::ApplicationWindow, _, level| {
+                if let (Some(page), Some(level)) =
+                    (page.upgrade(), level.and_then(|v| v.get::<u8>()))
+                {
+                    page.command(Command::Style(level));
+                }
+            })
+            .build()
+    };
+    window.add_action_entries([
+        simple("undo", Command::Undo),
+        simple("redo", Command::Redo),
+        simple("bold", Command::Bold),
+        simple("italic", Command::Italic),
+        simple("bullets", Command::Bullets),
+        simple("numbers", Command::Numbers),
+        style,
+    ]);
 }
 
 /// The window shown without a file: what Slate opens, and Open.
@@ -291,7 +368,7 @@ fn choose_and_open(app: &gtk::Application) {
 
 fn open_file(app: &gtk::Application, file: &gio::File, parent: Option<&gtk::Window>) {
     match file.path() {
-        Some(path) => open_window(app, &path, false),
+        Some(path) => open_window(app, &path, None),
         None => alert(
             parent,
             &format!("Cannot open {}", file.uri()),
@@ -337,15 +414,19 @@ fn alert(parent: Option<&gtk::Window>, message: &str, detail: &str) {
 }
 
 /// Show `path` in a window: its own if it is open, else a new one that says "Opening…"
-/// while the file is read in the background. `bench`: run `--bench-flow` on it.
-fn open_window(app: &gtk::Application, path: &Path, bench: bool) {
+/// while the file is read in the background. `bench`: run that benchmark on it.
+fn open_window(app: &gtk::Application, path: &Path, bench: Option<bench::Mode>) {
     let path = canonical(path);
     if let Some(window) = window_for(&path) {
         window.present();
         return;
     }
     let name = suite_file::document_name(&path).into_owned();
-    let (width, height) = if bench { bench::WINDOW } else { (900, 860) };
+    let (width, height) = if bench.is_some() {
+        bench::WINDOW
+    } else {
+        (900, 860)
+    };
     let window = gtk::ApplicationWindow::builder()
         .application(app)
         .title(&name)
@@ -399,7 +480,7 @@ fn open_window(app: &gtk::Application, path: &Path, bench: bool) {
             Err(_) => "Reading it failed unexpectedly.".to_owned(),
         };
         tracing::warn!("cannot open {}: {reason}", path.display());
-        if bench {
+        if bench.is_some() {
             std::process::exit(1);
         }
         let dialog = gtk::AlertDialog::builder()
@@ -482,14 +563,14 @@ fn text_width(app: &gtk::Application) -> TextWidth {
         .unwrap_or_default()
 }
 
-/// Replace "Opening…" with the document. `bench`: run `--bench-flow` on it.
+/// Replace "Opening…" with the document. `bench`: run that benchmark on it.
 fn show(
     app: &gtk::Application,
     stack: &gtk::Stack,
     status: &gtk::Label,
     name: &str,
     opened: open::Opened,
-    bench: bool,
+    bench: Option<bench::Mode>,
 ) {
     let words = opened.words;
     status.set_text(&format!(
@@ -498,7 +579,7 @@ fn show(
         group_digits(words),
         if words == 1 { "" } else { "s" }
     ));
-    let setting = if bench {
+    let setting = if bench.is_some() {
         TextWidth::Full
     } else {
         text_width(app)
@@ -512,9 +593,12 @@ fn show(
         .build();
     stack.add_named(&scrolled, Some("document"));
     stack.set_visible_child_name("document");
+    if let Some(window) = stack.root().and_downcast::<gtk::ApplicationWindow>() {
+        add_page_actions(&window, &page);
+    }
     page.grab_focus();
-    if bench {
-        bench::run(app, &page, words);
+    if let Some(mode) = bench {
+        bench::run(app, &page, words, mode);
     }
 }
 

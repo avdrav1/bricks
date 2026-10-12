@@ -22,6 +22,10 @@
 //!   [`Flow::path`] gives) and a byte offset into its text. [`Flow::hit`] turns a point into
 //!   one; the selection is a pair of them; copies and the accessible text are the leaves'
 //!   texts in document order joined by `\n`, tables' cells and pictures' alt text included.
+//! - **Edits** change the document through [`Flow::edit`], which rebuilds only the
+//!   top-level blocks the edit [`Splice`]s, keeps the scroll anchor, and has the shaper
+//!   forget the layouts of the leaves it replaced. A leaf's [`LayoutKey`] names its layout
+//!   in the shaper's cache and stays while the leaf does, though leaf numbers shift.
 
 mod content;
 mod fenwick;
@@ -38,6 +42,30 @@ use fenwick::Fenwick;
 use std::borrow::Cow;
 use std::ops::Range;
 use tree::{Builder, Cx, Leaf, Node, LOOKS};
+
+/// What a shaper caches a leaf's layout under. A rebuilt leaf gets a new key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LayoutKey(u64);
+
+/// Top-level blocks an edit replaced: `removed` blocks from `start` before the edit are
+/// `inserted` blocks from `start` after it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Splice {
+    pub start: usize,
+    pub removed: usize,
+    pub inserted: usize,
+}
+
+/// Where a top-level text block lays out its text: its leaf, the text's left edge from the
+/// column's, its top in document coordinates, and the width it wraps at.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextPlace {
+    pub leaf: LeafId,
+    pub key: LayoutKey,
+    pub x: i32,
+    pub y: f64,
+    pub width: i32,
+}
 
 /// Space above the document's first block.
 pub const TOP_MARGIN: i32 = 40;
@@ -101,14 +129,17 @@ pub struct Hit {
 pub trait Shaper {
     /// The average character width and line height of `look` at the normal size.
     fn metrics(&mut self, look: Look) -> Metrics;
-    /// Lay out `content` (leaf `leaf`) wrapped at `width` pixels; its height in pixels.
-    fn shape(&mut self, leaf: LeafId, content: Content<'_>, width: i32) -> i32;
+    /// Lay out `content`, whose layout is cached under `key`, wrapped at `width` pixels; its
+    /// height in pixels.
+    fn shape(&mut self, key: LayoutKey, content: Content<'_>, width: i32) -> i32;
     /// Where (`x`, `y`), relative to the text's top left, falls in `content` wrapped at
     /// `width`.
-    fn hit(&mut self, leaf: LeafId, content: Content<'_>, width: i32, x: f64, y: f64) -> Hit;
+    fn hit(&mut self, key: LayoutKey, content: Content<'_>, width: i32, x: f64, y: f64) -> Hit;
     /// A picture's size in pixels when it can be shown; the flow prefers the size the file
     /// gives ([`Image::size`]).
     fn picture_size(&mut self, image: &Image) -> Option<(f32, f32)>;
+    /// The leaf whose layout is cached under `key` is gone: drop what is kept for it.
+    fn forget(&mut self, key: LayoutKey);
 }
 
 /// Something to draw. `x` is relative to the column's left edge and `y` is in document
@@ -119,6 +150,7 @@ pub enum Paint<'a> {
     /// hangs [`LEVEL_INDENT`] to its left. `selected`: the bytes the selection covers.
     Text {
         leaf: LeafId,
+        key: LayoutKey,
         content: Content<'a>,
         x: i32,
         y: f64,
@@ -226,6 +258,8 @@ pub struct Flow {
     metrics: Option<[Metrics; 9]>,
     page_breaks: usize,
     break_tops: Vec<usize>,
+    /// The next leaf's layout key.
+    next_key: u64,
     /// The selection's anchor and focus.
     selection: Option<(Position, Position)>,
 }
@@ -233,14 +267,9 @@ pub struct Flow {
 impl Flow {
     /// The flow of `doc`, not laid out yet: [`Flow::set_width`] lays it out.
     pub fn new(doc: Document) -> Self {
-        let mut builder = Builder::new(&doc.format);
-        let tops = builder.blocks(&doc.blocks, &[], false);
-        let chars = Fenwick::build(
-            builder
-                .leaves
-                .iter()
-                .map(|l| l.chars.map_or(0, |c| i64::from(c) + 1)),
-        );
+        let mut builder = Builder::new(&doc.format, 0, 0);
+        let tops = builder.tops(&doc.blocks, 0..doc.blocks.len());
+        let chars = Fenwick::build(builder.leaves.iter().map(leaf_chars));
         Flow {
             heights: Fenwick::build(tops.iter().map(|n| i64::from(n.height))),
             doc,
@@ -257,6 +286,7 @@ impl Flow {
             metrics: None,
             page_breaks: builder.page_breaks,
             break_tops: builder.break_tops,
+            next_key: builder.keys,
             selection: None,
         }
     }
@@ -349,7 +379,7 @@ impl Flow {
     }
 
     /// Measure top-level block `i` at the width; true if it wasn't.
-    fn ensure(&mut self, i: usize, shaper: &mut dyn Shaper) -> bool {
+    pub fn measure_block(&mut self, i: usize, shaper: &mut dyn Shaper) -> bool {
         let node = &mut self.tops[i];
         if node.laid == self.width {
             return false;
@@ -390,7 +420,7 @@ impl Flow {
             let mut measured = false;
             let mut i = self.anchor.block;
             while i < self.tops.len() && self.top_of(i) < bottom {
-                measured |= self.ensure(i, shaper);
+                measured |= self.measure_block(i, shaper);
                 i += 1;
             }
             let h = f64::from(self.tops[self.anchor.block].height);
@@ -420,7 +450,7 @@ impl Flow {
             }
             let i = self.next;
             self.next += 1;
-            if self.ensure(i, shaper) {
+            if self.measure_block(i, shaper) {
                 measured += 1;
             }
         }
@@ -560,6 +590,152 @@ impl Flow {
                 _ => None,
             },
         }
+    }
+
+    // ---- editing ----
+
+    /// Change the document with `f`, which says which top-level blocks it replaced, and
+    /// rebuild their layout state: estimated until measured, the viewport on the same
+    /// block. Clears the selection.
+    pub fn edit<R>(
+        &mut self,
+        shaper: &mut dyn Shaper,
+        f: impl FnOnce(&mut Document) -> (R, Splice),
+    ) -> R {
+        let (result, splice) = f(&mut self.doc);
+        self.splice(shaper, splice);
+        result
+    }
+
+    fn splice(&mut self, shaper: &mut dyn Shaper, s: Splice) {
+        let old_end = s.start + s.removed;
+        let new_end = s.start + s.inserted;
+        let first = self
+            .leaves
+            .partition_point(|l| (l.path[0] as usize) < s.start);
+        let last = self
+            .leaves
+            .partition_point(|l| (l.path[0] as usize) < old_end);
+        for leaf in &self.leaves[first..last] {
+            shaper.forget(leaf.key);
+        }
+        let width = self.width;
+        self.exact -= self.tops[s.start..old_end]
+            .iter()
+            .filter(|n| width > 0 && n.laid == width)
+            .count();
+        let had_breaks = self.page_breaks > 0;
+
+        let mut builder = Builder::new(&self.doc.format, first, self.next_key);
+        let mut nodes = builder.tops(&self.doc.blocks, s.start..new_end);
+        self.next_key = builder.keys;
+        let new_breaks = builder.page_breaks > 0;
+        let added = builder.leaves.len();
+        let leaf_shift = added as i64 - (last - first) as i64;
+        let block_shift = s.inserted as i64 - s.removed as i64;
+        self.leaves
+            .splice(first..last, std::mem::take(&mut builder.leaves));
+        if block_shift != 0 {
+            for leaf in &mut self.leaves[first + added..] {
+                leaf.path[0] = (i64::from(leaf.path[0]) + block_shift) as u32;
+            }
+        }
+        if let Some(metrics) = self.metrics {
+            tree::prepare_pictures(&mut nodes, &self.doc, &self.leaves, shaper);
+            for node in &mut nodes {
+                node.height = tree::estimate(node, width, &self.leaves, &metrics);
+            }
+        }
+        let old: Vec<i32> = self.tops[s.start..old_end]
+            .iter()
+            .map(|n| n.height)
+            .collect();
+        self.tops.splice(s.start..old_end, nodes);
+        if leaf_shift != 0 {
+            for node in &mut self.tops[new_end..] {
+                tree::shift_leaves(node, leaf_shift);
+            }
+        }
+        // A list item's spacing depends on the block after it.
+        let mut respaced = 0;
+        if s.start > 0 {
+            let node = &mut self.tops[s.start - 1];
+            let before = node.height;
+            if builder.respace(node, self.doc.blocks.get(s.start)) {
+                respaced = node.height - before;
+            }
+        }
+        if had_breaks || new_breaks {
+            let (count, holding) = tree::number_breaks(&mut self.tops);
+            self.page_breaks = count;
+            self.break_tops = holding;
+        }
+
+        if leaf_shift != 0 || block_shift != 0 {
+            self.heights = Fenwick::build(self.tops.iter().map(|n| i64::from(n.height)));
+            self.chars = Fenwick::build(self.leaves.iter().map(leaf_chars));
+        } else {
+            for (i, h) in old.into_iter().enumerate() {
+                let by = self.tops[s.start + i].height - h;
+                if by != 0 {
+                    self.heights.add(s.start + i, i64::from(by));
+                }
+            }
+            if respaced != 0 {
+                self.heights.add(s.start - 1, i64::from(respaced));
+            }
+            for i in first..first + added {
+                let by =
+                    leaf_chars(&self.leaves[i]) - (self.chars.prefix(i + 1) - self.chars.prefix(i));
+                if by != 0 {
+                    self.chars.add(i, by);
+                }
+            }
+        }
+
+        if self.anchor.block >= old_end {
+            self.anchor.block = (self.anchor.block as i64 + block_shift) as usize;
+        } else if self.anchor.block >= new_end {
+            self.anchor = Anchor {
+                block: new_end
+                    .saturating_sub(1)
+                    .min(self.tops.len().saturating_sub(1)),
+                offset: 0.0,
+            };
+        }
+        self.next = s.start.min(self.tops.len());
+        self.selection = None;
+    }
+
+    /// The leaf of top-level block `block` when that block is text (a paragraph, list
+    /// item, code block, or raw source).
+    pub fn block_leaf(&self, block: usize) -> Option<LeafId> {
+        let (leaf, ..) = tree::text_place(self.tops.get(block)?)?;
+        Some(leaf)
+    }
+
+    /// Where top-level text block `block` lays out its text, measured at the width first.
+    pub fn text_place(&mut self, block: usize, shaper: &mut dyn Shaper) -> Option<TextPlace> {
+        tree::text_place(self.tops.get(block)?)?;
+        self.measure_block(block, shaper);
+        let (leaf, x, above) = tree::text_place(&self.tops[block])?;
+        Some(TextPlace {
+            leaf,
+            key: self.leaves[leaf.index()].key,
+            x,
+            y: self.top_of(block) + f64::from(above),
+            width: (self.width - x).max(1),
+        })
+    }
+
+    /// The key `leaf`'s layout is cached under.
+    pub fn layout_key(&self, leaf: LeafId) -> LayoutKey {
+        self.leaves[leaf.index()].key
+    }
+
+    /// How many top-level blocks the document has.
+    pub fn block_count(&self) -> usize {
+        self.tops.len()
     }
 
     fn end(&self) -> Position {
@@ -716,4 +892,9 @@ impl Flow {
         };
         (start + within).min(self.char_count())
     }
+}
+
+/// A leaf's share of the accessible text: its characters and a `\n`, or 0 without text.
+fn leaf_chars(leaf: &Leaf) -> i64 {
+    leaf.chars.map_or(0, |c| i64::from(c) + 1)
 }

@@ -26,9 +26,16 @@ Anything else is refused with a message naming the format (`.doc`, `.odt`, `.rtf
 - The window title is the file name; the status bar shows the format and the word count.
 - Accessibility: the document's text is exposed to screen readers.
 
-## SL1: editor (not built yet)
+## SL1: editor (in progress)
 
 Typing, formatting commands with undo, save and save-as with atomic writes, crash recovery, and find and replace, in Slate's own pageless text engine, a custom Pango flow ([ADR 0007](../adr/0007-slate-editing-engine.md); pageless per [ADR 0005](../adr/0005-slate-is-pageless.md)).
+
+Built so far (SLATE-6), in paragraphs, list items, and code blocks (tables come with SLATE-12):
+
+- Typing goes through the input method. Backspace and Delete remove a character, or join paragraphs at a paragraph's start or end; Backspace at a list item's start leaves the list. Enter splits the paragraph (after a heading the new one is normal text; in a list it starts a new item, and on an empty item it leaves the list); Shift+Enter breaks the line. Tab and Shift+Tab nest and un-nest list items.
+- The caret moves with the arrows, Ctrl+Left and Ctrl+Right by word, Home and End along the wrapped line, and Ctrl+Home and Ctrl+End to the document's ends; a click puts it where it lands.
+- Ctrl+B and Ctrl+I toggle bold and italic over the selection, or for what's typed next. Ctrl+0 makes normal text and Ctrl+1 to Ctrl+6 headings. Ctrl+Shift+8 toggles a bulleted list and Ctrl+Shift+7 a numbered one, renumbering as items come and go. The menu's Edit and Format sections do the same. Plain text has no formatting.
+- Every step undoes (Ctrl+Z) and redoes (Ctrl+Shift+Z, Ctrl+Y); typing undoes a word at a time.
 
 ## Non-goals for now
 

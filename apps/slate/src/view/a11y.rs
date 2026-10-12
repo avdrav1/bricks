@@ -31,7 +31,7 @@ pub fn boundary(
             };
             let text = content.text();
             let width = flow.wrap_width(unit.leaf).max(1);
-            let layout = shaper.layout(unit.leaf, content, width);
+            let layout = shaper.layout(flow.layout_key(unit.leaf), content, width);
             let k = o - unit.start;
             match granularity {
                 G::Line => line(layout, &text, &unit, k, end),
@@ -75,7 +75,7 @@ fn starts(layout: &pango::Layout, unit: &Unit, k: usize, end: usize, bit: u32) -
 
 /// The layout's log attributes as their bit fields, one per character and one past the end.
 #[allow(unsafe_code)]
-fn log_attrs(layout: &pango::Layout) -> Vec<u32> {
+pub(super) fn log_attrs(layout: &pango::Layout) -> Vec<u32> {
     use gtk::glib::translate::ToGlibPtr;
     let mut n = 0;
     // SAFETY: PangoLogAttr is a struct of 32 one-bit fields, so each is one u32; Pango

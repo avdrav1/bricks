@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# SLATE-4, SLATE-10, and SLATE-11 acceptance: the window opens, shows, and refuses documents,
-# its pageless column follows View → Text Width, and its text selects and copies.
+# SLATE-4, SLATE-10, SLATE-11, and SLATE-6 acceptance: the window opens, shows, and
+# refuses documents, its pageless column follows View → Text Width, its text selects and
+# copies, and it edits with undo.
 #
 #   scripts/check_slate.sh [BINARY]   (default target/release/slate)
 #
@@ -36,7 +37,17 @@
 #  11. `slate fixture.docx`: its page break is an accessible object named "Page break";
 #  12. Ctrl+A, Ctrl+C in w.txt: the clipboard holds the file's lines as plain text;
 #  13. in looks.md, a drag from left of the plain line to the right of the bold line below
-#      it, then Ctrl+C: the clipboard holds those two lines.
+#      it, then Ctrl+C: the clipboard holds those two lines;
+#  14. in edit.md ("# Title", "First paragraph."), read through AT-SPI after each step:
+#      Ctrl+End and " More", Enter and "Second" (typed through the input method), seven
+#      Backspaces (the last joins the paragraphs), undo until nothing is left to undo, and
+#      redo until nothing is left; then Home, End, Ctrl+Left, Left, Right, Ctrl+Right, Up,
+#      and Down, each followed by a typed mark, put the marks where the keys say;
+#  15. in fmt.md (three lines of HHHHHHHH and a Z), measured in screenshots with the caret
+#      parked on the Z: Ctrl+1 on the first line draws it at least 1.5 times as tall,
+#      Ctrl+Shift+8 on the second indents it as a bulleted item, Ctrl+B over the third
+#      (selected by dragging) gives it at least 1.15 times the ink; three Ctrl+Z give back
+#      the first screenshot's lines exactly and three Ctrl+Shift+Z the formatted ones.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -153,6 +164,41 @@ elif cmd == "contains":
     print(f"found {len(want) - len(missing)} of {len(want)}")
     for m in missing:
         print(f"missing: {m}")
+elif cmd == "page":
+    for node in walk(app()):
+        ti = node.get_text_iface() if node.get_role_name() == "text" else None
+        if ti is not None:
+            print("page: " + Atspi.Text.get_text(ti, 0, -1).replace("\n", "|"))
+            break
+PY
+cat > /tmp/fmt.py <<"PY"
+import gi
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import GdkPixbuf
+def bands(name):
+    p = GdkPixbuf.Pixbuf.new_from_file(f"/shots/{name}.png")
+    w, h, rs, n, px = p.get_width(), p.get_height(), p.get_rowstride(), p.get_n_channels(), p.get_pixels()
+    out, cur = [], None
+    for y in range(70, h - 50):
+        xs = [x for x in range(w) if px[y * rs + x * n] + px[y * rs + x * n + 1] + px[y * rs + x * n + 2] < 300]
+        if xs:
+            if cur is None:
+                cur = [y, y, 0, xs[-1]]
+            cur[1], cur[2], cur[3] = y, cur[2] + len(xs), max(cur[3], xs[-1])
+        elif cur is not None:
+            out.append(cur)
+            cur = None
+    return out
+before, after, undone, redone = (bands(n) for n in ("fmt-before", "fmt-after", "fmt-undone", "fmt-redone"))
+print("bands: " + " ".join(f"{len(b)}" for b in (before, after, undone, redone)))
+if len(before) >= 3 and len(after) >= 3:
+    height = lambda b: b[1] - b[0] + 1
+    print(f"heading height: {height(after[0]) * 100 // height(before[0])}")
+    print(f"list shift: {after[1][3] - before[1][3]}")
+    print(f"bold ink: {after[2][2] * 100 // before[2][2]}")
+# The lines measured, not the Z line under them, where the caret is.
+print("undo restores: " + ("yes" if undone[:3] == before[:3] else "no"))
+print("redo restores: " + ("yes" if redone[:3] == after[:3] else "no"))
 PY
 cat > /tmp/px.py <<"PY"
 import sys
@@ -263,7 +309,7 @@ session() {
   slate >>/tmp/app.log 2>&1 & sleep 3
   titles
   keys -M ctrl o -m ctrl; sleep 2; shot dialog
-  keys -M ctrl l -m ctrl; wtype -d 40 /tmp/md/fixture.md; sleep 1; keys -k Return; sleep 4
+  keys -M ctrl l -m ctrl; keys -d 40 /tmp/md/fixture.md; sleep 1; keys -k Return; sleep 4
   titles; quit
   echo "== 6 drop"
   slate /tmp/w.txt >>/tmp/app.log 2>&1 & sleep 3
@@ -314,6 +360,38 @@ session() {
   read -r _ plain bold <<<"$(python3 /tmp/px.py /shots/drag-before.png | sed -n "s/^mids: //p")"
   python /dnd.py drag 300 "$plain" 1000 "$bold"; keys -M ctrl c -m ctrl; sleep 1; shot drag
   echo "dragged: $(wl-paste -n | tr "\n" "|")"; quit
+  echo "== 14 edit"
+  printf "# Title\n\nFirst paragraph.\n" > /tmp/edit.md
+  slate /tmp/edit.md >>/tmp/app.log 2>&1 & sleep 4
+  # Every wtype starts with a pause: the first key of a new virtual keyboard can be lost
+  # while the window takes its keymap. Repeated keys go in one wtype for the same reason.
+  keys -M ctrl -k End -m ctrl; keys -d 60 " More"; keys -k Return; keys -d 60 "Second"; sleep 1
+  a11y page | sed "s/^/typed /"
+  keys $(for i in $(seq 7); do printf -- "-k BackSpace -s 120 "; done); sleep 1
+  a11y page | sed "s/^/deleted /"
+  keys -M ctrl $(for i in $(seq 15); do printf "z -s 120 "; done) -m ctrl; sleep 1
+  a11y page | sed "s/^/undone /"
+  keys -M ctrl -M shift $(for i in $(seq 15); do printf "z -s 120 "; done) -m shift -m ctrl; sleep 1
+  a11y page | sed "s/^/redone /"
+  keys -M ctrl -k End -m ctrl -s 200 -k Home -s 200 "[" -s 200 -k End -s 200 "]" -s 200 \
+    -M ctrl -k Left -m ctrl -s 200 "|" -s 200 -k Left -s 200 -k Left -s 200 "_" -s 200 \
+    -k Right -s 200 -k Right -s 200 -k Right -s 200 "^" -s 200 -M ctrl -k Right -m ctrl -s 200 "~" \
+    -s 200 -k Up -s 200 -k End -s 200 "!" -s 200 -k Down -s 200 -k End -s 200 "?"; sleep 1
+  a11y page | sed "s/^/moved /"; shot edit; quit
+  echo "== 15 format"
+  printf "HHHHHHHH\n\nHHHHHHHH\n\nHHHHHHHH\n\nZ\n" > /tmp/fmt.md
+  slate /tmp/fmt.md >>/tmp/app.log 2>&1 & sleep 4
+  keys -M ctrl -k End -m ctrl; shot fmt-before
+  keys -M ctrl -k Home -m ctrl; keys -M ctrl 1 -m ctrl
+  keys -k Down; keys -M ctrl -M shift 8 -m shift -m ctrl
+  keys -M ctrl -k End -m ctrl; shot fmt-mid
+  read -r _ _ third <<<"$(python3 /tmp/px.py /shots/fmt-mid.png | sed -n "s/^mids: //p")"
+  python /dnd.py drag 300 "$third" 1000 "$third"; keys -M ctrl b -m ctrl
+  keys -M ctrl -k End -m ctrl; shot fmt-after
+  for i in 1 2 3; do keys -M ctrl z -m ctrl; done; keys -M ctrl -k End -m ctrl; shot fmt-undone
+  for i in 1 2 3; do keys -M ctrl -M shift z -m shift -m ctrl; done
+  keys -M ctrl -k End -m ctrl; shot fmt-redone
+  python3 /tmp/fmt.py; quit
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -382,6 +460,17 @@ column "10: Narrow in a 640 px window stays 480" "10 narrow window" "narrow640 c
 check "11: the .docx page break is named Page break to screen readers" "11 page break" "^page breaks: 1$"
 check "12: Ctrl+A, Ctrl+C copies the whole text as plain text" "12 select all" "^copy equals the file$"
 check "13: dragging over two lines copies exactly them" "13 drag" "^dragged: HHHHHHHH\|HHHHHHHH$"
+check "14: typing, Enter, and typing again edit the text" "14 edit" "^typed page: Title\|First paragraph\. More\|Second$"
+check "14: Backspace deletes, and at a paragraph's start joins" "14 edit" "^deleted page: Title\|First paragraph\. More$"
+check "14: undo gives back the opened text" "14 edit" "^undone page: Title\|First paragraph\.$"
+check "14: redo gives back every edit" "14 edit" "^redone page: Title\|First paragraph\. More$"
+check "14: Home, End, arrows, and word moves put the caret where they say" "14 edit" \
+  "^moved page: Title!\|\[First paragraph\._ \|M\^ore~\]\?$"
+at_least "15: Ctrl+1 makes a heading (percent of the line's height)" "15 format" "heading height" 150
+at_least "15: Ctrl+Shift+8 makes a bulleted item (px its text moves right)" "15 format" "list shift" 20
+at_least "15: Ctrl+B over a selection makes it bold (percent ink)" "15 format" "bold ink" 115
+check "15: undo gives back the unformatted lines exactly" "15 format" "^undo restores: yes$"
+check "15: redo gives back the formatted lines exactly" "15 format" "^redo restores: yes$"
 if [ $fail = 0 ]; then echo "SLATE OK"; else
   echo "SLATE CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

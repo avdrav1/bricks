@@ -1,11 +1,12 @@
-//! SLATE-11 acceptance: on a 150,000-word document at Full in a 1600x1000 window, the
-//! visible text re-wraps within one frame, the whole document in under 500 ms, and
-//! scrolling keeps frame CPU p99 under 16 ms.
+//! Performance acceptance on a 150,000-word document at Full in a 1600x1000 window:
+//! - SLATE-11: the visible text re-wraps within one frame, the whole document in under
+//!   500 ms, and scrolling keeps frame CPU p99 under 16 ms (`--bench-flow`);
+//! - SLATE-6: typing latency p99 is under 25 ms (`--bench-typing`).
 //!
 //! Writes ADR 0007's spike document as Markdown (headings, two bullet levels, bold and
-//! italic words) and runs `slate FILE --bench-flow` on it. Opens a real window, so it needs
-//! a graphical session; on a tiling desktop make the window float at 1600x1000 or the
-//! numbers are for another size (the report says which). Timing is asserted only in
+//! italic words) and runs `slate FILE --bench-…` on it. Opens a real window, so it needs a
+//! graphical session; on a tiling desktop make the window float at 1600x1000 or the
+//! numbers are for another size (the flow report says which). Timing is asserted only in
 //! optimized builds:
 //! `cargo test --release -p slate --test flow_perf -- --ignored --nocapture`
 
@@ -159,19 +160,18 @@ fn field(json: &str, path: &str) -> f64 {
     rest[..end].parse().unwrap()
 }
 
-#[test]
-#[ignore = "opens a window; run with --release --ignored"]
-fn the_flow_rewraps_and_scrolls_a_150000_word_document_in_time() {
+/// Run `slate FILE <flag>` on the generated document; its JSON report.
+fn bench(flag: &str) -> String {
     if std::env::var_os("WAYLAND_DISPLAY").is_none() && std::env::var_os("DISPLAY").is_none() {
         panic!("needs a graphical session");
     }
-    let dir = std::env::temp_dir().join(format!("slate-flow-perf-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("slate-perf-{flag}-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("long.md");
     std::fs::write(&path, document()).unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_slate"))
         .arg(&path)
-        .arg("--bench-flow")
+        .arg(flag)
         .output()
         .expect("run slate");
     std::fs::remove_dir_all(&dir).ok();
@@ -182,6 +182,13 @@ fn the_flow_rewraps_and_scrolls_a_150000_word_document_in_time() {
         String::from_utf8_lossy(&out.stderr)
     );
     eprintln!("{line}");
+    line
+}
+
+#[test]
+#[ignore = "opens a window; run with --release --ignored"]
+fn the_flow_rewraps_and_scrolls_a_150000_word_document_in_time() {
+    let line = bench("--bench-flow");
     assert!(field(&line, "words") >= WORDS as f64, "{line}");
     assert_eq!(field(&line, "switches"), 10.0, "{line}");
     assert_eq!(field(&line, "unfinished"), 0.0, "{line}");
@@ -204,4 +211,19 @@ fn the_flow_rewraps_and_scrolls_a_150000_word_document_in_time() {
     );
     assert!(whole < 500.0, "re-wrapping the document took {whole:.0} ms");
     assert!(scroll < 16.0, "scrolling frames took {scroll:.1} ms p99");
+}
+
+#[test]
+#[ignore = "opens a window; run with --release --ignored"]
+fn typing_in_a_150000_word_document_shows_each_key_in_time() {
+    let line = bench("--bench-typing");
+    assert!(field(&line, "words") >= WORDS as f64, "{line}");
+    assert_eq!(field(&line, "keystrokes"), 100.0, "{line}");
+    if cfg!(debug_assertions) {
+        eprintln!("debug build: timing not checked; use --release");
+        return;
+    }
+    let p99 = field(&line, "latency_ms/p99");
+    eprintln!("typing latency p99 {p99:.1} ms (target < 25)");
+    assert!(p99 < 25.0, "typing latency p99 {p99:.1} ms");
 }
