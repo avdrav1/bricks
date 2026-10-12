@@ -20,7 +20,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 - [x] SL1: slate edits and saves .txt, .md, and .docx with undo; LibreOffice reopens a saved .docx with the edits and everything else unchanged; an edited Markdown file changes only the edited blocks
 - [ ] SL2: slate finds and replaces text across paragraphs and table cells with undo, and after a crash offers back the unsaved edits of every open document without touching its file
 - [x] FR0: frame opens the fixture .pptx files and a real-world PowerPoint deck and shows every slide's shapes, text, and pictures where LibreOffice reads them (dump comparison); F5 plays the deck full screen
-- [ ] FR1: frame edits slide text on the slide and in the outline view, moves and resizes shapes with snapping, formats through the inspector, inserts text, shapes, pictures, and tables, and adds, deletes, and reorders slides, all with undo; File → New starts a deck; Save writes .pptx that LibreOffice reopens with the edits and everything else unchanged; the spec's reference task takes fewer input actions than in PowerPoint
+- [x] FR1: frame edits slide text on the slide and in the outline view, moves and resizes shapes with snapping, formats through the inspector, inserts text, shapes, pictures, and tables, and adds, deletes, and reorders slides, all with undo; File → New starts a deck; Save writes .pptx that LibreOffice reopens with the edits and everything else unchanged; the spec's reference task takes fewer input actions than in PowerPoint
 
 ## Stories
 
