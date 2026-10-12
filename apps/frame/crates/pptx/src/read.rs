@@ -11,7 +11,7 @@ use crate::xml::Element;
 use crate::Error;
 use presentation_model::{
     Background, Fill, Frame, Image, Layer, Picture, PlaceholderKind, Presentation, Shape,
-    ShapeKind, Size, Slide, TextBody,
+    ShapeKind, Size, Slide, Source, TextBody,
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -688,15 +688,7 @@ fn graphic(scope: &Scope<'_>, e: &Element, looks: &Looks<'_>) -> ShapeKind {
     match graphic_uri(e).rsplit('/').next().unwrap_or_default() {
         "table" => match data.child("tbl") {
             Some(tbl) => {
-                let base: Vec<&Element> = scope
-                    .default_style
-                    .into_iter()
-                    .chain(
-                        scope
-                            .master
-                            .and_then(|m| m.part.root.path(&["txStyles", "otherStyle"])),
-                    )
-                    .collect();
+                let base = base_styles(scope, "otherStyle");
                 ShapeKind::Table(crate::table::table(
                     tbl,
                     looks,
@@ -748,26 +740,23 @@ fn shape_text(
         Some("body") => "bodyStyle",
         _ => "otherStyle",
     };
-    let base = scope
-        .default_style
-        .into_iter()
-        .chain(
-            scope
-                .master
-                .and_then(|m| m.part.root.path(&["txStyles", master_style])),
-        )
-        .collect();
+    let base = base_styles(scope, master_style);
     // Nearest parent last: the master placeholder's list style, then the layout's.
-    let inherited = parents.iter().rev().filter_map(|p| p.child("txBody"));
+    let sources = [Source::Layout, Source::Master];
+    let inherited = parents
+        .iter()
+        .zip(sources)
+        .rev()
+        .filter_map(|(p, s)| Some((p.child("txBody")?, s)));
     let styles = Styles {
         base,
         font_ref: font_ref(e, scope.text),
         shape: inherited
             .clone()
-            .chain([tx_body])
-            .filter_map(|b| b.child("lstStyle"))
+            .chain([(tx_body, Source::Own)])
+            .filter_map(|(b, s)| Some((b.child("lstStyle")?, s)))
             .collect(),
-        body: inherited.filter_map(|b| b.child("bodyPr")).collect(),
+        body: inherited.filter_map(|(b, _)| b.child("bodyPr")).collect(),
     };
     text::body(Some(tx_body), &styles, scope.text)
 }
@@ -784,8 +773,23 @@ fn font_ref(e: &Element, ctx: &TextContext<'_>) -> FontRef {
             _ => None,
         },
         color: ctx.palette.first(r, None),
+        source: Source::Own,
         ..FontRef::default()
     }
+}
+
+/// The text styles every shape's text starts from: the presentation's default text style,
+/// then the master's `titleStyle`, `bodyStyle`, or `otherStyle`.
+fn base_styles<'a>(scope: &Scope<'a>, master_style: &str) -> Vec<(&'a Element, Source)> {
+    let master = scope
+        .master
+        .and_then(|m| m.part.root.path(&["txStyles", master_style]));
+    scope
+        .default_style
+        .map(|s| (s, Source::Presentation))
+        .into_iter()
+        .chain(master.map(|s| (s, Source::Master)))
+        .collect()
 }
 
 /// A shape's geometry: its preset name and first adjust value, or `custom` for freeform

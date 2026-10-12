@@ -1,13 +1,15 @@
 //! Drawing a slide into a GTK snapshot. One renderer serves the slide list, the canvas, and
 //! the slideshow (ADR 0004): lengths in the model are EMU and draw at `scale` pixels per
-//! EMU, with the slide's top-left corner at the snapshot's origin.
+//! EMU, with the slide's top-left corner at the snapshot's origin. A shape's text lays out
+//! once for drawing and for editing ([`place_text`]), so the caret lands where the text is.
 
 use crate::deck::Deck;
+use deck_edit::TextPos;
 use gtk::prelude::*;
 use gtk::{gdk, graphene, gsk, pango};
 use presentation_model::{
-    Align, Anchor, Background, Caps, Color, Crop, Dash, Fill, Frame, Outline, Paragraph, Shape,
-    ShapeKind, Slide, Spacing, Table, TextBody, Vertical, EMU_PER_POINT,
+    Align, Anchor, Background, Caps, Color, Crop, Dash, Fill, Frame, Layer, Outline, Paragraph,
+    Shape, ShapeKind, Slide, Spacing, Table, TextBody, Vertical, EMU_PER_POINT,
 };
 
 fn rgba(c: Color) -> gdk::RGBA {
@@ -39,7 +41,7 @@ pub fn draw_slide(
     slide: &Slide,
     scale: f32,
 ) {
-    let size = deck.presentation.size;
+    let size = deck.presentation().size;
     let bounds = rect(0.0, 0.0, size.cx as f32 * scale, size.cy as f32 * scale);
     snap.push_clip(&bounds);
     match &slide.background {
@@ -113,29 +115,68 @@ fn draw_shape(snap: &gtk::Snapshot, ctx: &pango::Context, deck: &Deck, shape: &S
     if let ShapeKind::Table(t) = &shape.kind {
         in_frame(snap, f, scale, |_, _| draw_table(snap, ctx, t, scale));
     }
-    if let Some(text) = &shape.text {
-        let frame = shape.text_frame.as_ref().unwrap_or(f);
-        in_frame(snap, frame, scale, |w, h| {
-            draw_text(snap, ctx, text, w, h, scale)
-        });
+    if let Some(placed) = shape
+        .text
+        .as_ref()
+        .filter(|t| !t.is_empty())
+        .and_then(|_| place_text(ctx, shape, scale))
+    {
+        snap.save();
+        snap.transform(Some(&placed.to_slide));
+        draw_paras(snap, &placed.block, placed.x0, placed.y0);
+        snap.restore();
     }
 }
 
-/// Run `draw` with the origin at `f`'s top-left corner, turned with it: text and tables
-/// turn with their shape but don't mirror (a vertical flip turns them upside down, as
-/// PowerPoint draws them). `draw` gets the box's size in pixels.
-fn in_frame(snap: &gtk::Snapshot, f: &Frame, scale: f32, draw: impl FnOnce(f32, f32)) {
+/// From `f`'s box to the slide's pixels: the origin at the box's top-left corner, turned
+/// with it. Text and tables turn with their shape but don't mirror (a vertical flip turns
+/// them upside down, as PowerPoint draws them). Also gives the box's size in pixels.
+fn frame_transform(f: &Frame, scale: f32) -> (gsk::Transform, f32, f32) {
     let (w, h) = (f.cx as f32 * scale, f.cy as f32 * scale);
     let (cx, cy) = f.centre();
-    snap.save();
-    snap.translate(&graphene::Point::new(cx as f32 * scale, cy as f32 * scale));
     let turn = f.rotation as f32 + if f.flip_v { 180.0 } else { 0.0 };
-    if turn != 0.0 {
-        snap.rotate(turn);
-    }
-    snap.translate(&graphene::Point::new(-w / 2.0, -h / 2.0));
+    let t = gsk::Transform::new()
+        .translate(&graphene::Point::new(cx as f32 * scale, cy as f32 * scale))
+        .rotate(turn)
+        .translate(&graphene::Point::new(-w / 2.0, -h / 2.0));
+    (t, w, h)
+}
+
+/// Run `draw` with the origin at `f`'s top-left corner, turned with it
+/// ([`frame_transform`]). `draw` gets the box's size in pixels.
+fn in_frame(snap: &gtk::Snapshot, f: &Frame, scale: f32, draw: impl FnOnce(f32, f32)) {
+    let (t, w, h) = frame_transform(f, scale);
+    snap.save();
+    snap.transform(Some(&t));
     draw(w, h);
     snap.restore();
+}
+
+/// `t` and a `w` x `h` box turned for `body`'s text: vertical text lays out in the box
+/// turned a quarter, with width and height swapped.
+fn upright(t: gsk::Transform, body: &TextBody, w: f32, h: f32) -> (gsk::Transform, f32, f32) {
+    if body.vertical == Vertical::Horizontal {
+        return (t, w, h);
+    }
+    let turn = if body.vertical == Vertical::Down {
+        90.0
+    } else {
+        270.0
+    };
+    let t = t
+        .translate(&graphene::Point::new(w / 2.0, h / 2.0))
+        .rotate(turn)
+        .translate(&graphene::Point::new(-h / 2.0, -w / 2.0));
+    (t, h, w)
+}
+
+/// Whether the slide point (`x`, `y`) in pixels at `scale` is inside `f`'s box.
+fn in_box(f: &Frame, scale: f32, x: f32, y: f32) -> bool {
+    let (t, w, h) = frame_transform(f, scale);
+    t.invert().is_ok_and(|inv| {
+        let p = inv.transform_point(&graphene::Point::new(x, y));
+        (0.0..=w).contains(&p.x()) && (0.0..=h).contains(&p.y())
+    })
 }
 
 fn is_line(preset: &str) -> bool {
@@ -281,6 +322,8 @@ struct LaidPara {
     layout: pango::Layout,
     x: f32,
     y: f32,
+    /// The layout's logical height.
+    height: f32,
     bullet: Option<(pango::Layout, f32, f32)>,
 }
 
@@ -313,24 +356,16 @@ fn lay_out(ctx: &pango::Context, body: &TextBody, width: f32, scale: f32) -> Tex
     let (mut y, mut right) = (0.0f32, 0.0f32);
     let mut paras = Vec::with_capacity(body.paragraphs.len());
     for (i, p) in body.paragraphs.iter().enumerate() {
-        let first = p.runs.iter().find(|r| !r.text.is_empty() && r.text != "\n");
-        let size_px = first.map_or(p.end_size, |r| r.size) as f32 * fs * pt_px;
+        let first = p.first_run();
+        let size_px = first.size as f32 * fs * pt_px;
         if i > 0 {
             y += spacing_px(p.space_before, size_px, pt_px);
         }
-        let layout = paragraph_layout(
-            ctx,
-            p,
-            first.map_or("", |r| r.font.as_str()),
-            size_px,
-            fs,
-            pt_px,
-        );
-        let has_text = first.is_some();
-        let bullet = p.bullet.as_ref().filter(|_| has_text).map(|b| {
+        let layout = paragraph_layout(ctx, p, &first.font, size_px, fs, pt_px);
+        let bullet = p.shown_bullet().map(|b| {
             let bl = pango::Layout::new(ctx);
-            bl.set_font_description(Some(&font(&b.font, b.size as f32 * fs * pt_px)));
-            bl.set_text(&b.text);
+            bl.set_font_description(Some(&font(b.font, b.size as f32 * fs * pt_px)));
+            bl.set_text(b.text);
             let attrs = pango::AttrList::new();
             let c = b.color;
             attrs.insert(pango::AttrColor::new_foreground(
@@ -401,6 +436,7 @@ fn lay_out(ctx: &pango::Context, body: &TextBody, width: f32, scale: f32) -> Tex
             layout,
             x,
             y,
+            height: lh,
             bullet: bullet.map(|(bl, bx, by)| (bl, bx, y + by)),
         });
         y += lh + spacing_px(p.space_after, size_px, pt_px);
@@ -428,7 +464,15 @@ fn paragraph_layout(
     for run in &p.runs {
         let start = text.len() as u32;
         match run.caps {
-            Caps::All => text.push_str(&run.text.to_uppercase()),
+            // Letter by letter, so the layout's text keeps the model's byte offsets (the
+            // caret's positions): a letter whose capital is longer (ß) stays as it is.
+            Caps::All => text.extend(run.text.chars().map(|c| {
+                let mut upper = c.to_uppercase();
+                match (upper.next(), upper.next()) {
+                    (Some(u), None) if u.len_utf8() == c.len_utf8() => u,
+                    _ => c,
+                }
+            })),
             _ => text.push_str(&run.text),
         }
         let end = text.len() as u32;
@@ -485,58 +529,28 @@ fn paragraph_layout(
     layout
 }
 
-/// Draw `body` in a `w` x `h` box at the origin: insets, anchoring, autofit's font scale,
-/// vertical text.
-fn draw_text(
-    snap: &gtk::Snapshot,
+/// Lay out `body` in a `w` x `h` box: the block, and where it starts in the box (insets,
+/// anchoring).
+fn lay_out_in(
     ctx: &pango::Context,
     body: &TextBody,
     w: f32,
     h: f32,
     scale: f32,
-) {
-    if body.is_empty() {
-        return;
-    }
-    if body.vertical == Vertical::Horizontal {
-        let ins = &body.insets;
-        let block = lay_out(
-            ctx,
-            body,
-            (w - (ins.left + ins.right) as f32 * scale).max(1.0),
-            scale,
-        );
-        draw_block(snap, body, &block, w, h, scale);
-        return;
-    }
-    // Turned a quarter: lay out in the box with width and height swapped.
-    snap.save();
-    snap.translate(&graphene::Point::new(w / 2.0, h / 2.0));
-    snap.rotate(if body.vertical == Vertical::Down {
-        90.0
-    } else {
-        270.0
-    });
-    snap.translate(&graphene::Point::new(-h / 2.0, -w / 2.0));
+) -> (TextBlock, f32, f32) {
     let ins = &body.insets;
     let block = lay_out(
         ctx,
         body,
-        (h - (ins.left + ins.right) as f32 * scale).max(1.0),
+        (w - (ins.left + ins.right) as f32 * scale).max(1.0),
         scale,
     );
-    draw_block(snap, body, &block, h, w, scale);
-    snap.restore();
+    let (x0, y0) = origin(body, &block, w, h, scale);
+    (block, x0, y0)
 }
 
-fn draw_block(
-    snap: &gtk::Snapshot,
-    body: &TextBody,
-    block: &TextBlock,
-    w: f32,
-    h: f32,
-    scale: f32,
-) {
+/// Where `block` starts in a `w` x `h` box: after the insets, anchored.
+fn origin(body: &TextBody, block: &TextBlock, w: f32, h: f32, scale: f32) -> (f32, f32) {
     let ins = &body.insets;
     let (l, t, r, b) = (
         ins.left as f32 * scale,
@@ -555,6 +569,44 @@ fn draw_block(
     } else {
         0.0
     };
+    (x0, y0)
+}
+
+/// Draw `body` in a `w` x `h` box at the origin: insets, anchoring, autofit's font scale,
+/// vertical text.
+fn draw_text(
+    snap: &gtk::Snapshot,
+    ctx: &pango::Context,
+    body: &TextBody,
+    w: f32,
+    h: f32,
+    scale: f32,
+) {
+    if body.is_empty() {
+        return;
+    }
+    let (t, w, h) = upright(gsk::Transform::new(), body, w, h);
+    let (block, x0, y0) = lay_out_in(ctx, body, w, h, scale);
+    snap.save();
+    snap.transform(Some(&t));
+    draw_paras(snap, &block, x0, y0);
+    snap.restore();
+}
+
+fn draw_block(
+    snap: &gtk::Snapshot,
+    body: &TextBody,
+    block: &TextBlock,
+    w: f32,
+    h: f32,
+    scale: f32,
+) {
+    let (x0, y0) = origin(body, block, w, h, scale);
+    draw_paras(snap, block, x0, y0);
+}
+
+/// Draw `block`'s paragraphs and bullets starting at (`x0`, `y0`).
+fn draw_paras(snap: &gtk::Snapshot, block: &TextBlock, x0: f32, y0: f32) {
     let black = gdk::RGBA::BLACK;
     for p in &block.paras {
         if let Some((bl, bx, by)) = &p.bullet {
@@ -568,6 +620,285 @@ fn draw_block(
         snap.append_layout(&p.layout, &black);
         snap.restore();
     }
+}
+
+/// A shape's text as it lays out on the slide: for drawing it, and for the caret.
+pub struct PlacedText {
+    block: TextBlock,
+    /// Where the block starts in the text's box.
+    x0: f32,
+    y0: f32,
+    /// From the text's box (upright, its origin at the top-left corner) to the slide's
+    /// pixels.
+    to_slide: gsk::Transform,
+}
+
+/// Lay out `shape`'s text, empty or not, on the slide at `scale`; `None` without text.
+pub fn place_text(ctx: &pango::Context, shape: &Shape, scale: f32) -> Option<PlacedText> {
+    let body = shape.text.as_ref()?;
+    let frame = shape.text_frame.as_ref().unwrap_or(&shape.frame);
+    let (t, w, h) = frame_transform(frame, scale);
+    let (to_slide, w, h) = upright(t, body, w, h);
+    let (block, x0, y0) = lay_out_in(ctx, body, w, h, scale);
+    Some(PlacedText {
+        block,
+        x0,
+        y0,
+        to_slide,
+    })
+}
+
+/// The byte offset `trailing` characters after byte `index` of `layout`'s text.
+fn offset(layout: &pango::Layout, index: i32, trailing: i32) -> usize {
+    let text = layout.text();
+    let start = usize::try_from(index).unwrap_or(0).min(text.len());
+    let after: usize = text[start..]
+        .chars()
+        .take(usize::try_from(trailing).unwrap_or(0))
+        .map(char::len_utf8)
+        .sum();
+    start + after
+}
+
+/// The top and bottom of `layout`'s line `line`, in Pango units.
+fn line_yrange(layout: &pango::Layout, line: i32) -> (i32, i32) {
+    let mut it = layout.iter();
+    for _ in 0..line {
+        if !it.next_line() {
+            break;
+        }
+    }
+    it.line_yrange()
+}
+
+impl PlacedText {
+    /// The transform from the text's box to the slide's pixels.
+    pub fn to_slide(&self) -> &gsk::Transform {
+        &self.to_slide
+    }
+
+    /// The position nearest the slide point (`x`, `y`), in pixels.
+    pub fn hit(&self, x: f32, y: f32) -> TextPos {
+        let point = graphene::Point::new(x, y);
+        let p = match self.to_slide.clone().invert() {
+            Ok(inv) => inv.transform_point(&point),
+            Err(_) => point,
+        };
+        self.hit_box(p.x(), p.y())
+    }
+
+    /// The position nearest the point (`x`, `y`) of the text's box.
+    fn hit_box(&self, x: f32, y: f32) -> TextPos {
+        let (x, y) = (x - self.x0, y - self.y0);
+        let paras = &self.block.paras;
+        let Some(last) = paras.len().checked_sub(1) else {
+            return TextPos::default();
+        };
+        let i = paras
+            .iter()
+            .position(|p| y < p.y + p.height)
+            .unwrap_or(last);
+        let p = &paras[i];
+        let (_, index, trailing) = p.layout.xy_to_index(units(x - p.x), units(y - p.y));
+        TextPos::new(i, offset(&p.layout, index, trailing))
+    }
+
+    /// The caret at `pos`: a rectangle of no width as tall as its line, in the text's box.
+    pub fn caret(&self, pos: TextPos) -> graphene::Rect {
+        let Some(p) = self.block.paras.get(pos.paragraph) else {
+            return rect(self.x0, self.y0, 0.0, 0.0);
+        };
+        let (strong, _) = p.layout.cursor_pos(pos.offset as i32);
+        rect(
+            self.x0 + p.x + px(strong.x()),
+            self.y0 + p.y + px(strong.y()),
+            0.0,
+            px(strong.height()),
+        )
+    }
+
+    /// The rectangles that highlight `from..to`, in the text's box.
+    pub fn selection(&self, from: TextPos, to: TextPos) -> Vec<graphene::Rect> {
+        let mut out = Vec::new();
+        let paras = self.block.paras.iter().enumerate();
+        for (i, p) in paras.take(to.paragraph + 1).skip(from.paragraph) {
+            let a = if i == from.paragraph { from.offset } else { 0 };
+            let b = if i == to.paragraph {
+                to.offset
+            } else {
+                p.layout.text().len()
+            };
+            let mut it = p.layout.iter();
+            loop {
+                let (top, bottom) = it.line_yrange();
+                if let Some(line) = it.line_readonly() {
+                    let start = line.start_index().max(0) as usize;
+                    let end = start + line.length().max(0) as usize;
+                    let (la, lb) = (a.max(start), b.min(end));
+                    if la < lb {
+                        let ranges = line.x_ranges(la as i32, lb as i32);
+                        for [x1, x2] in ranges.as_chunks::<2>().0 {
+                            out.push(rect(
+                                self.x0 + p.x + px(*x1),
+                                self.y0 + p.y + px(top),
+                                px(x2 - x1),
+                                px(bottom - top),
+                            ));
+                        }
+                    }
+                }
+                if !it.next_line() {
+                    break;
+                }
+            }
+        }
+        out
+    }
+
+    /// The position a character left (`forward` false) or right of `pos` as the text
+    /// shows, into the paragraph before or after at a paragraph's ends.
+    pub fn step(&self, pos: TextPos, forward: bool) -> Option<TextPos> {
+        let paras = &self.block.paras;
+        let p = paras.get(pos.paragraph)?;
+        let dir = if forward { 1 } else { -1 };
+        let (index, trailing) = p
+            .layout
+            .move_cursor_visually(true, pos.offset as i32, 0, dir);
+        if index < 0 {
+            let i = pos.paragraph.checked_sub(1)?;
+            return Some(TextPos::new(i, paras[i].layout.text().len()));
+        }
+        if index == i32::MAX {
+            return (pos.paragraph + 1 < paras.len()).then(|| TextPos::new(pos.paragraph + 1, 0));
+        }
+        Some(TextPos::new(
+            pos.paragraph,
+            offset(&p.layout, index, trailing),
+        ))
+    }
+
+    /// The position on the line above or below `pos` nearest `x` of the text's box.
+    pub fn vertical(&self, pos: TextPos, up: bool, x: f32) -> Option<TextPos> {
+        let paras = &self.block.paras;
+        let p = paras.get(pos.paragraph)?;
+        let (line, _) = p.layout.index_to_line_x(pos.offset as i32, false);
+        let (i, line) = if up && line > 0 {
+            (pos.paragraph, line - 1)
+        } else if up {
+            let i = pos.paragraph.checked_sub(1)?;
+            (i, paras[i].layout.line_count() - 1)
+        } else if line + 1 < p.layout.line_count() {
+            (pos.paragraph, line + 1)
+        } else if pos.paragraph + 1 < paras.len() {
+            (pos.paragraph + 1, 0)
+        } else {
+            return None;
+        };
+        let q = &paras[i];
+        let (top, bottom) = line_yrange(&q.layout, line);
+        let (_, index, trailing) = q
+            .layout
+            .xy_to_index(units(x - self.x0 - q.x), (top + bottom) / 2);
+        Some(TextPos::new(i, offset(&q.layout, index, trailing)))
+    }
+
+    /// The start and end of the line `pos` is on (Home and End): the end before the
+    /// line's break or the space it wraps at.
+    pub fn line_ends(&self, pos: TextPos) -> (TextPos, TextPos) {
+        let Some(p) = self.block.paras.get(pos.paragraph) else {
+            return (pos, pos);
+        };
+        let (n, _) = p.layout.index_to_line_x(pos.offset as i32, false);
+        let Some(line) = p.layout.line_readonly(n) else {
+            return (pos, pos);
+        };
+        let text = p.layout.text();
+        let start = (line.start_index().max(0) as usize).min(text.len());
+        let mut end = (start + line.length().max(0) as usize).min(text.len());
+        if let Some(c) = text[start..end].chars().next_back() {
+            if c == '\n' || (end < text.len() && c.is_whitespace()) {
+                end -= c.len_utf8();
+            }
+        }
+        (
+            TextPos::new(pos.paragraph, start),
+            TextPos::new(pos.paragraph, end),
+        )
+    }
+}
+
+/// The topmost of the slide's own shapes at the slide point (`x`, `y`), in pixels at
+/// `scale`, when it has text: the shape to edit there.
+pub fn text_shape_at(slide: &Slide, scale: f32, x: f32, y: f32) -> Option<usize> {
+    let (i, shape) = slide
+        .shapes
+        .iter()
+        .enumerate()
+        .rev()
+        .filter(|(_, s)| s.layer == Layer::Slide)
+        .find(|(_, s)| {
+            in_box(&s.frame, scale, x, y) || s.text_frame.is_some_and(|f| in_box(&f, scale, x, y))
+        })?;
+    shape.text.is_some().then_some(i)
+}
+
+fn dashed_box(snap: &gtk::Snapshot, f: &Frame, scale: f32, color: &gdk::RGBA) {
+    in_frame(snap, f, scale, |w, h| {
+        let s = gsk::Stroke::new(1.0);
+        s.set_dash(&[4.0, 3.0]);
+        snap.append_stroke(&geometry("rect", None, w, h), &s, color);
+    });
+}
+
+/// Dashed outlines of the slide's empty placeholders, so there's somewhere to click to
+/// type into them. The canvas shows them; thumbnails and the slideshow don't.
+pub fn draw_empty_placeholders(snap: &gtk::Snapshot, slide: &Slide, scale: f32, color: &gdk::RGBA) {
+    let empty = slide.shapes.iter().filter(|s| {
+        s.layer == Layer::Slide
+            && s.placeholder.is_some()
+            && s.text.as_ref().is_none_or(TextBody::is_empty)
+    });
+    for shape in empty {
+        dashed_box(snap, &shape.frame, scale, color);
+    }
+}
+
+/// The text being edited: its box, the selection from `anchor` to `caret`, and the caret
+/// in the colour of the text it types.
+pub fn draw_editing(
+    snap: &gtk::Snapshot,
+    ctx: &pango::Context,
+    shape: &Shape,
+    scale: f32,
+    anchor: TextPos,
+    caret: TextPos,
+    accent: &gdk::RGBA,
+) {
+    let (Some(body), Some(placed)) = (shape.text.as_ref(), place_text(ctx, shape, scale)) else {
+        return;
+    };
+    dashed_box(
+        snap,
+        shape.text_frame.as_ref().unwrap_or(&shape.frame),
+        scale,
+        accent,
+    );
+    snap.save();
+    snap.transform(Some(&placed.to_slide));
+    if anchor != caret {
+        let highlight = gdk::RGBA::new(accent.red(), accent.green(), accent.blue(), 0.3);
+        for r in placed.selection(anchor.min(caret), anchor.max(caret)) {
+            snap.append_color(&highlight, &r);
+        }
+    }
+    let mut color = deck_edit::look(body, caret, caret).map_or(Color::BLACK, |r| r.color);
+    if color.alpha == 0 {
+        color = Color::BLACK;
+    }
+    color.alpha = 255;
+    let c = placed.caret(caret);
+    snap.append_color(&rgba(color), &rect(c.x() - 0.75, c.y(), 1.5, c.height()));
+    snap.restore();
 }
 
 /// A table at the origin: rows grow to fit their text, as PowerPoint draws them; fills,

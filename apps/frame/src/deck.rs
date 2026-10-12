@@ -1,8 +1,10 @@
-//! An open deck: the presentation as `pptx` read it, with its pictures decoded into GDK
-//! textures. Both happen in [`Deck::load`], off the UI thread (ADR 0004).
+//! An open deck: the presentation as `pptx` read it and as edits change it, with its
+//! pictures decoded into GDK textures. Reading and decoding happen in [`Deck::load`], off
+//! the UI thread (ADR 0004).
 
 use gtk::{gdk, glib};
 use presentation_model::{Background, Fill, Image, Presentation, ShapeKind};
+use std::cell::{Ref, RefCell, RefMut};
 use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
@@ -38,7 +40,7 @@ impl std::error::Error for OpenError {
 }
 
 pub struct Deck {
-    pub presentation: Presentation,
+    presentation: RefCell<Presentation>,
     /// Decoded pictures by the address of their bytes (slides share an `Arc` per part).
     textures: HashMap<usize, gdk::Texture>,
 }
@@ -55,12 +57,8 @@ impl Deck {
             return Err(OpenError::Refused(why));
         }
         let presentation = pptx::read(path).map_err(OpenError::Read)?;
-        let mut deck = Deck {
-            presentation,
-            textures: HashMap::new(),
-        };
         let mut images = Vec::new();
-        for slide in &deck.presentation.slides {
+        for slide in &presentation.slides {
             if let Background::Picture(image) = &slide.background {
                 images.push(image);
             }
@@ -92,8 +90,20 @@ impl Deck {
                 Err(e) => tracing::warn!("a {} picture doesn't decode: {e}", image.format.name()),
             }
         }
-        deck.textures = textures;
-        Ok(deck)
+        Ok(Deck {
+            presentation: RefCell::new(presentation),
+            textures,
+        })
+    }
+
+    /// The presentation as it is now.
+    pub fn presentation(&self) -> Ref<'_, Presentation> {
+        self.presentation.borrow()
+    }
+
+    /// The presentation, to change through `deck-edit`.
+    pub fn presentation_mut(&self) -> RefMut<'_, Presentation> {
+        self.presentation.borrow_mut()
     }
 
     /// The decoded picture, when it decodes.
@@ -121,7 +131,8 @@ impl Deck {
                 })
                 .sum()
         };
-        let slides = &self.presentation.slides;
+        let presentation = self.presentation();
+        let slides = &presentation.slides;
         (0..slides.len())
             .max_by_key(|&i| (weight(&slides[i]), std::cmp::Reverse(i)))
             .unwrap_or(0)

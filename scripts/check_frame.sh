@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# FRAME-4 acceptance: Frame's viewer window; FRAME-5: its slideshow.
+# FRAME-4 acceptance: Frame's viewer window; FRAME-5: its slideshow; FRAME-6: text editing.
 #
 #   scripts/check_frame.sh [BINARY]   (default target/release/frame)
 #
@@ -28,6 +28,15 @@
 #      of the screen white); Space shows slide 2; Escape returns to the window on slide 2.
 #      Shift+F5 on slide 4, then Space: slide 5 is hidden, so the show ends, back on 4.
 #   8. a 4:3 deck (SampleShow.pptx) shows letterboxed in black on the 16:9 screen.
+# FRAME-6 acceptance: editing slide text, with undo.
+#   9. in layouts.pptx (PowerPoint's), a click at the end of slide 1's subtitle (a
+#      placeholder whose look all comes from its layout and master) puts the caret there,
+#      and Left moves it, not the slide; typing " here" changes the canvas description to
+#      "subtitle here" and draws more dark pixels where the subtitle is; Ctrl+Z undoes
+#      "here", then " "; Ctrl+Shift+Z and Ctrl+Y redo them; Enter and typing start a
+#      paragraph; Ctrl+A and Delete empty the placeholder, and typing fills it; Escape
+#      stops editing, so Page Down shows slide 2. On the fixture, a click at the end of
+#      slide 3's text box and "!" change it. Clicks go through the virtual pointer.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -74,7 +83,9 @@ def canvas():
         stack.extend(n.get_child_at_index(i) for i in range(n.get_child_count()))
     sys.exit("no canvas")
 
-def main(path, points):
+def slide(path):
+    # The slide in the screenshot: what differs from the canvas backdrop in its middle row
+    # and column. Returns the pixel reader and the left, top, width, and height of the slide.
     cx, cy, cw, ch = canvas()
     p = GdkPixbuf.Pixbuf.new_from_file(path)
     rs, nc, px = p.get_rowstride(), p.get_n_channels(), p.get_pixels()
@@ -86,16 +97,31 @@ def main(path, points):
     col = [y for y in range(cy, cy + ch) if far(at(mx, y), back)]
     if not row or not col:
         sys.exit("no slide in the canvas")
-    left, right, top, bottom = row[0], row[-1], col[0], col[-1]
-    print(f"slide at {left},{top} {right - left + 1}x{bottom - top + 1}")
+    return at, row[0], col[0], row[-1] - row[0] + 1, col[-1] - col[0] + 1
+
+def main(path, points):
+    at, left, top, w, h = slide(path)
+    print(f"slide at {left},{top} {w}x{h}")
     for spec in points:
         name, fx, fy, want = spec.split(":")
-        x = round(left + float(fx) * (right - left + 1))
-        y = round(top + float(fy) * (bottom - top + 1))
+        x = round(left + float(fx) * w)
+        y = round(top + float(fy) * h)
         got = at(x, y)
-        w = tuple(int(want[i:i + 2], 16) for i in (0, 2, 4))
-        res = "no" if any(abs(got[k] - w[k]) > 12 for k in range(3)) else "yes"
+        wc = tuple(int(want[i:i + 2], 16) for i in (0, 2, 4))
+        res = "no" if any(abs(got[k] - wc[k]) > 12 for k in range(3)) else "yes"
         print(f"match {name}: {res} (got {bytes(got).hex().upper()} at {x},{y})")
+
+def point(path, fx, fy):
+    # The screen point at fractions of the slide, to click.
+    _, left, top, w, h = slide(path)
+    print(round(left + float(fx) * w), round(top + float(fy) * h))
+
+def ink(path, name, fx0, fy0, fx1, fy1):
+    # Pixels drawn darker than light grey in a box given in fractions of the slide.
+    at, left, top, w, h = slide(path)
+    xs = range(round(left + float(fx0) * w), round(left + float(fx1) * w))
+    ys = range(round(top + float(fy0) * h), round(top + float(fy1) * h))
+    print(f"ink {name}: {sum(1 for y in ys for x in xs if max(at(x, y)) < 200)}")
 
 def screen(path, points):
     # Absolute points (the slideshow fills the screen) and the share of white pixels.
@@ -113,6 +139,10 @@ def screen(path, points):
 
 if sys.argv[1] == "screen":
     screen(sys.argv[2], sys.argv[3:])
+elif sys.argv[1] == "point":
+    point(*sys.argv[2:5])
+elif sys.argv[1] == "ink":
+    ink(*sys.argv[2:8])
 else:
     main(sys.argv[1], sys.argv[2:])
 PY
@@ -169,6 +199,31 @@ session() {
   frame /tmp/f/SampleShow.pptx >>/tmp/app.log 2>&1 & sleep 3
   keys -k F5; sleep 2; shot letterbox
   python3 /tmp/px.py screen /shots/letterbox.png left:40:360:000000 right:1240:360:000000 slide:640:40:FFFFFF
+  pkill -x frame; sleep 0.5
+
+  echo "== 9 editing"
+  frame /tmp/f/layouts.pptx >>/tmp/app.log 2>&1 & sleep 3
+  shot edit0
+  python3 /tmp/px.py ink /shots/edit0.png before 0.15 0.57 0.85 0.65
+  read x y < <(python3 /tmp/px.py point /shots/edit0.png 0.828 0.6095)
+  python3 /scripts/dnd_helpers.py drag $x $y $x $y; sleep 0.5
+  keys -k Left; sleep 0.3; shown left
+  keys -k End " here"; sleep 0.5; shot edit1; shown typed
+  python3 /tmp/px.py ink /shots/edit1.png after 0.15 0.57 0.85 0.65
+  keys -M ctrl z -m ctrl; sleep 0.5; shown undo1
+  keys -M ctrl z -m ctrl; sleep 0.5; shown undo2
+  keys -M ctrl -M shift z -m shift -m ctrl; sleep 0.5; shown redo1
+  keys -M ctrl y -m ctrl; sleep 0.5; shown redo2
+  keys -k Return "second"; sleep 0.5; shown enter
+  keys -M ctrl a -m ctrl -k Delete; sleep 0.5; shot edit-empty; shown cleared
+  keys "Typed"; sleep 0.5; shown retyped
+  keys -k Escape -k Next; sleep 0.5; shown escape
+  pkill -x frame; sleep 0.5
+  frame /tmp/f/fixture.pptx >>/tmp/app.log 2>&1 & sleep 3
+  keys -k Next -k Next; sleep 0.5; shot textbox0
+  read x y < <(python3 /tmp/px.py point /shots/textbox0.png 0.730 0.878)
+  python3 /scripts/dnd_helpers.py drag $x $y $x $y; sleep 0.5
+  keys "!"; sleep 0.5; shot textbox1; shown textbox
   pkill -x frame; sleep 0.5
 
   echo "== 5 drop"
@@ -245,6 +300,21 @@ absent "7: ... no slideshow left" "7 slideshow" "^past: Slideshow slide"
 check "8: a 4:3 deck is letterboxed in black (left)" "8 letterbox" "^match left: yes"
 check "8: ... (right)" "8 letterbox" "^match right: yes"
 check "8: ... around the slide" "8 letterbox" "^match slide: yes"
+# FRAME-6: editing slide text.
+check "9: a click puts the caret in the subtitle; Left moves it, not the slide" "9 editing" "^left: Slide 1 of 10$"
+check "9: typing changes the placeholder" "9 editing" "^typed: subtitle here$"
+b=$(section "9 editing" | sed -n "s/^ink before: //p"); a=$(section "9 editing" | sed -n "s/^ink after: //p")
+if [ -n "$a" ] && [ -n "$b" ] && [ "$a" -gt $((b + 100)) ]; then echo "ok   9: ... and the slide draws the typed text ($b -> $a dark pixels)"; else echo "FAIL 9: the slide draws the typed text (${b:-?} -> ${a:-?} dark pixels)"; fail=1; fi
+check "9: Ctrl+Z undoes the last word" "9 editing" "^undo1: subtitle $"
+check "9: ... and then the space before it" "9 editing" "^undo2: subtitle$"
+check "9: Ctrl+Shift+Z redoes the space" "9 editing" "^redo1: subtitle $"
+check "9: Ctrl+Y redoes the word" "9 editing" "^redo2: subtitle here$"
+check "9: Enter starts a paragraph" "9 editing" "^enter: second$"
+check "9: ... after the first" "9 editing" "^enter: subtitle here$"
+absent "9: Ctrl+A and Delete empty the placeholder" "9 editing" "^cleared: (subtitle|second)"
+check "9: typing fills the empty placeholder" "9 editing" "^retyped: Typed$"
+check "9: Escape stops editing; Page Down changes slides again" "9 editing" "^escape: Slide 2 of 10$"
+check "9: typing in a text box changes it" "9 editing" "^textbox: Text box: bold blue and theme in Liberation Serif!$"
 if [ $fail = 0 ]; then echo "FRAME OK"; else
   echo "FRAME CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

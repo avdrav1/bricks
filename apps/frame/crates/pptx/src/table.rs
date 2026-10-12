@@ -5,7 +5,9 @@
 use crate::fill::Looks;
 use crate::text::{self, FontRef, Styles, TextContext};
 use crate::xml::{self, Element};
-use presentation_model::{Anchor, Borders, Fill, Insets, Outline, Table, TableCell, TableRow};
+use presentation_model::{
+    Anchor, Borders, Fill, Insets, Outline, Source, Table, TableCell, TableRow,
+};
 use std::sync::LazyLock;
 
 /// PowerPoint's default table style ("Medium Style 2 - Accent 1"), for decks that name
@@ -34,7 +36,7 @@ pub(crate) fn table(
     tbl: &Element,
     looks: &Looks<'_>,
     ctx: &TextContext<'_>,
-    base: &[&Element],
+    base: &[(&Element, Source)],
     styles: Option<&Element>,
 ) -> Table {
     let columns: Vec<i64> = tbl
@@ -250,7 +252,7 @@ fn cell(
     mut look: CellLook,
     looks: &Looks<'_>,
     ctx: &TextContext<'_>,
-    base: &[&Element],
+    base: &[(&Element, Source)],
 ) -> TableCell {
     let pr = tc.child("tcPr");
     if let Some(pr) = pr {
@@ -275,6 +277,7 @@ fn cell(
         font_ref: look.font_ref,
         shape: tx_body
             .and_then(|b| b.child("lstStyle"))
+            .map(|s| (s, Source::Own))
             .into_iter()
             .collect(),
         body: Vec::new(),
