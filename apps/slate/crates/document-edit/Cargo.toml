@@ -10,6 +10,9 @@ publish = false
 [dependencies]
 document-model.workspace = true
 
+[dev-dependencies]
+docx.workspace = true
+
 [lints]
 workspace = true
 

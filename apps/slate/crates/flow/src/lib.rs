@@ -707,24 +707,28 @@ impl Flow {
         self.selection = None;
     }
 
-    /// The leaf of top-level block `block` when that block is text (a paragraph, list
-    /// item, code block, or raw source).
-    pub fn block_leaf(&self, block: usize) -> Option<LeafId> {
-        let (leaf, ..) = tree::text_place(self.tops.get(block)?)?;
-        Some(leaf)
+    /// The leaf at `path` (see [`Flow::path`]), if there is one.
+    pub fn leaf_at(&self, path: &[u32]) -> Option<LeafId> {
+        let i = self
+            .leaves
+            .binary_search_by(|l| l.path[..].cmp(path))
+            .ok()?;
+        Some(LeafId(i as u32))
     }
 
-    /// Where top-level text block `block` lays out its text, measured at the width first.
-    pub fn text_place(&mut self, block: usize, shaper: &mut dyn Shaper) -> Option<TextPlace> {
-        tree::text_place(self.tops.get(block)?)?;
+    /// Where text leaf `leaf` lays out its text, its top-level block measured at the width
+    /// first; `None` for a leaf without laid-out text (a picture, page break, or rule).
+    pub fn text_place(&mut self, leaf: LeafId, shaper: &mut dyn Shaper) -> Option<TextPlace> {
+        let block = *self.leaves.get(leaf.index())?.path.first()? as usize;
         self.measure_block(block, shaper);
-        let (leaf, x, above) = tree::text_place(&self.tops[block])?;
+        let (x, y, width) =
+            tree::text_place(&self.tops[block], leaf, 0, self.top_of(block), self.width)?;
         Some(TextPlace {
             leaf,
             key: self.leaves[leaf.index()].key,
             x,
-            y: self.top_of(block) + f64::from(above),
-            width: (self.width - x).max(1),
+            y,
+            width,
         })
     }
 

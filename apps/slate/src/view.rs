@@ -22,7 +22,7 @@ mod caret;
 mod shaper;
 
 use crate::settings::TextWidth;
-use document_edit::{Change, Edit, Flag, History, Pos};
+use document_edit::{Change, Container, Edit, Flag, History, Pos};
 use document_model::{ParagraphStyle, RunStyle};
 use flow::{Flow, Located, Paint, Splice, LEVEL_INDENT};
 use gtk::prelude::*;
@@ -118,8 +118,8 @@ struct State {
     history: History,
     /// `None` when the document has no editable block.
     caret: Option<Pos>,
-    /// Where Up and Down aim, in pango units from the column's left edge.
-    goal: Option<i32>,
+    /// Where Up and Down aim, in pixels from the column's left edge.
+    goal: Option<f64>,
     /// The look the next typed text takes when Ctrl+B or Ctrl+I changed it at the caret.
     typing: Option<RunStyle>,
     /// Plain text: no formatting, lists, or headings.
@@ -999,16 +999,23 @@ mod imp {
             });
         }
 
-        /// Tab in a list item nests it a level deeper (Shift+Tab shallower); elsewhere Tab
-        /// types a tab.
+        /// Tab in a table cell goes to the next cell (Shift+Tab the one before), and out of
+        /// the table past its last; in a list item it nests the item a level deeper
+        /// (Shift+Tab shallower); elsewhere it types a tab.
         fn tab(&self, back: bool) {
-            let in_list = self.state.borrow().as_ref().is_some_and(|st| {
-                !st.plain && st.caret.is_some_and(|c| caret::is_list_item(st, c.block))
+            let (in_cell, in_list) = self.state.borrow().as_ref().map_or((false, false), |st| {
+                let c = st.caret;
+                (
+                    c.is_some_and(|c| matches!(c.at, Container::Cell { .. })),
+                    !st.plain && c.is_some_and(|c| caret::is_list_item(st, c)),
+                )
             });
-            if in_list {
+            if in_cell {
+                self.move_caret(false, |st, c| caret::next_cell(st, c, !back).unwrap_or(c));
+            } else if in_list {
                 self.edit_with(true, |st| {
-                    let blocks = caret::blocks(st)?;
-                    document_edit::indent(st.flow.document(), blocks, if back { -1 } else { 1 })
+                    let (at, blocks) = caret::blocks(st)?;
+                    document_edit::indent(st.flow.document(), at, blocks, if back { -1 } else { 1 })
                 });
             } else if !back {
                 self.type_text("\t");
@@ -1051,13 +1058,14 @@ mod imp {
                         0 => ParagraphStyle::Normal,
                         n => ParagraphStyle::Heading(n.min(6)),
                     };
-                    let blocks = caret::blocks(st).filter(|_| !st.plain)?;
-                    document_edit::set_style(st.flow.document(), blocks, style)
+                    let (at, blocks) = caret::blocks(st).filter(|_| !st.plain)?;
+                    document_edit::set_style(st.flow.document(), at, blocks, style)
                 }),
                 Command::Bullets | Command::Numbers => self.edit_with(true, |st| {
-                    let blocks = caret::blocks(st).filter(|_| !st.plain)?;
+                    let (at, blocks) = caret::blocks(st).filter(|_| !st.plain)?;
                     document_edit::toggle_list(
                         st.flow.document(),
+                        at,
                         blocks,
                         command == Command::Numbers,
                     )
@@ -1162,12 +1170,20 @@ impl Page {
     }
 }
 
-/// The blocks an edit's change replaced, for the flow.
+/// The top-level blocks an edit's change replaced, for the flow: an edit in a cell
+/// replaces its table.
 fn splice(change: Change) -> Splice {
-    Splice {
-        start: change.start,
-        removed: change.removed,
-        inserted: change.inserted,
+    match change.at {
+        Container::Top => Splice {
+            start: change.start,
+            removed: change.removed,
+            inserted: change.inserted,
+        },
+        Container::Cell { table, .. } => Splice {
+            start: table,
+            removed: 1,
+            inserted: 1,
+        },
     }
 }
 

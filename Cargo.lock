@@ -231,6 +231,7 @@ name = "document-edit"
 version = "0.1.0"
 dependencies = [
  "document-model",
+ "docx",
 ]
 
 [[package]]

@@ -1,14 +1,18 @@
 //! Looks edits: paragraph style, list kind, list level, and ordered labels of whole
 //! blocks, each holding the blocks' looks (without their text) before and after.
 
-use crate::{bare, paragraph, set_runs, shell, take_runs, text_len, Change, Edit, Pos};
+use crate::{
+    bare, block_len, blocks, blocks_mut, paragraph, set_runs, shell, take_runs, Change, Container,
+    Edit, Pos,
+};
 use document_model::{Block, Document, ListItem, ListKind, Paragraph, ParagraphStyle};
 use std::ops::Range;
 
-/// Changing the looks of whole blocks: each block's index, its looks before, and its
-/// looks after, as blocks without text.
+/// Changing the looks of whole blocks of a container: each block's index, its looks
+/// before, and its looks after, as blocks without text.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct LooksEdit {
+    at: Container,
     blocks: Vec<(usize, Block, Block)>,
     /// Where the caret goes; `None` selects the changed blocks.
     caret: Option<Pos>,
@@ -22,8 +26,17 @@ fn restyle(block: &mut Block, looks: &Block) {
 }
 
 impl LooksEdit {
-    pub(crate) fn new(blocks: Vec<(usize, Block, Block)>, caret: Option<Pos>) -> LooksEdit {
-        LooksEdit { blocks, caret }
+    pub(crate) fn new(
+        at: Container,
+        blocks: Vec<(usize, Block, Block)>,
+        caret: Option<Pos>,
+    ) -> LooksEdit {
+        LooksEdit { at, blocks, caret }
+    }
+
+    /// The blocks of the edit's container.
+    fn container<'a>(&self, doc: &'a mut Document) -> &'a mut Vec<Block> {
+        blocks_mut(doc, self.at).expect("the edit's container exists")
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -31,14 +44,22 @@ impl LooksEdit {
     }
 
     pub(crate) fn set(&self, doc: &mut Document) {
+        if self.blocks.is_empty() {
+            return;
+        }
+        let blocks = self.container(doc);
         for (i, _, after) in &self.blocks {
-            restyle(&mut doc.blocks[*i], after);
+            restyle(&mut blocks[*i], after);
         }
     }
 
     pub(crate) fn unset(&self, doc: &mut Document) {
+        if self.blocks.is_empty() {
+            return;
+        }
+        let blocks = self.container(doc);
         for (i, before, _) in self.blocks.iter().rev() {
-            restyle(&mut doc.blocks[*i], before);
+            restyle(&mut blocks[*i], before);
         }
     }
 
@@ -48,12 +69,20 @@ impl LooksEdit {
         let n = last - first + 1;
         let (caret, anchor) = match self.caret {
             Some(caret) => (caret, None),
-            None => (
-                Pos::new(last, text_len(doc, last).unwrap_or(0)),
-                Some(Pos::new(first, 0)),
-            ),
+            None => {
+                let len = blocks(doc, self.at)
+                    .and_then(|b| b.get(last))
+                    .and_then(block_len);
+                let start = Pos {
+                    at: self.at,
+                    block: first,
+                    offset: 0,
+                };
+                (start.moved(last, len.unwrap_or(0)), Some(start))
+            }
         };
         Change {
+            at: self.at,
             start: first,
             removed: n,
             inserted: n,
@@ -81,20 +110,29 @@ impl LooksEdit {
     }
 }
 
-fn edit(blocks: Vec<(usize, Block, Block)>) -> Option<Edit> {
-    (!blocks.is_empty()).then(|| LooksEdit::new(blocks, None).into())
+fn edit(at: Container, blocks: Vec<(usize, Block, Block)>) -> Option<Edit> {
+    (!blocks.is_empty()).then(|| LooksEdit::new(at, blocks, None).into())
 }
 
-/// `blocks` clamped to the document.
-fn clamp(doc: &Document, blocks: Range<usize>) -> Range<usize> {
-    blocks.start.min(doc.blocks.len())..blocks.end.min(doc.blocks.len())
+/// The blocks of `at` and `range` clamped to them.
+fn clamp(doc: &Document, at: Container, range: Range<usize>) -> Option<(&[Block], Range<usize>)> {
+    let blocks = blocks(doc, at)?;
+    let n = blocks.len();
+    Some((blocks, range.start.min(n)..range.end.min(n)))
 }
 
-/// Give the paragraphs in `blocks` `style`; list items there become paragraphs in it.
-pub fn set_style(doc: &Document, blocks: Range<usize>, style: ParagraphStyle) -> Option<Edit> {
+/// Give the paragraphs in `blocks` of `at` `style`; list items there become paragraphs
+/// in it.
+pub fn set_style(
+    doc: &Document,
+    at: Container,
+    blocks: Range<usize>,
+    style: ParagraphStyle,
+) -> Option<Edit> {
+    let (blocks, range) = clamp(doc, at, blocks)?;
     let mut out = Vec::new();
-    for i in clamp(doc, blocks) {
-        let block = &doc.blocks[i];
+    for i in range {
+        let block = &blocks[i];
         let p = match block {
             Block::Paragraph(p) if p.style != style => p,
             Block::ListItem(item) => &item.paragraph,
@@ -103,7 +141,7 @@ pub fn set_style(doc: &Document, blocks: Range<usize>, style: ParagraphStyle) ->
         let after = Block::Paragraph(Paragraph { style, ..bare(p) });
         out.push((i, shell(block), after));
     }
-    edit(out)
+    edit(at, out)
 }
 
 fn same_kind(kind: &ListKind, ordered: bool) -> bool {
@@ -126,20 +164,21 @@ fn new_kind(ordered: bool) -> ListKind {
 }
 
 /// Bulleted (or numbered when `ordered`) list on or off for the paragraphs and list items
-/// in `blocks`: off when they all already are list items of that kind, else on.
-pub fn toggle_list(doc: &Document, blocks: Range<usize>, ordered: bool) -> Option<Edit> {
-    let blocks = clamp(doc, blocks);
-    let texts = || {
-        blocks
-            .clone()
-            .filter(|&i| paragraph(&doc.blocks[i]).is_some())
-    };
+/// in `blocks` of `at`: off when they all already are list items of that kind, else on.
+pub fn toggle_list(
+    doc: &Document,
+    at: Container,
+    blocks: Range<usize>,
+    ordered: bool,
+) -> Option<Edit> {
+    let (blocks, range) = clamp(doc, at, blocks)?;
+    let texts = || range.clone().filter(|&i| paragraph(&blocks[i]).is_some());
     texts().next()?;
     let off = texts()
-        .all(|i| matches!(&doc.blocks[i], Block::ListItem(item) if same_kind(&item.kind, ordered)));
+        .all(|i| matches!(&blocks[i], Block::ListItem(item) if same_kind(&item.kind, ordered)));
     let mut out = Vec::new();
     for i in texts() {
-        let block = &doc.blocks[i];
+        let block = &blocks[i];
         let after = match block {
             Block::ListItem(item) if off => Block::Paragraph(Paragraph {
                 style: ParagraphStyle::Normal,
@@ -166,18 +205,20 @@ pub fn toggle_list(doc: &Document, blocks: Range<usize>, ordered: bool) -> Optio
         };
         out.push((i, shell(block), after));
     }
-    edit(out)
+    edit(at, out)
 }
 
 /// The deepest list level.
 const MAX_LEVEL: i16 = 8;
 
-/// Move the list items in `blocks` `by` levels deeper (shallower when negative), within
-/// 0..=8. A numbered item moved starts at 1 unless it continues a list at its new level.
-pub fn indent(doc: &Document, blocks: Range<usize>, by: i8) -> Option<Edit> {
+/// Move the list items in `blocks` of `at` `by` levels deeper (shallower when negative),
+/// within 0..=8. A numbered item moved starts at 1 unless it continues a list at its new
+/// level.
+pub fn indent(doc: &Document, at: Container, blocks: Range<usize>, by: i8) -> Option<Edit> {
+    let (blocks, range) = clamp(doc, at, blocks)?;
     let mut out = Vec::new();
-    for i in clamp(doc, blocks) {
-        let block = &doc.blocks[i];
+    for i in range {
+        let block = &blocks[i];
         let Block::ListItem(item) = block else {
             continue;
         };
@@ -199,7 +240,7 @@ pub fn indent(doc: &Document, blocks: Range<usize>, by: i8) -> Option<Edit> {
         });
         out.push((i, shell(block), after));
     }
-    edit(out)
+    edit(at, out)
 }
 
 /// `label` with its first run of decimal digits replaced by `number`; a label without
@@ -214,25 +255,26 @@ fn numbered(label: &str, number: u64) -> String {
     format!("{}{number}{}", &label[..start], &label[end..])
 }
 
-/// Renumber the ordered items of the lists touching `blocks` (of `doc` as it is now): at
-/// each level, consecutive numbered items (deeper items between them don't break the run,
-/// a shallower or other item does) count up from the first one's number, labelled like it.
-pub(crate) fn relabel(doc: &Document, blocks: Range<usize>) -> LooksEdit {
-    let n = doc.blocks.len();
-    let is_item = |i: usize| matches!(doc.blocks.get(i), Some(Block::ListItem(_)));
-    let mut lo = blocks.start.min(n);
+/// Renumber the ordered items of the lists touching `range` of `at` (of `doc` as it is
+/// now): at each level, consecutive numbered items (deeper items between them don't break
+/// the run, a shallower or other item does) count up from the first one's number,
+/// labelled like it.
+pub(crate) fn relabel(doc: &Document, at: Container, range: Range<usize>) -> LooksEdit {
+    let blocks = blocks(doc, at).unwrap_or_default();
+    let n = blocks.len();
+    let is_item = |i: usize| matches!(blocks.get(i), Some(Block::ListItem(_)));
+    let mut lo = range.start.min(n);
     while lo > 0 && is_item(lo - 1) {
         lo -= 1;
     }
-    let mut hi = blocks.end.min(n);
+    let mut hi = range.end.min(n);
     while hi < n && is_item(hi) {
         hi += 1;
     }
     // Per level: the next number and the first item's label.
     let mut runs: Vec<Option<(u64, &str)>> = Vec::new();
     let mut out = Vec::new();
-    for i in lo..hi {
-        let block = &doc.blocks[i];
+    for (i, block) in blocks.iter().enumerate().take(hi).skip(lo) {
         let Block::ListItem(item) = block else {
             runs.clear();
             continue;
@@ -262,5 +304,5 @@ pub(crate) fn relabel(doc: &Document, blocks: Range<usize>) -> LooksEdit {
             None => runs[level] = Some((number + 1, label)),
         }
     }
-    LooksEdit::new(out, None)
+    LooksEdit::new(at, out, None)
 }

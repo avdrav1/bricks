@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# SLATE-4, SLATE-10, SLATE-11, and SLATE-6 acceptance: the window opens, shows, and
-# refuses documents, its pageless column follows View → Text Width, its text selects and
-# copies, and it edits with undo.
+# SLATE-4, SLATE-10, SLATE-11, SLATE-6, and SLATE-12 acceptance: the window opens, shows,
+# and refuses documents, its pageless column follows View → Text Width, its text selects
+# and copies, and it edits with undo, table cells included.
 #
 #   scripts/check_slate.sh [BINARY]   (default target/release/slate)
 #
@@ -47,7 +47,13 @@
 #      parked on the Z: Ctrl+1 on the first line draws it at least 1.5 times as tall,
 #      Ctrl+Shift+8 on the second indents it as a bulleted item, Ctrl+B over the third
 #      (selected by dragging) gives it at least 1.15 times the ink; three Ctrl+Z give back
-#      the first screenshot's lines exactly and three Ctrl+Shift+Z the formatted ones.
+#      the first screenshot's lines exactly and three Ctrl+Shift+Z the formatted ones;
+#  16. in table.md ("Before", a 2x2 table a b / c d, "After"), each key followed by a
+#      typed digit, read through AT-SPI: End and Down go into cell a, Tab to b and on to
+#      c, Right twice from inside c into d, Tab past the last cell out to "After", Up back
+#      into c, Shift+Tab back to b; Backspace in b deletes, a second one at the cell's
+#      start does nothing, Enter splits b in two; undo to the end gives the opened text
+#      and redo to the end the edited one.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -392,6 +398,19 @@ session() {
   for i in 1 2 3; do keys -M ctrl -M shift z -m shift -m ctrl; done
   keys -M ctrl -k End -m ctrl; shot fmt-redone
   python3 /tmp/fmt.py; quit
+  echo "== 16 table"
+  printf "Before\n\n| a | b |\n|---|---|\n| c | d |\n\nAfter\n" > /tmp/table.md
+  slate /tmp/table.md >>/tmp/app.log 2>&1 & sleep 4
+  a11y page | sed "s/^/opened /"
+  keys -k End -s 200 -k Down -s 200 1 -s 200 -k Tab -s 200 2 -s 200 -k Tab -s 200 3 \
+    -s 200 -k Right -s 200 -k Right -s 200 4 -s 200 -k Tab -s 200 5 -s 200 -k Up -s 200 6 \
+    -s 200 -M shift -k Tab -m shift -s 200 7 -s 200 -k BackSpace -s 200 -k BackSpace -s 200 8 \
+    -s 200 -k Return -s 200 9; sleep 1
+  a11y page | sed "s/^/edited /"; shot table
+  keys -M ctrl $(for i in $(seq 25); do printf "z -s 120 "; done) -m ctrl; sleep 1
+  a11y page | sed "s/^/undone /"
+  keys -M ctrl -M shift $(for i in $(seq 25); do printf "z -s 120 "; done) -m shift -m ctrl; sleep 1
+  a11y page | sed "s/^/redone /"; quit
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -471,6 +490,11 @@ at_least "15: Ctrl+Shift+8 makes a bulleted item (px its text moves right)" "15 
 at_least "15: Ctrl+B over a selection makes it bold (percent ink)" "15 format" "bold ink" 115
 check "15: undo gives back the unformatted lines exactly" "15 format" "^undo restores: yes$"
 check "15: redo gives back the formatted lines exactly" "15 format" "^redo restores: yes$"
+check "16: the table reads in document order" "16 table" "^opened page: Before\|a\|b\|c\|d\|After$"
+check "16: arrows and Tab move into, between, and out of cells; typing, Backspace, and Enter edit cells" \
+  "16 table" "^edited page: Before\|a1\|8\|92b\|63c\|4d\|5After$"
+check "16: undo gives back the opened table" "16 table" "^undone page: Before\|a\|b\|c\|d\|After$"
+check "16: redo gives back the edited table" "16 table" "^redone page: Before\|a1\|8\|92b\|63c\|4d\|5After$"
 if [ $fail = 0 ]; then echo "SLATE OK"; else
   echo "SLATE CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

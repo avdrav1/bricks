@@ -187,7 +187,7 @@ fn an_edit_rebuilds_only_its_blocks_and_keeps_the_viewport() {
             .collect()
     };
     let before = shown(&flow);
-    let edited_key = flow.layout_key(flow.block_leaf(2).unwrap());
+    let edited_key = flow.layout_key(flow.leaf_at(&[2]).unwrap());
 
     // Typing in block 2, far above the viewport: one block, same counts.
     let shaped = fake.shaped;
@@ -259,6 +259,96 @@ fn an_edit_rebuilds_only_its_blocks_and_keeps_the_viewport() {
         flow.path(LeafId::from_index(cell)),
         fresh.path(LeafId::from_index(cell))
     );
+}
+
+/// A text's left edge, top, and wrap width.
+type Place = (i32, f64, i32);
+
+/// Every text leaf's place: what `text_place` says, and where `paint` draws it.
+fn places(flow: &mut Flow, fake: &mut Fake) -> Vec<(Place, Place)> {
+    let mut painted = Vec::new();
+    flow.paint(0.0, f64::MAX, &mut |p| {
+        if let Paint::Text {
+            leaf, x, y, width, ..
+        } = p
+        {
+            painted.push((leaf, (x, y, width)));
+        }
+    });
+    painted
+        .into_iter()
+        .map(|(leaf, at)| {
+            let p = flow.text_place(leaf, fake).unwrap();
+            ((p.x, p.y, p.width), at)
+        })
+        .collect()
+}
+
+#[test]
+fn a_cells_growth_relays_out_only_its_table() {
+    let mut fake = Fake::default();
+    let mut blocks = many(20);
+    blocks.insert(
+        10,
+        table(vec![
+            vec![cell(vec![para("a")]), cell(vec![para("b")])],
+            vec![cell(vec![para("c")]), cell(vec![para("d"), para("e")])],
+        ]),
+    );
+    let mut flow = laid_out(blocks, 200, &mut fake);
+    for (place, painted) in places(&mut flow, &mut fake) {
+        assert_eq!(place, painted, "text_place is where paint draws the text");
+    }
+    let after_table = |flow: &mut Flow, fake: &mut Fake| {
+        let leaf = flow.leaf_at(&[11]).unwrap();
+        flow.text_place(leaf, fake).unwrap().y
+    };
+    let before_table = flow
+        .text_place(flow.leaf_at(&[9]).unwrap(), &mut fake)
+        .unwrap()
+        .y;
+    let below = after_table(&mut flow, &mut fake);
+    let cell_b = flow.leaf_at(&[10, 0, 1, 0]).unwrap();
+    let line = flow.text_place(cell_b, &mut fake).unwrap().width / 10;
+
+    // Cell b grows by two lines: only the table is laid out again.
+    let shaped = fake.shaped;
+    flow.edit(&mut fake, |doc| {
+        let Block::Table(t) = &mut doc.blocks[10] else {
+            unreachable!()
+        };
+        let Block::Paragraph(p) = &mut t.rows[0].cells[1].blocks[0] else {
+            unreachable!()
+        };
+        p.runs[0].text.push_str(&"x".repeat(2 * line as usize));
+        (
+            (),
+            Splice {
+                start: 10,
+                removed: 1,
+                inserted: 1,
+            },
+        )
+    });
+    flow.layout_slice(&mut fake, &mut || true);
+    assert_eq!(
+        fake.shaped - shaped,
+        5,
+        "the table's five cell paragraphs, nothing else"
+    );
+    assert_eq!(
+        flow.text_place(flow.leaf_at(&[9]).unwrap(), &mut fake)
+            .unwrap()
+            .y,
+        before_table
+    );
+    assert_eq!(
+        after_table(&mut flow, &mut fake),
+        below + f64::from(2 * LINE)
+    );
+    for (place, painted) in places(&mut flow, &mut fake) {
+        assert_eq!(place, painted);
+    }
 }
 
 #[test]

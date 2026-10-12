@@ -434,10 +434,34 @@ pub(crate) fn number_breaks(tops: &mut [Node]) -> (usize, Vec<usize>) {
     (count, holding)
 }
 
-/// Where a top-level text node's text sits in its box: its leaf, left edge, and top.
-pub(crate) fn text_place(node: &Node) -> Option<(LeafId, i32, i32)> {
+/// Where `leaf`'s text sits in `node`, whose box starts at (`x`, `y`) and is `width`
+/// wide: its left edge, top, and wrap width; `None` when `leaf` isn't text in it. Inside a
+/// table this holds only once the table is measured at `width`.
+pub(crate) fn text_place(
+    node: &Node,
+    leaf: LeafId,
+    x: i32,
+    y: f64,
+    width: i32,
+) -> Option<(i32, f64, i32)> {
     match &node.kind {
-        Kind::Text(b) => Some((b.leaf, b.indent, b.above)),
+        Kind::Text(b) if b.leaf == leaf => Some((
+            x + b.indent,
+            y + f64::from(b.above),
+            (width - b.indent).max(1),
+        )),
+        Kind::Table(table) => {
+            let top = y + f64::from(TABLE_MARGIN);
+            table.rows.iter().find_map(|row| {
+                row.cells.iter().find_map(|cell| {
+                    let cx = x + cell.x + CELL_BORDER + CELL_PADDING;
+                    let inner = cell_inner(cell.width);
+                    cell.nodes
+                        .iter()
+                        .find_map(|n| text_place(n, leaf, cx, top + f64::from(row.y + n.y), inner))
+                })
+            })
+        }
         _ => None,
     }
 }

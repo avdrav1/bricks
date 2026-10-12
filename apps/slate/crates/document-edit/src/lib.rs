@@ -4,6 +4,9 @@
 //! (paragraph style, list membership, list level, list labels) and holds each block's
 //! looks before and after. [`History`] keeps the steps for undo and redo.
 //!
+//! Edits work in a [`Container`]: the document's blocks, or a table cell's. An edit stays
+//! inside its container, and undo and redo act on the same one.
+//!
 //! Paragraphs stay normalized ([`normalize`]): neighbouring runs that look the same are
 //! one run and no run is empty, so undoing an edit gives back the document exactly.
 //!
@@ -17,23 +20,111 @@ pub use text::{join_backward, join_forward, look, replace, split, toggle, TextEd
 
 use document_model::{Block, CodeBlock, Document, ListItem, Paragraph, Run};
 use std::borrow::Cow;
+use std::cmp::Ordering;
 use std::collections::VecDeque;
 
 /// Steps kept for undo; older ones are forgotten.
 pub const HISTORY_STEPS: usize = 1_000;
 
-/// A place in the document: a top-level block (index into [`Document::blocks`]) and a
-/// byte offset into its text, on a char boundary. Text of Paragraph = runs joined;
-/// ListItem = its paragraph's runs joined; CodeBlock = `text` without its final "\n".
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+/// A list of blocks edits work in: the document's, or a cell's of the table at top-level
+/// block `table` (tables inside cells aren't containers: their cells aren't editable).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Container {
+    #[default]
+    Top,
+    Cell {
+        table: usize,
+        row: usize,
+        cell: usize,
+    },
+}
+
+/// A place in the document: a container, a block in it (index into the container's
+/// blocks), and a byte offset into the block's text, on a char boundary. Text of
+/// Paragraph = runs joined; ListItem = its paragraph's runs joined; CodeBlock = `text`
+/// without its final "\n". Places order as they come in the document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Pos {
+    pub at: Container,
     pub block: usize,
     pub offset: usize,
 }
 
 impl Pos {
+    /// A place in the document's blocks.
     pub fn new(block: usize, offset: usize) -> Pos {
-        Pos { block, offset }
+        Pos {
+            at: Container::Top,
+            block,
+            offset,
+        }
+    }
+
+    /// A place in a cell of the table at top-level block `table`.
+    pub fn in_cell(table: usize, row: usize, cell: usize, block: usize, offset: usize) -> Pos {
+        Pos {
+            at: Container::Cell { table, row, cell },
+            block,
+            offset,
+        }
+    }
+
+    /// The key ordering places in the document: the top-level block, then the place
+    /// inside its table (none for a top-level place), then the offset.
+    fn key(&self) -> (usize, Option<(usize, usize, usize)>, usize) {
+        match self.at {
+            Container::Top => (self.block, None, self.offset),
+            Container::Cell { table, row, cell } => {
+                (table, Some((row, cell, self.block)), self.offset)
+            }
+        }
+    }
+
+    /// The same container and block at another offset.
+    pub(crate) fn at_offset(self, offset: usize) -> Pos {
+        Pos { offset, ..self }
+    }
+
+    /// The same container at another block and offset.
+    pub(crate) fn moved(self, block: usize, offset: usize) -> Pos {
+        Pos {
+            at: self.at,
+            block,
+            offset,
+        }
+    }
+}
+
+impl Ord for Pos {
+    fn cmp(&self, other: &Pos) -> Ordering {
+        self.key().cmp(&other.key())
+    }
+}
+
+impl PartialOrd for Pos {
+    fn partial_cmp(&self, other: &Pos) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// The blocks of `at`; `None` if `at` isn't a cell of a top-level table.
+pub fn blocks(doc: &Document, at: Container) -> Option<&[Block]> {
+    match at {
+        Container::Top => Some(&doc.blocks),
+        Container::Cell { table, row, cell } => match doc.blocks.get(table)? {
+            Block::Table(t) => Some(&t.rows.get(row)?.cells.get(cell)?.blocks),
+            _ => None,
+        },
+    }
+}
+
+pub(crate) fn blocks_mut(doc: &mut Document, at: Container) -> Option<&mut Vec<Block>> {
+    match at {
+        Container::Top => Some(&mut doc.blocks),
+        Container::Cell { table, row, cell } => match doc.blocks.get_mut(table)? {
+            Block::Table(t) => Some(&mut t.rows.get_mut(row)?.cells.get_mut(cell)?.blocks),
+            _ => None,
+        },
     }
 }
 
@@ -46,9 +137,19 @@ pub fn is_editable(block: &Block) -> bool {
     )
 }
 
-/// The block's text length in bytes (see [`Pos`]); `None` if not editable or out of range.
-pub fn text_len(doc: &Document, block: usize) -> Option<usize> {
-    match doc.blocks.get(block)? {
+/// The text length in bytes (see [`Pos`]) of block `block` of `at`; `None` if not
+/// editable or out of range.
+pub fn text_len(doc: &Document, at: Container, block: usize) -> Option<usize> {
+    block_len(blocks(doc, at)?.get(block)?)
+}
+
+/// The text (see [`Pos`]) of block `block` of `at`, for editable blocks.
+pub fn text(doc: &Document, at: Container, block: usize) -> Option<Cow<'_, str>> {
+    block_text(blocks(doc, at)?.get(block)?)
+}
+
+pub(crate) fn block_len(block: &Block) -> Option<usize> {
+    match block {
         Block::Paragraph(p) => Some(runs_len(&p.runs)),
         Block::ListItem(item) => Some(runs_len(&item.paragraph.runs)),
         Block::CodeBlock(code) => Some(code_text(&code.text).len()),
@@ -56,9 +157,8 @@ pub fn text_len(doc: &Document, block: usize) -> Option<usize> {
     }
 }
 
-/// The block's text (see [`Pos`]) for editable blocks.
-pub fn text(doc: &Document, block: usize) -> Option<Cow<'_, str>> {
-    match doc.blocks.get(block)? {
+pub(crate) fn block_text(block: &Block) -> Option<Cow<'_, str>> {
+    match block {
         Block::Paragraph(p) => Some(joined(&p.runs)),
         Block::ListItem(item) => Some(joined(&item.paragraph.runs)),
         Block::CodeBlock(code) => Some(Cow::Borrowed(code_text(&code.text))),
@@ -94,12 +194,13 @@ pub enum Flag {
     Italic,
 }
 
-/// What applying, undoing, or redoing changed: blocks `[start, start+removed)` of the
-/// document before became `[start, start+inserted)` after (every block whose content or
-/// looks changed is inside), and where the caret goes; `anchor` is `Some` when the result
-/// is a selection (anchor..caret), e.g. after restyling a selection.
+/// What applying, undoing, or redoing changed: blocks `[start, start+removed)` of
+/// container `at` before became `[start, start+inserted)` after (every block whose content
+/// or looks changed is inside), and where the caret goes; `anchor` is `Some` when the
+/// result is a selection (anchor..caret), e.g. after restyling a selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Change {
+    pub at: Container,
     pub start: usize,
     pub removed: usize,
     pub inserted: usize,
@@ -211,7 +312,7 @@ impl History {
     pub fn apply(&mut self, doc: &mut Document, edit: Edit) -> Change {
         let mut change = edit.apply(doc);
         let relabel = if edit.restructures() {
-            looks::relabel(doc, change.start..change.start + change.inserted)
+            looks::relabel(doc, change.at, change.start..change.start + change.inserted)
         } else {
             LooksEdit::default()
         };
