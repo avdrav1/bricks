@@ -145,6 +145,8 @@ fn main() -> glib::ExitCode {
         app.set_accels_for_action("app.close", &["<Control>w"]);
         app.set_accels_for_action("app.quit", &["<Control>q"]);
         watch_settings(app);
+        // Package copies of Word documents left by killed Slate processes.
+        std::thread::spawn(saving::Original::sweep);
     });
     // Changes still being written finish before Slate exits.
     app.connect_shutdown(|_| SAVER.with_borrow_mut(Saver::finish));
@@ -613,11 +615,6 @@ fn show(
     } else {
         text_width(app)
     };
-    let target = match opened.doc.format {
-        document_model::Format::Text(info) => saving::Target::Text(info),
-        document_model::Format::Markdown(info) => saving::Target::Markdown(info, opened.source),
-        document_model::Format::Docx => saving::Target::Docx,
-    };
     let page = view::Page::new(opened.doc, opened.textures, setting);
     PAGES.with_borrow_mut(|pages| pages.push(page.downgrade()));
     page.update_property(&[gtk::accessible::Property::Label(&name)]);
@@ -629,7 +626,7 @@ fn show(
     stack.set_visible_child_name("document");
     if let Some(window) = stack.root().and_downcast::<gtk::ApplicationWindow>() {
         add_page_actions(&window, &page);
-        saving::Saver::attach(&window, &page, status, path.to_owned(), target);
+        saving::Saver::attach(&window, &page, status, path.to_owned(), opened.target);
     }
     page.grab_focus();
     if let Some(mode) = bench {

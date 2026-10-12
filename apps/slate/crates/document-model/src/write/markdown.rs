@@ -39,12 +39,9 @@ use super::inline::{self, Mode};
 use super::{encode, ending, push_with_ending, Unencodable};
 use crate::markdown::MarkdownSource;
 use crate::{
-    Align, Block, CodeBlock, Image, ListItem, ListKind, Paragraph, ParagraphStyle, RawKind, Table,
-    TextInfo,
+    match_blocks, Align, Block, CodeBlock, Image, ListItem, ListKind, Paragraph, ParagraphStyle,
+    RawKind, Table, TextInfo,
 };
-
-/// The largest unmatched middle (old blocks × new blocks) matched block by block.
-const MATCH_LIMIT: usize = 4_000 * 4_000;
 
 const PAGE_BREAK: &str = "<div style=\"break-after: page\"></div>";
 
@@ -61,7 +58,7 @@ pub fn write_markdown(
     let nl = ending(info.line_ending);
     let kept = match source {
         Some(src) => {
-            let mut kept = matching(&src.blocks, blocks);
+            let mut kept = match_blocks(&src.blocks, blocks);
             keep_references(&mut kept, src);
             whole_lines(&mut kept, &src.starts);
             kept
@@ -166,35 +163,6 @@ pub fn write_markdown(
     Ok((bytes, written))
 }
 
-/// For each new block, the old block it is (`None`: written fresh): equal blocks matched
-/// in order.
-fn matching(old: &[Block], new: &[Block]) -> Vec<Option<usize>> {
-    let mut kept = vec![None; new.len()];
-    let prefix = old.iter().zip(new).take_while(|(a, b)| a == b).count();
-    let room = old.len().min(new.len()) - prefix;
-    let suffix = old
-        .iter()
-        .rev()
-        .zip(new.iter().rev())
-        .take(room)
-        .take_while(|(a, b)| a == b)
-        .count();
-    for (k, slot) in kept.iter_mut().enumerate().take(prefix) {
-        *slot = Some(k);
-    }
-    for k in 0..suffix {
-        kept[new.len() - 1 - k] = Some(old.len() - 1 - k);
-    }
-    let a = &old[prefix..old.len() - suffix];
-    let b = &new[prefix..new.len() - suffix];
-    if !a.is_empty() && !b.is_empty() && a.len().saturating_mul(b.len()) <= MATCH_LIMIT {
-        for (i, j) in common_subsequence(a, b) {
-            kept[prefix + j] = Some(prefix + i);
-        }
-    }
-    kept
-}
-
 /// Old blocks sharing a line (`starts`) are copied all, one after the other, or none.
 fn whole_lines(kept: &mut [Option<usize>], starts: &[usize]) {
     let mut new_of = vec![None; starts.len()];
@@ -255,38 +223,6 @@ fn keep_references(kept: &mut [Option<usize>], src: &MarkdownSource) {
             }
         }
     }
-}
-
-/// The longest common subsequence of equal blocks, as index pairs in order.
-fn common_subsequence(a: &[Block], b: &[Block]) -> Vec<(usize, usize)> {
-    let (n, m) = (a.len(), b.len());
-    let width = m + 1;
-    // lcs[i][j]: the longest common subsequence of a[i..] and b[j..] (≤ 4,000: one side of
-    // a middle within the limit is at most its square root).
-    let mut lcs = vec![0u16; (n + 1) * width];
-    for i in (0..n).rev() {
-        for j in (0..m).rev() {
-            lcs[i * width + j] = if a[i] == b[j] {
-                lcs[(i + 1) * width + j + 1] + 1
-            } else {
-                lcs[(i + 1) * width + j].max(lcs[i * width + j + 1])
-            };
-        }
-    }
-    let mut pairs = Vec::with_capacity(lcs[0] as usize);
-    let (mut i, mut j) = (0, 0);
-    while i < n && j < m {
-        if a[i] == b[j] {
-            pairs.push((i, j));
-            i += 1;
-            j += 1;
-        } else if lcs[(i + 1) * width + j] >= lcs[i * width + j + 1] {
-            i += 1;
-        } else {
-            j += 1;
-        }
-    }
-    pairs
 }
 
 /// The line starting at `start`, without its line break.

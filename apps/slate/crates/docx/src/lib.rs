@@ -1,5 +1,6 @@
 //! Slate's DOCX reader (SLATE-3, docs/adr/0003-slate-document-model.md): the main part of a
-//! WordprocessingML package into the document model.
+//! WordprocessingML package into the document model; and its save (SLATE-8), which
+//! patches the package read ([`save`]).
 //!
 //! `zip` opens the package and `quick-xml` streams `word/document.xml`. Paragraph and run
 //! looks resolve through `word/styles.xml` (document defaults, `basedOn` chains, the
@@ -10,8 +11,11 @@
 
 mod body;
 mod numbering;
+mod save;
 mod styles;
 mod xml;
+
+pub use save::{save, DocxSource};
 
 use document_model::{Document, Format};
 use std::collections::HashMap;
@@ -80,33 +84,57 @@ pub fn read(path: &Path) -> Result<Document, DocxError> {
 
 /// Read a .docx package.
 pub fn read_from<R: Read + Seek>(reader: R) -> Result<Document, DocxError> {
+    Ok(read_package(reader)?.0)
+}
+
+/// Read the .docx file at `path`, and where its blocks came from in it, for [`save`].
+pub fn read_source(path: &Path) -> Result<(Document, DocxSource), DocxError> {
+    let (doc, main) = read_package(BufReader::new(File::open(path)?))?;
+    let source = DocxSource::new(main, &doc.blocks)?;
+    Ok((doc, source))
+}
+
+/// The main part as read: its name, its text, and where its blocks came from.
+pub(crate) struct MainPart {
+    pub name: String,
+    pub xml: String,
+    /// The part started with a byte-order mark.
+    pub bom: bool,
+    pub body: Option<body::Container>,
+}
+
+fn read_package<R: Read + Seek>(reader: R) -> Result<(Document, MainPart), DocxError> {
     let mut package = Package {
         zip: ZipArchive::new(reader)?,
         images: HashMap::new(),
     };
     let main = package.main_part()?;
     let rels = package.rels(&main)?;
-    let part_of = |kind: &str, default: &str| {
-        rels.values()
-            .find(|r| !r.external && r.kind.rsplit('/').next() == Some(kind))
-            .map_or_else(|| default.to_owned(), |r| r.target.clone())
+    let (styles, numbering) = package.styles_and_numbering(&rels)?;
+    let bytes = package.bytes(&main)?.ok_or(DocxError::NotDocx)?;
+    let (bom, bytes) = match bytes.strip_prefix(b"\xEF\xBB\xBF") {
+        Some(rest) => (true, rest.to_vec()),
+        None => (false, bytes),
     };
-    let styles_part = part_of("styles", "word/styles.xml");
-    let numbering_part = part_of("numbering", "word/numbering.xml");
-    let styles = match package.text(&styles_part)? {
-        Some(xml) => styles::Styles::parse(&xml)?,
-        None => styles::Styles::default(),
-    };
-    let numbering = match package.text(&numbering_part)? {
-        Some(xml) => numbering::Numbering::parse(&xml, &styles)?,
-        None => numbering::Numbering::default(),
-    };
-    let xml = package.text(&main)?.ok_or(DocxError::NotDocx)?;
-    let blocks = body::read(&xml, &styles, &numbering, &rels, &mut package)?;
-    Ok(Document {
+    let xml =
+        String::from_utf8(bytes).map_err(|_| DocxError::Xml(format!("{main} isn't UTF-8")))?;
+    let (blocks, body) = body::read(&xml, &styles, &numbering, &rels, &mut package)?;
+    let doc = Document {
         blocks,
         format: Format::Docx,
-    })
+    };
+    let main = MainPart {
+        name: main,
+        xml,
+        bom,
+        body,
+    };
+    Ok((doc, main))
+}
+
+/// The kind of a relationship: its type URI's last segment (`styles`, `hyperlink`).
+fn rel_kind(rel: &Rel) -> &str {
+    rel.kind.rsplit('/').next().unwrap_or_default()
 }
 
 /// A relationship of the main part: where its target is and what it is.
@@ -126,6 +154,28 @@ pub(crate) struct Package<R> {
 }
 
 impl<R: Read + Seek> Package<R> {
+    /// The styles and list numbering the main part's relationships `rels` name (else at
+    /// their usual names); empty when the package has none.
+    fn styles_and_numbering(
+        &mut self,
+        rels: &HashMap<String, Rel>,
+    ) -> Result<(styles::Styles, numbering::Numbering), DocxError> {
+        let part_of = |kind: &str, default: &str| {
+            rels.values()
+                .find(|r| !r.external && rel_kind(r) == kind)
+                .map_or_else(|| default.to_owned(), |r| r.target.clone())
+        };
+        let styles = match self.text(&part_of("styles", "word/styles.xml"))? {
+            Some(xml) => styles::Styles::parse(&xml)?,
+            None => styles::Styles::default(),
+        };
+        let numbering = match self.text(&part_of("numbering", "word/numbering.xml"))? {
+            Some(xml) => numbering::Numbering::parse(&xml, &styles)?,
+            None => numbering::Numbering::default(),
+        };
+        Ok((styles, numbering))
+    }
+
     /// A part's bytes, `None` if the package has no such part.
     fn bytes(&mut self, name: &str) -> Result<Option<Vec<u8>>, DocxError> {
         let mut file = match self.zip.by_name(name) {
@@ -166,13 +216,7 @@ impl<R: Read + Seek> Package<R> {
 
     /// The relationships of part `source`, targets resolved to part names.
     fn rels(&mut self, source: &str) -> Result<HashMap<String, Rel>, DocxError> {
-        let (dir, file) = source.rsplit_once('/').unwrap_or(("", source));
-        let rels_name = if dir.is_empty() {
-            format!("_rels/{file}.rels")
-        } else {
-            format!("{dir}/_rels/{file}.rels")
-        };
-        self.rels_of(&rels_name, dir)
+        self.rels_of(&rels_part(source), dir_of(source))
     }
 
     fn rels_of(&mut self, rels_name: &str, dir: &str) -> Result<HashMap<String, Rel>, DocxError> {
@@ -221,6 +265,19 @@ impl<R: Read + Seek> Package<R> {
         let bytes = self.bytes(name).ok().flatten().map(Arc::from);
         self.images.insert(name.to_owned(), bytes.clone());
         bytes
+    }
+}
+
+/// The directory of part `name` (`word` for `word/document.xml`).
+fn dir_of(name: &str) -> &str {
+    name.rsplit_once('/').map_or("", |(dir, _)| dir)
+}
+
+/// The name of part `source`'s relationships part.
+fn rels_part(source: &str) -> String {
+    match source.rsplit_once('/') {
+        Some((dir, file)) => format!("{dir}/_rels/{file}.rels"),
+        None => format!("_rels/{source}.rels"),
     }
 }
 

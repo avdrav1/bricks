@@ -1,6 +1,6 @@
 [package]
 name = "docx"
-description = "Slate's DOCX reader: WordprocessingML into the document model"
+description = "Slate's DOCX reader and patching writer: WordprocessingML into the document model and back"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
@@ -9,8 +9,13 @@ publish = false
 
 [dependencies]
 document-model.workspace = true
+suite-file.workspace = true
 quick-xml = "0.41"
 zip = { version = "8", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+# The save tests make their edits as the app does.
+document-edit.workspace = true
 
 [lints]
 workspace = true

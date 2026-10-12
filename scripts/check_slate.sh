@@ -85,7 +85,11 @@
 #      a UTF-16 LE file saves in UTF-16 LE with its BOM; in a Markdown file with setext
 #      headings, __bold__, "* " and "1)" lists, saving an edited paragraph changes only
 #      its line and undoing it saves the original bytes; closing with changes asks to
-#      save, and Enter saves them and closes.
+#      save, and Enter saves them and closes;
+#  21. saving a Word document: fixture.docx with " Edited" typed after its last paragraph
+#      and Ctrl+S keeps every zip part but word/document.xml byte for byte, in the same
+#      order, and its document.xml holds "The end. Edited"; reopened, the page shows it; a
+#      relaunch after a kill leaves one package copy in the cache, the running one's.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -167,6 +171,17 @@ else:
     for l in lines:
         print(f"{label}-diff: {l}")
     print(f"{label} changed lines: {len(lines)}")
+PY
+# A saved package against the original: its part names in order, which parts changed, and
+# how often TEXT is in its word/document.xml.
+cat > /tmp/parts.py <<"PY"
+import sys, zipfile
+a, b, text = zipfile.ZipFile(sys.argv[1]), zipfile.ZipFile(sys.argv[2]), sys.argv[3]
+print("parts: same order" if a.namelist() == b.namelist() else f"parts: {a.namelist()} != {b.namelist()}")
+changed = [n for n in a.namelist() if n in b.namelist() and a.read(n) != b.read(n)]
+print("changed parts: " + ",".join(changed))
+found = b.read("word/document.xml").decode().count(text)
+print(f"document.xml has the edit: {found}")
 PY
 cat > /tmp/words.py <<"PY"
 import sys
@@ -661,6 +676,15 @@ plain two" & sleep 1
   pgrep -x slate >/dev/null && echo "after prompt: slate still running" || echo "after prompt: slate exited"
   grep -c "^Edit me hereZ$" /tmp/save/m.md | sed "s/^/md saved on close: /"
   echo "temp files left: $(ls -a /tmp/save | grep -c cronkite-save)"; quit
+  echo "== 21 docx save"
+  cp /tmp/fixture.docx /tmp/save/f.docx
+  slate /tmp/save/f.docx >>/tmp/app.log 2>&1 & sleep 4
+  keys -M ctrl -k End -m ctrl; keys " Edited"; sleep 1; keys -M ctrl s -m ctrl; sleep 1; saved
+  titles | sed "s/^/docx-saved-/"
+  python3 /tmp/parts.py /tmp/fixture.docx /tmp/save/f.docx "The end. Edited"; quit
+  slate /tmp/save/f.docx >>/tmp/app.log 2>&1 & sleep 4
+  a11y page f.docx | grep -c "The end. Edited$" | sed "s/^/reopened with the edit: /"
+  echo "package copies: $(ls ${XDG_CACHE_HOME:-$HOME/.cache}/slate | grep -c "^original-")"; quit
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -804,6 +828,12 @@ check "20: closing with changes asks to save" "20 save" "^prompt: Save changes t
 check "20: Enter saves and closes" "20 save" "^after prompt: slate exited$"
 check "20: the change was saved on closing" "20 save" "^md saved on close: 1$"
 check "20: no temp file is left" "20 save" "^temp files left: 0$"
+check "21: Ctrl+S saves a Word document" "21 docx save" "^docx-saved-titles: f.docx,$"
+check "21: the package keeps its parts in order" "21 docx save" "^parts: same order$"
+check "21: only word/document.xml changes" "21 docx save" "^changed parts: word/document.xml$"
+check "21: document.xml holds the edit" "21 docx save" "^document.xml has the edit: 1$"
+check "21: reopened, the page shows the edit" "21 docx save" "^reopened with the edit: 1$"
+check "21: copies left by killed processes are swept" "21 docx save" "^package copies: 1$"
 if [ $fail = 0 ]; then echo "SLATE OK"; else
   echo "SLATE CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

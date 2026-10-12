@@ -62,7 +62,7 @@ Slate's crates, in `apps/slate/crates/`:
 | Crate | Owns |
 | --- | --- |
 | `document-model` | Slate's document model (ADR 0003): blocks, runs, plain-text reader with encoding and line-ending detection, Markdown reader (`pulldown-cmark`); writers: plain text in the file's encoding and line endings, Markdown copying unedited blocks' bytes from the source |
-| `docx` | DOCX reader: `word/document.xml` with styles, numbering, hyperlinks, pictures, and tables into the document model |
+| `docx` | DOCX reader: `word/document.xml` with styles, numbering, hyperlinks, pictures, and tables into the document model; saving by patching the package read: unedited blocks' XML copied, edited and new ones written with the document's own styles and run looks, every other part copied |
 | `document-edit` | edits as undoable commands on the document model (ADR 0007), in the document's blocks or a table cell's: text replacements holding the removed and inserted text, paragraph looks, list numbering, history that joins typing a word at a time |
 | `flow` | the pageless flow's layout state (ADR 0007), toolkit-free: per-block heights in a Fenwick index, estimates replaced by time-sliced measuring, scroll anchoring, tables and pictures, hit-testing, selection, plain and accessible text, splicing in edited blocks; shapes text through a `Shaper` trait |
 | `slate` (`apps/slate`) | the GTK 4 window: open, drop, alerts, menus, save and save as (atomic, off the UI thread, asking before closing with changes), and the page, which draws the flow (snapshot, Pango) and edits it: caret, input method, keys, undo, drag selection, copy, and accessible text |
@@ -91,7 +91,7 @@ python3 scripts/lo_functions.py          # re-record formula results from LibreO
 python3 scripts/lo_formats.py            # re-record number format results from LibreOffice (STYLE-2)
 python3 scripts/lo_xlsx.py fixture|dump FILE  # LibreOffice fixture workbook and dumps (XLSX-*)
 python3 scripts/lo_docx.py fixture|dump FILE  # Slate's LibreOffice fixture document and paragraph dumps (SLATE-3)
-scripts/check_slate.sh [BINARY]          # Slate GUI check in docker: open, drop, show, refuse, text widths, select and copy, editing, tables, input method (SLATE-4, -10, -11, -6, -12, -13; scripts/ime_helpers.py is the input method)
+scripts/check_slate.sh [BINARY]          # Slate GUI check in docker: open, drop, show, refuse, text widths, select and copy, editing, tables, input method, accessibility, saving .txt, .md, and .docx (SLATE-4, -10, -11, -6, -12, -13, -14, -15, -7, -8; scripts/ime_helpers.py is the input method)
 cargo run --release -p xlsx --example gen_corpus_xlsx  # corpus/rows_1m.xlsx (BENCH-2)
 cargo run --release -p xlsx --example gen_corpus_xlsx -- --styled   # corpus/styled_1m.xlsx (STYLE-3, BENCH-3)
 python3 scripts/lo_pptx.py fixture|dump|layouts FILE  # LibreOffice fixture deck, dumps, and layout names (FRAME-*)

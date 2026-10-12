@@ -1,26 +1,29 @@
-//! Saving (SLATE-7): Ctrl+S saves over the document's file, Ctrl+Shift+S saves it as a
-//! .md or .txt file through the file dialog. A plain-text file is written back in its
-//! encoding, line endings, and final newline; a Markdown file keeps the bytes of every block
-//! not edited ([`document_model::write_markdown`]). The bytes are made and written off the
-//! UI thread, atomically (`suite_file::save_atomic`): the old file stays whole until the new
-//! one is complete and verified. Editing goes on meanwhile; the document saved is the one
-//! shown when the save began.
+//! Saving (SLATE-7, SLATE-8): Ctrl+S saves over the document's file, Ctrl+Shift+S saves it
+//! as another file through the file dialog: .md or .txt, or .docx for a Word document. A
+//! plain-text file is written back in its encoding, line endings, and final newline; a
+//! Markdown file keeps the bytes of every block not edited
+//! ([`document_model::write_markdown`]); a Word document is saved by patching the package it
+//! was read from ([`docx::save`]): only what was edited changes. The bytes are made and
+//! written off the UI thread, atomically (`suite_file::save_atomic`): the old file stays
+//! whole until the new one is complete and verified. Editing goes on meanwhile; the
+//! document saved is the one shown when the save began.
 //!
 //! The window's title starts with "• " while the document differs from its file, and
-//! closing it then asks whether to save. Word documents can't be saved yet (SLATE-8): Save
-//! says so and offers Save As.
+//! closing it then asks whether to save.
 
 use crate::view::Page;
 use document_model::{
     write_markdown, write_text, Document, Encoding, LineEnding, MarkdownSource, TextInfo,
 };
+use docx::DocxSource;
 use gtk::prelude::*;
 use gtk::{gio, glib};
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 
 /// How a save writes the document.
 #[derive(Debug, Clone)]
@@ -28,15 +31,83 @@ pub enum Target {
     Text(TextInfo),
     /// With the file's source, when it was read or last saved as Markdown.
     Markdown(TextInfo, Option<MarkdownSource>),
-    /// Not saved yet: Save As writes it as Markdown or plain text.
-    Docx,
+    /// A Word document, saved by patching the package it was read from or last saved as.
+    Docx(Docx),
+}
+
+/// A Word document's source map and a private copy of its package.
+#[derive(Debug, Clone)]
+pub struct Docx {
+    pub source: DocxSource,
+    pub original: Arc<Original>,
+}
+
+/// A private copy of the package a Word document was read from or last saved as, in the
+/// cache directory (`$XDG_CACHE_HOME/slate`), removed with it: the next save patches it,
+/// so the file may change, move, or be saved over meanwhile.
+#[derive(Debug)]
+pub struct Original {
+    copy: PathBuf,
+}
+
+impl Original {
+    /// Copy the package at `path`.
+    pub fn copy_of(path: &Path) -> std::io::Result<Original> {
+        static N: AtomicU64 = AtomicU64::new(0);
+        let dir = Original::dir();
+        std::fs::create_dir_all(&dir)?;
+        let copy = dir.join(format!(
+            "original-{}-{}.docx",
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::copy(path, &copy)?;
+        Ok(Original { copy })
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.copy
+    }
+
+    fn dir() -> PathBuf {
+        std::env::var_os("XDG_CACHE_HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
+            .unwrap_or_else(std::env::temp_dir)
+            .join("slate")
+    }
+
+    /// Remove the copies left by Slate processes no longer running (killed before they
+    /// could remove their own).
+    pub fn sweep() {
+        let Ok(entries) = std::fs::read_dir(Original::dir()) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let pid = name
+                .to_str()
+                .and_then(|n| n.strip_prefix("original-"))
+                .and_then(|n| n.split('-').next())
+                .and_then(|pid| pid.parse::<u32>().ok());
+            if pid.is_some_and(|pid| !Path::new(&format!("/proc/{pid}")).exists()) {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+}
+
+impl Drop for Original {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.copy);
+    }
 }
 
 impl Target {
     fn info(&self) -> Option<TextInfo> {
         match self {
             Target::Text(info) | Target::Markdown(info, _) => Some(*info),
-            Target::Docx => None,
+            Target::Docx(_) => None,
         }
     }
 
@@ -44,7 +115,7 @@ impl Target {
         match self {
             Target::Text(_) => "Plain text",
             Target::Markdown(..) => "Markdown",
-            Target::Docx => "Word document",
+            Target::Docx(_) => "Word document",
         }
     }
 }
@@ -154,8 +225,7 @@ impl Saver {
         }
     }
 
-    /// Ctrl+S: save over the file; a Word document is offered Save As. `then` runs once
-    /// the file is saved.
+    /// Ctrl+S: save over the file. `then` runs once the file is saved.
     pub fn save(self: &Rc<Self>, then: Option<Box<dyn FnOnce()>>) {
         if self.saving.get() {
             // Saved once the running save ends; a save already waiting covers a bare one.
@@ -166,48 +236,32 @@ impl Saver {
             return;
         }
         let target = self.target.borrow().clone();
-        if let Target::Docx = target {
-            self.cannot_save_docx(then);
-            return;
-        }
         let dest = self.path.borrow().clone();
         self.save_to(dest, target, false, then);
     }
 
-    fn cannot_save_docx(self: &Rc<Self>, then: Option<Box<dyn FnOnce()>>) {
-        let dialog = gtk::AlertDialog::builder()
-            .message("Slate can’t save Word documents yet")
-            .detail("Save As saves this document as Markdown (.md) or plain text (.txt).")
-            .buttons(["Cancel", "Save As…"])
-            .default_button(1)
-            .cancel_button(0)
-            .modal(true)
-            .build();
-        let saver = self.clone();
-        glib::spawn_future_local(async move {
-            let parent = saver.window.upgrade();
-            if let Ok(1) = dialog.choose_future(parent.as_ref()).await {
-                saver.save_as(then);
-            }
-        });
-    }
-
-    /// Ctrl+Shift+S: pick a .md or .txt file, then save there.
+    /// Ctrl+Shift+S: pick a .md or .txt file (or .docx for a Word document), then save there.
     pub fn save_as(self: &Rc<Self>, then: Option<Box<dyn FnOnce()>>) {
         let Some(window) = self.window.upgrade() else {
             return;
         };
         let markdown = filter("Markdown", &["*.md", "*.markdown"]);
         let text = filter("Plain text", &["*.txt", "*.text"]);
+        let word = filter("Word document", &["*.docx"]);
         let filters = gio::ListStore::new::<gtk::FileFilter>();
+        let docx = matches!(*self.target.borrow(), Target::Docx(_));
+        if docx {
+            filters.append(&word);
+        }
         filters.append(&markdown);
         filters.append(&text);
         let current = self.path.borrow().clone();
-        let (default, initial) = match &*self.target.borrow() {
-            Target::Text(_) => (&text, self.name()),
-            Target::Markdown(..) => (&markdown, self.name()),
-            Target::Docx => (&markdown, with_extension(&current, "md")),
+        let default = match &*self.target.borrow() {
+            Target::Text(_) => &text,
+            Target::Markdown(..) => &markdown,
+            Target::Docx(_) => &word,
         };
+        let initial = self.name();
         let dialog = gtk::FileDialog::builder()
             .title("Save As")
             .modal(true)
@@ -238,7 +292,8 @@ impl Saver {
     }
 
     /// How a file at `dest` is written, by its extension: the document's own encoding and
-    /// line endings when it was plain text or Markdown already.
+    /// line endings when it was plain text or Markdown already; a .docx only for a Word
+    /// document, by patching its package.
     fn target_for(&self, dest: &Path) -> Result<Target, &'static str> {
         let ext = dest
             .extension()
@@ -254,7 +309,11 @@ impl Saver {
                 Ok(Target::Markdown(info, source))
             }
             Some("txt" | "text") => Ok(Target::Text(info)),
-            _ => Err("Slate saves Markdown (.md) and plain text (.txt) files."),
+            Some("docx") => match &*current {
+                Target::Docx(_) => Ok(current.clone()),
+                _ => Err("Slate saves a Word document (.docx) only when it opened one."),
+            },
+            _ => Err("Slate saves Markdown (.md), plain text (.txt), and Word (.docx) files."),
         }
     }
 
@@ -339,11 +398,10 @@ impl Saver {
 
     /// Closing with changes: save them, discard them, or keep the window.
     fn ask_before_closing(self: &Rc<Self>) {
-        let docx = matches!(*self.target.borrow(), Target::Docx);
         let dialog = gtk::AlertDialog::builder()
             .message(format!("Save changes to “{}” before closing?", self.name()))
             .detail("Changes not saved are lost.")
-            .buttons(["Cancel", "Discard", if docx { "Save As…" } else { "Save" }])
+            .buttons(["Cancel", "Discard", "Save"])
             .default_button(2)
             .cancel_button(0)
             .modal(true)
@@ -363,7 +421,6 @@ impl Saver {
             });
             match choice {
                 Ok(1) => close(),
-                Ok(2) if docx => saver.save_as(Some(close)),
                 Ok(2) => saver.save(Some(close)),
                 _ => {}
             }
@@ -372,13 +429,36 @@ impl Saver {
 }
 
 /// Make the bytes of `doc` as `target` and write them at `dest` atomically; the target to
-/// save with next time (a Markdown file's new source).
+/// save with next time (a Markdown file's new source; a Word document's new source and a
+/// copy of the package written).
 fn write(doc: &Document, dest: &Path, target: Target, save_as: bool) -> Result<Target, String> {
+    if let Target::Docx(word) = target {
+        let cancel = AtomicBool::new(false);
+        let source = docx::save(
+            dest,
+            word.original.path(),
+            &doc.blocks,
+            &word.source,
+            &cancel,
+        )
+        .map_err(|e| e.to_string())?;
+        return Ok(match Original::copy_of(dest) {
+            Ok(original) => Target::Docx(Docx {
+                source,
+                original: Arc::new(original),
+            }),
+            Err(e) => {
+                // The previous copy and its source still make the same saves.
+                tracing::warn!("cannot keep a copy of {}: {e}", dest.display());
+                Target::Docx(word)
+            }
+        });
+    }
     let made = |target: &Target| match target {
         Target::Text(info) => write_text(&doc.blocks, info).map(|bytes| (bytes, None)),
         Target::Markdown(info, source) => write_markdown(&doc.blocks, info, source.as_ref())
             .map(|(bytes, source)| (bytes, Some(source))),
-        Target::Docx => unreachable!("Word documents aren't saved"),
+        Target::Docx(_) => unreachable!("Word documents are saved above"),
     };
     let (bytes, source, target) = match made(&target) {
         Ok((bytes, source)) => (bytes, source, target),
@@ -426,9 +506,4 @@ fn filter(name: &str, patterns: &[&str]) -> gtk::FileFilter {
         filter.add_pattern(p);
     }
     filter
-}
-
-/// `path`'s file name with its extension replaced by `ext`.
-fn with_extension(path: &Path, ext: &str) -> String {
-    suite_file::document_name(&path.with_extension(ext)).into_owned()
 }

@@ -11,6 +11,11 @@
 //! before it, the break, the text after; a part left empty by a break at either end isn't
 //! a paragraph. Pictures are blocks: a paragraph's pictures come before its text, and a
 //! paragraph holding only pictures stays as an empty paragraph after them.
+//!
+//! For saving, the reader also maps the body and every table cell to the elements their
+//! blocks came from ([`Container`]): each `w:p` and `w:tbl` child's bytes in the part, the
+//! blocks it made, a table's cells, and its pictures' `w:drawing` or `w:pict`. What sits
+//! between them (section properties, bookmarks, content controls' tags) isn't an element.
 
 use crate::numbering::{format_number, Counters, Numbering};
 use crate::styles::{ParaProps, RunProps, Styles};
@@ -23,14 +28,58 @@ use document_model::{
 use quick_xml::events::{BytesStart, Event};
 use std::collections::HashMap;
 use std::io::{Read, Seek};
+use std::ops::Range;
 
+/// The elements of the body or of a table cell, in order: where each block came from in
+/// `word/document.xml`.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Container {
+    pub elements: Vec<Element>,
+    /// Where content added after the last element goes: before the container's end tag,
+    /// or before the body's own section properties.
+    pub tail: usize,
+    /// The body's own section properties (`w:body/w:sectPr`).
+    pub sect: Option<Range<usize>>,
+}
+
+/// A `w:p` or `w:tbl` child of the body or of a cell.
+#[derive(Debug, Clone)]
+pub(crate) struct Element {
+    /// Its bytes in the part.
+    pub span: Range<usize>,
+    /// The blocks it made, as indices into its container's blocks.
+    pub blocks: Range<usize>,
+    /// A table's cells.
+    pub table: Option<TableSpan>,
+    /// For each picture block it made, in order: its `w:drawing` or `w:pict` element (`None`
+    /// when one element held several pictures).
+    pub pictures: Vec<Option<Range<usize>>>,
+    /// A paragraph's list numbering instance (`w:numId`, 0 or `None`: not a list).
+    pub num: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct TableSpan {
+    /// Each row's cells.
+    pub rows: Vec<Vec<CellSpan>>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CellSpan {
+    /// The `w:tc` element.
+    pub span: Range<usize>,
+    pub content: Container,
+}
+
+/// Read the body of `word/document.xml` (`xml`): its blocks, and where they came from
+/// (`None` without a `w:body`).
 pub(crate) fn read<R: Read + Seek>(
     xml: &str,
     styles: &Styles,
     numbering: &Numbering,
     rels: &HashMap<String, Rel>,
     package: &mut Package<R>,
-) -> Result<Vec<Block>, DocxError> {
+) -> Result<(Vec<Block>, Option<Container>), DocxError> {
     let mut body = Body {
         r: xml::reader(xml),
         styles,
@@ -42,15 +91,17 @@ pub(crate) fn read<R: Read + Seek>(
         depth: 0,
         footnotes: 0,
         endnotes: 0,
+        pictures: Vec::new(),
+        num: None,
     };
     let mut out = Vec::new();
     loop {
         match body.r.read_event()? {
             Event::Start(e) if xml::local(&e) == b"body" => {
-                body.blocks(b"body", &mut out, None)?;
-                return Ok(out);
+                let container = body.blocks(b"body", &mut out, None)?;
+                return Ok((out, Some(container)));
             }
-            Event::Eof => return Ok(out),
+            Event::Eof => return Ok((out, None)),
             _ => {}
         }
     }
@@ -69,7 +120,9 @@ struct Field {
 enum Item {
     Text(String, RunStyle),
     PageBreak,
-    Image(Image),
+    /// A picture, with its `w:drawing` or `w:pict` element when it was that element's only
+    /// picture.
+    Image(Image, Option<Range<usize>>),
 }
 
 /// A table cell's own properties.
@@ -91,6 +144,10 @@ struct Body<'a, 'x, R> {
     /// Footnote and endnote references so far: their marks number on from these.
     footnotes: u64,
     endnotes: u64,
+    /// The pictures of the paragraph just read, as [`Element::pictures`].
+    pictures: Vec<Option<Range<usize>>>,
+    /// The list numbering instance of the paragraph just read.
+    num: Option<u32>,
 }
 
 /// The deepest nesting of tables kept as tables; the content of tables nested deeper
@@ -115,25 +172,51 @@ fn wrapper(name: &[u8]) -> bool {
 }
 
 impl<R: Read + Seek> Body<'_, '_, R> {
-    /// Block content up to the end of element `end` (`body`, `tc`). In a cell, `cell`
-    /// takes the cell's properties.
+    /// Where the reader is in the part.
+    fn pos(&self) -> usize {
+        self.r.buffer_position() as usize
+    }
+
+    /// Block content up to the end of element `end` (`body`, `tc`), and where each block
+    /// came from. In a cell, `cell` takes the cell's properties.
     fn blocks(
         &mut self,
         end: &[u8],
         out: &mut Vec<Block>,
         mut cell: Option<&mut CellProps>,
-    ) -> Result<(), DocxError> {
+    ) -> Result<Container, DocxError> {
+        let base = out.len();
+        let mut container = Container::default();
         // Cells of tables too deep to keep, open inside this element.
         let mut flattened = 0usize;
         loop {
+            let before = self.pos();
+            let first = out.len();
             match self.r.read_event()? {
                 Event::Start(e) => match xml::local(&e) {
-                    b"p" => self.paragraph(out)?,
+                    b"p" => {
+                        self.paragraph(out)?;
+                        container.elements.push(Element {
+                            span: before..self.pos(),
+                            blocks: first - base..out.len() - base,
+                            table: None,
+                            pictures: std::mem::take(&mut self.pictures),
+                            num: self.num,
+                        });
+                    }
                     b"tbl" if self.depth < MAX_TABLE_DEPTH => {
                         self.depth += 1;
                         let table = self.table();
                         self.depth -= 1;
-                        out.push(Block::Table(table?));
+                        let (table, span) = table?;
+                        out.push(Block::Table(table));
+                        container.elements.push(Element {
+                            span: before..self.pos(),
+                            blocks: first - base..out.len() - base,
+                            table: Some(span),
+                            pictures: Vec::new(),
+                            num: None,
+                        });
                     }
                     b"tbl" | b"tr" => {}
                     b"tc" => flattened += 1,
@@ -142,17 +225,31 @@ impl<R: Read + Seek> Body<'_, '_, R> {
                             self.cell_props(c)?;
                         }
                     }
+                    b"sectPr" => {
+                        xml::skip(&mut self.r, &e)?;
+                        container.sect = Some(before..self.pos());
+                    }
                     name if wrapper(name) => {}
                     _ => xml::skip(&mut self.r, &e)?,
                 },
                 Event::Empty(e) if xml::local(&e) == b"p" => {
                     let (p, _) = self.paragraph_of(&ParaProps::default());
                     out.push(Block::Paragraph(p));
+                    container.elements.push(Element {
+                        span: before..self.pos(),
+                        blocks: first - base..out.len() - base,
+                        table: None,
+                        pictures: Vec::new(),
+                        num: None,
+                    });
                 }
                 Event::End(e) if e.local_name().as_ref() == b"tc" && flattened > 0 => {
                     flattened -= 1;
                 }
-                Event::End(e) if e.local_name().as_ref() == end => return Ok(()),
+                Event::End(e) if e.local_name().as_ref() == end => {
+                    container.tail = container.sect.as_ref().map_or(before, |s| s.start);
+                    return Ok(container);
+                }
                 Event::Eof => return Err(DocxError::Xml(format!("unclosed w:{}", show(end)))),
                 _ => {}
             }
@@ -173,41 +270,52 @@ impl<R: Read + Seek> Body<'_, '_, R> {
         }
     }
 
-    fn table(&mut self) -> Result<Table, DocxError> {
+    fn table(&mut self) -> Result<(Table, TableSpan), DocxError> {
         let mut table = Table::default();
+        let mut span = TableSpan::default();
         loop {
             match self.r.read_event()? {
                 Event::Start(e) => match xml::local(&e) {
-                    b"tr" => table.rows.push(self.row()?),
+                    b"tr" => {
+                        let (row, cells) = self.row()?;
+                        table.rows.push(row);
+                        span.rows.push(cells);
+                    }
                     name if wrapper(name) => {}
                     _ => xml::skip(&mut self.r, &e)?,
                 },
-                Event::End(e) if e.local_name().as_ref() == b"tbl" => return Ok(table),
+                Event::End(e) if e.local_name().as_ref() == b"tbl" => return Ok((table, span)),
                 Event::Eof => return Err(DocxError::Xml("unclosed w:tbl".into())),
                 _ => {}
             }
         }
     }
 
-    fn row(&mut self) -> Result<TableRow, DocxError> {
+    fn row(&mut self) -> Result<(TableRow, Vec<CellSpan>), DocxError> {
         let mut row = TableRow::default();
+        let mut cells = Vec::new();
         loop {
+            let before = self.pos();
             match self.r.read_event()? {
                 Event::Start(e) => match xml::local(&e) {
                     b"trPr" => row.header = self.header_row()?,
                     b"tc" => {
                         let mut props = CellProps { span: 1 };
                         let mut blocks = Vec::new();
-                        self.blocks(b"tc", &mut blocks, Some(&mut props))?;
+                        let content = self.blocks(b"tc", &mut blocks, Some(&mut props))?;
                         row.cells.push(TableCell {
                             blocks,
                             span: props.span,
+                        });
+                        cells.push(CellSpan {
+                            span: before..self.pos(),
+                            content,
                         });
                     }
                     name if wrapper(name) => {}
                     _ => xml::skip(&mut self.r, &e)?,
                 },
-                Event::End(e) if e.local_name().as_ref() == b"tr" => return Ok(row),
+                Event::End(e) if e.local_name().as_ref() == b"tr" => return Ok((row, cells)),
                 Event::Eof => return Err(DocxError::Xml("unclosed w:tr".into())),
                 _ => {}
             }
@@ -231,27 +339,10 @@ impl<R: Read + Seek> Body<'_, '_, R> {
     /// An empty paragraph with the look `direct` and the styles give it, and the run
     /// properties its text starts from.
     fn paragraph_of(&self, direct: &ParaProps) -> (Paragraph, RunProps) {
-        let style = self.styles.paragraph(direct.style.as_deref());
-        let mut ppr = self.styles.default_ppr.clone();
-        let mut rpr = self.styles.default_rpr.clone();
-        if let Some(s) = style {
-            ppr.apply(&s.ppr);
-            rpr.apply(&s.rpr);
-        }
-        ppr.apply(direct);
+        let ppr = self.styles.paragraph_props(direct);
         let mut p = Paragraph::new(self.styles.paragraph_style(direct.style.as_deref()));
         p.align = ppr.align.unwrap_or_default();
-        (p, rpr)
-    }
-
-    /// The paragraph's list numbering, from its own `w:numPr` or its style's.
-    fn list_props(&self, direct: &ParaProps) -> (Option<u32>, Option<u8>) {
-        let mut ppr = self.styles.default_ppr.clone();
-        if let Some(s) = self.styles.paragraph(direct.style.as_deref()) {
-            ppr.apply(&s.ppr);
-        }
-        ppr.apply(direct);
-        (ppr.num_id, ppr.level)
+        (p, self.styles.base_run(direct.style.as_deref()))
     }
 
     fn paragraph(&mut self, out: &mut Vec<Block>) -> Result<(), DocxError> {
@@ -295,23 +386,14 @@ impl<R: Read + Seek> Body<'_, '_, R> {
     /// Turn a paragraph's items into blocks (see the module comment).
     fn emit_paragraph(&mut self, direct: &ParaProps, items: Vec<Item>, out: &mut Vec<Block>) {
         let (template, _) = self.paragraph_of(direct);
-        let mut list = match self.list_props(direct) {
-            (Some(num), level) if num != 0 => {
-                let style = direct.style.as_deref();
-                let level = level
-                    .or_else(|| style.and_then(|s| self.numbering.level_of_style(num, s)))
-                    .unwrap_or(0);
-                self.numbering
-                    .next(&mut self.counters, num, level)
-                    .map(|kind| (kind, level))
-            }
-            _ => None,
-        };
-        let mut ppr = self.styles.default_ppr.clone();
-        if let Some(s) = self.styles.paragraph(direct.style.as_deref()) {
-            ppr.apply(&s.ppr);
-        }
-        ppr.apply(direct);
+        let numbered = self.numbering.list_of(self.styles, direct);
+        self.num = numbered.map(|(num, _)| num);
+        let mut list = numbered.and_then(|(num, level)| {
+            self.numbering
+                .next(&mut self.counters, num, level)
+                .map(|kind| (kind, level))
+        });
+        let ppr = self.styles.paragraph_props(direct);
         if ppr.page_break_before == Some(true) {
             out.push(Block::PageBreak);
         }
@@ -348,7 +430,10 @@ impl<R: Read + Seek> Body<'_, '_, R> {
                         has_text = true;
                         p.push(&text, &style);
                     }
-                    Item::Image(image) => out.push(Block::Image(image)),
+                    Item::Image(image, span) => {
+                        out.push(Block::Image(image));
+                        self.pictures.push(span);
+                    }
                     Item::PageBreak => {}
                 }
             }
@@ -399,6 +484,7 @@ impl<R: Read + Seek> Body<'_, '_, R> {
         let mut direct = RunProps::default();
         let mut style: Option<RunStyle> = None;
         loop {
+            let before = self.pos();
             let event = self.r.read_event()?;
             let empty = matches!(event, Event::Empty(_));
             match event {
@@ -460,8 +546,8 @@ impl<R: Read + Seek> Body<'_, '_, R> {
                             let mark = format_number(self.endnotes, "lowerRoman");
                             self.push_text(items, &mark, look);
                         }
-                        b"drawing" if !empty => self.drawing(items)?,
-                        b"pict" if !empty => self.pict(items)?,
+                        b"drawing" if !empty => self.drawing(items, before)?,
+                        b"pict" if !empty => self.pict(items, before)?,
                         b"Fallback" if !empty => xml::skip(&mut self.r, &e)?,
                         name if wrapper(name) => {}
                         _ if !empty => xml::skip(&mut self.r, &e)?,
@@ -484,21 +570,10 @@ impl<R: Read + Seek> Body<'_, '_, R> {
     /// A run's look: document defaults, paragraph style, character style, direct
     /// formatting, each over the one before.
     fn run_style(&self, base: &RunProps, direct: &RunProps, link: Option<String>) -> RunStyle {
-        let mut p = base.clone();
-        if let Some(s) = self.styles.character(direct.style.as_deref()) {
-            p.apply(&s.rpr);
-        }
-        p.apply(direct);
         let field_link = self.fields.iter().rev().find_map(|f| f.link.clone());
         RunStyle {
-            bold: p.bold.unwrap_or(false),
-            italic: p.italic.unwrap_or(false),
-            underline: p.underline.unwrap_or(false),
-            strike: p.strike.unwrap_or(false),
-            size: p.size,
-            color: p.color.flatten(),
             link: link.or(field_link),
-            ..RunStyle::default()
+            ..self.styles.run_look(base, direct)
         }
     }
 
@@ -557,9 +632,9 @@ impl<R: Read + Seek> Body<'_, '_, R> {
         })
     }
 
-    /// A DrawingML picture (`w:drawing`): every `a:blip` in it, sized by `wp:extent` and
-    /// described by `wp:docPr`. Text boxes in drawings aren't read.
-    fn drawing(&mut self, items: &mut Vec<Item>) -> Result<(), DocxError> {
+    /// A DrawingML picture (`w:drawing`, starting at `start`): every `a:blip` in it, sized
+    /// by `wp:extent` and described by `wp:docPr`. Text boxes in drawings aren't read.
+    fn drawing(&mut self, items: &mut Vec<Item>, start: usize) -> Result<(), DocxError> {
         let mut size = None;
         let mut alt = String::new();
         let mut blips = Vec::new();
@@ -597,19 +672,20 @@ impl<R: Read + Seek> Body<'_, '_, R> {
             }
         }
         let one = blips.len() == 1;
+        let span = one.then(|| start..self.pos());
         for id in blips {
             if let Some(image) = self.picture(&id, &alt, if one { size } else { None }) {
                 if self.shows() {
-                    items.push(Item::Image(image));
+                    items.push(Item::Image(image, span.clone()));
                 }
             }
         }
         Ok(())
     }
 
-    /// A VML picture (`w:pict`): `v:imagedata` sized by its shape's style. Text boxes
-    /// aren't read.
-    fn pict(&mut self, items: &mut Vec<Item>) -> Result<(), DocxError> {
+    /// A VML picture (`w:pict`, starting at `start`): `v:imagedata` sized by its shape's
+    /// style. Text boxes aren't read.
+    fn pict(&mut self, items: &mut Vec<Item>, start: usize) -> Result<(), DocxError> {
         let mut size = None;
         let mut alt = String::new();
         let mut ids = Vec::new();
@@ -644,10 +720,11 @@ impl<R: Read + Seek> Body<'_, '_, R> {
                 _ => {}
             }
         }
+        let span = (ids.len() == 1).then(|| start..self.pos());
         for id in ids {
             if let Some(image) = self.picture(&id, &alt, size) {
                 if self.shows() {
-                    items.push(Item::Image(image));
+                    items.push(Item::Image(image, span.clone()));
                 }
             }
         }
