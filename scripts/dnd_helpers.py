@@ -10,6 +10,8 @@
   dnd_helpers.py click X Y             the same pointer: a quick click at (X, Y), as a
                                        hand makes one (GTK takes a press held past the
                                        double-click time as a long press)
+  dnd_helpers.py wheel X Y NOTCHES     the same pointer at (X, Y) turns a mouse wheel
+                                       NOTCHES notches down (negative: up)
 """
 
 import sys
@@ -47,7 +49,8 @@ def source(path):
 
 
 def pointer(width=1280, height=720):
-    """A virtual pointer: its `move(x, y)`, `button(pressed, hold)`, and `done()`."""
+    """A virtual pointer: its `move(x, y)`, `button(pressed, hold)`, `wheel(notch)`, and
+    `done()`."""
     from pywayland.client import Display
     from pywayland.protocol.wayland import WlSeat
     from wlr_proto.wlr_virtual_pointer_unstable_v1 import ZwlrVirtualPointerManagerV1
@@ -84,15 +87,23 @@ def pointer(width=1280, height=720):
         display.flush()
         time.sleep(hold)
 
+    def wheel(notch):
+        # One wheel notch: 15 px of vertical scroll (axis 0), as libinput reports it.
+        pointer.axis_source(0)  # wheel
+        pointer.axis_discrete(ms(), 0, 15.0 * notch, notch)
+        pointer.frame()
+        display.flush()
+        time.sleep(0.03)
+
     def done():
         display.roundtrip()
         display.disconnect()
 
-    return move, button, done
+    return move, button, wheel, done
 
 
 def drag(x1, y1, x2, y2):
-    move, button, done = pointer()
+    move, button, _, done = pointer()
     move(x1, y1)
     time.sleep(0.5)
     button(True)
@@ -106,11 +117,21 @@ def drag(x1, y1, x2, y2):
 
 
 def click(x, y):
-    move, button, done = pointer()
+    move, button, _, done = pointer()
     move(x, y)
     time.sleep(0.3)
     button(True, hold=0.05)
     button(False, hold=0.3)
+    done()
+
+
+def wheel(x, y, notches):
+    move, _, turn, done = pointer()
+    move(x, y)
+    time.sleep(0.3)
+    for _ in range(abs(notches)):
+        turn(1 if notches > 0 else -1)
+    time.sleep(0.3)
     done()
 
 
@@ -121,5 +142,7 @@ if __name__ == "__main__":
         drag(*map(float, sys.argv[2:6]))
     elif sys.argv[1] == "click":
         click(*map(float, sys.argv[2:4]))
+    elif sys.argv[1] == "wheel":
+        wheel(float(sys.argv[2]), float(sys.argv[3]), int(sys.argv[4]))
     else:
         sys.exit(__doc__)

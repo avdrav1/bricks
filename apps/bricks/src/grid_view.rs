@@ -492,7 +492,8 @@ mod imp {
 
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
             let obj = self.obj();
-            obj.bounds(); // grow whole rows/columns to what indexing found
+            // Grows whole rows/columns to what indexing found; empty cells fill the rest.
+            let reach = obj.reach();
             let (Some(vadj), Some(hadj)) = (self.vadj.borrow().clone(), self.hadj.borrow().clone())
             else {
                 return;
@@ -508,7 +509,7 @@ mod imp {
                 scroll: vadj.value(),
                 extent: body_h,
                 sizes: &sizing.rows,
-                count: shown_rows(book.active()),
+                count: reach.rows,
             };
             let visible = rows.visible(0);
             // Formula cells show their results (FML-4); those over the frame's budget wait
@@ -523,7 +524,7 @@ mod imp {
                 scroll: hadj.value(),
                 extent: body_w,
                 sizes: &sizing.cols,
-                count: u64::from(cache.col_count().max(table.min_width())) + 1,
+                count: u64::from((cache.col_count().max(table.min_width()) + 1).max(reach.cols)),
             };
             let visible_cols = cols.visible(0);
 
@@ -885,15 +886,19 @@ mod imp {
 
             // Selection and cell cursor. Coordinates are clamped to just outside the body
             // before narrowing to f32, so far-away edges stay exact. The selection covers
-            // the merges it touches; a cursor on a merge outlines all of it.
+            // the merges it touches; a cursor on a merge outlines all of it. Whole rows and
+            // columns cover the data, and show on through the empty cells past it (GRID-6).
             let merges = TableMerges(table);
             let sel = self.selection.get();
             let (tl, br) = sel.area(&merges);
-            let (x0, x1) = (clamp_x(col_x(tl.col)), clamp_x(col_end(br.col)));
-            let (y0, y1) = (clamp_y(row_y(tl.row)), clamp_y(row_end(br.row)));
+            let (whole_cols, whole_rows) = (sel.whole_columns().is_some(), sel.is_whole_rows());
+            let x1 = if whole_rows { w } else { col_end(br.col) };
+            let y1 = if whole_cols { h } else { row_end(br.row) };
+            let (x0, x1) = (clamp_x(col_x(tl.col)), clamp_x(x1));
+            let (y0, y1) = (clamp_y(row_y(tl.row)), clamp_y(y1));
             let accent = gdk::RGBA::new(0.21, 0.52, 0.89, 1.0);
             let (range_tl, range_br) = sel.range();
-            if range_tl != range_br {
+            if range_tl != range_br || whole_cols || whole_rows {
                 let fill = gdk::RGBA::new(accent.red(), accent.green(), accent.blue(), 0.18);
                 snapshot.append_color(&fill, &rect(x0, y0, x1 - x0, y1 - y0));
             }
@@ -1178,7 +1183,8 @@ impl GridView {
                         if g.imp().editing.get().is_some() {
                             g.queue_allocate(); // the editor moves with its cell
                         }
-                        g.queue_draw();
+                        // The empty cells past the data reach on as it scrolls (GRID-6).
+                        g.update_adjustments();
                     }
                 }
             });
@@ -1195,10 +1201,11 @@ impl GridView {
         g
     }
 
-    /// What navigation moves within: the rows indexed so far, the widest row seen, and one
-    /// screen of whole rows, plus the editable edge: one empty row (once indexing is done)
-    /// and one empty column past the data, where typing grows the table (SAVE-2). Whole-row
-    /// and whole-column selections follow it as it grows.
+    /// The data's extent: the rows indexed so far, the widest row seen, and one screen of
+    /// whole rows, plus the editable edge: one empty row (once indexing is done) and one
+    /// empty column past the data, where typing grows the table (SAVE-2). Whole rows,
+    /// whole columns, and select-all cover this much, and follow it as it grows; the
+    /// grid shows and moves within [`GridView::reach`].
     fn bounds(&self) -> Bounds {
         let imp = self.imp();
         let (_, body_h) = imp.body_size();
@@ -1214,15 +1221,6 @@ impl GridView {
                 self.set_selection(sel);
             }
         }
-        // A reopened file can have fewer rows than the cursor's (a header detected where
-        // there was none); once its row count is final, bring the cursor back in.
-        let cur = imp.selection.get().cursor();
-        if b.rows > 0 && cur.row >= b.rows && self.is_complete() {
-            self.set_selection(Selection::at(grid::Cell {
-                row: b.rows - 1,
-                col: cur.col,
-            }));
-        }
         b
     }
 
@@ -1234,6 +1232,54 @@ impl GridView {
         imp.cache.borrow().col_count().max(min)
     }
 
+    /// What the grid shows and the cursor moves within (GRID-6): [`GridView::bounds`],
+    /// then empty rows and columns past the data, as in Excel and Calc: enough to fill the
+    /// window and one more screen past where it is scrolled, and to reach the selection
+    /// and the cursor, up to [`reach_limit`]. Scrolling or moving on adds more, and
+    /// scrolling back takes them away. Rows wait for indexing, since rows past those
+    /// indexed so far aren't empty.
+    fn reach(&self) -> Bounds {
+        let imp = self.imp();
+        let b = self.bounds();
+        let (max_rows, max_cols) = reach_limit(b);
+        let (body_w, body_h) = imp.body_size();
+        let sel = imp.selection.get();
+        let (cur, (_, far)) = (sel.cursor(), sel.range());
+        let scroll = |adj: &RefCell<Option<gtk::Adjustment>>| {
+            adj.borrow().as_ref().map_or(0.0, |a| a.value())
+        };
+        let sizing = imp.sizing.borrow();
+        let rows = if self.is_complete() {
+            let far = far.row.max(cur.row);
+            reach_count(
+                b.rows,
+                &sizing.rows,
+                scroll(&imp.vadj),
+                body_h,
+                far,
+                max_rows,
+            )
+        } else {
+            b.rows
+        };
+        let far = u64::from(far.col.max(cur.col));
+        let (data, max) = (u64::from(b.cols), u64::from(max_cols));
+        let cols = reach_count(data, &sizing.cols, scroll(&imp.hadj), body_w, far, max);
+        Bounds {
+            rows,
+            cols: cols as u32,
+            ..b
+        }
+    }
+
+    /// The bounds a row header click and a column header click work in: the row or
+    /// column clicked may be past the data ([`GridView::reach`]), and the whole row or
+    /// column covers the data ([`GridView::bounds`]).
+    fn header_bounds(&self) -> (Bounds, Bounds) {
+        let (b, r) = (self.bounds(), self.reach());
+        (Bounds { rows: r.rows, ..b }, Bounds { cols: r.cols, ..b })
+    }
+
     /// Both axes of the body as they are scrolled and sized now: rows, then columns.
     fn with_viewports<R>(&self, f: impl FnOnce(Viewport<'_>, Viewport<'_>) -> R) -> R {
         let imp = self.imp();
@@ -1241,7 +1287,11 @@ impl GridView {
         let value = |adj: &RefCell<Option<gtk::Adjustment>>| {
             adj.borrow().as_ref().map_or(0.0, |a| a.value())
         };
-        let (row_count, col_count) = (self.shown_rows(), self.col_count() + 1);
+        let Bounds {
+            rows: row_count,
+            cols: col_count,
+            ..
+        } = self.reach();
         let sizing = imp.sizing.borrow();
         f(
             Viewport {
@@ -1438,7 +1488,7 @@ impl GridView {
                 return;
             }
         }
-        let b = self.bounds();
+        let (b, (by_row, by_col)) = (self.bounds(), self.header_bounds());
         if b.rows == 0 || b.cols == 0 {
             return;
         }
@@ -1450,11 +1500,11 @@ impl GridView {
                 None
             }
             (true, false) => {
-                sel.click_row(cell.row, shift, top_left.col, b, m);
+                sel.click_row(cell.row, shift, top_left.col, by_row, m);
                 Some(Drag::Rows)
             }
             (false, true) => {
-                sel.click_col(cell.col, shift, top_left.row, b, m);
+                sel.click_col(cell.col, shift, top_left.row, by_col, m);
                 Some(Drag::Cols)
             }
             (false, false) if shift => {
@@ -1528,7 +1578,7 @@ impl GridView {
                 push(hz, x - rh_w, x - rh_w - body_w);
             }
         }
-        let b = self.bounds();
+        let (b, (by_row, by_col)) = (self.bounds(), self.header_bounds());
         if b.rows == 0 || b.cols == 0 {
             return;
         }
@@ -1537,8 +1587,8 @@ impl GridView {
         let moved = self.with_merges(|m| {
             match kind {
                 Drag::Cells => sel.extend_to(cell, m),
-                Drag::Rows => sel.click_row(cell.row, true, 0, b, m),
-                Drag::Cols => sel.click_col(cell.col, true, 0, b, m),
+                Drag::Rows => sel.click_row(cell.row, true, 0, by_row, m),
+                Drag::Cols => sel.click_col(cell.col, true, 0, by_col, m),
                 Drag::Resize { .. } => return false,
             }
             true
@@ -1555,18 +1605,25 @@ impl GridView {
     /// Apply a navigation key (GRID-3/GRID-4) and keep the moved cell in view.
     pub fn press(&self, key: Key, mods: Mods) {
         let imp = self.imp();
-        let bounds = self.bounds();
-        // End and Ctrl+End go to the last cell with data, as in Calc, not the empty edge.
+        let (bounds, reach) = (self.bounds(), self.reach());
+        // End and Ctrl+End go to the last cell with data, as in Calc, not the empty cells
+        // past it; End keeps the row. Whole rows and columns (Shift/Ctrl+Space) and
+        // select-all cover the data. Everything else moves on past it (GRID-6).
         let within = match key {
             Key::End => {
                 let (rows, cols) = (self.row_count(), self.col_count());
                 Bounds {
-                    rows: if rows > 0 { rows } else { bounds.rows },
+                    rows: match (mods.ctrl, rows) {
+                        (true, 0) => bounds.rows,
+                        (true, rows) => rows,
+                        (false, _) => reach.rows,
+                    },
                     cols: if cols > 0 { cols } else { bounds.cols },
                     ..bounds
                 }
             }
-            _ => bounds,
+            Key::Space => bounds,
+            _ => reach,
         };
         let mut sel = imp.selection.get();
         let reveal = self.with_merges(|m| {
@@ -1586,6 +1643,8 @@ impl GridView {
     /// Scroll the least amount that shows the given rows and columns (first and last,
     /// inclusive) whole, or at least their start when they don't fit.
     fn scroll_to(&self, (rows, cols): grid::Reveal) {
+        // The range first reaches a selection that moved past the data (GRID-6).
+        self.update_adjustments();
         let imp = self.imp();
         let (body_w, body_h) = imp.body_size();
         let reveal = |adj: &gtk::Adjustment, start: f64, end: f64, view: f64| {
@@ -1636,7 +1695,7 @@ impl GridView {
     /// after the edit move within a selected range, as in Calc.
     fn start_edit(&self, start: Start) {
         let cell = self.imp().selection.get().cursor();
-        let b = self.bounds();
+        let b = self.reach();
         if cell.row >= b.rows || cell.col >= b.cols {
             return;
         }
@@ -1786,7 +1845,8 @@ impl GridView {
     }
 
     /// Give cell (`row`, `col`) the raw text `text` as one undoable step (EDIT-2, FML-9):
-    /// the edge row grows the table (SAVE-2). A formula that doesn't parse is refused,
+    /// a row past the data grows the table to it (SAVE-2, GRID-6); empty text there
+    /// changes nothing. A formula that doesn't parse is refused,
     /// saying where: "Formula error at character N: …" (counting its `=` as 1).
     fn apply_text(&self, row: u64, col: u32, text: String) -> Result<(), String> {
         let imp = self.imp();
@@ -1803,12 +1863,15 @@ impl GridView {
         let mut grew = false;
         let cmd: Option<Box<dyn Command<CsvTable>>> = {
             let mut table = self.table_mut();
-            if row >= table.row_count() {
-                // The edge row (SAVE-2): add the row and set the cell, as one step.
+            if row >= table.row_count() && text_empty {
+                None
+            } else if row >= table.row_count() {
+                // Past the data: add the rows up to this one and set the cell, as one step.
+                let rows = table.row_count();
                 match table.paste(row, col, &[vec![text]]) {
                     Ok(edits) if !edits.is_empty() => {
                         let at = CellRef {
-                            row: table.row_id(row.min(table.row_count().saturating_sub(1))),
+                            row: added_row(&edits, rows, row).unwrap_or(RowId::source(0)),
                             col: table.col_id(col),
                         };
                         grew = true;
@@ -1816,7 +1879,8 @@ impl GridView {
                     }
                     _ => None,
                 }
-            } else if table.cell_value(row, col).as_deref() != Some(text.as_str()) {
+            } else if table.cell_value(row, col).as_deref().unwrap_or("") != text {
+                // A cell past its row's end shows empty: empty text leaves it so.
                 let at = CellRef {
                     row: table.row_id(row),
                     col: table.col_id(col),
@@ -1947,12 +2011,28 @@ impl GridView {
             t.row_of(t.id_at(position)).ok_or("That row isn't shown")
         };
         let b = self.bounds();
-        // Rows stop at the editable edge row; columns are known only as far as rows have
-        // loaded (none just after a sheet switch), so they aren't cut.
+        // Any cell past the data once indexing is done (GRID-6), up to `reach_limit`; until
+        // then rows stop at those indexed. Columns are known only as far as rows have
+        // loaded (none just after a sheet switch), so only the limit cuts them. Whole rows
+        // and columns cover the data, as clicking their headers does.
+        let (max_rows, max_cols) = reach_limit(b);
+        let last = if self.is_complete() {
+            max_rows - 1
+        } else {
+            b.rows.saturating_sub(1)
+        };
+        let by_row = Bounds {
+            rows: last + 1,
+            ..b
+        };
+        let by_col = Bounds {
+            cols: max_cols,
+            ..b
+        };
         let cell = |a: &formula::CellAddr| -> Result<grid::Cell, &'static str> {
             Ok(grid::Cell {
-                row: table_row(a.row)?.min(b.rows.saturating_sub(1)),
-                col: a.col,
+                row: table_row(a.row)?.min(last),
+                col: a.col.min(max_cols - 1),
             })
         };
         let mut sel = self.imp().selection.get();
@@ -1967,13 +2047,13 @@ impl GridView {
                     sel.extend_to(cell(z)?, m);
                 }
                 formula::Area::Cols { first, last, .. } => {
-                    sel.click_col(*first, false, 0, b, m);
-                    sel.click_col(*last, true, 0, b, m);
+                    sel.click_col(*first, false, 0, by_col, m);
+                    sel.click_col(*last, true, 0, by_col, m);
                 }
                 formula::Area::Rows { first, last, .. } => {
                     let (first, last) = (table_row(*first)?, table_row(*last)?);
-                    sel.click_row(first, false, 0, b, m);
-                    sel.click_row(last, true, 0, b, m);
+                    sel.click_row(first, false, 0, by_row, m);
+                    sel.click_row(last, true, 0, by_row, m);
                 }
             }
             Ok(sel.reveal(m))
@@ -2061,18 +2141,24 @@ impl GridView {
     /// Redraw after the data changed: cached rows and titles reload (from scratch: a
     /// column delete can narrow the widest row), the remembered sizes follow their rows
     /// and columns, the scroll range follows the row count, and the cursor goes to
-    /// `focus` if given (else stays, clamped to the rows left).
+    /// `focus` if given (else stays; while indexing, clamped to the rows indexed).
     fn after_change(&self, focus: Option<grid::Cell>) {
         let imp = self.imp();
         imp.cache.borrow_mut().reset();
         imp.titles.take();
         self.refit_sizes();
         self.update_adjustments();
-        let b = self.bounds();
+        // Past the data is a place too once indexing is done (GRID-6); until then the
+        // rows stop at those indexed so far.
+        let last = if self.is_complete() {
+            u64::MAX
+        } else {
+            self.bounds().rows.saturating_sub(1)
+        };
         let cursor = focus.unwrap_or_else(|| imp.selection.get().cursor());
-        if focus.is_some() || cursor.row >= b.rows {
+        if focus.is_some() || cursor.row > last {
             let cell = grid::Cell {
-                row: cursor.row.min(b.rows.saturating_sub(1)),
+                row: cursor.row.min(last),
                 col: cursor.col,
             };
             self.set_selection(Selection::at(cell));
@@ -2092,6 +2178,8 @@ impl GridView {
         self.insert_rows(true);
     }
 
+    /// Rows inserted past the data would only add empty lines to the file: there is
+    /// nothing below them to move down (GRID-6).
     fn insert_rows(&self, below: bool) {
         let Some((first, count)) = self.selected_rows() else {
             return;
@@ -2100,6 +2188,9 @@ impl GridView {
         let edit = {
             let mut t = self.table_mut();
             let rows = t.row_count();
+            if first >= rows {
+                return;
+            }
             t.insert_rows(at.min(rows), count)
         };
         self.reshape(edit);
@@ -2138,8 +2229,12 @@ impl GridView {
         self.insert_cols(true);
     }
 
+    /// Columns past the data have nothing right of them to move, so nothing happens.
     fn insert_cols(&self, right: bool) {
         let (first, count) = self.selected_cols();
+        if first >= self.col_count() {
+            return;
+        }
         let at = if right { first + count } else { first };
         let edit = self.table_mut().insert_cols(at, count);
         self.reshape(edit);
@@ -2279,9 +2374,11 @@ impl GridView {
 
     /// Format the selection with `patch` as one undoable step (STYLE-6): whole columns or
     /// rows when they are selected so (their column or row styles, and the cells with
-    /// their own style there), else the selected cells, merges whole. A cell range over
-    /// [`REPLACE_MAX_CELLS`] cells is refused. Whole rows or columns of a sheet with many
-    /// style runs are worked out on the job pool ("Formatting"; edits wait).
+    /// their own style there), else the selected cells, merges whole. Cells and whole rows
+    /// past the data get rows to hold their formats, added at the end in the same step
+    /// (GRID-6). A cell range over [`REPLACE_MAX_CELLS`] cells is refused. Whole rows or
+    /// columns of a sheet with many style runs are worked out on the job pool
+    /// ("Formatting"; edits wait).
     pub fn format_selection(&self, patch: &StylePatch) {
         let imp = self.imp();
         if self.busy() || imp.editing.get().is_some() {
@@ -2290,10 +2387,15 @@ impl GridView {
         let sel = imp.selection.get();
         let (tl, br) = self.selected_area();
         let width = self.col_count();
-        let (target, focus) = {
-            let t = self.table();
+        let (target, focus, pad) = {
+            let mut t = self.table_mut();
             let n = t.row_count();
-            let rows = tl.row..(br.row + 1).min(n);
+            let pad = if sel.whole_columns().is_none() && br.row >= n {
+                t.insert_rows(n, br.row + 1 - n)
+            } else {
+                None
+            };
+            let rows = tl.row..br.row + 1;
             let target = match (sel.whole_columns(), sel.is_whole_rows()) {
                 (Some(_), true) => FormatTarget::Cols(0..width),
                 (Some(_), false) => FormatTarget::Cols(tl.col..br.col + 1),
@@ -2307,15 +2409,18 @@ impl GridView {
                 },
             };
             let cur = sel.cursor();
+            let added = pad
+                .as_ref()
+                .and_then(|p| added_row(std::slice::from_ref(p), n, cur.row));
             let focus = CellRef {
                 row: if cur.row < n {
                     t.row_id(cur.row)
                 } else {
-                    RowId::source(0)
+                    added.unwrap_or(RowId::source(0))
                 },
                 col: t.col_id(cur.col),
             };
-            (target, focus)
+            (target, focus, pad)
         };
         let (sheet, runs) = {
             let book = imp.book.borrow();
@@ -2324,7 +2429,11 @@ impl GridView {
         if runs > FORMAT_JOB_RUNS && !matches!(target, FormatTarget::Cells { .. }) {
             let mut snapshot = imp.book.borrow().snapshot();
             let patch = patch.clone();
+            let padding = pad.clone();
             let job = jobs::spawn(move |_| {
+                if let Some(pad) = padding {
+                    pad_sheet(&mut snapshot, sheet, pad);
+                }
                 let edit = snapshot.format_edit(sheet, target, &patch);
                 edit.map(|e| (e, snapshot.styles().clone()))
             });
@@ -2348,16 +2457,30 @@ impl GridView {
                     imp.book.borrow_mut().set_styles(Arc::unwrap_or_clone(pool));
                     edit
                 });
-                g.finish_format(result, focus);
+                g.finish_format(result, pad, focus);
             });
             return;
         }
-        let edit = imp.book.borrow_mut().format_edit(sheet, target, patch);
-        self.finish_format(edit, focus);
+        let edit = match &pad {
+            None => imp.book.borrow_mut().format_edit(sheet, target, patch),
+            Some(pad) => {
+                // Worked out on a copy that has the rows; its new style records come back.
+                let mut padded = imp.book.borrow().snapshot();
+                pad_sheet(&mut padded, sheet, pad.clone());
+                let edit = padded.format_edit(sheet, target, patch);
+                if edit.is_ok() {
+                    let pool = Arc::unwrap_or_clone(padded.styles().clone());
+                    imp.book.borrow_mut().set_styles(pool);
+                }
+                edit
+            }
+        };
+        self.finish_format(edit, pad, focus);
     }
 
-    /// Run a format edit as one undoable step, or say why there is none.
-    fn finish_format(&self, edit: Result<Edit, FormatError>, focus: CellRef) {
+    /// Run a format edit as one undoable step, after `pad` (rows added for it, GRID-6), or
+    /// say why there is none.
+    fn finish_format(&self, edit: Result<Edit, FormatError>, pad: Option<Edit>, focus: CellRef) {
         let refuse = |title: &str, why: &str| {
             self.emit_by_name::<()>("refused", &[&title, &why]);
         };
@@ -2377,7 +2500,8 @@ impl GridView {
             ),
             Ok(Edit::Styles(e)) if e.is_empty() => {}
             Ok(edit) => {
-                self.execute(Box::new(Batch::new("Format cells", vec![edit], focus)));
+                let edits = pad.into_iter().chain([edit]).collect();
+                self.execute(Box::new(Batch::new("Format cells", edits, focus)));
                 self.after_change(None);
             }
         }
@@ -2524,15 +2648,17 @@ impl GridView {
                 Some(_) => tl.row..table.row_count(),
                 None => tl.row..(br.row + 1).min(table.row_count()),
             };
+            let (first, end) = (rows.start, rows.end);
             let edit = if sel.is_whole_rows() {
                 table.clear_cells(rows, tl.col..)
             } else {
                 table.clear_cells(rows, tl.col..br.col + 1)
             };
             let Some(edit) = edit else { return };
+            // The cursor may be past the data (GRID-6); the focus is a cleared row.
             let cur = sel.cursor();
             let cursor = CellRef {
-                row: table.row_id(cur.row),
+                row: table.row_id(cur.row.clamp(first, end - 1)),
                 col: table.col_id(cur.col),
             };
             (edit, cursor)
@@ -2733,15 +2859,21 @@ impl GridView {
         }
         let (note, cmd) = {
             let mut table = self.table_mut();
-            let at = tl.row.min(table.row_count());
+            // Past the data too (GRID-6): the rows up to it are added.
+            let (at, rows) = (tl.row, table.row_count());
             match table.paste(at, tl.col, &cells) {
                 Ok(mut edits) => {
                     if let Some(block) = &styles {
                         edits.extend(table.paste_styles(&edits, at, tl.col, block));
                     }
                     let cmd = (!edits.is_empty()).then(|| {
+                        let row = if at < rows {
+                            table.row_id(at)
+                        } else {
+                            added_row(&edits, rows, at).unwrap_or(RowId::source(0))
+                        };
                         let focus = CellRef {
-                            row: table.row_id(at.min(table.row_count().saturating_sub(1))),
+                            row,
                             col: table.col_id(tl.col),
                         };
                         Batch::new("Paste", edits, focus)
@@ -2766,10 +2898,7 @@ impl GridView {
         if !matches!(note, ClipView::Pasted(_)) {
             return;
         }
-        let anchor = grid::Cell {
-            row: tl.row.min(self.row_count().saturating_sub(1)),
-            col: tl.col,
-        };
+        let anchor = tl;
         self.after_change(Some(anchor));
         let mut sel = Selection::at(anchor);
         let end = grid::Cell {
@@ -4599,13 +4728,16 @@ impl GridView {
         self.imp().painted_top.get()
     }
 
-    /// Resize scroll ranges to the rows indexed so far and the widest row seen.
+    /// Resize scroll ranges to what the grid reaches: the rows indexed so far, the widest
+    /// row seen, and the empty cells past them (GRID-6).
     pub fn update_adjustments(&self) {
         let imp = self.imp();
-        let rows = self.shown_rows();
+        let reach = self.reach();
         // Room for the widest row number in the current font (digits are tabular): the
-        // edge row's file row number.
-        let widest = self.table().total_rows() + 1;
+        // last row's file row number, the edge row's or one past it.
+        let t = self.table();
+        let widest = t.total_rows() + reach.rows.saturating_sub(t.row_count()).max(1);
+        drop(t);
         let digits = widest.ilog10() as i32 + 1;
         let digit_w = self.create_pango_layout(Some("0")).pixel_size().0.max(1);
         imp.row_header_w
@@ -4614,11 +4746,11 @@ impl GridView {
         // GTK requires upper >= page size; short or narrow tables just don't scroll.
         let sizing = imp.sizing.borrow();
         if let Some(v) = imp.vadj.borrow().as_ref() {
-            let upper = sizing.rows.start(rows).max(body_h);
+            let upper = sizing.rows.start(reach.rows).max(body_h);
             v.configure(v.value(), 0.0, upper, ROW_H, body_h * 0.9, body_h);
         }
         if let Some(hz) = imp.hadj.borrow().as_ref() {
-            let cols = u64::from(self.col_count() + 1);
+            let cols = u64::from(reach.cols);
             let upper = sizing.cols.start(cols).max(body_w);
             hz.configure(hz.value(), 0.0, upper, COL_W / 4.0, body_w * 0.9, body_w);
         }
@@ -4975,6 +5107,40 @@ fn shown_rows(table: &CsvTable) -> u64 {
     table.row_count() + u64::from(table.is_complete())
 }
 
+/// The identity table row `row` gets from a paste's `edits`, for a row at or past `rows`
+/// (the row count before them): its place in the run they add at the end (GRID-6).
+fn added_row(edits: &[Edit], rows: u64, row: u64) -> Option<RowId> {
+    edits.iter().find_map(|e| match e {
+        Edit::InsertRows { rows: runs, .. } => {
+            runs.first().map(|r| RowId(r.first.0 + (row - rows)))
+        }
+        _ => None,
+    })
+}
+
+/// How far the empty cells past the data go (GRID-6), as rows and columns: Excel's sheet
+/// size, or the data's where that is bigger (a taller CSV keeps just its edge row). A
+/// cell typed there can still save as .xlsx, and a name-box reference can't make a file
+/// of a trillion empty rows.
+fn reach_limit(data: Bounds) -> (u64, u32) {
+    (data.rows.max(xlsx::MAX_ROWS), data.cols.max(xlsx::MAX_COLS))
+}
+
+/// Rows or columns the grid reaches along one axis (GRID-6): the data's `data`, or as
+/// many as fill the `view` from `scroll` and one more `view` past it and reach index
+/// `far`, at most `limit` of those.
+fn reach_count(data: u64, sizes: &Sizes, scroll: f64, view: f64, far: u64, limit: u64) -> u64 {
+    let fill = sizes.index_at(scroll + 2.0 * view) + 1;
+    data.max(fill.max(far + 1).min(limit))
+}
+
+/// Add the rows `pad` adds to sheet `id` of `book`, a snapshot a format past the data is
+/// worked out on (GRID-6).
+fn pad_sheet(book: &mut Workbook, id: SheetId, pad: Edit) {
+    let sheet = book.sheet_mut(id).expect("the formatted sheet exists");
+    sheet.table.apply(pad);
+}
+
 /// What the popover calls an inferred type: "Automatic (whole numbers)".
 fn type_name(t: Option<InferredType>) -> &'static str {
     match t {
@@ -5185,5 +5351,27 @@ mod tests {
     fn a_centred_across_run_is_bounded() {
         let (first, last) = across_run(1000, 16_384, |_| true);
         assert_eq!((first, last), (1000 - ACROSS_MAX, 1000 + ACROSS_MAX));
+    }
+
+    #[test]
+    fn empty_cells_reach_a_screen_past_the_view_and_the_cursor() {
+        let sizes = Sizes::new(20.0);
+        let max = xlsx::MAX_ROWS;
+        // A blank sheet (just the edge row) fills a 700 px view and one more below it.
+        assert_eq!(reach_count(1, &sizes, 0.0, 700.0, 0, max), 71);
+        // Scrolled on, they follow; a cursor further down is reached too.
+        assert_eq!(reach_count(1, &sizes, 2000.0, 700.0, 0, max), 171);
+        assert_eq!(reach_count(1, &sizes, 0.0, 700.0, 5000, max), 5001);
+        // A taller file keeps its own count until scrolled to its end, then gains a screen.
+        let end = sizes.start(1000) - 700.0;
+        assert_eq!(reach_count(1000, &sizes, 0.0, 700.0, 0, max), 1000);
+        assert_eq!(reach_count(1000, &sizes, end, 700.0, 0, max), 1036);
+        // One taller than Excel's sheet keeps just its edge row: the limit is its own.
+        let tall = 19_094_580;
+        let end = sizes.start(tall) - 700.0;
+        assert_eq!(reach_count(tall, &sizes, end, 700.0, 0, tall), tall);
+        // Excel's sheet size caps them; a cursor can't push past it either.
+        assert_eq!(reach_count(1, &sizes, 0.0, 700.0, u64::MAX - 1, max), max);
+        assert_eq!(reach_count(1, &sizes, 1e12, 700.0, 0, max), max);
     }
 }

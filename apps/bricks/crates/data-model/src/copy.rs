@@ -105,8 +105,8 @@ impl CsvTable {
     }
 
     /// The edit that gives the cells a paste wrote (`pasted`, from [`Self::paste`] at table
-    /// row `row`, column `col`) the styles of `block`; run it after them, in the same undo
-    /// step. `None` if there is nothing to style.
+    /// row `row`, column `col`, past the last row too) the styles of `block`; run it after
+    /// them, in the same undo step. `None` if there is nothing to style.
     pub fn paste_styles(
         &self,
         pasted: &[Edit],
@@ -114,8 +114,7 @@ impl CsvTable {
         col: Col,
         block: &StyleBlock,
     ) -> Option<Edit> {
-        let rows = self.row_count();
-        let start = row.min(rows);
+        let (rows, start) = (self.row_count(), row);
         let added = pasted.iter().find_map(|e| match e {
             Edit::InsertRows { rows, .. } => rows.first().map(|r| r.first),
             _ => None,
