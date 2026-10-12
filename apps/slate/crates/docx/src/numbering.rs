@@ -5,7 +5,7 @@
 //! from each other, as in Word; an instance's `w:startOverride` restarts a level the first
 //! time the instance is used. Numbering a level restarts the levels below it.
 
-use crate::styles::Styles;
+use crate::styles::{ParaProps, Styles};
 use crate::xml::{self, XmlReader};
 use crate::DocxError;
 use document_model::ListKind;
@@ -170,6 +170,47 @@ impl Numbering {
             }
         }
         Some(ListKind::Ordered { number: n, label })
+    }
+
+    /// A paragraph's list numbering, from its own `w:numPr` or its style's: the instance
+    /// and level. `None` without an instance or with instance 0 (no list).
+    pub fn list_of(&self, styles: &Styles, direct: &ParaProps) -> Option<(u32, u8)> {
+        let ppr = styles.paragraph_props(direct);
+        let num = ppr.num_id.filter(|&n| n != 0)?;
+        let level = ppr
+            .level
+            .or_else(|| {
+                let style = direct.style.as_deref()?;
+                self.level_of_style(num, style)
+            })
+            .unwrap_or(0);
+        Some((num, level))
+    }
+
+    /// Whether level `level` of instance `num_id` shows bullets (else numbers); `None` if
+    /// the instance or level doesn't exist.
+    pub fn bulleted(&self, num_id: u32, level: u8) -> Option<bool> {
+        let num = self.nums.get(&num_id)?;
+        let this = self.level(num, level.min(LEVELS as u8 - 1))?;
+        Some(this.format == "bullet")
+    }
+
+    /// The numbering instances' ids, smallest first.
+    pub fn ids(&self) -> Vec<u32> {
+        let mut ids: Vec<u32> = self.nums.keys().copied().collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    /// Ids free for a new abstract numbering and a new instance.
+    pub fn free_ids(&self) -> (u32, u32) {
+        let next = |ids: &mut dyn Iterator<Item = u32>| {
+            ids.filter(|&i| i != u32::MAX).max().map_or(1, |m| m + 1)
+        };
+        (
+            next(&mut self.abstracts.keys().copied()),
+            next(&mut self.nums.keys().copied()),
+        )
     }
 }
 

@@ -249,8 +249,10 @@ dependencies = [
 name = "docx"
 version = "0.1.0"
 dependencies = [
+ "document-edit",
  "document-model",
  "quick-xml",
+ "suite-file",
  "zip",
 ]
 

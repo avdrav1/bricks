@@ -3,7 +3,7 @@
 
 use crate::xml::{self, XmlReader};
 use crate::DocxError;
-use document_model::{Align, ParagraphStyle, Rgb};
+use document_model::{Align, ParagraphStyle, Rgb, RunStyle};
 use quick_xml::events::{BytesStart, Event};
 use std::collections::HashMap;
 
@@ -335,6 +335,78 @@ impl Styles {
             return ParagraphStyle::Normal;
         };
         style_of_name(&style.name)
+    }
+
+    /// A paragraph's properties: document defaults, its style's, then its own (`direct`).
+    pub fn paragraph_props(&self, direct: &ParaProps) -> ParaProps {
+        let mut ppr = self.default_ppr.clone();
+        if let Some(s) = self.paragraph(direct.style.as_deref()) {
+            ppr.apply(&s.ppr);
+        }
+        ppr.apply(direct);
+        ppr
+    }
+
+    /// The run properties a paragraph in style `id` starts its text from: document
+    /// defaults, then the style's.
+    pub fn base_run(&self, id: Option<&str>) -> RunProps {
+        let mut rpr = self.default_rpr.clone();
+        if let Some(s) = self.paragraph(id) {
+            rpr.apply(&s.rpr);
+        }
+        rpr
+    }
+
+    /// A run's look, without its link: `base` (see [`Styles::base_run`]), its character
+    /// style, then its direct formatting, each over the one before.
+    pub fn run_look(&self, base: &RunProps, direct: &RunProps) -> RunStyle {
+        let mut p = base.clone();
+        if let Some(s) = self.character(direct.style.as_deref()) {
+            p.apply(&s.rpr);
+        }
+        p.apply(direct);
+        RunStyle {
+            bold: p.bold.unwrap_or(false),
+            italic: p.italic.unwrap_or(false),
+            underline: p.underline.unwrap_or(false),
+            strike: p.strike.unwrap_or(false),
+            size: p.size,
+            color: p.color.flatten(),
+            ..RunStyle::default()
+        }
+    }
+
+    /// The id of the paragraph style that is `style` in the model, preferring the one with
+    /// Word's built-in name (`heading 2`), then the smallest id; `None` if there is none.
+    pub fn id_of(&self, style: ParagraphStyle) -> Option<&str> {
+        let canonical = canonical_name(style);
+        let mut ids: Vec<(&String, &Style)> = self
+            .styles
+            .iter()
+            .filter(|(_, s)| s.kind == Kind::Paragraph && style_of_name(&s.name) == style)
+            .collect();
+        ids.sort_by_key(|(id, s)| (s.name.trim().to_lowercase() != canonical, id.as_str()));
+        ids.first().map(|(id, _)| id.as_str())
+    }
+
+    /// The style paragraphs that name none have.
+    pub fn default_paragraph(&self) -> Option<&str> {
+        self.default_paragraph.as_deref()
+    }
+
+    /// Whether the styles have one with id `id`, of any kind.
+    pub fn has(&self, id: &str) -> bool {
+        self.styles.contains_key(id)
+    }
+}
+
+/// Word's built-in name of a model paragraph style, lowercase.
+pub(crate) fn canonical_name(style: ParagraphStyle) -> String {
+    match style {
+        ParagraphStyle::Normal => "normal".into(),
+        ParagraphStyle::Title => "title".into(),
+        ParagraphStyle::Heading(n) => format!("heading {n}"),
+        ParagraphStyle::Quote => "quote".into(),
     }
 }
 

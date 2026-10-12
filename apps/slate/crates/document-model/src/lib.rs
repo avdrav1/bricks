@@ -9,10 +9,12 @@
 //! Markdown ([`write_markdown`]).
 
 mod markdown;
+mod matching;
 mod text;
 mod write;
 
 pub use markdown::{load_linked_images, read_markdown, read_markdown_source, MarkdownSource};
+pub use matching::{match_blocks, match_blocks_by};
 pub use text::{decode, read_text, Encoding, LineEnding, TextInfo};
 pub use write::{encode, write_markdown, write_text, Unencodable};
 

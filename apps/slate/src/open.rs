@@ -1,19 +1,30 @@
 //! Reading a file into a document, off the UI thread (SLATE-4): which reader its name
-//! picks, what Slate refuses and why, and the pictures decoded for the document.
+//! picks, what Slate refuses and why, the pictures decoded for the document, and what a
+//! save needs to write it back (`saving::Target`).
 
+use crate::saving::{Docx, Original, Target};
 use crate::view::{texture_key, Textures};
-use document_model::{Block, Document, ImageFormat, ImageSource, MarkdownSource};
+use document_model::{Block, Document, Format, ImageFormat, ImageSource, MarkdownSource};
 use gtk::{gdk, glib};
 use std::fmt;
 use std::path::Path;
+use std::sync::Arc;
 
 /// A document read and ready to show.
 pub struct Opened {
     pub doc: Document,
     pub textures: Textures,
     pub words: usize,
-    /// A Markdown file's source, so a save rewrites only the blocks edited.
-    pub source: Option<MarkdownSource>,
+    /// How a save writes it back: a Markdown file's source and a Word document's package,
+    /// so a save changes only what was edited.
+    pub target: Target,
+}
+
+/// Where the blocks came from, for a save.
+enum Source {
+    None,
+    Markdown(MarkdownSource),
+    Docx(docx::DocxSource, Original),
 }
 
 /// Why a file can't be shown, said to the user.
@@ -69,16 +80,20 @@ fn kind(path: &Path) -> Result<Kind, OpenError> {
 }
 
 /// Read the file at `path`, merge its runs for editing ([`document_edit::normalize`]), and
-/// decode its pictures.
+/// decode its pictures. A Word document is read from a private copy of its package, which
+/// its saves patch.
 pub fn read(path: &Path) -> Result<Opened, OpenError> {
     let (mut doc, mut source) = match kind(path)? {
-        Kind::Text => (document_model::read_text(&std::fs::read(path)?), None),
+        Kind::Text => (
+            document_model::read_text(&std::fs::read(path)?),
+            Source::None,
+        ),
         Kind::Markdown => {
             let (mut doc, source) = document_model::read_markdown_source(&std::fs::read(path)?);
             if let Some(dir) = path.parent() {
                 document_model::load_linked_images(&mut doc.blocks, dir);
             }
-            (doc, Some(source))
+            (doc, Source::Markdown(source))
         }
         Kind::Docx => {
             let mut head = [0u8; 8];
@@ -90,15 +105,28 @@ pub fn read(path: &Path) -> Result<Opened, OpenError> {
                         .into(),
                 ));
             }
-            let doc = docx::read(path).map_err(|e| OpenError(sentence(&e.to_string())))?;
-            (doc, None)
+            let original = Original::copy_of(path)?;
+            let (doc, source) = docx::read_source(original.path())
+                .map_err(|e| OpenError(sentence(&e.to_string())))?;
+            (doc, Source::Docx(source, original))
         }
     };
     document_edit::normalize(&mut doc);
     // The source describes the blocks as shown: pictures loaded, runs merged.
-    if let Some(source) = source.as_mut() {
-        source.set_blocks(doc.blocks.clone());
+    match &mut source {
+        Source::None => {}
+        Source::Markdown(s) => s.set_blocks(doc.blocks.clone()),
+        Source::Docx(s, _) => s.set_blocks(doc.blocks.clone()),
     }
+    let target = match (doc.format, source) {
+        (Format::Markdown(info), Source::Markdown(source)) => Target::Markdown(info, Some(source)),
+        (Format::Docx, Source::Docx(source, original)) => Target::Docx(Docx {
+            source,
+            original: Arc::new(original),
+        }),
+        (Format::Text(info), _) => Target::Text(info),
+        (format, _) => unreachable!("{format:?} read without its source"),
+    };
     let mut textures = Textures::new();
     decode_pictures(&doc.blocks, &mut textures);
     let words = doc.word_count();
@@ -106,7 +134,7 @@ pub fn read(path: &Path) -> Result<Opened, OpenError> {
         doc,
         textures,
         words,
-        source,
+        target,
     })
 }
 
