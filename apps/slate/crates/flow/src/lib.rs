@@ -707,6 +707,19 @@ impl Flow {
         self.selection = None;
     }
 
+    /// Measure `leaf` again when it is next laid out: the shaper lays its text out
+    /// differently now (an input method's preedit), though the document is the same.
+    pub fn remeasure(&mut self, leaf: LeafId) {
+        let Some(block) = self.leaves.get(leaf.index()).map(|l| l.path[0] as usize) else {
+            return;
+        };
+        let node = &mut self.tops[block];
+        let was_exact = self.width > 0 && node.laid == self.width;
+        if tree::unlay(node, leaf) && was_exact {
+            self.exact -= 1;
+        }
+    }
+
     /// The leaf at `path` (see [`Flow::path`]), if there is one.
     pub fn leaf_at(&self, path: &[u32]) -> Option<LeafId> {
         let i = self

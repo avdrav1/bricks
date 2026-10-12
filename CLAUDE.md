@@ -91,7 +91,7 @@ python3 scripts/lo_functions.py          # re-record formula results from LibreO
 python3 scripts/lo_formats.py            # re-record number format results from LibreOffice (STYLE-2)
 python3 scripts/lo_xlsx.py fixture|dump FILE  # LibreOffice fixture workbook and dumps (XLSX-*)
 python3 scripts/lo_docx.py fixture|dump FILE  # Slate's LibreOffice fixture document and paragraph dumps (SLATE-3)
-scripts/check_slate.sh [BINARY]          # Slate GUI check in docker: open, drop, show, refuse, text widths, select and copy (SLATE-4, SLATE-10, SLATE-11)
+scripts/check_slate.sh [BINARY]          # Slate GUI check in docker: open, drop, show, refuse, text widths, select and copy, editing, tables, input method (SLATE-4, -10, -11, -6, -12, -13; scripts/ime_helpers.py is the input method)
 cargo run --release -p xlsx --example gen_corpus_xlsx  # corpus/rows_1m.xlsx (BENCH-2)
 cargo run --release -p xlsx --example gen_corpus_xlsx -- --styled   # corpus/styled_1m.xlsx (STYLE-3, BENCH-3)
 python3 scripts/lo_pptx.py fixture|dump FILE  # LibreOffice fixture deck and dumps (FRAME-*)

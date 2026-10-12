@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# SLATE-4, SLATE-10, SLATE-11, SLATE-6, and SLATE-12 acceptance: the window opens, shows,
-# and refuses documents, its pageless column follows View → Text Width, its text selects
-# and copies, and it edits with undo, table cells included.
+# SLATE-4, SLATE-10, SLATE-11, SLATE-6, SLATE-12, and SLATE-13 acceptance: the window
+# opens, shows, and refuses documents, its pageless column follows View → Text Width, its
+# text selects and copies, it edits with undo, table cells included, and it composes
+# through an input method.
 #
 #   scripts/check_slate.sh [BINARY]   (default target/release/slate)
 #
@@ -53,7 +54,14 @@
 #      c, Right twice from inside c into d, Tab past the last cell out to "After", Up back
 #      into c, Shift+Tab back to b; Backspace in b deletes, a second one at the cell's
 #      start does nothing, Enter splits b in two; undo to the end gives the opened text
-#      and redo to the end the edited one.
+#      and redo to the end the edited one;
+#  17. an input method on sway's seat (scripts/ime_helpers.py, through zwp_input_method_v2
+#      to the window's text input) composing in ime.md ("Hello world", caret at the end):
+#      the preedit かな shows underlined right of the text, the document unchanged
+#      (AT-SPI); commit replaces it with 仮名; the input method reads "Hello world仮名"
+#      and the caret's byte offset 17 around the caret; deleting 3 bytes before the
+#      caret removes 名. Sway sends a window text input only on a focus change, so a
+#      second window takes focus and gives it back first.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -65,14 +73,48 @@ docx=$(realpath apps/slate/crates/docx/tests/data)
 shots=()
 if [ -n "${SHOTS:-}" ]; then mkdir -p "$SHOTS"; shots=(-v "$(realpath "$SHOTS"):/shots"); fi
 out=$(docker run --rm --cap-add SYS_NICE -v "$bin:/usr/local/bin/slate:ro" \
-  -v "$model:/model:ro" -v "$docx:/docx:ro" -v "$PWD/scripts/dnd_helpers.py:/dnd.py:ro" "${shots[@]}" \
+  -v "$model:/model:ro" -v "$docx:/docx:ro" -v "$PWD/scripts/dnd_helpers.py:/dnd.py:ro" \
+  -v "$PWD/scripts/ime_helpers.py:/ime.py:ro" -v "$PWD/scripts/protocols:/protocols:ro" "${shots[@]}" \
   archlinux:latest bash -c '
 set -uo pipefail
-pacman -Syu --noconfirm --needed sway wtype grim gtk4 ttf-dejavu dbus python-gobject at-spi2-core \
-  python-pywayland wlr-protocols wayland pkgconf jq wl-clipboard >/dev/null 2>&1
+pacman -Syu --noconfirm --needed sway wtype grim gtk4 ttf-dejavu wqy-zenhei dbus python-gobject \
+  at-spi2-core python-pywayland wlr-protocols wayland pkgconf jq wl-clipboard >/dev/null 2>&1
 mkdir -p /shots /tmp/rt /tmp/md /tmp/proto && chmod 700 /tmp/rt && touch /tmp/proto/__init__.py
 python -m pywayland.scanner -i /usr/share/wayland/wayland.xml \
   /usr/share/wlr-protocols/unstable/wlr-virtual-pointer-unstable-v1.xml -o /tmp/proto/wlr_proto >/dev/null
+python -m pywayland.scanner -i /usr/share/wayland/wayland.xml \
+  /protocols/input-method-unstable-v2.xml -o /tmp/proto/im_proto >/dev/null 2>&1
+cat > /tmp/preedit.py <<"PY"
+import sys
+import gi
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import GdkPixbuf
+def load(name):
+    p = GdkPixbuf.Pixbuf.new_from_file(f"/shots/{name}.png")
+    w, h, rs, n, px = p.get_width(), p.get_height(), p.get_rowstride(), p.get_n_channels(), p.get_pixels()
+    return lambda x, y: px[y * rs + x * n] + px[y * rs + x * n + 1] + px[y * rs + x * n + 2] < 450, w // 2, h
+# The document window is the left half; its text lines are the bands of ink below the header.
+dark, w, h = load("ime-before")
+bands, cur = [], None
+for y in range(60, h - 40):
+    if any(dark(x, y) for x in range(w)):
+        cur = [y, y] if cur is None else [cur[0], y]
+    elif cur is not None:
+        bands.append(cur)
+        cur = None
+y0, y1 = bands[-1]
+right = max(x for y in range(y0, y1 + 1) for x in range(w) if dark(x, y))
+dark, _, _ = load("ime-preedit")
+ink = sum(1 for y in range(y0 - 4, y1 + 8) for x in range(right + 2, w) if dark(x, y))
+longest = 0
+for y in range(y0, y1 + 8):
+    run = 0
+    for x in range(right - 1, w):
+        run = run + 1 if dark(x, y) else 0
+        longest = max(longest, run)
+print(f"preedit ink: {ink}")
+print(f"underline: {longest}")
+PY
 export PYTHONPATH=/tmp/proto XDG_RUNTIME_DIR=/tmp/rt GDK_DEBUG=no-portals XDG_STATE_HOME=/tmp/state GDK_BACKEND=wayland
 export XDG_CONFIG_HOME=/tmp/config
 printf "output HEADLESS-1 resolution 1280x720 position 0 0\ndefault_border none\n" > /tmp/sway.conf
@@ -411,6 +453,24 @@ session() {
   a11y page | sed "s/^/undone /"
   keys -M ctrl -M shift $(for i in $(seq 25); do printf "z -s 120 "; done) -m shift -m ctrl; sleep 1
   a11y page | sed "s/^/redone /"; quit
+  echo "== 17 ime"
+  printf "Hello world\n" > /tmp/ime.md
+  mkfifo /tmp/ime.fifo
+  ime() { timeout 5 sh -c "echo \"$1\" > /tmp/ime.fifo"; sleep 1; }
+  slate /tmp/ime.md >>/tmp/app.log 2>&1 & sleep 4
+  # A keyboard on the seat throughout, and an input method; then a focus change.
+  wtype -s 120000 & board=$!; sleep 1
+  python3 /ime.py serve /tmp/ime.fifo /tmp/ime.log 2>>/tmp/app.log & sleep 1
+  slate >>/tmp/app.log 2>&1 & sleep 3
+  swaymsg "[title=ime.md] focus" >/dev/null; sleep 1
+  keys -M ctrl -k End -m ctrl; sleep 1; shot ime-before
+  ime "preedit かな 6"; shot ime-preedit
+  python3 /tmp/preedit.py
+  a11y page | sed "s/^/composing /"
+  ime "commit 仮名"; a11y page | sed "s/^/committed /"
+  ime "surrounding"; grep "^surrounding:" /tmp/ime.log | tail -1
+  ime "delete 3 0"; a11y page | sed "s/^/deleted /"; shot ime-after
+  kill $board; quit
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -495,6 +555,12 @@ check "16: arrows and Tab move into, between, and out of cells; typing, Backspac
   "16 table" "^edited page: Before\|a1\|8\|92b\|63c\|4d\|5After$"
 check "16: undo gives back the opened table" "16 table" "^undone page: Before\|a\|b\|c\|d\|After$"
 check "16: redo gives back the edited table" "16 table" "^redone page: Before\|a1\|8\|92b\|63c\|4d\|5After$"
+at_least "17: the preedit shows right of the text (dark px)" "17 ime" "preedit ink" 40
+at_least "17: the preedit is underlined (px of line)" "17 ime" "underline" 20
+check "17: the preedit isn't in the document" "17 ime" "^composing page: Hello world$"
+check "17: commit replaces the preedit with the text" "17 ime" "^committed page: Hello world仮名$"
+check "17: the input method reads the text around the caret" "17 ime" "^surrounding: Hello world仮名\|17\|17$"
+check "17: the input method deletes before the caret" "17 ime" "^deleted page: Hello world仮$"
 if [ $fail = 0 ]; then echo "SLATE OK"; else
   echo "SLATE CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

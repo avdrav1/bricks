@@ -39,6 +39,17 @@ struct Entry {
     bytes: usize,
 }
 
+/// An input method's preedit shown in a leaf's text: the layout made with it, apart from
+/// the cache.
+struct Preedit {
+    key: LayoutKey,
+    /// Where it goes in the leaf's text, in bytes.
+    at: usize,
+    text: String,
+    attrs: pango::AttrList,
+    layout: Option<Entry>,
+}
+
 /// Pango layouts for a document's leaves.
 pub struct PangoShaper {
     context: pango::Context,
@@ -49,6 +60,7 @@ pub struct PangoShaper {
     cached_bytes: usize,
     clock: u64,
     markers: HashMap<String, pango::Layout>,
+    preedit: Option<Preedit>,
 }
 
 impl PangoShaper {
@@ -61,6 +73,7 @@ impl PangoShaper {
             cached_bytes: 0,
             clock: 0,
             markers: HashMap::new(),
+            preedit: None,
         }
     }
 
@@ -72,9 +85,32 @@ impl PangoShaper {
         }
     }
 
+    /// Show `text` with `attrs` (relative to it) underlined at byte `at` of the layout
+    /// under `key`, until it is set again; `None` shows the text as it is.
+    pub fn set_preedit(&mut self, preedit: Option<(LayoutKey, usize, &str, &pango::AttrList)>) {
+        self.preedit = preedit.map(|(key, at, text, attrs)| {
+            let attrs = attrs.copy().unwrap_or_default();
+            let mut underline: pango::Attribute =
+                pango::AttrInt::new_underline(pango::Underline::Single).into();
+            underline.set_start_index(0);
+            underline.set_end_index(text.len() as u32);
+            attrs.insert(underline);
+            Preedit {
+                key,
+                at,
+                text: text.to_owned(),
+                attrs,
+                layout: None,
+            }
+        });
+    }
+
     /// The layout cached under `key` for `content`, wrapped at `width`, made (again) if
-    /// needed.
+    /// needed; with the preedit in it when the preedit is in this leaf.
     pub fn layout(&mut self, key: LayoutKey, content: Content<'_>, width: i32) -> &pango::Layout {
+        if self.preedit.as_ref().is_some_and(|p| p.key == key) {
+            return self.preedit_layout(content, width);
+        }
         self.clock += 1;
         let clock = self.clock;
         if !self.cache.contains_key(&key) {
@@ -96,6 +132,46 @@ impl PangoShaper {
         }
         let entry = self.cache.get_mut(&key).expect("cached above");
         entry.used = clock;
+        if entry.width != width {
+            entry.layout.set_width(width * pango::SCALE);
+            entry.width = width;
+        }
+        &entry.layout
+    }
+
+    /// The preedit's leaf laid out with the preedit in it.
+    fn preedit_layout(&mut self, content: Content<'_>, width: i32) -> &pango::Layout {
+        if self.preedit.as_ref().is_some_and(|p| p.layout.is_none()) {
+            let layout = self.make(content);
+            let p = self.preedit.as_mut().expect("checked above");
+            let text = layout.text();
+            let mut at = p.at.min(text.len());
+            while !text.is_char_boundary(at) {
+                at -= 1;
+            }
+            let mut joined = String::with_capacity(text.len() + p.text.len());
+            joined.push_str(&text[..at]);
+            joined.push_str(&p.text);
+            joined.push_str(&text[at..]);
+            let attrs = layout
+                .attributes()
+                .and_then(|a| a.copy())
+                .unwrap_or_default();
+            attrs.splice(&p.attrs, at as i32, p.text.len() as i32);
+            layout.set_text(&joined);
+            layout.set_attributes(Some(&attrs));
+            p.layout = Some(Entry {
+                layout,
+                width: -1,
+                used: 0,
+                bytes: 0,
+            });
+        }
+        let entry = self
+            .preedit
+            .as_mut()
+            .and_then(|p| p.layout.as_mut())
+            .expect("made above");
         if entry.width != width {
             entry.layout.set_width(width * pango::SCALE);
             entry.width = width;
@@ -305,6 +381,9 @@ impl Shaper for PangoShaper {
     fn forget(&mut self, key: LayoutKey) {
         if let Some(entry) = self.cache.remove(&key) {
             self.cached_bytes -= entry.bytes;
+        }
+        if self.preedit.as_ref().is_some_and(|p| p.key == key) {
+            self.preedit = None;
         }
     }
 }
