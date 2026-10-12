@@ -10,8 +10,8 @@ use crate::text::{self, FontRef, Fonts, Styles, TextContext};
 use crate::xml::Element;
 use crate::Error;
 use presentation_model::{
-    Background, Fill, Frame, Image, Layer, Picture, PlaceholderKind, Presentation, Shape,
-    ShapeKind, Size, Slide, Source, TextBody,
+    Background, Fill, Frame, Image, Layer, Layout as ModelLayout, Picture, PlaceholderKind,
+    Presentation, Shape, ShapeKind, Size, Slide, Source, TextBody,
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -153,6 +153,7 @@ impl Reader {
         if let Some(r) = pres.rels.of_kind("tableStyles") {
             self.table_styles = self.part(&r.target).ok();
         }
+        let (layouts, layout_index) = self.layouts(&pres);
         let mut slides = Vec::new();
         for id in pres
             .root
@@ -164,26 +165,97 @@ impl Reader {
                 continue;
             };
             let number = slides.len() + 1;
-            slides.push(self.slide(&rel.target, number)?);
+            let part = self.part(&rel.target)?;
+            let layout_path = part.rels.of_kind("slideLayout").map(|r| r.target.clone());
+            let layout = match &layout_path {
+                Some(path) => Some(self.layout(path)?),
+                None => None,
+            };
+            let mut slide = self.slide(&part, layout.as_deref(), number)?;
+            slide.layout = layout_path.and_then(|p| layout_index.get(&p).copied());
+            slide.part = Some(rel.target.clone());
+            slides.push(slide);
         }
-        Ok(Presentation { size, slides })
+        Ok(Presentation {
+            size,
+            slides,
+            layouts,
+        })
     }
 
-    fn slide(&mut self, path: &str, number: usize) -> Result<Slide, Error> {
-        let part = self.part(path)?;
-        let layout = match part.rels.of_kind("slideLayout") {
-            Some(r) => Some(self.layout(&r.target)?),
-            None => None,
-        };
+    /// The deck's layouts, master by master as `presentation.xml` lists the masters and
+    /// each master its layouts, each with a new slide on it; and their indexes by part.
+    /// A layout that can't be read is left out: it only matters for new slides.
+    fn layouts(&mut self, pres: &Part) -> (Vec<ModelLayout>, HashMap<String, usize>) {
+        let (mut out, mut index) = (Vec::new(), HashMap::new());
+        let masters = pres
+            .root
+            .path(&["sldMasterIdLst"])
+            .into_iter()
+            .flat_map(|l| l.all("sldMasterId"))
+            .filter_map(|id| pres.rels.get(id.rel_attr("id")?))
+            .map(|r| r.target.clone())
+            .collect::<Vec<_>>();
+        for (m, master_path) in masters.iter().enumerate() {
+            let Ok(master) = self.part(master_path) else {
+                continue;
+            };
+            let paths: Vec<String> = master
+                .root
+                .path(&["sldLayoutIdLst"])
+                .into_iter()
+                .flat_map(|l| l.all("sldLayoutId"))
+                .filter_map(|id| master.rels.get(id.rel_attr("id")?))
+                .map(|r| r.target.clone())
+                .collect();
+            for path in paths {
+                let Ok(layout) = self.layout(&path) else {
+                    continue;
+                };
+                let blank = Part {
+                    root: crate::xml::parse(blank_slide(&layout).as_bytes())
+                        .expect("a blank slide parses"),
+                    rels: Default::default(),
+                };
+                let Ok(slide) = self.slide(&blank, Some(&layout), 0) else {
+                    continue;
+                };
+                let root = &layout.part.root;
+                index.insert(path.clone(), out.len());
+                out.push(ModelLayout {
+                    name: root
+                        .child("cSld")
+                        .and_then(|c| c.attr("name"))
+                        .unwrap_or_default()
+                        .to_owned(),
+                    kind: root.attr("type").unwrap_or("cust").to_owned(),
+                    part: path,
+                    master: m,
+                    slide: Slide {
+                        layout: Some(out.len()),
+                        ..slide
+                    },
+                });
+            }
+        }
+        (out, index)
+    }
+
+    /// The slide in `part` on `layout`; `number` is its slide number, for fields.
+    fn slide(
+        &mut self,
+        part: &Part,
+        layout: Option<&Layout>,
+        number: usize,
+    ) -> Result<Slide, Error> {
         let root = &part.root;
-        let master = layout.as_ref().map(|l| l.master.clone());
+        let master = layout.map(|l| l.master.clone());
         // Colours: the master's map, as the layout and then the slide override it.
         let mut palette = master
             .as_ref()
             .map(|m| m.palette.clone())
             .unwrap_or_default();
         for over in layout
-            .as_ref()
             .map(|l| &l.part.root)
             .into_iter()
             .chain([root])
@@ -210,8 +282,8 @@ impl Reader {
         };
         // The background: the slide's own, else its layout's, else its master's.
         let mut background = Background::default();
-        let mut sources: Vec<&Part> = vec![&part];
-        if let Some(l) = &layout {
+        let mut sources: Vec<&Part> = vec![part];
+        if let Some(l) = layout {
             sources.push(&l.part);
             sources.push(&l.master.part);
         }
@@ -223,7 +295,7 @@ impl Reader {
                 break;
             }
         }
-        if let Some(layout) = &layout {
+        if let Some(layout) = layout {
             if root.flag("showMasterSp") != Some(false) {
                 if layout.show_master {
                     let m = &layout.master.part;
@@ -234,7 +306,7 @@ impl Reader {
                 collect(&s, sp_tree(&layout.part.root), &mut Vec::new(), &mut shapes);
             }
         }
-        let s = scope(Layer::Slide, &part, layout.as_deref());
+        let s = scope(Layer::Slide, part, layout);
         collect(&s, sp_tree(root), &mut Vec::new(), &mut shapes);
         let notes = match part.rels.of_kind("notesSlide") {
             Some(r) => notes_text(&self.part(&r.target)?.root),
@@ -245,6 +317,8 @@ impl Reader {
             shapes,
             hidden: root.flag("show") == Some(false),
             notes,
+            layout: None,
+            part: None,
         })
     }
 
@@ -318,6 +392,40 @@ fn placeholders(tree: &Element) -> Vec<Placeholder> {
         }
     }
     out
+}
+
+/// The slide XML PowerPoint writes for a new slide on `layout`: an empty placeholder for
+/// each of the layout's but the date, footer, and slide number, matching it by type and
+/// `idx`, with no frame or text style of its own.
+fn blank_slide(layout: &Layout) -> String {
+    let escape = |s: &str| {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('"', "&quot;")
+    };
+    let mut xml = String::from("<p:sld><p:cSld><p:spTree>");
+    let shown = layout
+        .placeholders
+        .iter()
+        .filter(|p| !matches!(p.kind.as_str(), "dt" | "ftr" | "sldNum" | "hdr"));
+    for (n, ph) in shown.enumerate() {
+        let name = nv_props(&ph.shape)
+            .and_then(|n| n.child("cNvPr"))
+            .and_then(|c| c.attr("name"))
+            .unwrap_or_default();
+        let kind = match ph.kind.as_str() {
+            "obj" => String::new(),
+            k => format!(" type=\"{}\"", escape(k)),
+        };
+        let idx = ph.idx.map(|i| format!(" idx=\"{i}\"")).unwrap_or_default();
+        xml.push_str(&format!(
+            "<p:sp><p:nvSpPr><p:cNvPr id=\"{}\" name=\"{}\"/><p:cNvSpPr/><p:nvPr><p:ph{kind}{idx}/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/><a:p/></p:txBody></p:sp>",
+            n + 2,
+            escape(name)
+        ));
+    }
+    xml.push_str("</p:spTree></p:cSld></p:sld>");
+    xml
 }
 
 /// A shape's non-visual properties (`nvSpPr`, `nvPicPr`, ...).

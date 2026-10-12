@@ -7,7 +7,7 @@
 //! runs that look the same merged ([`Paragraph::merge_runs`]), so undoing an edit gives
 //! back the body exactly.
 
-use crate::{Change, Property, ShapeRef};
+use crate::{Change, ShapeRef};
 use presentation_model::{Paragraph, Presentation, Run, TextBody};
 
 /// A place in a text body: a paragraph and a byte offset into its text
@@ -345,9 +345,8 @@ impl TextEdit {
     }
 
     fn change(&self, caret: TextPos) -> Change {
-        Change {
+        Change::Text {
             shape: self.shape,
-            property: Property::Text,
             caret,
         }
     }

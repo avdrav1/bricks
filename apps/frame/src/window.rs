@@ -1,11 +1,13 @@
 //! Windows: the start window, a window per deck (slide list, canvas, status bar), the
 //! file dialog, drops, and alerts (spec FR0); the deck window's undo history and its keys
-//! (text editing itself is in [`crate::editing`]).
+//! (text editing itself is in [`crate::editing`], the slide list in
+//! [`crate::slide_list`]).
 
 use crate::deck::Deck;
 use crate::editing;
-use crate::slide_view::SlideView;
-use deck_edit::History;
+use crate::slide_list::{self, THUMB_WIDTH};
+use crate::slide_view::{Editing, SlideView};
+use deck_edit::{Change, Edit, History};
 use gtk::prelude::*;
 use gtk::{gdk, gio, glib};
 use std::cell::{Cell, RefCell};
@@ -14,7 +16,6 @@ use std::rc::Rc;
 use std::time::Instant;
 
 const START_WINDOW: &str = "start";
-const THUMB_WIDTH: i32 = 176;
 
 thread_local! {
     /// Each open deck's window, by canonical path: opening a file again brings its
@@ -248,17 +249,17 @@ pub(crate) struct DeckWindow {
     pub deck: Rc<Deck>,
     pub canvas: SlideView,
     /// The slide list's thumbnails, by slide.
-    pub thumbs: Vec<SlideView>,
-    list: gtk::ListBox,
+    pub thumbs: RefCell<Vec<SlideView>>,
+    pub list: gtk::ListBox,
     scrolled: gtk::ScrolledWindow,
     status: gtk::Label,
-    pub history: RefCell<History>,
+    history: RefCell<History>,
     /// The canvas's input method, for typing.
     pub im: gtk::IMMulticontext,
 }
 
 impl DeckWindow {
-    fn count(&self) -> usize {
+    pub fn count(&self) -> usize {
         self.deck.presentation().slides.len()
     }
 
@@ -266,13 +267,14 @@ impl DeckWindow {
     /// description (the slide's text).
     pub fn go(&self, index: usize) {
         let n = self.count();
+        let index = index.min(n.saturating_sub(1));
+        self.canvas.set_index(index);
+        self.describe(index);
         if n == 0 {
+            self.status.set_text("No slides");
             return;
         }
-        let index = index.min(n - 1);
-        self.canvas.set_index(index);
         self.status.set_text(&format!("Slide {} of {n}", index + 1));
-        self.describe(index);
         if let Some(row) = self.list.row_at_index(index as i32) {
             if !row.is_selected() {
                 self.list.select_row(Some(&row));
@@ -289,13 +291,21 @@ impl DeckWindow {
         }
     }
 
-    /// The canvas's accessible name and description: slide `index` and its text, as it is
-    /// now.
+    /// The canvas's accessible name and description: slide `index` with its layout's
+    /// name, and its text, as they are now.
     pub fn describe(&self, index: usize) {
-        let Some(text) = self.deck.presentation().slides.get(index).map(|s| s.text()) else {
-            return;
+        let deck = self.deck.presentation();
+        let (label, text) = match deck.slides.get(index) {
+            Some(slide) => {
+                let layout = slide.layout.and_then(|l| deck.layouts.get(l));
+                let label = match layout {
+                    Some(l) if !l.name.is_empty() => format!("Slide {}, {}", index + 1, l.name),
+                    _ => format!("Slide {}", index + 1),
+                };
+                (label, slide.text())
+            }
+            None => ("No slides".to_owned(), String::new()),
         };
-        let label = format!("Slide {}", index + 1);
         self.canvas.update_property(&[
             gtk::accessible::Property::Label(&label),
             gtk::accessible::Property::Description(&text),
@@ -305,6 +315,67 @@ impl DeckWindow {
     pub fn step(&self, by: isize) {
         let i = self.canvas.index() as isize + by;
         self.go(i.clamp(0, self.count().saturating_sub(1) as isize) as usize);
+    }
+
+    /// Apply `edit` to the deck as a step of its undo history, and show what it changed.
+    pub fn apply(&self, edit: impl Into<Edit>) {
+        let change = self
+            .history
+            .borrow_mut()
+            .apply(&mut self.deck.presentation_mut(), edit);
+        self.changed(change, true);
+    }
+
+    /// End the history's current step: the next edit won't join it.
+    pub fn seal(&self) {
+        self.history.borrow_mut().seal();
+    }
+
+    /// Ctrl+Z: undo the last step, showing where it was.
+    pub fn undo(&self) {
+        let editing = self.canvas.editing().is_some();
+        let change = self
+            .history
+            .borrow_mut()
+            .undo(&mut self.deck.presentation_mut());
+        if let Some(change) = change {
+            self.changed(change, editing);
+        }
+    }
+
+    /// Ctrl+Shift+Z, Ctrl+Y: redo the last step undone.
+    pub fn redo(&self) {
+        let editing = self.canvas.editing().is_some();
+        let change = self
+            .history
+            .borrow_mut()
+            .redo(&mut self.deck.presentation_mut());
+        if let Some(change) = change {
+            self.changed(change, editing);
+        }
+    }
+
+    /// Show what `change` changed. A text change: its slide, redrawn with its thumbnail
+    /// and description, and, when `caret`, the caret where it leaves the text. A slide
+    /// list change: the list rebuilt and the slide it shows.
+    fn changed(&self, change: Change, caret: bool) {
+        match change {
+            Change::Text { shape, caret: at } => {
+                if self.canvas.index() != shape.slide {
+                    self.go(shape.slide);
+                }
+                self.describe(shape.slide);
+                if let Some(thumb) = self.thumbs.borrow().get(shape.slide) {
+                    thumb.queue_draw();
+                }
+                editing::show(self, caret.then(|| Editing::at(shape.shape, at)));
+            }
+            Change::Slides { show } => {
+                editing::show(self, None);
+                slide_list::rebuild(self);
+                self.go(show);
+            }
+        }
     }
 }
 
@@ -428,36 +499,6 @@ fn slideshow(view: &Rc<DeckWindow>, start: usize) {
     show.present();
 }
 
-fn thumbnail_row(deck: &Rc<Deck>, index: usize) -> (gtk::ListBoxRow, SlideView) {
-    let hidden = deck.presentation().slides[index].hidden;
-    let content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    content.set_margin_top(6);
-    content.set_margin_bottom(6);
-    content.set_margin_start(4);
-    content.set_margin_end(8);
-    let number = gtk::Label::new(Some(&(index + 1).to_string()));
-    number.set_valign(gtk::Align::Start);
-    number.set_width_chars(3);
-    number.set_xalign(1.0);
-    let thumb = SlideView::new(deck, index, THUMB_WIDTH);
-    let label = if hidden {
-        format!("Slide {} (hidden)", index + 1)
-    } else {
-        format!("Slide {}", index + 1)
-    };
-    thumb.update_property(&[gtk::accessible::Property::Label(&label)]);
-    content.append(&number);
-    content.append(&thumb);
-    if hidden {
-        // Hidden slides show dimmed; the slideshow skips them.
-        content.set_opacity(0.4);
-        content.set_tooltip_text(Some("Hidden slide"));
-    }
-    let row = gtk::ListBoxRow::new();
-    row.set_child(Some(&content));
-    (row, thumb)
-}
-
 fn show_deck(
     app: &gtk::Application,
     window: &gtk::ApplicationWindow,
@@ -469,19 +510,17 @@ fn show_deck(
     list.set_selection_mode(gtk::SelectionMode::Single);
     list.add_css_class("navigation-sidebar");
     list.update_property(&[gtk::accessible::Property::Label("Slides")]);
-    let mut thumbs = Vec::new();
-    for i in 0..deck.presentation().slides.len() {
-        let (row, thumb) = thumbnail_row(&deck, i);
-        list.append(&row);
-        thumbs.push(thumb);
-    }
     let scrolled = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .child(&list)
         .width_request(THUMB_WIDTH + 64)
         .build();
+    // The slide list's context menu hangs off this box (crate::slide_list).
+    let side = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    scrolled.set_vexpand(true);
+    side.append(&scrolled);
     let paned = gtk::Paned::new(gtk::Orientation::Horizontal);
-    paned.set_start_child(Some(&scrolled));
+    paned.set_start_child(Some(&side));
     paned.set_end_child(Some(&canvas));
     paned.set_shrink_start_child(false);
     paned.set_resize_start_child(false);
@@ -503,17 +542,15 @@ fn show_deck(
         window: window.downgrade(),
         deck: deck.clone(),
         canvas: canvas.clone(),
-        thumbs,
+        thumbs: RefCell::new(Vec::new()),
         list: list.clone(),
         scrolled,
         status: status.clone(),
         history: RefCell::new(History::new()),
         im: gtk::IMMulticontext::new(),
     });
+    slide_list::rebuild(&view);
     editing::attach(&view);
-    if view.count() == 0 {
-        status.set_text("No slides");
-    }
     list.connect_row_selected({
         let view = Rc::downgrade(&view);
         move |_, row| {
@@ -534,18 +571,25 @@ fn show_deck(
             let ctrl = mods.contains(ModifierType::CONTROL_MASK);
             let shift = mods.contains(ModifierType::SHIFT_MASK);
             let alt = mods.contains(ModifierType::ALT_MASK);
+            let text = view.canvas.editing().is_some();
             // Ctrl+Z undoes, Ctrl+Shift+Z and Ctrl+Y redo: the deck's one history, before
-            // the canvas's input method sees the keys. Shifted, z arrives as Z.
+            // the canvas's input method sees the keys. Shifted, z arrives as Z. Ctrl+M
+            // adds a slide even while text is edited; Ctrl+D, Ctrl+Up, and Ctrl+Down
+            // are the slide's only when no text is.
             if ctrl && !alt {
                 match key {
-                    Key::z | Key::Z if !shift => editing::undo(&view),
-                    Key::z | Key::Z | Key::y | Key::Y => editing::redo(&view),
+                    Key::z | Key::Z if !shift => view.undo(),
+                    Key::z | Key::Z | Key::y | Key::Y => view.redo(),
+                    Key::m | Key::M if !shift => slide_list::new_slide(&view),
+                    Key::d | Key::D if !shift && !text => slide_list::duplicate(&view),
+                    Key::Up | Key::KP_Up if !shift && !text => slide_list::move_by(&view, -1),
+                    Key::Down | Key::KP_Down if !shift && !text => slide_list::move_by(&view, 1),
                     _ => return glib::Propagation::Proceed,
                 }
                 return glib::Propagation::Stop;
             }
             // While text is edited, the keys are the text's (crate::editing).
-            if view.canvas.editing().is_some() || ctrl || alt {
+            if text || ctrl || alt {
                 return glib::Propagation::Proceed;
             }
             match key {
@@ -563,6 +607,10 @@ fn show_deck(
                 | Key::KP_Left => view.step(-1),
                 Key::Home | Key::KP_Home => view.go(0),
                 Key::End | Key::KP_End => view.go(view.count().saturating_sub(1)),
+                // Delete and Backspace in the slide list delete the slide.
+                Key::Delete | Key::KP_Delete | Key::BackSpace if slide_list::has_focus(&view) => {
+                    slide_list::delete(&view)
+                }
                 _ => return glib::Propagation::Proceed,
             }
             glib::Propagation::Stop
@@ -584,6 +632,7 @@ fn show_deck(
         .build();
     window.add_action_entries([from_start, from_here]);
     if let Some(bar) = window.titlebar().and_downcast::<gtk::HeaderBar>() {
+        slide_list::attach(&view, window, &bar, &side);
         let play = gtk::Button::from_icon_name("media-playback-start-symbolic");
         play.set_action_name(Some("win.slideshow"));
         play.set_tooltip_text(Some("Slideshow (F5)"));

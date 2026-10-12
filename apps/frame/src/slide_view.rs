@@ -67,6 +67,9 @@ mod imp {
         pub backdrop: Cell<Option<gdk::RGBA>>,
         /// The window's canvas: it outlines empty placeholders and shows editing.
         pub editable: Cell<bool>,
+        /// `index` is a layout's: the view shows the new slide it makes, its
+        /// placeholders outlined (the New Slide menu).
+        pub layout: Cell<bool>,
         pub editing: Cell<Option<Editing>>,
         pub pango: RefCell<Option<pango::Context>>,
         /// How long the last snapshot took to build, in milliseconds (the drawing
@@ -121,7 +124,12 @@ mod imp {
                 return;
             };
             let presentation = deck.presentation();
-            let Some(slide) = presentation.slides.get(self.index.get()) else {
+            let slide = if self.layout.get() {
+                presentation.layouts.get(self.index.get()).map(|l| &l.slide)
+            } else {
+                presentation.slides.get(self.index.get())
+            };
+            let Some(slide) = slide else {
                 return;
             };
             let Some(at) = obj.placement() else {
@@ -132,7 +140,7 @@ mod imp {
             snapshot.translate(&graphene::Point::new(at.x, at.y));
             snapshot.scale(at.kx, at.ky);
             render::draw_slide(snapshot, &ctx, deck, slide, at.scale);
-            if self.editable.get() {
+            if self.editable.get() || self.layout.get() {
                 let muted = gdk::RGBA::new(backdrop.red(), backdrop.green(), backdrop.blue(), 0.6);
                 render::draw_empty_placeholders(snapshot, slide, at.scale, &muted);
             }
@@ -184,6 +192,13 @@ impl SlideView {
             view.set_hexpand(true);
             view.set_vexpand(true);
         }
+        view
+    }
+
+    /// A thumbnail `width` wide of the new slide layout `layout` of `deck` makes.
+    pub fn layout(deck: &Rc<Deck>, layout: usize, width: i32) -> SlideView {
+        let view = SlideView::new(deck, layout, width);
+        view.imp().layout.set(true);
         view
     }
 

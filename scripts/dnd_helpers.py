@@ -7,6 +7,9 @@
                                        wlr-virtual-pointer protocol, so no real input
                                        device is needed. Needs the generated `wlr_proto`
                                        package (pywayland scanner) on the path.
+  dnd_helpers.py click X Y             the same pointer: a quick click at (X, Y), as a
+                                       hand makes one (GTK takes a press held past the
+                                       double-click time as a long press)
 """
 
 import sys
@@ -43,7 +46,8 @@ def source(path):
     app.run([])
 
 
-def drag(x1, y1, x2, y2, width=1280, height=720):
+def pointer(width=1280, height=720):
+    """A virtual pointer: its `move(x, y)`, `button(pressed, hold)`, and `done()`."""
     from pywayland.client import Display
     from pywayland.protocol.wayland import WlSeat
     from wlr_proto.wlr_virtual_pointer_unstable_v1 import ZwlrVirtualPointerManagerV1
@@ -74,12 +78,21 @@ def drag(x1, y1, x2, y2, width=1280, height=720):
         display.flush()
         time.sleep(0.03)
 
-    def button(pressed):
+    def button(pressed, hold=0.2):
         pointer.button(ms(), 0x110, 1 if pressed else 0)  # BTN_LEFT
         pointer.frame()
         display.flush()
-        time.sleep(0.2)
+        time.sleep(hold)
 
+    def done():
+        display.roundtrip()
+        display.disconnect()
+
+    return move, button, done
+
+
+def drag(x1, y1, x2, y2):
+    move, button, done = pointer()
     move(x1, y1)
     time.sleep(0.5)
     button(True)
@@ -89,8 +102,16 @@ def drag(x1, y1, x2, y2, width=1280, height=720):
     time.sleep(0.5)
     button(False)
     time.sleep(0.5)
-    display.roundtrip()
-    display.disconnect()
+    done()
+
+
+def click(x, y):
+    move, button, done = pointer()
+    move(x, y)
+    time.sleep(0.3)
+    button(True, hold=0.05)
+    button(False, hold=0.3)
+    done()
 
 
 if __name__ == "__main__":
@@ -98,5 +119,7 @@ if __name__ == "__main__":
         source(sys.argv[2])
     elif sys.argv[1] == "drag":
         drag(*map(float, sys.argv[2:6]))
+    elif sys.argv[1] == "click":
+        click(*map(float, sys.argv[2:4]))
     else:
         sys.exit(__doc__)

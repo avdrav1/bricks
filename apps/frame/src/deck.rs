@@ -58,7 +58,10 @@ impl Deck {
         }
         let presentation = pptx::read(path).map_err(OpenError::Read)?;
         let mut images = Vec::new();
-        for slide in &presentation.slides {
+        // Layouts' new slides too: a slide added on a layout no slide uses shows its
+        // pictures.
+        let layouts = presentation.layouts.iter().map(|l| &l.slide);
+        for slide in presentation.slides.iter().chain(layouts) {
             if let Background::Picture(image) = &slide.background {
                 images.push(image);
             }
