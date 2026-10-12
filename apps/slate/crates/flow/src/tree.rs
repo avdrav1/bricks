@@ -3,7 +3,7 @@
 //! estimating without one, and walking it to paint and to hit-test.
 
 use crate::content::{code_text, floor_boundary, Content};
-use crate::{LeafId, Located, Look, Metrics, Paint, Position, Shaper};
+use crate::{LayoutKey, LeafId, Located, Look, Metrics, Paint, Position, Shaper};
 use document_model::{Block, Document, Format, Image, ParagraphStyle};
 use std::ops::Range;
 
@@ -69,6 +69,8 @@ pub(crate) struct Leaf {
     pub lines: Box<[u32]>,
     /// The width its text was last wrapped at.
     pub wrap: i32,
+    /// What the shaper caches its layout under: new whenever the leaf is rebuilt.
+    pub key: LayoutKey,
 }
 
 #[derive(Debug)]
@@ -161,27 +163,40 @@ impl Node {
     }
 }
 
-/// Builds the tree and the leaves of a document.
+/// Builds the tree and the leaves of a document, or of a stretch of its top-level blocks.
 pub(crate) struct Builder {
     pub leaves: Vec<Leaf>,
     pub page_breaks: usize,
     /// Top-level blocks holding a page break, in order.
     pub break_tops: Vec<usize>,
     plain: bool,
+    /// The first leaf's number: leaves before the stretch built.
+    base: u32,
+    /// The next layout key.
+    pub keys: u64,
 }
 
 impl Builder {
-    pub fn new(format: &Format) -> Self {
+    pub fn new(format: &Format, base: usize, keys: u64) -> Self {
         Builder {
             leaves: Vec::new(),
             page_breaks: 0,
             break_tops: Vec::new(),
             plain: matches!(format, Format::Text(_)),
+            base: base as u32,
+            keys,
         }
     }
 
+    /// Nodes for top-level blocks `range` of `all`.
+    pub fn tops(&mut self, all: &[Block], range: Range<usize>) -> Vec<Node> {
+        range
+            .map(|i| self.block(&all[i], all.get(i + 1), vec![i as u32], false))
+            .collect()
+    }
+
     /// Nodes for `blocks`, whose paths start with `prefix`.
-    pub fn blocks(&mut self, blocks: &[Block], prefix: &[u32], header: bool) -> Vec<Node> {
+    fn blocks(&mut self, blocks: &[Block], prefix: &[u32], header: bool) -> Vec<Node> {
         let mut nodes = Vec::with_capacity(blocks.len());
         for (i, block) in blocks.iter().enumerate() {
             let mut path = prefix.to_vec();
@@ -191,8 +206,12 @@ impl Builder {
         nodes
     }
 
+    fn next_leaf(&self) -> LeafId {
+        LeafId(self.base + self.leaves.len() as u32)
+    }
+
     fn leaf(&mut self, path: Vec<u32>, text: Option<&str>) -> LeafId {
-        let id = LeafId(self.leaves.len() as u32);
+        let id = self.next_leaf();
         let (chars, bytes, lines) = match text {
             Some(t) => {
                 let lines: Box<[u32]> = t.split('\n').map(|l| l.chars().count() as u32).collect();
@@ -207,12 +226,14 @@ impl Builder {
             bytes,
             lines,
             wrap: 0,
+            key: LayoutKey(self.keys),
         });
+        self.keys += 1;
         id
     }
 
     fn block(&mut self, block: &Block, next: Option<&Block>, path: Vec<u32>, header: bool) -> Node {
-        let space = if self.plain { 0 } else { PARAGRAPH_SPACE };
+        let space = self.space();
         let kind = match block {
             Block::Paragraph(p) => {
                 let content = Content::Paragraph {
@@ -247,12 +268,7 @@ impl Builder {
                 };
                 let leaf = self.leaf(path, Some(&content.text()));
                 let mut b = TextBox::new(leaf, Look::Body, scale(&item.paragraph));
-                // A list's items sit close together; the list ends with a paragraph's space.
-                b.below = if matches!(next, Some(Block::ListItem(_))) {
-                    ITEM_SPACE
-                } else {
-                    space
-                };
+                b.below = self.item_below(next);
                 b.indent = i32::from(item.level) * LEVEL_INDENT + LEVEL_INDENT;
                 b.marker = true;
                 Kind::Text(b)
@@ -310,7 +326,7 @@ impl Builder {
                     for (c, cell) in row.cells.iter().enumerate() {
                         let mut prefix = path.clone();
                         prefix.extend([r as u32, c as u32]);
-                        let first_leaf = LeafId(self.leaves.len() as u32);
+                        let first_leaf = self.next_leaf();
                         cells.push(CellBox {
                             span: cell.span.max(1) as i32,
                             x: 0,
@@ -329,6 +345,100 @@ impl Builder {
             }
         };
         Node::new(kind)
+    }
+
+    fn space(&self) -> i32 {
+        if self.plain {
+            0
+        } else {
+            PARAGRAPH_SPACE
+        }
+    }
+
+    /// The space below a list item followed by `next`: a list's items sit close together;
+    /// the list ends with a paragraph's space.
+    fn item_below(&self, next: Option<&Block>) -> i32 {
+        if matches!(next, Some(Block::ListItem(_))) {
+            ITEM_SPACE
+        } else {
+            self.space()
+        }
+    }
+
+    /// Give a top-level list item's node the space its new `next` block calls for, keeping
+    /// its measurement. False if it isn't a list item.
+    pub fn respace(&self, node: &mut Node, next: Option<&Block>) -> bool {
+        let Kind::Text(b) = &mut node.kind else {
+            return false;
+        };
+        if !b.marker {
+            return false;
+        }
+        let below = self.item_below(next);
+        let by = below - b.below;
+        b.below = below;
+        node.height += by;
+        node.laid_height += by;
+        true
+    }
+}
+
+/// Move every leaf number in `node` by `by`.
+pub(crate) fn shift_leaves(node: &mut Node, by: i64) {
+    let shift = |l: &mut LeafId| l.0 = (i64::from(l.0) + by) as u32;
+    match &mut node.kind {
+        Kind::Text(b) => shift(&mut b.leaf),
+        Kind::Picture { leaf, .. } | Kind::PageBreak { leaf, .. } | Kind::Rule { leaf } => {
+            shift(leaf)
+        }
+        Kind::Table(table) => {
+            for cell in table.rows.iter_mut().flat_map(|r| &mut r.cells) {
+                shift(&mut cell.first_leaf);
+                for n in &mut cell.nodes {
+                    shift_leaves(n, by);
+                }
+            }
+        }
+    }
+}
+
+/// Number the page breaks in `tops` in document order; their count, and the top-level
+/// blocks holding one.
+pub(crate) fn number_breaks(tops: &mut [Node]) -> (usize, Vec<usize>) {
+    fn walk(node: &mut Node, count: &mut usize) -> bool {
+        match &mut node.kind {
+            Kind::PageBreak { index, .. } => {
+                *index = *count;
+                *count += 1;
+                true
+            }
+            Kind::Table(table) => {
+                let mut any = false;
+                for cell in table.rows.iter_mut().flat_map(|r| &mut r.cells) {
+                    for n in &mut cell.nodes {
+                        any |= walk(n, count);
+                    }
+                }
+                any
+            }
+            _ => false,
+        }
+    }
+    let mut count = 0;
+    let mut holding = Vec::new();
+    for (i, node) in tops.iter_mut().enumerate() {
+        if walk(node, &mut count) {
+            holding.push(i);
+        }
+    }
+    (count, holding)
+}
+
+/// Where a top-level text node's text sits in its box: its leaf, left edge, and top.
+pub(crate) fn text_place(node: &Node) -> Option<(LeafId, i32, i32)> {
+    match &node.kind {
+        Kind::Text(b) => Some((b.leaf, b.indent, b.above)),
+        _ => None,
     }
 }
 
@@ -460,7 +570,7 @@ pub(crate) fn measure(node: &mut Node, width: i32, cx: &mut Cx<'_>) -> i32 {
             let content = content_at(cx.doc, &leaf.path).expect("a text leaf has content");
             let wrap = (width - b.indent).max(1);
             leaf.wrap = wrap;
-            b.text_height = cx.shaper.shape(b.leaf, content, wrap).max(1);
+            b.text_height = cx.shaper.shape(leaf.key, content, wrap).max(1);
             b.above + b.text_height + b.below
         }
         Kind::Picture {
@@ -475,7 +585,7 @@ pub(crate) fn measure(node: &mut Node, width: i32, cx: &mut Cx<'_>) -> i32 {
                 let image = image_at(cx.doc, &l.path);
                 *label_height = cx
                     .shaper
-                    .shape(*leaf, Content::PictureLabel(image), width)
+                    .shape(l.key, Content::PictureLabel(image), width)
                     .max(1);
                 *label_height
             }
@@ -641,10 +751,12 @@ pub(crate) fn paint<'a>(node: &'a Node, x: i32, y: f64, width: i32, cx: &mut Pai
                     height: node.height,
                 });
             }
-            let content = content_at(cx.doc, &cx.leaves[b.leaf.index()].path).expect("text leaf");
+            let leaf = &cx.leaves[b.leaf.index()];
+            let content = content_at(cx.doc, &leaf.path).expect("text leaf");
             let selected = cx.selected(b.leaf);
             (cx.f)(Paint::Text {
                 leaf: b.leaf,
+                key: leaf.key,
                 content,
                 x: x + b.indent,
                 y: y + f64::from(b.above),
@@ -671,6 +783,7 @@ pub(crate) fn paint<'a>(node: &'a Node, x: i32, y: f64, width: i32, cx: &mut Pai
                 }
                 None => (cx.f)(Paint::Text {
                     leaf: *leaf,
+                    key: cx.leaves[leaf.index()].key,
                     content: Content::PictureLabel(image),
                     x,
                     y,
@@ -742,7 +855,7 @@ pub(crate) fn hit(
             let content = content_at(doc, &leaf.path).expect("text leaf");
             let wrap = (width - b.indent).max(1);
             let ty = (y - f64::from(b.above)).clamp(0.0, f64::from(b.text_height - 1).max(0.0));
-            let h = shaper.hit(b.leaf, content, wrap, x - f64::from(b.indent), ty);
+            let h = shaper.hit(leaf.key, content, wrap, x - f64::from(b.indent), ty);
             let text = content.text();
             let index = floor_boundary(&text, h.index);
             let offset = if h.trailing {

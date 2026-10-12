@@ -1,12 +1,16 @@
-//! `slate FILE --bench-flow`: SLATE-11's measurements of the flow, as ADR 0007's spike took
-//! them, in a [`WINDOW`]-sized window at Full.
+//! The benchmarks, each in a [`WINDOW`]-sized window at Full; each prints one JSON line
+//! and quits. A frame's CPU time runs from the frame clock's before-paint to its
+//! after-paint: layout, snapshot, and rendering.
 //!
-//! Once the document is laid out, the text width switches Narrow ↔ Full ten times. Each
-//! switch records how many frames pass until one shows the new column (with that frame's
-//! CPU time) and how long until every block is measured at the new width. Then the page
-//! scrolls 37 px a frame for 900 frames. A frame's CPU time runs from the frame clock's
-//! before-paint to its after-paint: layout, snapshot, and rendering. Prints one JSON line
-//! and quits.
+//! - `--bench-flow` (SLATE-11), as ADR 0007's spike measured: once the document is laid
+//!   out, the text width switches Narrow ↔ Full ten times. Each switch records how many
+//!   frames pass until one shows the new column (with that frame's CPU time) and how long
+//!   until every block is measured at the new width. Then the page scrolls 37 px a frame
+//!   for 900 frames.
+//! - `--bench-typing` (SLATE-6): the caret goes to the middle of the document and 100
+//!   characters are typed 80 to 150 ms apart through the input method's path
+//!   ([`Page::type_text`]). Each one's latency runs from the call to the after-paint of the
+//!   frame that shows it; input delivery from the compositor isn't included.
 
 use crate::settings::TextWidth;
 use crate::view::{self, Page};
@@ -25,6 +29,16 @@ const SCROLL_FRAMES: u32 = 900;
 const SCROLL_STEP: f64 = 37.0;
 /// The longest a layout may take before the benchmark gives up on it.
 const GIVE_UP: Duration = Duration::from_secs(20);
+const KEYSTROKES: usize = 100;
+/// What is typed, a character at a time, round and round.
+const TYPED: &str = "the quick brown fox jumps over the lazy dog ";
+
+/// Which benchmark to run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Flow,
+    Typing,
+}
 
 #[derive(Clone, Copy)]
 enum Phase {
@@ -62,12 +76,129 @@ struct Rec {
     columns: (i32, i32),
 }
 
-/// Measure `page`, the document of `words` words, then quit.
-pub fn run(app: &gtk::Application, page: &Page, words: usize) {
+/// Run `mode` on `page`, the document of `words` words, then quit.
+pub fn run(app: &gtk::Application, page: &Page, words: usize, mode: Mode) {
+    match mode {
+        Mode::Flow => flow(app, page, words),
+        Mode::Typing => typing(app, page, words),
+    }
+}
+
+struct Typing {
+    /// When the last keystroke was typed and the revision that shows it, until a frame does.
+    pending: Option<(Instant, u64)>,
+    frame_start: Option<Instant>,
+    latency_ms: Vec<f64>,
+    frame_cpu_ms: Vec<f64>,
+    typed: usize,
+    /// A fixed pseudo-random sequence for the gaps between keystrokes.
+    seed: u64,
+}
+
+/// Type into the middle of `page` once it is laid out, a keystroke every 80 to 150 ms.
+fn typing(app: &gtk::Application, page: &Page, words: usize) {
+    let Some(clock) = page.frame_clock() else {
+        let app = app.clone();
+        page.connect_realize(move |page| typing(&app, page, words));
+        return;
+    };
+    let started = Instant::now();
+    let rec = Rc::new(RefCell::new(Typing {
+        pending: None,
+        frame_start: None,
+        latency_ms: Vec::new(),
+        frame_cpu_ms: Vec::new(),
+        typed: 0,
+        seed: 0x5EED,
+    }));
+    clock.connect_before_paint({
+        let rec = rec.clone();
+        move |_| rec.borrow_mut().frame_start = Some(Instant::now())
+    });
+    clock.connect_after_paint({
+        let (rec, page) = (rec.clone(), page.downgrade());
+        move |_| {
+            let Some(page) = page.upgrade() else { return };
+            let mut r = rec.borrow_mut();
+            let frame = r.frame_start.take();
+            if let Some((at, revision)) = r.pending {
+                if page.revision() >= revision {
+                    r.pending = None;
+                    r.latency_ms.push(ms(at.elapsed()));
+                    if let Some(f) = frame {
+                        r.frame_cpu_ms.push(ms(f.elapsed()));
+                    }
+                }
+            }
+        }
+    });
+    // Wait for the layout, then put the caret mid-document and start typing.
+    let app = app.clone();
+    page.add_tick_callback(move |page, _| {
+        if page.completed_at().is_none() || page.column() == 0 {
+            if started.elapsed() > GIVE_UP {
+                println!(r#"{{"error":"the document never finished its layout"}}"#);
+                std::process::exit(1);
+            }
+            return glib::ControlFlow::Continue;
+        }
+        page.put_caret(page.block_count() / 2);
+        keystroke(&app, page, &rec, words);
+        glib::ControlFlow::Break
+    });
+}
+
+/// Type the next character after a pause, or report once all are typed and shown.
+fn keystroke(app: &gtk::Application, page: &Page, rec: &Rc<RefCell<Typing>>, words: usize) {
+    let gap = {
+        let mut r = rec.borrow_mut();
+        r.seed = r
+            .seed
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        80 + (r.seed >> 33) % 71
+    };
+    let (app, page, rec) = (app.clone(), page.downgrade(), rec.clone());
+    glib::timeout_add_local_once(Duration::from_millis(gap), move || {
+        let Some(page) = page.upgrade() else { return };
+        let typed = rec.borrow().typed;
+        if typed == KEYSTROKES {
+            if rec.borrow().pending.is_none() {
+                let r = rec.borrow();
+                println!(
+                    r#"{{"words":{},"keystrokes":{},"latency_ms":{},"frame_cpu_ms":{}}}"#,
+                    words,
+                    r.latency_ms.len(),
+                    summary(&r.latency_ms),
+                    summary(&r.frame_cpu_ms),
+                );
+                app.quit();
+            } else {
+                keystroke(&app, &page, &rec, words);
+            }
+            return;
+        }
+        let c = TYPED
+            .chars()
+            .nth(typed % TYPED.chars().count())
+            .unwrap_or('a');
+        let at = Instant::now();
+        page.type_text(&c.to_string());
+        {
+            let mut r = rec.borrow_mut();
+            r.pending = Some((at, page.revision()));
+            r.typed += 1;
+        }
+        keystroke(&app, &page, &rec, words);
+    });
+}
+
+/// Measure re-wrapping and scrolling on `page`, the document of `words` words.
+fn flow(app: &gtk::Application, page: &Page, words: usize) {
     let Some(clock) = page.frame_clock() else {
         // Not realized yet: start once it is.
         let app = app.clone();
-        page.connect_realize(move |page| run(&app, page, words));
+        page.connect_realize(move |page| flow(&app, page, words));
         return;
     };
     let rec = Rc::new(RefCell::new(Rec {

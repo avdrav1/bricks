@@ -10,7 +10,7 @@ use super::{texture_key, Textures};
 use document_model::{
     Align, Format, Image, ImageSource, ListKind, Paragraph, ParagraphStyle, RunStyle,
 };
-use flow::{Content, Hit, LeafId, Look, Metrics, Shaper};
+use flow::{Content, Hit, LayoutKey, Look, Metrics, Shaper};
 use gtk::pango;
 use gtk::prelude::*;
 use std::collections::HashMap;
@@ -45,7 +45,7 @@ pub struct PangoShaper {
     /// Looks come from paragraph styles (Markdown, plain text), not from the runs (DOCX).
     style_looks: bool,
     textures: Textures,
-    cache: HashMap<LeafId, Entry>,
+    cache: HashMap<LayoutKey, Entry>,
     cached_bytes: usize,
     clock: u64,
     markers: HashMap<String, pango::Layout>,
@@ -72,16 +72,17 @@ impl PangoShaper {
         }
     }
 
-    /// `leaf`'s layout wrapped at `width`, made (again) if needed.
-    pub fn layout(&mut self, leaf: LeafId, content: Content<'_>, width: i32) -> &pango::Layout {
+    /// The layout cached under `key` for `content`, wrapped at `width`, made (again) if
+    /// needed.
+    pub fn layout(&mut self, key: LayoutKey, content: Content<'_>, width: i32) -> &pango::Layout {
         self.clock += 1;
         let clock = self.clock;
-        if !self.cache.contains_key(&leaf) {
+        if !self.cache.contains_key(&key) {
             let layout = self.make(content);
             let bytes = layout.text().len().max(1);
             self.cached_bytes += bytes;
             self.cache.insert(
-                leaf,
+                key,
                 Entry {
                     layout,
                     width: -1,
@@ -90,10 +91,10 @@ impl PangoShaper {
                 },
             );
             if self.cached_bytes > CACHE_BYTES {
-                self.evict(leaf);
+                self.evict(key);
             }
         }
-        let entry = self.cache.get_mut(&leaf).expect("cached above");
+        let entry = self.cache.get_mut(&key).expect("cached above");
         entry.used = clock;
         if entry.width != width {
             entry.layout.set_width(width * pango::SCALE);
@@ -103,7 +104,7 @@ impl PangoShaper {
     }
 
     /// Drop the least recently used quarter of the layouts, never `keep`.
-    fn evict(&mut self, keep: LeafId) {
+    fn evict(&mut self, keep: LayoutKey) {
         let mut used: Vec<u64> = self.cache.values().map(|e| e.used).collect();
         let cut = used.len() / 4;
         let (_, &mut oldest, _) = used.select_nth_unstable(cut);
@@ -280,12 +281,12 @@ impl Shaper for PangoShaper {
         }
     }
 
-    fn shape(&mut self, leaf: LeafId, content: Content<'_>, width: i32) -> i32 {
-        self.layout(leaf, content, width).pixel_size().1
+    fn shape(&mut self, key: LayoutKey, content: Content<'_>, width: i32) -> i32 {
+        self.layout(key, content, width).pixel_size().1
     }
 
-    fn hit(&mut self, leaf: LeafId, content: Content<'_>, width: i32, x: f64, y: f64) -> Hit {
-        let layout = self.layout(leaf, content, width);
+    fn hit(&mut self, key: LayoutKey, content: Content<'_>, width: i32, x: f64, y: f64) -> Hit {
+        let layout = self.layout(key, content, width);
         let scale = f64::from(pango::SCALE);
         let (inside, index, trailing) =
             layout.xy_to_index((x * scale).round() as i32, (y * scale).round() as i32);
@@ -299,5 +300,11 @@ impl Shaper for PangoShaper {
     fn picture_size(&mut self, image: &Image) -> Option<(f32, f32)> {
         self.texture(image)
             .map(|t| (t.width() as f32, t.height() as f32))
+    }
+
+    fn forget(&mut self, key: LayoutKey) {
+        if let Some(entry) = self.cache.remove(&key) {
+            self.cached_bytes -= entry.bytes;
+        }
     }
 }

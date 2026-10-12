@@ -6,9 +6,10 @@ use document_model::{
     RunStyle, Table, TableCell, TableRow,
 };
 use flow::{
-    Content, Flow, Hit, LeafId, Look, Metrics, Paint, Position, Shaper, BOTTOM_MARGIN, CELL_BORDER,
-    CELL_PADDING, PAGE_BREAK_HEIGHT, TABLE_MARGIN, TOP_MARGIN,
+    Content, Flow, Hit, LayoutKey, LeafId, Look, Metrics, Paint, Position, Shaper, Splice,
+    BOTTOM_MARGIN, CELL_BORDER, CELL_PADDING, PAGE_BREAK_HEIGHT, TABLE_MARGIN, TOP_MARGIN,
 };
+use std::collections::HashSet;
 use std::sync::Arc;
 
 const CHAR: f64 = 10.0;
@@ -22,6 +23,8 @@ struct Fake {
     shaped: usize,
     /// What estimates assume a character's width is (the truth is [`CHAR`]).
     estimated_char: Option<f64>,
+    /// Layouts the flow said are gone.
+    forgotten: HashSet<LayoutKey>,
 }
 
 /// Lines of `text` wrapped `width` px wide: (byte start, byte end) of each.
@@ -53,12 +56,12 @@ impl Shaper for Fake {
         }
     }
 
-    fn shape(&mut self, _leaf: LeafId, content: Content<'_>, width: i32) -> i32 {
+    fn shape(&mut self, _key: LayoutKey, content: Content<'_>, width: i32) -> i32 {
         self.shaped += 1;
         lines(&content.text(), width).len() as i32 * LINE
     }
 
-    fn hit(&mut self, _leaf: LeafId, content: Content<'_>, width: i32, x: f64, y: f64) -> Hit {
+    fn hit(&mut self, _key: LayoutKey, content: Content<'_>, width: i32, x: f64, y: f64) -> Hit {
         let text = content.text();
         let lines = lines(&text, width);
         let line = ((y / f64::from(LINE)) as usize).min(lines.len() - 1);
@@ -87,6 +90,10 @@ impl Shaper for Fake {
             ImageSource::Embedded { .. } => Some((400.0, 300.0)),
             ImageSource::Link(_) => None,
         }
+    }
+
+    fn forget(&mut self, key: LayoutKey) {
+        self.forgotten.insert(key);
     }
 }
 
@@ -152,6 +159,106 @@ fn texts(flow: &Flow, top: f64, bottom: f64) -> Vec<(LeafId, f64)> {
         }
     });
     out
+}
+
+/// The flow's text, layout keys aside: every leaf's text and the document's height.
+fn shape_of(flow: &Flow) -> (Vec<Option<String>>, f64, usize) {
+    let texts = (0..flow.leaf_count())
+        .map(|i| {
+            flow.leaf_text(LeafId::from_index(i))
+                .map(|t| t.into_owned())
+        })
+        .collect();
+    (texts, flow.content_height(), flow.char_count())
+}
+
+#[test]
+fn an_edit_rebuilds_only_its_blocks_and_keeps_the_viewport() {
+    let mut fake = Fake::default();
+    let mut blocks = many(60);
+    blocks.insert(30, table(vec![vec![cell(vec![para("in a cell")])]]));
+    let mut flow = laid_out(blocks, 100, &mut fake);
+    flow.scroll_to(1500.0);
+    flow.layout_viewport(&mut fake, 400.0);
+    let shown = |flow: &Flow| -> Vec<(Option<String>, f64)> {
+        texts(flow, flow.scroll(), flow.scroll() + 400.0)
+            .into_iter()
+            .map(|(l, y)| (flow.leaf_text(l).map(|t| t.into_owned()), y - flow.scroll()))
+            .collect()
+    };
+    let before = shown(&flow);
+    let edited_key = flow.layout_key(flow.block_leaf(2).unwrap());
+
+    // Typing in block 2, far above the viewport: one block, same counts.
+    let shaped = fake.shaped;
+    flow.edit(&mut fake, |doc| {
+        let Block::Paragraph(p) = &mut doc.blocks[2] else {
+            unreachable!()
+        };
+        p.runs[0].text.push_str(&"x".repeat(25));
+        (
+            (),
+            Splice {
+                start: 2,
+                removed: 1,
+                inserted: 1,
+            },
+        )
+    });
+    assert!(fake.forgotten.contains(&edited_key));
+    flow.layout_viewport(&mut fake, 400.0);
+    assert_eq!(
+        shown(&flow),
+        before,
+        "the viewport shows the same text at the same place"
+    );
+    flow.layout_slice(&mut fake, &mut || true);
+    assert_eq!(
+        fake.shaped - shaped,
+        1,
+        "only the edited block was shaped again"
+    );
+    assert_eq!(shown(&flow), before);
+
+    // Enter in block 5: one block becomes two; every leaf after it is renumbered.
+    flow.edit(&mut fake, |doc| {
+        doc.blocks.insert(6, para("a new paragraph"));
+        (
+            (),
+            Splice {
+                start: 5,
+                removed: 1,
+                inserted: 2,
+            },
+        )
+    });
+    flow.layout_viewport(&mut fake, 400.0);
+    assert_eq!(shown(&flow), before);
+    // Joining two paragraphs below the viewport: two blocks become one.
+    flow.edit(&mut fake, |doc| {
+        doc.blocks.remove(50);
+        (
+            (),
+            Splice {
+                start: 49,
+                removed: 2,
+                inserted: 1,
+            },
+        )
+    });
+    flow.layout_slice(&mut fake, &mut || true);
+    assert_eq!(shown(&flow), before);
+
+    // The same as a flow made from the edited document.
+    let fresh = laid_out(flow.document().blocks.clone(), 100, &mut Fake::default());
+    assert_eq!(shape_of(&flow), shape_of(&fresh));
+    let cell = (0..fresh.leaf_count())
+        .find(|&i| fresh.path(LeafId::from_index(i)).len() > 1)
+        .unwrap();
+    assert_eq!(
+        flow.path(LeafId::from_index(cell)),
+        fresh.path(LeafId::from_index(cell))
+    );
 }
 
 #[test]

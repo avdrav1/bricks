@@ -23,6 +23,7 @@ members = [
     "apps/slate/crates/document-model",
     "apps/slate/crates/docx",
     "apps/slate/crates/flow",
+    "apps/slate/crates/document-edit",
     # Frame-only crates
     "apps/frame/crates/presentation-model",
     "apps/frame/crates/pptx",
@@ -57,6 +58,7 @@ xlsx = { path = "apps/bricks/crates/xlsx" }
 document-model = { path = "apps/slate/crates/document-model" }
 docx = { path = "apps/slate/crates/docx" }
 flow = { path = "apps/slate/crates/flow" }
+document-edit = { path = "apps/slate/crates/document-edit" }
 # Frame crates
 presentation-model = { path = "apps/frame/crates/presentation-model" }
 pptx = { path = "apps/frame/crates/pptx" }

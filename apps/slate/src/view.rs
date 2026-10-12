@@ -7,20 +7,29 @@
 //! redraw priority, measure the rest. The scroll position is anchored to a block, so replacing
 //! estimated heights never moves what the viewport shows.
 //!
+//! Text is edited in place (SLATE-6): typing comes through an input method context, and
+//! every key that changes the document makes a `document_edit` command, kept in the page's
+//! history for undo and redo. The caret moves by character, word, line, and block. An edit
+//! rebuilds only the blocks it changed ([`Flow::edit`]). The page's `Command`s are the
+//! formatting, list, and undo commands its keys and the window's menu share.
+//!
 //! The text selects by dragging, and Ctrl+A and Ctrl+C copy it as plain text. Ctrl+click
 //! opens a link. Screen readers read the text through `GtkAccessibleText`; page breaks are
 //! child widgets named "Page break" that draw their own dashed line.
 
 mod a11y;
+mod caret;
 mod shaper;
 
 use crate::settings::TextWidth;
-use flow::{Flow, Located, Paint, LEVEL_INDENT};
+use document_edit::{Change, Edit, Flag, History, Pos};
+use document_model::{ParagraphStyle, RunStyle};
+use flow::{Flow, Located, Paint, Splice, LEVEL_INDENT};
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{gdk, glib, graphene, gsk, pango};
 use shaper::PangoShaper;
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
@@ -33,8 +42,10 @@ const MIN_MARGIN: i32 = 24;
 const MIN_COLUMN: i32 = 120;
 /// The longest an idle layout slice runs.
 const SLICE: Duration = Duration::from_millis(4);
-/// How far an arrow key scrolls.
+/// How far the scroll wheel's and scrollbar's step moves.
 const LINE_STEP: f64 = 40.0;
+/// Room kept above or below the caret when the page scrolls to show it.
+const REVEAL_MARGIN: f64 = 24.0;
 /// How far past the page's edge a drag scrolls per frame, as a fraction of the overshoot.
 const AUTOSCROLL: f64 = 0.4;
 /// The document is paper: dark text on white whatever the theme, as it was written.
@@ -87,10 +98,34 @@ fn rect(x: f32, y: f32, w: f32, h: f32) -> graphene::Rect {
     graphene::Rect::new(x, y, w, h)
 }
 
-/// The document and its layouts.
+/// What the page's menu and keys do besides typing and moving the caret.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Command {
+    Undo,
+    Redo,
+    Bold,
+    Italic,
+    /// Normal text (0) or a heading level (1 to 6).
+    Style(u8),
+    Bullets,
+    Numbers,
+}
+
+/// The document, its layouts, and its editing state.
 struct State {
     flow: Flow,
     shaper: PangoShaper,
+    history: History,
+    /// `None` when the document has no editable block.
+    caret: Option<Pos>,
+    /// Where Up and Down aim, in pango units from the column's left edge.
+    goal: Option<i32>,
+    /// The look the next typed text takes when Ctrl+B or Ctrl+I changed it at the caret.
+    typing: Option<RunStyle>,
+    /// Plain text: no formatting, lists, or headings.
+    plain: bool,
+    /// Counts the edits shown, for the typing benchmark.
+    revision: u64,
 }
 
 mod imp {
@@ -115,6 +150,9 @@ mod imp {
         autoscroll: RefCell<Option<gtk::TickCallbackId>>,
         /// When every block was last measured at the column width; `None` while not.
         pub(super) completed: Cell<Option<Instant>>,
+        im: OnceCell<gtk::IMMulticontext>,
+        /// Scroll the caret into view at the next allocation.
+        pub(super) reveal: Cell<bool>,
     }
 
     #[glib::object_subclass]
@@ -196,8 +234,37 @@ mod imp {
             obj.set_cursor_from_name(Some("text"));
             obj.update_property(&[
                 gtk::accessible::Property::MultiLine(true),
-                gtk::accessible::Property::ReadOnly(true),
+                gtk::accessible::Property::ReadOnly(false),
             ]);
+            let im = gtk::IMMulticontext::new();
+            im.set_client_widget(Some(&*obj));
+            im.connect_commit({
+                let page = obj.downgrade();
+                move |_, text| {
+                    if let Some(page) = page.upgrade() {
+                        page.imp().type_text(text);
+                    }
+                }
+            });
+            let _ = self.im.set(im);
+            let focus = gtk::EventControllerFocus::new();
+            focus.connect_enter(|focus| {
+                if let Some(page) = focus.widget().and_downcast::<super::Page>() {
+                    if let Some(im) = page.imp().im.get() {
+                        im.focus_in();
+                    }
+                    page.queue_draw();
+                }
+            });
+            focus.connect_leave(|focus| {
+                if let Some(page) = focus.widget().and_downcast::<super::Page>() {
+                    if let Some(im) = page.imp().im.get() {
+                        im.focus_out();
+                    }
+                    page.queue_draw();
+                }
+            });
+            obj.add_controller(focus);
             self.select_by_dragging();
             self.point_at_links();
             self.keys();
@@ -212,6 +279,9 @@ mod imp {
             }
             for line in self.breaks.take() {
                 line.unparent();
+            }
+            if let Some(im) = self.im.get() {
+                im.set_client_widget(None::<&gtk::Widget>);
             }
         }
     }
@@ -236,22 +306,43 @@ mod imp {
             let column = column_width(self.setting.get(), width);
             let mut lines = Vec::new();
             let mut relayout = false;
+            let mut caret_box = None;
             {
                 let mut state = self.state.borrow_mut();
-                let Some(State { flow, shaper }) = state.as_mut() else {
+                let Some(st) = state.as_mut() else {
                     return;
                 };
-                if flow.width() != column {
-                    flow.set_width(column, shaper);
+                if st.flow.width() != column {
+                    st.flow.set_width(column, &mut st.shaper);
                     self.completed.set(None);
                     relayout = true;
                 }
-                flow.layout_viewport(shaper, f64::from(height));
-                if flow.is_complete() && self.completed.get().is_none() {
+                let page = f64::from(height);
+                st.flow.layout_viewport(&mut st.shaper, page);
+                if self.reveal.take() {
+                    if let Some((_, y, h)) = st.caret.and_then(|c| caret::rect(st, c)) {
+                        let top = st.flow.scroll();
+                        if y < top {
+                            st.flow.scroll_to(y - REVEAL_MARGIN);
+                        } else if y + h > top + page {
+                            st.flow.scroll_to(y + h - page + REVEAL_MARGIN);
+                        }
+                        st.flow.layout_viewport(&mut st.shaper, page);
+                    }
+                }
+                if st.flow.is_complete() && self.completed.get().is_none() {
                     self.completed.set(Some(Instant::now()));
                 }
-                let (left, scroll) = (column_left(width, column), flow.scroll());
-                flow.page_breaks(&mut |p| {
+                let (left, scroll) = (column_left(width, column), st.flow.scroll());
+                if let Some((x, y, h)) = st.caret.and_then(|c| caret::rect(st, c)) {
+                    caret_box = Some(gdk::Rectangle::new(
+                        left + x as i32,
+                        (y - scroll) as i32,
+                        1,
+                        h.ceil() as i32,
+                    ));
+                }
+                st.flow.page_breaks(&mut |p| {
                     if let Paint::PageBreak {
                         index,
                         x,
@@ -263,6 +354,9 @@ mod imp {
                         lines.push((index, left + x, (y - scroll) as f32, width, height));
                     }
                 });
+            }
+            if let (Some(caret), Some(im)) = (caret_box, self.im.get()) {
+                im.set_cursor_location(&caret);
             }
             if relayout {
                 self.start_layout();
@@ -281,12 +375,21 @@ mod imp {
             let obj = self.obj();
             let (w, h) = (obj.width(), obj.height());
             snapshot.append_color(&rgba(PAPER), &rect(0.0, 0.0, w as f32, h as f32));
-            if let Some(State { flow, shaper }) = self.state.borrow_mut().as_mut() {
-                let left = column_left(w, flow.width()) as f32;
-                let top = flow.scroll();
+            if let Some(st) = self.state.borrow_mut().as_mut() {
+                let left = column_left(w, st.flow.width()) as f32;
+                let top = st.flow.scroll();
+                let State { flow, shaper, .. } = st;
                 flow.paint(top, top + f64::from(h), &mut |p| {
                     draw(snapshot, shaper, p, left, top);
                 });
+                if obj.has_focus() {
+                    if let Some((x, y, ch)) = st.caret.and_then(|c| caret::rect(st, c)) {
+                        snapshot.append_color(
+                            &rgba(INK),
+                            &rect(left + x as f32, (y - top) as f32, 1.0, ch as f32),
+                        );
+                    }
+                }
             }
             for line in self.breaks.borrow().iter() {
                 obj.snapshot_child(line, snapshot);
@@ -309,7 +412,7 @@ mod imp {
             granularity: gtk::AccessibleTextGranularity,
         ) -> Option<(u32, u32, glib::Bytes)> {
             let mut state = self.state.borrow_mut();
-            let State { flow, shaper } = state.as_mut()?;
+            let State { flow, shaper, .. } = state.as_mut()?;
             let (start, end) = a11y::boundary(flow, shaper, offset as usize, granularity)?;
             let text = flow.text(start, end);
             Some((
@@ -321,11 +424,12 @@ mod imp {
 
         fn caret_position(&self) -> u32 {
             let state = self.state.borrow();
-            let Some(State { flow, .. }) = state.as_ref() else {
+            let Some(st) = state.as_ref() else {
                 return 0;
             };
-            flow.selection()
-                .map_or(0, |(_, end)| flow.char_offset(end) as u32)
+            st.caret
+                .and_then(|c| caret::to_flow(st, c))
+                .map_or(0, |p| st.flow.char_offset(p) as u32)
         }
 
         fn selection(&self) -> Vec<gtk::AccessibleTextRange> {
@@ -407,7 +511,7 @@ mod imp {
             let started = Instant::now();
             let progress = {
                 let mut state = self.state.borrow_mut();
-                let Some(State { flow, shaper }) = state.as_mut() else {
+                let Some(State { flow, shaper, .. }) = state.as_mut() else {
                     return glib::ControlFlow::Break;
                 };
                 flow.layout_slice(shaper, &mut || started.elapsed() < SLICE)
@@ -433,7 +537,7 @@ mod imp {
         fn locate(&self, x: f64, y: f64) -> Option<Located> {
             let width = self.obj().width();
             let mut state = self.state.borrow_mut();
-            let State { flow, shaper } = state.as_mut()?;
+            let State { flow, shaper, .. } = state.as_mut()?;
             let left = f64::from(column_left(width, flow.width()));
             flow.hit(shaper, x - left, flow.scroll() + y)
         }
@@ -451,15 +555,19 @@ mod imp {
             obj.update_caret_position();
         }
 
-        /// Extend the selection being dragged to the widget point (`x`, `y`).
+        /// Extend the selection being dragged to the widget point (`x`, `y`); the caret
+        /// follows it.
         fn drag_to(&self, x: f64, y: f64) {
             self.dragging.set(Some((x, y)));
             let Some(focus) = self.locate(x, y) else {
                 return;
             };
-            if let Some(state) = self.state.borrow_mut().as_mut() {
-                let anchor = state.flow.selection_anchor().unwrap_or(focus.position);
-                state.flow.select(anchor, focus.position);
+            if let Some(st) = self.state.borrow_mut().as_mut() {
+                let anchor = st.flow.selection_anchor().unwrap_or(focus.position);
+                st.flow.select(anchor, focus.position);
+                if let Some(c) = caret::to_model(st, focus.position, true) {
+                    st.caret = Some(c);
+                }
             }
             self.selection_changed();
         }
@@ -475,8 +583,14 @@ mod imp {
                 page.grab_focus();
                 let imp = page.imp();
                 if let Some(at) = imp.locate(x, y) {
-                    if let Some(state) = imp.state.borrow_mut().as_mut() {
-                        state.flow.select(at.position, at.position);
+                    if let Some(st) = imp.state.borrow_mut().as_mut() {
+                        st.flow.select(at.position, at.position);
+                        if let Some(c) = caret::to_model(st, at.position, true) {
+                            st.caret = Some(c);
+                        }
+                        st.goal = None;
+                        st.typing = None;
+                        st.history.seal();
                     }
                 }
                 imp.dragging.set(Some((x, y)));
@@ -562,6 +676,9 @@ mod imp {
 
         fn keys(&self) {
             let keys = gtk::EventControllerKey::new();
+            if let Some(im) = self.im.get() {
+                keys.set_im_context(Some(im));
+            }
             keys.connect_key_pressed(|keys, key, _, mods| {
                 let Some(page) = keys.widget().and_downcast::<super::Page>() else {
                     return glib::Propagation::Proceed;
@@ -572,43 +689,380 @@ mod imp {
         }
 
         fn key(&self, key: gdk::Key, mods: gdk::ModifierType) -> glib::Propagation {
+            use gdk::Key as K;
             let ctrl = mods.contains(gdk::ModifierType::CONTROL_MASK);
-            if ctrl && matches!(key, gdk::Key::a | gdk::Key::A) {
-                if let Some(state) = self.state.borrow_mut().as_mut() {
-                    state.flow.select_all();
+            let shift = mods.contains(gdk::ModifierType::SHIFT_MASK);
+            if ctrl {
+                let digit = key.to_unicode().and_then(|c| c.to_digit(10));
+                let command = match key {
+                    K::z | K::Z => Some(if shift { Command::Redo } else { Command::Undo }),
+                    K::y | K::Y => Some(Command::Redo),
+                    K::b | K::B => Some(Command::Bold),
+                    K::i | K::I => Some(Command::Italic),
+                    K::asterisk | K::_8 if shift => Some(Command::Bullets),
+                    K::ampersand | K::_7 if shift => Some(Command::Numbers),
+                    _ => match digit {
+                        Some(n @ 0..=6) if !shift => Some(Command::Style(n as u8)),
+                        _ => None,
+                    },
+                };
+                if let Some(command) = command {
+                    self.command(command);
+                    return glib::Propagation::Stop;
                 }
-                self.selection_changed();
-                return glib::Propagation::Stop;
+                if matches!(key, K::a | K::A) {
+                    if let Some(st) = self.state.borrow_mut().as_mut() {
+                        st.flow.select_all();
+                        st.caret = caret::last(st);
+                    }
+                    self.selection_changed();
+                    return glib::Propagation::Stop;
+                }
+                if matches!(key, K::c | K::C | K::Insert) {
+                    let text = self
+                        .state
+                        .borrow()
+                        .as_ref()
+                        .map(|s| s.flow.selected_text())
+                        .unwrap_or_default();
+                    if !text.is_empty() {
+                        self.obj().clipboard().set_text(&text);
+                    }
+                    return glib::Propagation::Stop;
+                }
             }
-            if ctrl && matches!(key, gdk::Key::c | gdk::Key::C | gdk::Key::Insert) {
-                let text = self
-                    .state
-                    .borrow()
-                    .as_ref()
-                    .map(|s| s.flow.selected_text())
-                    .unwrap_or_default();
-                if !text.is_empty() {
-                    self.obj().clipboard().set_text(&text);
+            match key {
+                K::BackSpace => self.backspace(),
+                K::Delete | K::KP_Delete => self.delete(),
+                K::Return | K::KP_Enter | K::ISO_Enter if shift => self.type_text("\n"),
+                K::Return | K::KP_Enter | K::ISO_Enter => self.enter(),
+                K::Tab | K::KP_Tab | K::ISO_Left_Tab => self.tab(shift || key == K::ISO_Left_Tab),
+                K::Left | K::KP_Left => {
+                    self.move_caret(false, |st, c| match caret::selection(st) {
+                        Some((s, _)) if !ctrl => s,
+                        _ if ctrl => caret::word_left(st, c),
+                        _ => caret::left(st, c),
+                    })
                 }
-                return glib::Propagation::Stop;
-            }
-            let Some(adj) = self.vadj.borrow().clone() else {
-                return glib::Propagation::Proceed;
-            };
-            let page = adj.page_size();
-            let value = match key {
-                gdk::Key::Up | gdk::Key::KP_Up => adj.value() - LINE_STEP,
-                gdk::Key::Down | gdk::Key::KP_Down => adj.value() + LINE_STEP,
-                gdk::Key::Page_Up | gdk::Key::KP_Page_Up => adj.value() - page * 0.9,
-                gdk::Key::Page_Down | gdk::Key::KP_Page_Down | gdk::Key::space => {
-                    adj.value() + page * 0.9
+                K::Right | K::KP_Right => {
+                    self.move_caret(false, |st, c| match caret::selection(st) {
+                        Some((_, e)) if !ctrl => e,
+                        _ if ctrl => caret::word_right(st, c),
+                        _ => caret::right(st, c),
+                    })
                 }
-                gdk::Key::Home | gdk::Key::KP_Home => adj.lower(),
-                gdk::Key::End | gdk::Key::KP_End => adj.upper(),
+                K::Up | K::KP_Up | K::Down | K::KP_Down => {
+                    let down = matches!(key, K::Down | K::KP_Down);
+                    self.move_caret(true, |st, c| {
+                        let (to, goal) = caret::vertical(st, c, st.goal, down);
+                        st.goal = goal;
+                        to
+                    });
+                }
+                K::Home | K::KP_Home if ctrl => {
+                    self.move_caret(false, |st, c| caret::first(st).unwrap_or(c))
+                }
+                K::End | K::KP_End if ctrl => {
+                    self.move_caret(false, |st, c| caret::last(st).unwrap_or(c))
+                }
+                K::Home | K::KP_Home => {
+                    self.move_caret(false, |st, c| caret::line_edge(st, c, false))
+                }
+                K::End | K::KP_End => self.move_caret(false, |st, c| caret::line_edge(st, c, true)),
+                K::Page_Up | K::KP_Page_Up | K::Page_Down | K::KP_Page_Down => {
+                    let Some(adj) = self.vadj.borrow().clone() else {
+                        return glib::Propagation::Proceed;
+                    };
+                    let page = adj.page_size();
+                    let by = if matches!(key, K::Page_Up | K::KP_Page_Up) {
+                        -0.9
+                    } else {
+                        0.9
+                    };
+                    let value = adj.value() + page * by;
+                    adj.set_value(value.clamp(adj.lower(), (adj.upper() - page).max(adj.lower())));
+                }
                 _ => return glib::Propagation::Proceed,
-            };
-            adj.set_value(value.clamp(adj.lower(), (adj.upper() - page).max(adj.lower())));
+            }
             glib::Propagation::Stop
+        }
+
+        // ---- editing ----
+
+        /// Move the caret where `to` says, dropping the selection, and show it. Up and Down
+        /// (`keep_goal`) keep the column they aim for; other moves forget it.
+        fn move_caret(&self, keep_goal: bool, to: impl FnOnce(&mut State, Pos) -> Pos) {
+            {
+                let mut state = self.state.borrow_mut();
+                let Some(st) = state.as_mut() else {
+                    return;
+                };
+                let Some(c) = st.caret else {
+                    return;
+                };
+                if !keep_goal {
+                    st.goal = None;
+                }
+                st.caret = Some(to(st, c));
+                st.typing = None;
+                st.history.seal();
+                st.flow.clear_selection();
+            }
+            self.reveal_caret();
+        }
+
+        fn reveal_caret(&self) {
+            self.reveal.set(true);
+            let obj = self.obj();
+            obj.queue_allocate();
+            obj.queue_draw();
+            obj.update_caret_position();
+            obj.update_selection_bound();
+        }
+
+        /// Make the edit `make` builds from the state, apply it, and show the result.
+        /// `keep_caret`: a paragraph command given at the caret, not a selection, leaves
+        /// the caret where it was rather than selecting what it changed.
+        fn edit_with(&self, keep_caret: bool, make: impl FnOnce(&mut State) -> Option<Edit>) {
+            let change = {
+                let mut state = self.state.borrow_mut();
+                let Some(st) = state.as_mut() else {
+                    return;
+                };
+                let kept = if keep_caret && caret::selection(st).is_none() {
+                    st.caret
+                } else {
+                    None
+                };
+                let Some(edit) = make(st) else {
+                    return;
+                };
+                let State {
+                    flow,
+                    shaper,
+                    history,
+                    ..
+                } = st;
+                let change = flow.edit(shaper, |doc| {
+                    let change = history.apply(doc, edit);
+                    (change, splice(change))
+                });
+                match kept {
+                    Some(caret) => Change {
+                        caret,
+                        anchor: None,
+                        ..change
+                    },
+                    None => change,
+                }
+            };
+            self.changed(change);
+        }
+
+        /// Undo, or redo, a step.
+        fn step(&self, redo: bool) {
+            let change = {
+                let mut state = self.state.borrow_mut();
+                let Some(State {
+                    flow,
+                    shaper,
+                    history,
+                    ..
+                }) = state.as_mut()
+                else {
+                    return;
+                };
+                if !(if redo {
+                    history.can_redo()
+                } else {
+                    history.can_undo()
+                }) {
+                    return;
+                }
+                flow.edit(shaper, |doc| {
+                    let change = if redo {
+                        history.redo(doc)
+                    } else {
+                        history.undo(doc)
+                    };
+                    let s = change.map_or(
+                        Splice {
+                            start: 0,
+                            removed: 0,
+                            inserted: 0,
+                        },
+                        splice,
+                    );
+                    (change, s)
+                })
+            };
+            if let Some(change) = change {
+                self.changed(change);
+            }
+        }
+
+        /// Show what an edit, undo, or redo changed: the caret (and a selection) where it
+        /// says, the page breaks it left, the layout measured again.
+        fn changed(&self, change: Change) {
+            let (complete, breaks) = {
+                let mut state = self.state.borrow_mut();
+                let Some(st) = state.as_mut() else {
+                    return;
+                };
+                st.caret = Some(change.caret);
+                st.goal = None;
+                st.typing = None;
+                st.revision += 1;
+                if let Some(anchor) = change.anchor {
+                    if let (Some(a), Some(c)) =
+                        (caret::to_flow(st, anchor), caret::to_flow(st, change.caret))
+                    {
+                        st.flow.select(a, c);
+                    }
+                }
+                (st.flow.is_complete(), st.flow.page_break_count())
+            };
+            self.sync_breaks(breaks);
+            if !complete {
+                self.completed.set(None);
+                self.start_layout();
+            }
+            self.reveal_caret();
+        }
+
+        /// Keep one page-break child per page break.
+        fn sync_breaks(&self, count: usize) {
+            let mut breaks = self.breaks.borrow_mut();
+            while breaks.len() > count {
+                if let Some(line) = breaks.pop() {
+                    line.unparent();
+                }
+            }
+            while breaks.len() < count {
+                breaks.push(page_break(&self.obj()));
+            }
+        }
+
+        /// The selection, else the caret, as the range an edit replaces.
+        fn target(st: &State) -> Option<(Pos, Pos)> {
+            caret::selection(st).or_else(|| st.caret.map(|c| (c, c)))
+        }
+
+        pub(super) fn type_text(&self, text: &str) {
+            self.edit_with(false, |st| {
+                let (from, to) = Self::target(st)?;
+                let style = if st.plain {
+                    RunStyle::default()
+                } else {
+                    st.typing
+                        .clone()
+                        .unwrap_or_else(|| document_edit::look(st.flow.document(), from))
+                };
+                document_edit::replace(st.flow.document(), from, to, text, &style)
+            });
+        }
+
+        fn enter(&self) {
+            self.edit_with(false, |st| {
+                let (from, to) = Self::target(st)?;
+                document_edit::split(st.flow.document(), from, to)
+            });
+        }
+
+        fn backspace(&self) {
+            self.edit_with(false, |st| {
+                let doc = st.flow.document();
+                if let Some((s, e)) = caret::selection(st) {
+                    return document_edit::replace(doc, s, e, "", &RunStyle::default());
+                }
+                let c = st.caret?;
+                match caret::char_before(st, c) {
+                    Some(before) => {
+                        document_edit::replace(doc, before, c, "", &RunStyle::default())
+                    }
+                    None => document_edit::join_backward(doc, c),
+                }
+            });
+        }
+
+        fn delete(&self) {
+            self.edit_with(false, |st| {
+                let doc = st.flow.document();
+                if let Some((s, e)) = caret::selection(st) {
+                    return document_edit::replace(doc, s, e, "", &RunStyle::default());
+                }
+                let c = st.caret?;
+                match caret::char_after(st, c) {
+                    Some(after) => document_edit::replace(doc, c, after, "", &RunStyle::default()),
+                    None => document_edit::join_forward(doc, c),
+                }
+            });
+        }
+
+        /// Tab in a list item nests it a level deeper (Shift+Tab shallower); elsewhere Tab
+        /// types a tab.
+        fn tab(&self, back: bool) {
+            let in_list = self.state.borrow().as_ref().is_some_and(|st| {
+                !st.plain && st.caret.is_some_and(|c| caret::is_list_item(st, c.block))
+            });
+            if in_list {
+                self.edit_with(true, |st| {
+                    let blocks = caret::blocks(st)?;
+                    document_edit::indent(st.flow.document(), blocks, if back { -1 } else { 1 })
+                });
+            } else if !back {
+                self.type_text("\t");
+            }
+        }
+
+        pub(super) fn command(&self, command: Command) {
+            match command {
+                Command::Undo => self.step(false),
+                Command::Redo => self.step(true),
+                Command::Bold | Command::Italic => {
+                    let flag = if command == Command::Bold {
+                        Flag::Bold
+                    } else {
+                        Flag::Italic
+                    };
+                    self.edit_with(false, |st| {
+                        if st.plain {
+                            return None;
+                        }
+                        if let Some((s, e)) = caret::selection(st) {
+                            return document_edit::toggle(st.flow.document(), s, e, flag);
+                        }
+                        // No selection: what is typed next takes the look.
+                        let c = st.caret?;
+                        let mut look = st
+                            .typing
+                            .clone()
+                            .unwrap_or_else(|| document_edit::look(st.flow.document(), c));
+                        match flag {
+                            Flag::Bold => look.bold = !look.bold,
+                            Flag::Italic => look.italic = !look.italic,
+                        }
+                        st.typing = Some(look);
+                        None
+                    });
+                }
+                Command::Style(level) => self.edit_with(true, |st| {
+                    let style = match level {
+                        0 => ParagraphStyle::Normal,
+                        n => ParagraphStyle::Heading(n.min(6)),
+                    };
+                    let blocks = caret::blocks(st).filter(|_| !st.plain)?;
+                    document_edit::set_style(st.flow.document(), blocks, style)
+                }),
+                Command::Bullets | Command::Numbers => self.edit_with(true, |st| {
+                    let blocks = caret::blocks(st).filter(|_| !st.plain)?;
+                    document_edit::toggle_list(
+                        st.flow.document(),
+                        blocks,
+                        command == Command::Numbers,
+                    )
+                }),
+            }
         }
     }
 }
@@ -621,24 +1075,68 @@ glib::wrapper! {
 }
 
 impl Page {
+    /// The page showing `doc`, whose runs [`document_edit::normalize`] has merged so undo
+    /// gives each paragraph back exactly.
     pub fn new(doc: document_model::Document, textures: Textures, setting: TextWidth) -> Self {
         let page: Self = glib::Object::new();
         let imp = page.imp();
         imp.setting.set(setting);
         let shaper = PangoShaper::new(page.pango_context(), &doc.format, textures);
+        let plain = matches!(doc.format, document_model::Format::Text(_));
         let flow = Flow::new(doc);
         let lines = (0..flow.page_break_count())
-            .map(|_| {
-                let line = gtk::Separator::new(gtk::Orientation::Horizontal);
-                line.add_css_class("page-break");
-                line.update_property(&[gtk::accessible::Property::Label("Page break")]);
-                line.set_parent(&page);
-                line
-            })
+            .map(|_| page_break(&page))
             .collect();
         imp.breaks.replace(lines);
-        imp.state.replace(Some(State { flow, shaper }));
+        let mut state = State {
+            flow,
+            shaper,
+            history: History::new(),
+            caret: None,
+            goal: None,
+            typing: None,
+            plain,
+            revision: 0,
+        };
+        state.caret = caret::first(&state);
+        imp.state.replace(Some(state));
         page
+    }
+
+    /// Run a menu or key command.
+    pub fn command(&self, command: Command) {
+        self.imp().command(command);
+    }
+
+    /// Type `text` at the caret, as the input method's commit does.
+    pub fn type_text(&self, text: &str) {
+        self.imp().type_text(text);
+    }
+
+    /// Put the caret in the middle of the first editable block from top-level block
+    /// `block` on, and show it.
+    pub fn put_caret(&self, block: usize) {
+        let imp = self.imp();
+        if let Some(st) = imp.state.borrow_mut().as_mut() {
+            st.caret = caret::middle_from(st, block).or(st.caret);
+            st.flow.clear_selection();
+        }
+        self.queue_allocate();
+        imp.reveal.set(true);
+    }
+
+    /// How many edits the page has shown.
+    pub fn revision(&self) -> u64 {
+        self.imp().state.borrow().as_ref().map_or(0, |s| s.revision)
+    }
+
+    /// How many top-level blocks the document has.
+    pub fn block_count(&self) -> usize {
+        self.imp()
+            .state
+            .borrow()
+            .as_ref()
+            .map_or(0, |s| s.flow.block_count())
     }
 
     /// Follow a new text width setting.
@@ -664,19 +1162,38 @@ impl Page {
     }
 }
 
+/// The blocks an edit's change replaced, for the flow.
+fn splice(change: Change) -> Splice {
+    Splice {
+        start: change.start,
+        removed: change.removed,
+        inserted: change.inserted,
+    }
+}
+
+/// A page break's line: a child of `page` named "Page break" for screen readers.
+fn page_break(page: &Page) -> gtk::Separator {
+    let line = gtk::Separator::new(gtk::Orientation::Horizontal);
+    line.add_css_class("page-break");
+    line.update_property(&[gtk::accessible::Property::Label("Page break")]);
+    line.set_parent(page);
+    line
+}
+
 /// Draw `p`, with the column's left edge at `left` and the viewport's top at document y
 /// `top`.
 fn draw(snapshot: &gtk::Snapshot, shaper: &mut PangoShaper, p: Paint<'_>, left: f32, top: f64) {
     let at = |x: i32, y: f64| (left + x as f32, (y - top) as f32);
     match p {
         Paint::Text {
-            leaf,
+            key,
             content,
             x,
             y,
             width,
             marker,
             selected,
+            ..
         } => {
             let (x, y) = at(x, y);
             if marker {
@@ -690,7 +1207,7 @@ fn draw(snapshot: &gtk::Snapshot, shaper: &mut PangoShaper, p: Paint<'_>, left: 
                     snapshot.restore();
                 }
             }
-            let layout = shaper.layout(leaf, content, width);
+            let layout = shaper.layout(key, content, width);
             snapshot.save();
             snapshot.translate(&graphene::Point::new(x, y));
             if let Some(range) = selected {

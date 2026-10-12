@@ -93,6 +93,22 @@ impl Paragraph {
             }),
         }
     }
+
+    /// Join neighbouring runs that look the same and drop empty runs, so one text in one
+    /// look is always one run.
+    pub fn merge_runs(&mut self) {
+        let mut merged: Vec<Run> = Vec::with_capacity(self.runs.len());
+        for run in self.runs.drain(..) {
+            if run.text.is_empty() {
+                continue;
+            }
+            match merged.last_mut() {
+                Some(last) if last.style == run.style => last.text.push_str(&run.text),
+                _ => merged.push(run),
+            }
+        }
+        self.runs = merged;
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
