@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cronkite: a fast, native office suite for Linux</title>
-<meta name="description" content="Cronkite is a fast, native office suite for Linux: Bricks for spreadsheets, Slate for documents, Frame for presentations. Install Bricks with one command.">
+<meta name="description" content="Cronkite is a fast, native office suite for Linux: Bricks for spreadsheets, Slate for documents, Frame for presentations. Install Bricks and Slate with one command each.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=League+Spartan:wght@400;500;700;800&display=swap" rel="stylesheet">
@@ -89,40 +89,51 @@
         <h3>Bricks</h3>
         <span class="kind">Spreadsheet</span>
         <p>Opens gigabyte CSV files in a blink and edits <code>.xlsx</code> workbooks with formulas, multiple sheets, and cell styles. Saves never corrupt your file, and <code>00123</code> stays <code>00123</code>.</p>
-        <a class="more" href="#install">Install Bricks &darr;</a>
+        <a class="more" href="#install-bricks">Install Bricks &darr;</a>
       </article>
       <article class="app">
-        <span class="badge soon">In development</span>
+        <span class="badge ready">Available now</span>
         <h3>Slate</h3>
         <span class="kind">Word processor</span>
-        <p>A lightweight, native word processor for Linux.</p>
-        <span class="more note">Not released yet.</span>
+        <p>Opens, edits, and saves Word documents (<code>.docx</code>), Markdown, and plain text on one endless page. Saving a <code>.docx</code> changes only what you edited, so everything else in it stays as it was.</p>
+        <a class="more" href="#install-slate">Install Slate &darr;</a>
       </article>
       <article class="app">
-        <span class="badge soon">In development</span>
+        <span class="badge soon">Coming soon</span>
         <h3>Frame</h3>
         <span class="kind">Presentations</span>
-        <p>A lightweight, native presentation app for Linux.</p>
-        <span class="more note">Not released yet.</span>
+        <p>Edits PowerPoint decks (<code>.pptx</code>) directly on the slide, with one inspector instead of dialogs, and an outline view.</p>
+        <a class="more" href="#install-frame">When it ships &darr;</a>
       </article>
     </div>
   </section>
 
   <section id="install" aria-labelledby="install-h">
-    <h2 id="install-h">Install Bricks</h2>
-    <p class="sub">One command, for your user only. No sudo, no package manager.</p>
+    <h2 id="install-h">Install</h2>
+    <p class="sub">One command per app, for your user only. No sudo, no package manager. Paste it into a terminal; then start the app from your app menu.</p>
 
+    <h3 id="install-bricks">Bricks</h3>
     <div class="cmd primary">
-      <pre id="install-cmd">curl -fsSL https://bricks.cronkite.cc/install.sh | sh</pre>
-      <button type="button" data-copy="install-cmd">Copy</button>
+      <pre id="install-bricks-cmd">curl -fsSL https://bricks.cronkite.cc/install.sh | sh</pre>
+      <button type="button" data-copy="install-bricks-cmd">Copy</button>
     </div>
-    <p class="note">Paste it into a terminal. Then start Bricks from your app menu, or run <code>bricks</code>.</p>
+    <p class="note">The command is <code>bricks</code>. CSV and TSV files open with it. Download page: <a href="https://bricks.cronkite.cc">bricks.cronkite.cc</a>.</p>
 
-    <h3>What the installer does</h3>
+    <h3 id="install-slate">Slate</h3>
+    <div class="cmd primary">
+      <pre id="install-slate-cmd">curl -fsSL https://slate.cronkite.cc/install.sh | sh</pre>
+      <button type="button" data-copy="install-slate-cmd">Copy</button>
+    </div>
+    <p class="note">The command is <code>slate</code>. Word documents (<code>.docx</code>) and Markdown (<code>.md</code>) open with it, and it offers to open plain text. Download page: <a href="https://slate.cronkite.cc">slate.cronkite.cc</a>.</p>
+
+    <h3 id="install-frame">Frame</h3>
+    <p class="note">Not released yet. When it is, it installs the same way, from <code>frame.cronkite.cc</code>, and <code>.pptx</code> files will open with it.</p>
+
+    <h3>What an installer does</h3>
     <ol class="steps">
-      <li>Downloads the latest release and checks it against its published sha256. If the checksum doesn't match, nothing is installed.</li>
-      <li>Puts <code>bricks</code> in <code>~/.local/bin</code>, and its menu entry and icon in <code>~/.local/share</code>.</li>
-      <li>Makes Bricks the default app for CSV and TSV files, so double-clicking one opens it. Other apps' defaults are kept.</li>
+      <li>Downloads the app's latest release and checks it against its published sha256. If the checksum doesn't match, nothing is installed.</li>
+      <li>Puts the app (<code>bricks</code>, <code>slate</code>) in <code>~/.local/bin</code>, and its menu entry and icon in <code>~/.local/share</code>.</li>
+      <li>Makes it the default app for its files (above), so double-clicking one opens it. Other apps' defaults for other files are kept.</li>
     </ol>
 
     <h3>Requirements</h3>
@@ -138,17 +149,21 @@
     </table>
 
     <h3>Update</h3>
-    <p>Run the install command again. It replaces the old version and keeps your recent files.</p>
+    <p>Run the app's install command again. It replaces the old version and keeps your settings and recent files.</p>
 
     <h3>Uninstall</h3>
     <div class="cmd">
-      <pre id="uninstall-cmd">curl -fsSL https://bricks.cronkite.cc/install.sh | sh -s -- --uninstall</pre>
-      <button type="button" data-copy="uninstall-cmd">Copy</button>
+      <pre id="uninstall-bricks-cmd">curl -fsSL https://bricks.cronkite.cc/install.sh | sh -s -- --uninstall</pre>
+      <button type="button" data-copy="uninstall-bricks-cmd">Copy</button>
     </div>
-    <p class="note">Removes the app, its menu entry, and its file defaults.</p>
+    <div class="cmd">
+      <pre id="uninstall-slate-cmd">curl -fsSL https://slate.cronkite.cc/install.sh | sh -s -- --uninstall</pre>
+      <button type="button" data-copy="uninstall-slate-cmd">Copy</button>
+    </div>
+    <p class="note">Removes the app, its menu entry, and its file defaults. Your files are untouched.</p>
 
     <h3>Prefer a tarball?</h3>
-    <p>The <a href="https://bricks.cronkite.cc">Bricks download page</a> has the latest release as a <code>.tar.gz</code>, with its version, size, and sha256.</p>
+    <p>Each app's download page has its latest release as a <code>.tar.gz</code>, with its version, size, and sha256: <a href="https://bricks.cronkite.cc">Bricks</a>, <a href="https://slate.cronkite.cc">Slate</a>.</p>
   </section>
 
   <section aria-labelledby="source-h">
@@ -156,7 +171,7 @@
     <p>Cronkite is open source (MIT or Apache-2.0) and built in the open: <a href="https://github.com/avdrav1/cronkite">github.com/avdrav1/cronkite</a>.</p>
   </section>
 </main>
-<footer>Cronkite &middot; a native office suite for Linux &middot; <a href="https://bricks.cronkite.cc">bricks.cronkite.cc</a></footer>
+<footer>Cronkite &middot; a native office suite for Linux &middot; <a href="https://bricks.cronkite.cc">bricks.cronkite.cc</a> &middot; <a href="https://slate.cronkite.cc">slate.cronkite.cc</a></footer>
 <script>
   for (const button of document.querySelectorAll("button[data-copy]")) {
     button.addEventListener("click", async () => {

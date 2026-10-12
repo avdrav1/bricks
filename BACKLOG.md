@@ -185,8 +185,13 @@ Story notes, decisions made mid-story, and follow-ups go here, newest first.
   - Packaging: `packaging/dev.cronkite.Frame.desktop` (Office;Presentation; .pptx and .pptm) and an icon, `packaging/dev.cronkite.Frame.svg`.
   - Installer: `sites/frame/install.sh` is Bricks' installer without the Spreadsheet migration (`FRAME_DOWNLOAD_URL`, or `@DOWNLOAD_BASE_URL@` filled in at deploy). It reads the same latest.json and tarball layout and sets the .pptx default.
   - Follow-ups for Frame's first release, under the ship-it skill:
-    - `scripts/ship.sh`, `check_release.sh`, and `check_install.sh` are Bricks-only: one APP, latest.json at the bucket's root, and `--bench-open` on a CSV. Frame needs a download prefix or bucket, a `sites/frame` page, a Pages project, and an install check on Ubuntu 24.04 and Fedora.
-    - `sites/cronkite` links only to Bricks.
+    - `scripts/ship.sh` handles `bricks` and `slate` (SLATE-9). Frame still needs:
+      - a `frame` case there: `ID=dev.cronkite.Frame`, the version from `apps/frame/Cargo.toml`, releases under `frame/` per the per-app download decision, a Pages variable, and a tag prefix;
+      - a Frame branch in `check_release.sh`;
+      - a `check_install_frame.sh` like Slate's, for Ubuntu 24.04 and Fedora;
+      - a `sites/frame/index.html` page.
+      The `frame` Pages project already exists, from SUITE-4.
+    - `sites/cronkite` doesn't offer Frame's installer yet.
   - Acceptance: `scripts/check_frame.sh` 19 (Arch, headless sway). This binary, packaged with the entry and icon as a release served on localhost, is installed with `sites/frame/install.sh` over a mimeapps.list that has Impress for .pptx and eog for PNG.
     - `gio mime` names `dev.cronkite.Frame.desktop`, and the entry runs `/root/.local/bin/frame %f`.
     - `gio open` (a file manager's double-click) on a copy of layouts.pptx shows the window `clicked.pptx` at "Slide 1 of 10", from `/root/.local/bin/frame /tmp/f/clicked.pptx`.
