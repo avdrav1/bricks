@@ -6,6 +6,10 @@
 //! the model can't show is kept as written in [`Raw`] blocks: HTML blocks, footnote
 //! definitions, and link reference definitions (which the parser resolves and doesn't
 //! emit, so they are put back among the top-level blocks by their offset in the source).
+//!
+//! [`read_markdown_source`] also maps each top-level block back to the source lines it was
+//! read from ([`MarkdownSource`]), so a save can copy unchanged blocks byte for byte
+//! ([`write_markdown`](crate::write_markdown)).
 
 use crate::text::{decode, split_lines};
 use crate::{
@@ -18,17 +22,81 @@ use std::path::{Path, PathBuf};
 
 /// Read a Markdown file's bytes (decoded as [`read_text`](crate::read_text) decodes).
 pub fn read_markdown(bytes: &[u8]) -> Document {
+    read(bytes).0
+}
+
+/// Where each top-level block of a Markdown file came from: the decoded source text and
+/// the line each block starts on, so a save can copy the blocks that didn't change.
+#[derive(Debug, Clone)]
+pub struct MarkdownSource {
+    /// The decoded text, without a byte-order mark.
+    pub(crate) text: String,
+    /// The offset of the line each top-level block starts on, never decreasing. Block `i`'s
+    /// source runs to `starts[i + 1]` (the last block's to the end of the text); the text
+    /// before `starts[0]` comes with the first block.
+    pub(crate) starts: Vec<usize>,
+    /// The exact source of each top-level image block (`None` for other blocks).
+    pub(crate) images: Vec<Option<Range<usize>>>,
+    /// The blocks, as the document shows them.
+    pub(crate) blocks: Vec<Block>,
+}
+
+impl MarkdownSource {
+    /// Replace the blocks this source describes, one for one: the blocks as the document
+    /// shows them (linked pictures loaded, runs normalized).
+    ///
+    /// # Panics
+    /// If `blocks` doesn't have one block for each of the source's.
+    pub fn set_blocks(&mut self, blocks: Vec<Block>) {
+        assert_eq!(
+            blocks.len(),
+            self.blocks.len(),
+            "a Markdown source's blocks are replaced one for one"
+        );
+        self.blocks = blocks;
+    }
+}
+
+/// [`read_markdown`], plus where each top-level block came from (its blocks are the
+/// document's blocks as read).
+pub fn read_markdown_source(bytes: &[u8]) -> (Document, MarkdownSource) {
+    let (doc, text, mut starts, images) = read(bytes);
+    // Back to the start of each block's line, never before the block before it.
+    let mut floor = 0;
+    for start in &mut starts {
+        let line = text[..*start]
+            .rfind(['\n', '\r'])
+            .map_or(0, |i| i + 1)
+            .max(floor);
+        *start = line;
+        floor = line;
+    }
+    let source = MarkdownSource {
+        text,
+        starts,
+        images,
+        blocks: doc.blocks.clone(),
+    };
+    (doc, source)
+}
+
+/// The document, its decoded text, and where each top-level block starts in it and, for
+/// images, ends.
+type Read = (Document, String, Vec<usize>, Vec<Option<Range<usize>>>);
+
+fn read(bytes: &[u8]) -> Read {
     let (text, encoding) = decode(bytes);
     let (_, line_ending, final_newline) = split_lines(&text);
-    let blocks = parse(&text);
-    Document {
+    let (blocks, starts, images) = parse(&text);
+    let doc = Document {
         blocks,
         format: Format::Markdown(TextInfo {
             encoding,
             line_ending,
             final_newline,
         }),
-    }
+    };
+    (doc, text, starts, images)
 }
 
 fn options() -> Options {
@@ -38,8 +106,11 @@ fn options() -> Options {
         | Options::ENABLE_FOOTNOTES
 }
 
-/// The blocks of Markdown `text`.
-pub fn parse(text: &str) -> Vec<Block> {
+/// Top-level blocks, where each starts, and each image's source.
+type Located = (Vec<Block>, Vec<usize>, Vec<Option<Range<usize>>>);
+
+/// The blocks of Markdown `text`, where each starts, and each image's source.
+fn parse(text: &str) -> Located {
     let parser = Parser::new_ext(text, options()).into_offset_iter();
     let mut definitions: Vec<Range<usize>> = parser
         .reference_definitions()
@@ -53,17 +124,29 @@ pub fn parse(text: &str) -> Vec<Block> {
     }
     b.flush();
     // Put the reference definitions back where they were among the top-level blocks.
-    let (blocks, starts) = (b.blocks, b.starts);
-    let mut out = Vec::with_capacity(blocks.len() + definitions.len());
+    let n = b.blocks.len() + definitions.len();
+    let (mut out, mut starts, mut images) = (
+        Vec::with_capacity(n),
+        Vec::with_capacity(n),
+        Vec::with_capacity(n),
+    );
     let mut defs = definitions.into_iter().peekable();
-    for (block, start) in blocks.into_iter().zip(starts) {
+    for ((block, start), image) in b.blocks.into_iter().zip(b.starts).zip(b.images) {
         while let Some(def) = defs.next_if(|d| d.start < start) {
+            starts.push(def.start);
+            images.push(None);
             out.push(reference_definition(text, def));
         }
         out.push(block);
+        starts.push(start);
+        images.push(image);
     }
-    out.extend(defs.map(|d| reference_definition(text, d)));
-    out
+    for def in defs {
+        starts.push(def.start);
+        images.push(None);
+        out.push(reference_definition(text, def));
+    }
+    (out, starts, images)
 }
 
 fn reference_definition(text: &str, span: Range<usize>) -> Block {
@@ -89,6 +172,8 @@ enum Open {
         level: u8,
         /// The item's marker has been shown (its first block was emitted).
         shown: bool,
+        /// Where the item's marker is in the source.
+        start: usize,
     },
     Table {
         table: Table,
@@ -112,6 +197,8 @@ struct Builder<'t> {
     /// The top-level blocks and where each starts in the source.
     blocks: Vec<Block>,
     starts: Vec<usize>,
+    /// The source of each top-level image block.
+    images: Vec<Option<Range<usize>>>,
     /// Blocks of the table cells open (innermost last).
     cells: Vec<Vec<Block>>,
     open: Vec<Open>,
@@ -131,6 +218,7 @@ impl<'t> Builder<'t> {
             text,
             blocks: Vec::new(),
             starts: Vec::new(),
+            images: Vec::new(),
             cells: Vec::new(),
             open: Vec::new(),
             para: None,
@@ -176,28 +264,36 @@ impl<'t> Builder<'t> {
     /// [`ListItem`]; anything else gets an empty item before it.
     fn emit(&mut self, block: Block, start: usize) {
         let item = self.open.iter_mut().rev().find_map(|o| match o {
-            Open::Item { kind, level, shown } if !*shown => {
+            Open::Item {
+                kind,
+                level,
+                shown,
+                start,
+            } if !*shown => {
                 *shown = true;
-                Some((kind.clone(), *level))
+                Some((kind.clone(), *level, *start))
             }
             _ => None,
         });
-        let block = match (item, block) {
-            (Some((kind, level)), Block::Paragraph(paragraph)) => Block::ListItem(ListItem {
-                kind,
-                level,
-                paragraph,
-            }),
-            (Some((kind, level)), other) => {
+        let (block, start) = match (item, block) {
+            (Some((kind, level, at)), Block::Paragraph(paragraph)) => (
+                Block::ListItem(ListItem {
+                    kind,
+                    level,
+                    paragraph,
+                }),
+                at,
+            ),
+            (Some((kind, level, at)), other) => {
                 let marker = Block::ListItem(ListItem {
                     kind,
                     level,
                     paragraph: Paragraph::default(),
                 });
-                self.push(marker, start);
-                other
+                self.push(marker, at);
+                (other, start)
             }
-            (None, block) => block,
+            (None, block) => (block, start),
         };
         self.push(block, start);
     }
@@ -208,6 +304,7 @@ impl<'t> Builder<'t> {
             None => {
                 self.blocks.push(block);
                 self.starts.push(start);
+                self.images.push(None);
             }
         }
     }
@@ -416,6 +513,7 @@ impl<'t> Builder<'t> {
                     kind,
                     level,
                     shown: false,
+                    start: at,
                 });
             }
             Tag::Table(aligns) => {
@@ -476,6 +574,7 @@ impl<'t> Builder<'t> {
                     kind,
                     level,
                     shown: false,
+                    start,
                 }) = self.open.pop()
                 {
                     // An empty item still shows its marker.
@@ -485,7 +584,7 @@ impl<'t> Builder<'t> {
                             level,
                             paragraph: Paragraph::default(),
                         }),
-                        range.start,
+                        start,
                     );
                 }
             }
@@ -531,6 +630,11 @@ impl<'t> Builder<'t> {
                         size: None,
                     });
                     self.emit(image, range.start);
+                    if self.cells.is_empty() {
+                        if let Some(span) = self.images.last_mut() {
+                            *span = Some(range);
+                        }
+                    }
                 }
             }
             TagEnd::DefinitionList

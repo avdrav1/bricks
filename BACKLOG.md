@@ -126,7 +126,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | SLATE-13 | SL1 | P0 | done | SLATE-6 | IME composition | With an input method in the check container, composing CJK text shows the preedit underlined at the caret, commit replaces it with the text, and surrounding-text requests read and delete around the caret |
 | SLATE-14 | SL1 | P0 | done | SLATE-12 | Selection and clipboard across paragraphs and tables | Shift with movement keys, Shift+click, and double and triple click select across paragraphs and through tables (dragging and plain-text copy come in SLATE-11); Ctrl+C, Ctrl+X, and Ctrl+V carry rich text between Slate windows and plain text to other apps, a table's cells included; cut and paste undo |
 | SLATE-15 | SL1 | P0 | done | SLATE-6 | Accessibility of the flow | AT-SPI exposes the text, caret, text at an offset by character, word, line, and paragraph, run attributes, and insert and delete events (checked with Atspi); what needs GTK above 4.14 is recorded |
-| SLATE-7 | SL1 | P0 | todo | SLATE-6 | Save .txt and .md atomically | A saved .txt keeps its encoding and line endings; an edited .md changes only the edited blocks; saves are atomic |
+| SLATE-7 | SL1 | P0 | done | SLATE-6 | Save .txt and .md atomically | A saved .txt keeps its encoding and line endings; an edited .md changes only the edited blocks; saves are atomic |
 | SLATE-8 | SL1 | P0 | todo | SLATE-6 | Save .docx by patching the original package | LibreOffice reopens an edited .docx with the edits and every other part unchanged |
 | SLATE-9 | SL1 | P1 | todo | SLATE-4 | Desktop entry, icon, and installer | Double-clicking a .docx or .md opens Slate after install |
 | FRAME-1 | FR0 | P0 | done | - | Presentation model and PPTX package: slide order, size, shapes, placeholder inheritance | Slide count, order, size, and every shape's frame in the fixtures and a real-world deck match LibreOffice's dump within 1 EMU; placeholders without a frame take their layout's or master's |
@@ -149,6 +149,37 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-12 SLATE-7:** Slate saves .txt and .md files. Ctrl+S (File → Save) saves over the file, and Ctrl+Shift+S (File → Save As…) saves as .md or .txt by the extension chosen. The bytes are made and written off the UI thread through `suite_file::save_atomic` (temp file, fsync, verify by re-reading, rename); editing goes on meanwhile, and a save asked for during one waits for it.
+  - Writers in `document-model` (a subagent built them against a fixed contract; integrated here): `encode`, `write_text`, `write_markdown`, `Unencodable`, `MarkdownSource`, `read_markdown_source`.
+    - Plain text is written back in its encoding (UTF-8 with or without BOM, UTF-16 LE/BE, Windows-1252), line ending, and final newline. Text the encoding can't hold is refused with an alert naming the character; Save As then writes UTF-8.
+    - Markdown keeps a source map: each top-level block's line start in the file read, and the blocks as shown (pictures loaded, runs merged). At save, the current blocks are matched to those by common prefix and suffix, then the LCS of equal blocks. Matched blocks are copied byte for byte with the text up to the next block, and only the rest is written fresh. No edit tracking is needed, and undoing back to the original saves the original bytes.
+    - A matched block is still written fresh where its source would read otherwise in its new place: a numbered item joining a list, a changed list level, or a reference definition that was deleted. A moved picture reuses its source, keeping its URL.
+    - What Markdown can't hold is dropped (font sizes, colours, underline, empty paragraphs), listed in `write/markdown.rs`. Whitespace at the edge of a bold or italic stretch reads back outside it (CommonMark's flanking rules).
+  - `document-edit` gains `History::position`: an id for the document the history is at. A new edit gives a new id, typing joined to a step included; undo and redo give a position's id back; dropping steps past the history limit moves a base id. The window marks its title "• " while the position differs from the one saved. Closing a window, or Quit (which now closes each window), asks to save, discard, or cancel then. Word documents (SLATE-8) are offered Save As instead of Save.
+  - Ctrl+S and Ctrl+Shift+S are handled by the page's key handler, like Edit and Format; the menu only shows them. The app accelerator `<Control><Shift>s` didn't fire for the shifted key wtype sends (Frame matches the key itself too).
+  - Acceptance: `cargo test -p document-model` `tests/write.rs` (17):
+    - every text fixture writes back byte for byte (encodings, CRLF, CR, no final newline, BOM only, empty);
+    - every Markdown fixture writes back unchanged and, written fresh, reads back the same blocks;
+    - one edited paragraph, item, heading, cell, or code block changes only its lines;
+    - deleted, inserted, and moved blocks read back; a CRLF file gets CRLF in fresh blocks; Windows-1252 refuses "仮";
+    - inline looks read back;
+    - 3,000 seeded random edit sets over fixture.md, its CRLF form, and a list-heavy document read back wherever the fresh writer does, with re-saves through the returned source byte-stable.
+  - `cargo test -p document-edit` `tests/position.rs` (3): undo and redo return to positions, joined typing is a new position, and undoing past the history limit isn't the opened document.
+  - `scripts/check_slate.sh` SLATE OK (103 checks, 16 new, section 20):
+    - a Windows-1252 CRLF file without a final newline, edited and saved, is `b'caf\xe9 one\r\nsecond lineX'`, replaced by a rename (new inode, no temp file), and its title goes from "• w.txt" to "w.txt";
+    - "仮" is refused with the alert "Windows-1252 has no “仮”…" and the file stays the same;
+    - Save As as.md writes UTF-8 Markdown `b'caf\xc3\xa9 one\r\n\r\nsecond lineX\xe4\xbb\xae'` and retitles the window;
+    - a UTF-16 LE file saves as `b'\xff\xfeh\x00i\x00!\x00\n\x00'`;
+    - in a Markdown file with a setext heading, `__bold__`, `* ` and `1)` lists, editing one paragraph changes exactly its line, and undoing saves the original bytes;
+    - Ctrl+W with changes asks "Save changes to “m.md” before closing?", and Enter saves and closes.
+  - Perf unchanged: typing p99 17.9 ms, whole re-wrap max 283 ms, scroll p99 9.3 ms.
+  - Found:
+    - The check's image has no diffutils (`diff`, `cmp`), so comparisons use Python.
+    - fsync on docker's overlay filesystem can take seconds, so the check waits for the title's mark to clear rather than sleeping.
+    - Inserting File → Save and Save As shifted the F10 menu walk in `text_width`.
+  - Follow-ups:
+    - A document saved in another format keeps showing as it was read (a .txt saved as .md stays plain) until reopened.
+    - Save As over a file open in another Slate window leaves that window showing the old text.
 - **2026-10-12 SLATE-15:** Slate's page speaks to screen readers through `GtkAccessibleText` on GTK 4.14. The text, caret, selection, and text at an offset by character, word, sentence, line, and paragraph came with SLATE-11 to SLATE-13. Added here:
   - Run attributes: the default attributes come from the page's font, and an offset's attribute run comes from the leaf's Pango layout as drawn. Its attribute iterator gives the run's range in characters and the merged font (family, size in points, weight, style) plus underline, strikethrough, and foreground colour, so what is heard is what is drawn, heading and Markdown looks included.
   - Insert and delete events naming exactly the text each edit, undo, or redo changed. `document-edit` gains `Edit::span` and `History::next_span` (a subagent added these against a fixed contract): the blocks an edit or the next undo or redo will replace, computed by the same code as the `Change` it returns. Before applying, the page keeps those blocks' accessible text (a cell's: its whole table's; new `Flow::block_chars`). Afterwards it diffs that text against the new text by common prefix and suffix, then emits `update_contents(Remove)` and `update_contents(Insert)`. GTK's bridge reads a removal's text during the call, so `contents` serves the removed text for that range meanwhile. Typing one character announces exactly that character, not the paragraph.

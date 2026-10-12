@@ -7,7 +7,8 @@
 //! that can't be read gets an alert naming it and the reason, and its window closes.
 //! Documents show as one pageless column (ADR 0005), drawn by Slate's own flow (ADR 0007),
 //! whose width the menu's View → Text Width sets for every window at once, remembered in
-//! the user's settings.
+//! the user's settings. Ctrl+S and Ctrl+Shift+S save (`saving`); closing a window or
+//! quitting with changes not saved asks first.
 //!
 //! `slate FILE --bench-flow` measures the flow on FILE in a 1600x1000 window: re-wrapping
 //! after width changes and the frames of scrolling (SLATE-11's acceptance test);
@@ -15,6 +16,7 @@
 
 mod bench;
 mod open;
+mod saving;
 mod settings;
 mod view;
 
@@ -117,8 +119,13 @@ fn main() -> glib::ExitCode {
                 }
             })
             .build();
+        // Quit closes each window, so a window with changes asks first.
         let quit = gio::ActionEntry::builder("quit")
-            .activate(|app: &gtk::Application, _, _| app.quit())
+            .activate(|app: &gtk::Application, _, _| {
+                for window in app.windows() {
+                    window.close();
+                }
+            })
             .build();
         // View → Text Width: a radio choice for every window at once, remembered.
         let text_width = gio::ActionEntry::builder("text-width")
@@ -168,6 +175,17 @@ fn window_for(path: &Path) -> Option<gtk::ApplicationWindow> {
     })
 }
 
+/// `window` shows the file at `path` now (Save As).
+fn moved(window: &gtk::ApplicationWindow, path: &Path) {
+    OPEN.with_borrow_mut(|open| {
+        for (p, w) in open.iter_mut() {
+            if w.upgrade().as_ref() == Some(window) {
+                *p = path.to_owned();
+            }
+        }
+    });
+}
+
 fn header(title: &str) -> gtk::HeaderBar {
     let header = gtk::HeaderBar::new();
     let open = gtk::Button::from_icon_name("document-open-symbolic");
@@ -177,6 +195,8 @@ fn header(title: &str) -> gtk::HeaderBar {
     header.pack_start(&open);
     let file = gio::Menu::new();
     file.append(Some("Open…"), Some("app.open"));
+    file.append_item(&item("Save", "win.save", "<Control>s"));
+    file.append_item(&item("Save As…", "win.save-as", "<Control><Shift>s"));
     file.append(Some("Close Window"), Some("app.close"));
     // View → Text Width: a radio item per width, checked by `app.text-width`'s state.
     let widths = gio::Menu::new();
@@ -480,7 +500,7 @@ fn open_window(app: &gtk::Application, path: &Path, bench: Option<bench::Mode>) 
     glib::spawn_future_local(async move {
         let reason = match reading.await {
             Ok(Ok(opened)) => {
-                show(&app, &stack, &status, &name, opened, bench);
+                show(&app, &stack, &status, &path, opened, bench);
                 close_start_window(&app);
                 return;
             }
@@ -571,15 +591,16 @@ fn text_width(app: &gtk::Application) -> TextWidth {
         .unwrap_or_default()
 }
 
-/// Replace "Opening…" with the document. `bench`: run that benchmark on it.
+/// Replace "Opening…" with the document of `path`. `bench`: run that benchmark on it.
 fn show(
     app: &gtk::Application,
     stack: &gtk::Stack,
     status: &gtk::Label,
-    name: &str,
+    path: &Path,
     opened: open::Opened,
     bench: Option<bench::Mode>,
 ) {
+    let name = suite_file::document_name(path);
     let words = opened.words;
     status.set_text(&format!(
         "{} · {} word{}",
@@ -592,9 +613,14 @@ fn show(
     } else {
         text_width(app)
     };
+    let target = match opened.doc.format {
+        document_model::Format::Text(info) => saving::Target::Text(info),
+        document_model::Format::Markdown(info) => saving::Target::Markdown(info, opened.source),
+        document_model::Format::Docx => saving::Target::Docx,
+    };
     let page = view::Page::new(opened.doc, opened.textures, setting);
     PAGES.with_borrow_mut(|pages| pages.push(page.downgrade()));
-    page.update_property(&[gtk::accessible::Property::Label(name)]);
+    page.update_property(&[gtk::accessible::Property::Label(&name)]);
     let scrolled = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .child(&page)
@@ -603,6 +629,7 @@ fn show(
     stack.set_visible_child_name("document");
     if let Some(window) = stack.root().and_downcast::<gtk::ApplicationWindow>() {
         add_page_actions(&window, &page);
+        saving::Saver::attach(&window, &page, status, path.to_owned(), target);
     }
     page.grab_focus();
     if let Some(mode) = bench {

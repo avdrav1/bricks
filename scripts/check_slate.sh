@@ -77,7 +77,15 @@
 #      the character, word, line, and paragraph at an offset, the run attributes of bold
 #      (weight 700), italic (style italic), and plain text (weight 400); and the
 #      text-changed events a listener receives while "X" is typed, deleted, Enter is
-#      pressed, and the Enter undone.
+#      pressed, and the Enter undone;
+#  20. saving: a Windows-1252 file with CRLF and no final newline, edited and saved with
+#      Ctrl+S, keeps all three, is replaced by a rename (new inode, no temp file left),
+#      and the title loses its "• " mark; a character Windows-1252 lacks is refused with
+#      an alert and the file stays as it was; Save As to as.md writes Markdown in UTF-8;
+#      a UTF-16 LE file saves in UTF-16 LE with its BOM; in a Markdown file with setext
+#      headings, __bold__, "* " and "1)" lists, saving an edited paragraph changes only
+#      its line and undoing it saves the original bytes; closing with changes asks to
+#      save, and Enter saves them and closes.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -141,6 +149,24 @@ elif sys.argv[1] == "listen":
     listener.register("object:text-changed:delete")
     print("listening", flush=True)
     Atspi.event_main()
+PY
+cat > /tmp/bytes.py <<"PY"
+import sys
+data = open(sys.argv[2], "rb").read()
+print(f"{sys.argv[1]} bytes: {data!r}")
+PY
+# The lines that differ between two files ("LABEL-diff: - old", "LABEL-diff: + new") and how
+# many, or "LABEL: same bytes" (the image has no diffutils).
+cat > /tmp/compare.py <<"PY"
+import difflib, sys
+label, a, b = sys.argv[1], open(sys.argv[2], "rb").read(), open(sys.argv[3], "rb").read()
+if a == b:
+    print(f"{label}: same bytes")
+else:
+    lines = [l for l in difflib.ndiff(a.decode().splitlines(), b.decode().splitlines()) if l[:1] in "+-"]
+    for l in lines:
+        print(f"{label}-diff: {l}")
+    print(f"{label} changed lines: {len(lines)}")
 PY
 cat > /tmp/words.py <<"PY"
 import sys
@@ -408,6 +434,8 @@ session() {
   titles() { echo "titles: $(swaymsg -t get_tree | jq -r ".. | objects | select(.type==\"con\" and .name!=null) | .name" | sort | tr "\n" ",")"; }
   a11y() { python3 /tmp/a11y.py "$@" 2>&1; }
   quit() { pkill -x slate; sleep 1; }
+  # Wait up to 20 s for a save to end: no window title marked "• " (changes not saved).
+  saved() { for i in $(seq 40); do swaymsg -t get_tree | jq -r ".. | objects | .name? // empty" | grep -q "^• " || return 0; sleep 0.5; done; }
   # Screenshot each column window (focused in turn) and measure it: "LABEL col-X.md: rule ...".
   measure() {
     for t in col-a col-b col-c; do
@@ -419,7 +447,7 @@ session() {
   # F10 in col-a, Text Width, the Nth width (1 Narrow, 2 Medium, 3 Wide, 4 Full).
   text_width() {
     swaymsg "[title=col-a] focus" >/dev/null; sleep 1
-    keys -k F10; keys -k Down; keys -k Down; keys -k Return
+    keys -k F10; keys -k Down; keys -k Down; keys -k Down; keys -k Down; keys -k Return
     for i in $(seq $1); do keys -k Down; done
     keys -k Return; sleep 1
   }
@@ -600,6 +628,39 @@ plain two" & sleep 1
   python3 -u /tmp/atspi.py listen > /tmp/events.log 2>&1 & listener=$!; sleep 2
   keys X -s 300 -k BackSpace -s 300 -k Return -s 300 -M ctrl z -m ctrl; sleep 2
   kill $listener; cat /tmp/events.log; quit
+  echo "== 20 save"
+  mkdir -p /tmp/save
+  printf "caf\351 one\r\nsecond line" > /tmp/save/w.txt
+  ino=$(stat -c %i /tmp/save/w.txt)
+  slate /tmp/save/w.txt >>/tmp/app.log 2>&1 & sleep 4
+  keys -M ctrl -k End -m ctrl; keys X; sleep 1; titles | sed "s/^/edited-/"
+  keys -M ctrl s -m ctrl; saved; titles | sed "s/^/saved-/"
+  python3 /tmp/bytes.py txt-saved /tmp/save/w.txt
+  [ "$(stat -c %i /tmp/save/w.txt)" != "$ino" ] && echo "txt replaced by rename" || echo "txt written in place"
+  keys 仮; sleep 1; keys -M ctrl s -m ctrl; sleep 2; shot refused
+  a11y dump | grep -E "Cannot save|Windows-1252" | sed "s/^/alert: /"
+  keys -k Return; sleep 1; python3 /tmp/bytes.py txt-refused /tmp/save/w.txt
+  keys -M ctrl -M shift s -m shift -m ctrl; sleep 3; shot save-as
+  keys -M ctrl a -m ctrl; keys as.md; keys -k Return; sleep 1; saved
+  titles | sed "s/^/saved-as-/"; python3 /tmp/bytes.py as.md /tmp/save/as.md; quit
+  printf "\377\376h\000i\000\n\000" > /tmp/save/u.txt
+  slate /tmp/save/u.txt >>/tmp/app.log 2>&1 & sleep 4
+  keys -M ctrl -k End -m ctrl; keys "!"; keys -M ctrl s -m ctrl; sleep 1; saved
+  python3 /tmp/bytes.py utf16 /tmp/save/u.txt; quit
+  printf "Setext Title\n============\n\nSome __bold__ and _italic_ text.\n\n* star item one\n* star item two\n\nEdit me here\n\n1) paren list\n2) second\n" > /tmp/save/m.md
+  cp /tmp/save/m.md /tmp/m.orig
+  slate /tmp/save/m.md >>/tmp/app.log 2>&1 & sleep 4
+  keys -M ctrl -k Home -m ctrl; keys -k Down -k Down -k Down -k Down -k End; keys " now"; sleep 1
+  keys -M ctrl s -m ctrl; saved
+  python3 /tmp/compare.py md /tmp/m.orig /tmp/save/m.md
+  keys -M ctrl z z z -m ctrl; keys -M ctrl s -m ctrl; sleep 1; saved
+  python3 /tmp/compare.py md-undone /tmp/m.orig /tmp/save/m.md
+  keys Z; sleep 1; titles | sed "s/^/md-edited-/"; keys -M ctrl w -m ctrl; sleep 2; shot close-prompt
+  a11y dump | grep "Save changes" | sed "s/^/prompt: /"
+  keys -k Return; sleep 1; for i in $(seq 40); do pgrep -x slate >/dev/null || break; sleep 0.5; done
+  pgrep -x slate >/dev/null && echo "after prompt: slate still running" || echo "after prompt: slate exited"
+  grep -c "^Edit me hereZ$" /tmp/save/m.md | sed "s/^/md saved on close: /"
+  echo "temp files left: $(ls -a /tmp/save | grep -c cronkite-save)"; quit
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -725,6 +786,24 @@ check "19: typing announces the inserted character" "19 accessibility" "^event: 
 check "19: Backspace announces the deleted character" "19 accessibility" "^event: object:text-changed:delete 44 1 .X.$"
 check "19: Enter announces a new line" "19 accessibility" "^event: object:text-changed:insert 44 1 ..n.$"
 check "19: undoing it announces its removal" "19 accessibility" "^event: object:text-changed:delete 44 1 ..n.$"
+check "20: an edit marks the title" "20 save" "^edited-titles: • w.txt,$"
+check "20: Ctrl+S saves and clears the mark" "20 save" "^saved-titles: w.txt,$"
+check "20: a .txt keeps Windows-1252, CRLF, and no final newline" "20 save" \
+  "^txt-saved bytes: b.caf.xe9 one.r.nsecond lineX.$"
+check "20: the save replaces the file by a rename" "20 save" "^txt replaced by rename$"
+check "20: text the encoding lacks is refused, said in an alert" "20 save" "^alert: .*Windows-1252"
+check "20: a refused save leaves the file as it was" "20 save" "^txt-refused bytes: b.caf.xe9 one.r.nsecond lineX.$"
+check "20: Save As takes the new name" "20 save" "^saved-as-titles: as.md,$"
+check "20: Save As writes Markdown, in UTF-8 when the encoding lacks a character" "20 save" \
+  "^as.md bytes: b.caf.xc3.xa9 one.r.n.r.nsecond lineX.xe4.xbb.xae.$"
+check "20: UTF-16 LE saves with its BOM" "20 save" "^utf16 bytes: b..xff.xfeh.x00i.x00!.x00.n.x00.$"
+check "20: an edited .md changes only the edited line" "20 save" "^md changed lines: 2$"
+check "20: that line has the edit" "20 save" "^md-diff: \+ Edit me here now$"
+check "20: undone, the .md saves its original bytes" "20 save" "^md-undone: same bytes$"
+check "20: closing with changes asks to save" "20 save" "^prompt: Save changes to .m.md. before closing\?$"
+check "20: Enter saves and closes" "20 save" "^after prompt: slate exited$"
+check "20: the change was saved on closing" "20 save" "^md saved on close: 1$"
+check "20: no temp file is left" "20 save" "^temp files left: 0$"
 if [ $fail = 0 ]; then echo "SLATE OK"; else
   echo "SLATE CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1
