@@ -387,3 +387,126 @@ pub(super) fn is_list_item(st: &State, pos: Pos) -> bool {
         .and_then(|b| b.get(pos.block))
         .is_some_and(|b| matches!(b, document_model::Block::ListItem(_)))
 }
+
+// ---- selection ----
+
+/// The cell a leaf is in, as its path's (table, row, cell), if any.
+fn cell_of(st: &State, leaf: LeafId) -> Option<[u32; 3]> {
+    match st.flow.path(leaf) {
+        [t, r, c, _, ..] => Some([*t, *r, *c]),
+        _ => None,
+    }
+}
+
+/// The end of `leaf`'s text, in bytes (0 for a leaf without text).
+fn leaf_end(st: &State, leaf: LeafId) -> usize {
+    st.flow.leaf_text(leaf).map_or(0, |t| t.len())
+}
+
+/// `end` of a selection whose other end is `other`, moved to the edge of the table it's in
+/// when the other end isn't in the same cell: a selection running into a table takes the
+/// whole table, as cut and copy do.
+fn snap(st: &State, end: Position, other: Position) -> Position {
+    let Some(cell) = cell_of(st, end.leaf) else {
+        return end;
+    };
+    if cell_of(st, other.leaf) == Some(cell) {
+        return end;
+    }
+    let leaves = st.flow.block_leaves(cell[0] as usize);
+    if (end.leaf, end.offset) <= (other.leaf, other.offset) {
+        Position {
+            leaf: LeafId::from_index(leaves.start),
+            offset: 0,
+        }
+    } else {
+        let last = LeafId::from_index(leaves.end - 1);
+        Position {
+            leaf: last,
+            offset: leaf_end(st, last),
+        }
+    }
+}
+
+/// Select from `anchor` to `focus` (flow positions, either order), the ends that run
+/// into a table taking the whole table; `anchor` is kept as given, so the selection
+/// shrinks back when it returns into the anchor's cell.
+pub(super) fn select(st: &mut State, anchor: Position, focus: Position) {
+    st.anchor = Some(anchor);
+    let (a, f) = (snap(st, anchor, focus), snap(st, focus, anchor));
+    st.flow.select(a, f);
+}
+
+pub(super) fn clear_selection(st: &mut State) {
+    st.anchor = None;
+    st.flow.clear_selection();
+}
+
+/// Where a selection extended from the caret starts: the selection's anchor as made, else
+/// the caret.
+pub(super) fn anchor(st: &State) -> Option<Position> {
+    st.anchor.or_else(|| st.caret.and_then(|c| to_flow(st, c)))
+}
+
+/// The word around `p` (from the word's start to its end), or the space between words
+/// when `p` is in it; a leaf without laid-out text whole. For double click.
+pub(super) fn word_at(st: &mut State, p: Position) -> (Position, Position) {
+    let whole = (
+        Position { offset: 0, ..p },
+        Position {
+            offset: leaf_end(st, p.leaf),
+            ..p
+        },
+    );
+    let (Some(text), Some(place)) = (
+        st.flow.leaf_text(p.leaf).map(|t| t.into_owned()),
+        st.flow.text_place(p.leaf, &mut st.shaper),
+    ) else {
+        return whole;
+    };
+    let Some(content) = st.flow.content(p.leaf) else {
+        return whole;
+    };
+    let attrs = log_attrs(st.shaper.layout(place.key, content, place.width));
+    let starts = char_starts(&text);
+    let has = |j: usize, bit: u32| attrs.get(j).is_some_and(|a| a & bit != 0);
+    let here = starts
+        .iter()
+        .position(|&b| b >= p.offset)
+        .unwrap_or(starts.len() - 1);
+    let start = (0..=here).rev().find(|&j| has(j, WORD_START)).unwrap_or(0);
+    let end = (start + 1..starts.len())
+        .find(|&j| has(j, WORD_END))
+        .unwrap_or(starts.len() - 1);
+    let (s, e) = if here <= end {
+        (start, end)
+    } else {
+        // Between words: the space from the word before to the word after.
+        let s = (0..=here).rev().find(|&j| has(j, WORD_END)).unwrap_or(0);
+        let e = (here..starts.len())
+            .find(|&j| has(j, WORD_START))
+            .unwrap_or(starts.len() - 1);
+        (s, e)
+    };
+    (
+        Position {
+            offset: starts[s],
+            ..p
+        },
+        Position {
+            offset: starts[e],
+            ..p
+        },
+    )
+}
+
+/// The whole of `p`'s leaf: its paragraph, for triple click.
+pub(super) fn paragraph_at(st: &State, p: Position) -> (Position, Position) {
+    (
+        Position { offset: 0, ..p },
+        Position {
+            offset: leaf_end(st, p.leaf),
+            ..p
+        },
+    )
+}

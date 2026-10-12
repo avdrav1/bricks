@@ -4,7 +4,7 @@
 use crate::looks::LooksEdit;
 use crate::{
     bare, block_len, block_text, blocks, blocks_mut, paragraph, paragraph_mut, runs_len, runs_of,
-    set_runs, shell, take_runs, Change, Edit, Flag, Pos,
+    set_runs, shell, take_runs, Change, Edit, Flag, Fragment, Pos,
 };
 use document_model::{
     Block, Document, ListItem, ListKind, Paragraph, ParagraphStyle, Run, RunStyle,
@@ -12,7 +12,7 @@ use document_model::{
 
 /// Split `runs` at byte `at` of their joined text: `runs` keeps what's before, the
 /// returned runs hold what's after.
-fn split_off(runs: &mut Vec<Run>, at: usize) -> Vec<Run> {
+pub(crate) fn split_off(runs: &mut Vec<Run>, at: usize) -> Vec<Run> {
     let mut start = 0;
     for i in 0..runs.len() {
         let end = start + runs[i].text.len();
@@ -32,7 +32,7 @@ fn split_off(runs: &mut Vec<Run>, at: usize) -> Vec<Run> {
 }
 
 /// The runs covering bytes `from..to` of their joined text, cut at both ends.
-fn slice(runs: &[Run], from: usize, to: usize) -> Vec<Run> {
+pub(crate) fn slice(runs: &[Run], from: usize, to: usize) -> Vec<Run> {
     let (mut out, mut start) = (Vec::new(), 0);
     for r in runs {
         if start >= to {
@@ -52,28 +52,21 @@ fn slice(runs: &[Run], from: usize, to: usize) -> Vec<Run> {
 }
 
 /// `block`'s looks holding `runs`.
-fn with_runs(block: &Block, runs: Vec<Run>) -> Block {
+pub(crate) fn with_runs(block: &Block, runs: Vec<Run>) -> Block {
     let mut out = shell(block);
     set_runs(&mut out, runs);
     out
 }
 
-/// Text cut from or pasted into a document, as blocks. The first block's runs join the
-/// block they're pasted into (its looks don't matter); each later block is a block of its
-/// own, the last with its looks and the text from its start, taking the runs after the
-/// paste point.
-#[derive(Debug, Clone, PartialEq)]
-struct Fragment(Vec<Block>);
-
 impl Fragment {
-    fn is_empty(&self) -> bool {
-        self.0.len() == 1 && runs_len(&runs_of(&self.0[0])) == 0
+    pub(crate) fn is_empty(&self) -> bool {
+        self.blocks.len() == 1 && runs_len(&runs_of(&self.blocks[0])) == 0
     }
 
     /// Where the fragment ends once pasted at `at`.
     fn end(&self, at: Pos) -> Pos {
-        let n = self.0.len();
-        let len = runs_len(&runs_of(&self.0[n - 1]));
+        let n = self.blocks.len();
+        let len = runs_len(&runs_of(&self.blocks[n - 1]));
         if n == 1 {
             at.at_offset(at.offset + len)
         } else {
@@ -82,18 +75,17 @@ impl Fragment {
     }
 
     /// A copy of `from..to` of `blocks`, the blocks of their container.
-    fn copy(blocks: &[Block], from: Pos, to: Pos) -> Fragment {
+    pub(crate) fn copy(blocks: &[Block], from: Pos, to: Pos) -> Fragment {
         let (a, b) = (&blocks[from.block], &blocks[to.block]);
         if from.block == to.block {
-            return Fragment(vec![with_runs(
-                a,
-                slice(&runs_of(a), from.offset, to.offset),
-            )]);
+            return Fragment {
+                blocks: vec![with_runs(a, slice(&runs_of(a), from.offset, to.offset))],
+            };
         }
         let mut out = vec![with_runs(a, slice(&runs_of(a), from.offset, usize::MAX))];
         out.extend(blocks[from.block + 1..to.block].iter().cloned());
         out.push(with_runs(b, slice(&runs_of(b), 0, to.offset)));
-        Fragment(out)
+        Fragment { blocks: out }
     }
 }
 
@@ -114,13 +106,13 @@ fn remove(blocks: &mut Vec<Block>, from: Pos, to: Pos) {
 }
 
 /// Paste `fragment` at `at` into `blocks`, the blocks of its container; returns where it
-/// ends.
-fn paste(blocks: &mut Vec<Block>, at: Pos, fragment: &Fragment) -> Pos {
+/// ends. The fragment's first and last blocks hold text (see [`Fragment`]).
+pub(crate) fn paste(blocks: &mut Vec<Block>, at: Pos, fragment: &Fragment) -> Pos {
     let block = &mut blocks[at.block];
     let mut head = take_runs(block);
     let tail = split_off(&mut head, at.offset);
-    head.extend(runs_of(&fragment.0[0]).iter().cloned());
-    let n = fragment.0.len();
+    head.extend(runs_of(&fragment.blocks[0]).iter().cloned());
+    let n = fragment.blocks.len();
     if n == 1 {
         let offset = runs_len(&head);
         head.extend(tail);
@@ -128,7 +120,7 @@ fn paste(blocks: &mut Vec<Block>, at: Pos, fragment: &Fragment) -> Pos {
         return at.at_offset(offset);
     }
     set_runs(block, head);
-    let mut rest = fragment.0[1..].to_vec();
+    let mut rest = fragment.blocks[1..].to_vec();
     let last = rest.last_mut().expect("a fragment of more than one block");
     let mut runs = take_runs(last);
     let offset = runs_len(&runs);
@@ -139,7 +131,7 @@ fn paste(blocks: &mut Vec<Block>, at: Pos, fragment: &Fragment) -> Pos {
 }
 
 /// Whether `pos` is in an editable block of `blocks`, its container's, on a char boundary.
-fn valid(blocks: &[Block], pos: Pos) -> bool {
+pub(crate) fn valid(blocks: &[Block], pos: Pos) -> bool {
     blocks
         .get(pos.block)
         .and_then(block_text)
@@ -152,7 +144,7 @@ fn is_code(blocks: &[Block], block: usize) -> bool {
 
 /// The blocks of `from` and `to`'s container and `from..to` in order, when both are in
 /// editable blocks of the same container and the range doesn't reach out of a code block.
-fn range(doc: &Document, from: Pos, to: Pos) -> Option<(&[Block], Pos, Pos)> {
+pub(crate) fn range(doc: &Document, from: Pos, to: Pos) -> Option<(&[Block], Pos, Pos)> {
     if from.at != to.at {
         return None;
     }
@@ -210,10 +202,22 @@ pub struct TextEdit {
 impl TextEdit {
     /// Replacing `from..to` of `blocks`, their container's, with `inserted`.
     fn new(blocks: &[Block], from: Pos, to: Pos, inserted: Vec<Block>, typed: bool) -> TextEdit {
+        TextEdit::paste(blocks, from, to, Fragment { blocks: inserted }, typed)
+    }
+
+    /// Replacing `from..to` of `blocks`, their container's, with `inserted`, whose first
+    /// and last blocks hold text.
+    pub(crate) fn paste(
+        blocks: &[Block],
+        from: Pos,
+        to: Pos,
+        inserted: Fragment,
+        typed: bool,
+    ) -> TextEdit {
         TextEdit {
             at: from,
             removed: Fragment::copy(blocks, from, to),
-            inserted: Fragment(inserted),
+            inserted,
             typed,
             select: false,
         }
@@ -239,19 +243,19 @@ impl TextEdit {
         let blocks = self.container(doc);
         remove(blocks, self.at, self.removed.end(self.at));
         let caret = paste(blocks, self.at, &self.inserted);
-        self.change(self.removed.0.len(), self.inserted.0.len(), caret)
+        self.change(self.removed.blocks.len(), self.inserted.blocks.len(), caret)
     }
 
     pub(crate) fn revert(&self, doc: &mut Document) -> Change {
         let blocks = self.container(doc);
         remove(blocks, self.at, self.inserted.end(self.at));
         let caret = paste(blocks, self.at, &self.removed);
-        self.change(self.inserted.0.len(), self.removed.0.len(), caret)
+        self.change(self.inserted.blocks.len(), self.removed.blocks.len(), caret)
     }
 
     /// Whether blocks come or go.
     pub(crate) fn restructures(&self) -> bool {
-        self.removed.0.len() != self.inserted.0.len()
+        self.removed.blocks.len() != self.inserted.blocks.len()
     }
 
     /// Join `next`, typed straight after this typing, a word at a time: a word typed
@@ -261,26 +265,26 @@ impl TextEdit {
             && next.typed
             && self.removed.is_empty()
             && next.removed.is_empty()
-            && self.inserted.0.len() == 1
-            && next.inserted.0.len() == 1
+            && self.inserted.blocks.len() == 1
+            && next.inserted.blocks.len() == 1
             && next.at == self.inserted.end(self.at);
         if !continues {
             return false;
         }
-        let ends_in_space = runs_of(&self.inserted.0[0])
+        let ends_in_space = runs_of(&self.inserted.blocks[0])
             .last()
             .and_then(|r| r.text.chars().next_back())
             .is_some_and(char::is_whitespace);
-        let starts_word = runs_of(&next.inserted.0[0])
+        let starts_word = runs_of(&next.inserted.blocks[0])
             .first()
             .and_then(|r| r.text.chars().next())
             .is_some_and(|c| !c.is_whitespace());
         if ends_in_space && starts_word {
             return false;
         }
-        let block = &mut self.inserted.0[0];
+        let block = &mut self.inserted.blocks[0];
         let mut runs = take_runs(block);
-        runs.extend(runs_of(&next.inserted.0[0]).iter().cloned());
+        runs.extend(runs_of(&next.inserted.blocks[0]).iter().cloned());
         set_runs(block, runs);
         true
     }
@@ -424,7 +428,7 @@ pub fn toggle(doc: &Document, from: Pos, to: Pos, which: Flag) -> Option<Edit> {
     let removed = Fragment::copy(blocks, from, to);
     let mut inserted = removed.clone();
     let (mut any, mut all) = (false, true);
-    for block in &mut inserted.0 {
+    for block in &mut inserted.blocks {
         for run in paragraph_mut(block).into_iter().flat_map(|p| &mut p.runs) {
             any = true;
             all &= *flag(&mut run.style, which);
@@ -433,7 +437,7 @@ pub fn toggle(doc: &Document, from: Pos, to: Pos, which: Flag) -> Option<Edit> {
     if !any {
         return None;
     }
-    for block in &mut inserted.0 {
+    for block in &mut inserted.blocks {
         if let Some(p) = paragraph_mut(block) {
             for run in &mut p.runs {
                 *flag(&mut run.style, which) = !all;

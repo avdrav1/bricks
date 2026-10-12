@@ -221,6 +221,10 @@ fn edit_menu() -> gio::Menu {
     let menu = gio::Menu::new();
     menu.append_item(&item("Undo", "win.undo", "<Control>z"));
     menu.append_item(&item("Redo", "win.redo", "<Control><Shift>z"));
+    menu.append_item(&item("Cut", "win.cut", "<Control>x"));
+    menu.append_item(&item("Copy", "win.copy", "<Control>c"));
+    menu.append_item(&item("Paste", "win.paste", "<Control>v"));
+    menu.append_item(&item("Select All", "win.select-all", "<Control>a"));
     menu
 }
 
@@ -279,6 +283,10 @@ fn add_page_actions(window: &gtk::ApplicationWindow, page: &view::Page) {
         simple("italic", Command::Italic),
         simple("bullets", Command::Bullets),
         simple("numbers", Command::Numbers),
+        simple("cut", Command::Cut),
+        simple("copy", Command::Copy),
+        simple("paste", Command::Paste),
+        simple("select-all", Command::SelectAll),
         style,
     ]);
 }

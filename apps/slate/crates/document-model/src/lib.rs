@@ -13,6 +13,7 @@ mod text;
 pub use markdown::{load_linked_images, read_markdown};
 pub use text::{decode, read_text, Encoding, LineEnding, TextInfo};
 
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 /// A colour as red, green, blue.
@@ -44,7 +45,7 @@ impl Format {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Block {
     Paragraph(Paragraph),
     ListItem(ListItem),
@@ -57,7 +58,7 @@ pub enum Block {
 }
 
 /// A paragraph: runs of text in one style.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Paragraph {
     pub style: ParagraphStyle,
     pub align: Align,
@@ -111,7 +112,7 @@ impl Paragraph {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ParagraphStyle {
     #[default]
     Normal,
@@ -121,7 +122,7 @@ pub enum ParagraphStyle {
     Quote,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Align {
     #[default]
     Start,
@@ -131,13 +132,13 @@ pub enum Align {
 }
 
 /// Text with one look. Tabs are `\t`; a line break inside the paragraph is `\n`.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Run {
     pub text: String,
     pub style: RunStyle,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct RunStyle {
     pub bold: bool,
     pub italic: bool,
@@ -155,7 +156,7 @@ pub struct RunStyle {
 }
 
 /// A list item: one paragraph with its marker. Items of a list follow each other as blocks.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ListItem {
     pub kind: ListKind,
     /// Nesting level, 0 for a top-level item.
@@ -163,7 +164,7 @@ pub struct ListItem {
     pub paragraph: Paragraph,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ListKind {
     Bullet,
     /// `label` is the marker as shown, for example `3.` or `b)`.
@@ -176,7 +177,7 @@ pub enum ListKind {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct CodeBlock {
     /// The fenced block's info string's first word, if any.
     pub language: Option<String>,
@@ -186,19 +187,19 @@ pub struct CodeBlock {
     pub indent: u8,
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Table {
     pub rows: Vec<TableRow>,
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct TableRow {
     pub cells: Vec<TableCell>,
     /// A header row (Markdown's first row, DOCX's `tblHeader`).
     pub header: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TableCell {
     pub blocks: Vec<Block>,
     /// How many grid columns the cell spans.
@@ -214,7 +215,7 @@ impl Default for TableCell {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Image {
     pub alt: String,
     pub source: ImageSource,
@@ -222,7 +223,7 @@ pub struct Image {
     pub size: Option<(f32, f32)>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ImageSource {
     /// The picture's bytes, read from the file's package or from disk.
     Embedded {
@@ -233,7 +234,7 @@ pub enum ImageSource {
     Link(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ImageFormat {
     Png,
     Jpeg,
@@ -258,13 +259,13 @@ impl ImageFormat {
 }
 
 /// Source Slate can't model, kept as written so a save can write it back.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Raw {
     pub kind: RawKind,
     pub source: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RawKind {
     /// A Markdown HTML block.
     Html,

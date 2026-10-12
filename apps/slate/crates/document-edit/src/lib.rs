@@ -10,11 +10,17 @@
 //! Paragraphs stay normalized ([`normalize`]): neighbouring runs that look the same are
 //! one run and no run is empty, so undoing an edit gives back the document exactly.
 //!
+//! A selection can be copied as a [`Fragment`], deleted, or pasted over ([`copy`],
+//! [`delete`], [`paste`]), each one step; one reaching into or out of a table cell
+//! replaces whole top-level blocks ([`BlocksEdit`]).
+//!
 //! Toolkit-free: no GTK, no I/O.
 
+mod clipboard;
 mod looks;
 mod text;
 
+pub use clipboard::{copy, delete, paste, BlocksEdit, Fragment};
 pub use looks::{indent, set_style, toggle_list, LooksEdit};
 pub use text::{join_backward, join_forward, look, replace, split, toggle, TextEdit};
 
@@ -172,7 +178,7 @@ pub fn normalize(doc: &mut Document) {
     normalize_blocks(&mut doc.blocks);
 }
 
-fn normalize_blocks(blocks: &mut [Block]) {
+pub(crate) fn normalize_blocks(blocks: &mut [Block]) {
     for block in blocks {
         match block {
             Block::Paragraph(p) => p.merge_runs(),
@@ -239,6 +245,9 @@ pub enum Edit {
     Text(TextEdit),
     /// The looks of whole blocks: paragraph style, list kind and level.
     Looks(LooksEdit),
+    /// Whole top-level blocks replaced: a selection reaching into or out of a table cell
+    /// deleted or pasted over.
+    Blocks(BlocksEdit),
 }
 
 impl Edit {
@@ -246,6 +255,7 @@ impl Edit {
         match self {
             Edit::Text(e) => e.apply(doc),
             Edit::Looks(e) => e.apply(doc),
+            Edit::Blocks(e) => e.apply(doc),
         }
     }
 
@@ -253,6 +263,7 @@ impl Edit {
         match self {
             Edit::Text(e) => e.revert(doc),
             Edit::Looks(e) => e.revert(doc),
+            Edit::Blocks(e) => e.revert(doc),
         }
     }
 
@@ -261,7 +272,7 @@ impl Edit {
     fn restructures(&self) -> bool {
         match self {
             Edit::Text(e) => e.restructures(),
-            Edit::Looks(_) => true,
+            Edit::Looks(_) | Edit::Blocks(_) => true,
         }
     }
 
@@ -283,6 +294,12 @@ impl From<TextEdit> for Edit {
 impl From<LooksEdit> for Edit {
     fn from(e: LooksEdit) -> Edit {
         Edit::Looks(e)
+    }
+}
+
+impl From<BlocksEdit> for Edit {
+    fn from(e: BlocksEdit) -> Edit {
+        Edit::Blocks(e)
     }
 }
 
