@@ -1,9 +1,14 @@
-//! Saving a deck by patching the package it was read from (ADR 0006, FRAME-8). Parts no
-//! edit touches are copied as compressed bytes. What changes:
+//! Saving a deck by patching the package it was read from (ADR 0006, FRAME-8, FRAME-11).
+//! Parts no edit touches are copied as compressed bytes. What changes:
 //!
 //! - an edited shape's paragraphs, in its slide part: written from the model, each run
 //!   and paragraph with the markup it was read with (`Run::markup`,
-//!   `Paragraph::markup`); everything else in the part stays as written;
+//!   `Paragraph::markup`), the looks an edit set (`Source::Edit`) written into it;
+//!   everything else in the part stays as written;
+//! - an edited shape's fill and outline, in its `spPr`; a slide's background set by an
+//!   edit, as its `<p:bg>`;
+//! - a slide moved to another layout: its layout relationship, its placeholders' `<p:ph>`,
+//!   its empty placeholders the move dropped, and the new layout's it gained;
 //! - `presentation.xml`'s slide list (and its sections, when it has them), its
 //!   relationships, and `[Content_Types].xml`, as slides are added, deleted, and moved;
 //! - a new slide's part: the slide XML PowerPoint writes for one on its layout, with its
@@ -17,7 +22,10 @@
 use crate::package::resolve;
 use crate::read::blank_slide;
 use crate::xml::{self, escape, Element};
-use presentation_model::{Frame, Layer, Paragraph, Presentation, Shape, Slide, TextBody};
+use presentation_model::{
+    Align, Background, Bullet, BulletSize, Color, Dash, Fill, Frame, Layer, Outline, Paragraph,
+    PlaceholderSlot, Presentation, Run, Shape, Slide, Source, TextBody,
+};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
@@ -78,8 +86,8 @@ impl Drop for Original {
 
 /// Save `deck` at `dest`, atomically, by patching `source`, the package `read` was read
 /// from. Slides are matched to the parts they were read from by `Slide::part`. Verification
-/// reads the written file back: its slide count, and the text of every shape the save
-/// wrote.
+/// reads the written file back: its slide count; the text, boxes, fills, and outlines of
+/// every shape the save wrote; and the backgrounds and layouts it wrote.
 pub fn save(
     dest: &Path,
     source: &Path,
@@ -99,9 +107,19 @@ pub fn save(
     )
 }
 
-/// What a save wrote, by slide: the ids of the shapes whose text, and whose boxes, it
-/// wrote.
-type Written = Vec<(Vec<u32>, Vec<u32>)>;
+/// What a save wrote on one slide: the ids of the shapes whose text, boxes, and fills or
+/// outlines it wrote; whether it wrote the background and the layout.
+#[derive(Debug, Default)]
+struct Wrote {
+    text: Vec<u32>,
+    frames: Vec<u32>,
+    looks: Vec<u32>,
+    background: bool,
+    layout: bool,
+}
+
+/// What a save wrote, by slide.
+type Written = Vec<Wrote>;
 
 fn verify(tmp: &Path, deck: &Presentation, written: Option<&Written>) -> Result<(), String> {
     let back = crate::read(tmp).map_err(|e| e.to_string())?;
@@ -114,7 +132,7 @@ fn verify(tmp: &Path, deck: &Presentation, written: Option<&Written>) -> Result<
     }
     let written = written.ok_or("nothing was written")?;
     let slides = deck.slides.iter().zip(&back.slides).zip(written);
-    for (n, ((now, again), (texts, frames))) in slides.enumerate() {
+    for (n, ((now, again), wrote)) in slides.enumerate() {
         let shape = |s: &'_ Slide, id: u32| s.shapes.iter().find(|sh| sh.id == Some(id)).cloned();
         let differs = |id: &u32, same: &dyn Fn(&Shape, &Shape) -> bool| match (
             shape(now, *id),
@@ -123,17 +141,32 @@ fn verify(tmp: &Path, deck: &Presentation, written: Option<&Written>) -> Result<
             (Some(a), Some(b)) => !same(&a, &b),
             _ => true,
         };
-        let text_differs = texts
+        let text_differs = wrote
+            .text
             .iter()
             .find(|id| differs(id, &|a, b| a.plain_text() == b.plain_text()));
-        let frame_differs = frames
+        let frame_differs = wrote
+            .frames
             .iter()
             .find(|id| differs(id, &|a, b| a.frame == b.frame));
-        if let Some(id) = text_differs.or(frame_differs) {
+        let look_differs = wrote
+            .looks
+            .iter()
+            .find(|id| differs(id, &|a, b| a.fill == b.fill && a.outline == b.outline));
+        if let Some(id) = text_differs.or(frame_differs).or(look_differs) {
             return Err(format!(
                 "slide {}'s shape {id} reads back differently",
                 n + 1
             ));
+        }
+        if wrote.background && now.background != again.background {
+            return Err(format!(
+                "slide {}'s background reads back differently",
+                n + 1
+            ));
+        }
+        if wrote.layout && now.layout != again.layout {
+            return Err(format!("slide {}'s layout reads back differently", n + 1));
         }
     }
     Ok(())
@@ -272,7 +305,12 @@ fn inner(text: &str, e: &Element) -> io::Result<Range<usize>> {
 /// The namespace prefix element `e` is written with, with its colon (`p:` for
 /// `<p:sldIdLst>`); empty without one.
 fn prefix<'a>(text: &'a str, e: &Element) -> &'a str {
-    let tag = &text[e.span.start + 1..e.span.end];
+    tag_prefix(&text[e.span.clone()])
+}
+
+/// The namespace prefix of the element whose markup `raw` starts with, with its colon.
+fn tag_prefix(raw: &str) -> &str {
+    let tag = raw.strip_prefix('<').unwrap_or(raw);
     let name_end = tag
         .find(|c: char| c.is_whitespace() || c == '>' || c == '/')
         .unwrap_or(tag.len());
@@ -280,6 +318,380 @@ fn prefix<'a>(text: &'a str, e: &Element) -> &'a str {
         Some(i) => &tag[..=i],
         None => "",
     }
+}
+
+/// The prefix part `xml` (its root element `root`) declares for namespace `uri`, with its
+/// colon; `fallback` when it declares none.
+fn ns_prefix(xml: &str, root: &Element, uri: &str, fallback: &str) -> String {
+    let raw = &xml[root.span.clone()];
+    let open = &raw[..raw.find('>').unwrap_or(raw.len())];
+    let found = [format!("\"{uri}\""), format!("'{uri}'")]
+        .iter()
+        .find_map(|quoted| open.find(quoted.as_str()))
+        .and_then(|at| {
+            let before = &open[..at];
+            let decl = &before[before.rfind("xmlns")? + "xmlns".len()..];
+            let decl = decl.trim_end().strip_suffix('=')?.trim_end();
+            Some(match decl.strip_prefix(':') {
+                Some(p) => format!("{p}:"),
+                None => String::new(),
+            })
+        });
+    found.unwrap_or_else(|| fallback.to_owned())
+}
+
+const DRAWINGML_NS: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
+
+/// The span of attribute `name`'s value, its quotes included, in start tag `tag`.
+fn attr_value(tag: &str, name: &str) -> Option<Range<usize>> {
+    let b = tag.as_bytes();
+    let mut i = tag.find(char::is_whitespace)?;
+    loop {
+        while b.get(i).is_some_and(u8::is_ascii_whitespace) {
+            i += 1;
+        }
+        let start = i;
+        while b
+            .get(i)
+            .is_some_and(|c| *c != b'=' && !c.is_ascii_whitespace())
+        {
+            i += 1;
+        }
+        if i == start {
+            return None;
+        }
+        let key = &tag[start..i];
+        i += tag[i..].find('=')? + 1;
+        while b.get(i).is_some_and(u8::is_ascii_whitespace) {
+            i += 1;
+        }
+        let quote = *b.get(i)? as char;
+        let end = i + 1 + tag[i + 1..].find(quote)? + 1;
+        if key == name {
+            return Some(i..end);
+        }
+        i = end;
+    }
+}
+
+/// Element `raw` (its markup as written) with attributes `attrs` set, its children named
+/// in `remove` taken out, and `add` (each a child's local name and markup) put in where
+/// `order`, the schema's child order (the names that may stand at each place), has them.
+/// Everything else stays as written.
+fn rebuild(
+    raw: &str,
+    order: &[&[&str]],
+    attrs: &[(&str, String)],
+    remove: &[&str],
+    add: &[(&str, String)],
+) -> io::Result<String> {
+    let e = xml::parse(raw.as_bytes()).map_err(damaged)?;
+    let open_end = raw.find('>').ok_or_else(|| damaged("a broken tag"))? + 1;
+    let empty = raw[..open_end].ends_with("/>");
+    let mut tag = raw[..open_end]
+        .trim_end_matches('>')
+        .trim_end_matches('/')
+        .trim_end()
+        .to_owned();
+    for (name, value) in attrs {
+        let quoted = format!("\"{}\"", escape(value));
+        match attr_value(&tag, name) {
+            Some(r) => tag.replace_range(r, &quoted),
+            None => tag.push_str(&format!(" {name}={quoted}")),
+        }
+    }
+    let content_end = if empty {
+        open_end
+    } else {
+        raw.rfind("</").ok_or_else(|| damaged("a broken element"))?
+    };
+    let rank = |name: &str| {
+        order
+            .iter()
+            .position(|g| g.contains(&name))
+            .unwrap_or(order.len())
+    };
+    let mut pending: Vec<(usize, &str)> = add.iter().map(|(n, m)| (rank(n), m.as_str())).collect();
+    pending.sort_by_key(|(r, _)| *r);
+    let mut pending = pending.into_iter().peekable();
+    let mut content = String::new();
+    let mut cursor = open_end;
+    for c in e.elements() {
+        content.push_str(&raw[cursor..c.span.start]);
+        cursor = c.span.end;
+        if remove.contains(&c.name.as_str()) {
+            continue;
+        }
+        let r = rank(&c.name);
+        while let Some((_, m)) = pending.next_if(|(p, _)| *p < r) {
+            content.push_str(m);
+        }
+        content.push_str(&raw[c.span.clone()]);
+    }
+    for (_, m) in pending {
+        content.push_str(m);
+    }
+    content.push_str(&raw[cursor..content_end]);
+    Ok(if empty && content.is_empty() {
+        format!("{tag}/>")
+    } else if empty {
+        let name = &tag[1..tag.find(char::is_whitespace).unwrap_or(tag.len())];
+        format!("{tag}>{content}</{name}>")
+    } else {
+        format!("{tag}>{content}{}", &raw[content_end..])
+    })
+}
+
+/// DrawingML's fill elements, which stand at one place in their parents.
+const FILLS: &[&str] = &[
+    "noFill",
+    "solidFill",
+    "gradFill",
+    "blipFill",
+    "pattFill",
+    "grpFill",
+];
+
+/// The children of run properties (`CT_TextCharacterProperties`), in order.
+const RUN_ORDER: &[&[&str]] = &[
+    &["ln"],
+    FILLS,
+    &["effectLst", "effectDag"],
+    &["highlight"],
+    &["uLnTx", "uLn"],
+    &["uFillTx", "uFill"],
+    &["latin"],
+    &["ea"],
+    &["cs"],
+    &["sym"],
+    &["hlinkClick"],
+    &["hlinkMouseOver"],
+    &["rtl"],
+    &["extLst"],
+];
+
+/// A paragraph's bullet elements.
+const BULLETS: &[&str] = &[
+    "buClrTx",
+    "buClr",
+    "buSzTx",
+    "buSzPct",
+    "buSzPts",
+    "buFontTx",
+    "buFont",
+    "buNone",
+    "buAutoNum",
+    "buChar",
+    "buBlip",
+];
+
+/// The children of paragraph properties (`CT_TextParagraphProperties`), in order.
+const PARAGRAPH_ORDER: &[&[&str]] = &[
+    &["lnSpc"],
+    &["spcBef"],
+    &["spcAft"],
+    &["buClrTx", "buClr"],
+    &["buSzTx", "buSzPct", "buSzPts"],
+    &["buFontTx", "buFont"],
+    &["buNone", "buAutoNum", "buChar", "buBlip"],
+    &["tabLst"],
+    &["defRPr"],
+    &["extLst"],
+];
+
+/// The children of shape properties (`CT_ShapeProperties`), in order.
+const SHAPE_ORDER: &[&[&str]] = &[
+    &["xfrm"],
+    &["custGeom", "prstGeom"],
+    FILLS,
+    &["ln"],
+    &["effectLst", "effectDag"],
+    &["scene3d"],
+    &["sp3d"],
+    &["extLst"],
+];
+
+/// The children of a line (`CT_LineProperties`), in order.
+const LINE_ORDER: &[&[&str]] = &[
+    FILLS,
+    &["prstDash", "custDash"],
+    &["round", "bevel", "miter"],
+    &["headEnd"],
+    &["tailEnd"],
+    &["extLst"],
+];
+
+/// `<a:srgbClr>` for `c`, with its alpha when it isn't opaque.
+fn srgb(a: &str, c: Color) -> String {
+    let hex = c.hex();
+    if c.alpha == 255 {
+        return format!(r#"<{a}srgbClr val="{hex}"/>"#);
+    }
+    let alpha = (u32::from(c.alpha) * 100_000 + 127) / 255;
+    format!(r#"<{a}srgbClr val="{hex}"><{a}alpha val="{alpha}"/></{a}srgbClr>"#)
+}
+
+fn solid_fill(a: &str, c: Color) -> String {
+    format!("<{a}solidFill>{}</{a}solidFill>", srgb(a, c))
+}
+
+fn on_off(v: bool) -> String {
+    if v { "1" } else { "0" }.to_owned()
+}
+
+/// A run's (or a paragraph mark's) properties element under the name `name`: as read,
+/// with the looks an edit set (`Source::Edit`) written on it.
+fn run_props(r: &Run, name: &str, a: &str) -> io::Result<String> {
+    let s = &r.sources;
+    let looks = [
+        s.font,
+        s.size,
+        s.bold,
+        s.italic,
+        s.underline,
+        s.strike,
+        s.color,
+        s.baseline,
+        s.caps,
+    ];
+    if !looks.contains(&Source::Edit) {
+        return Ok(retag(&r.markup.props, name));
+    }
+    let raw = match &*r.markup.props {
+        "" => format!("<{a}{name}/>"),
+        props => retag(props, name),
+    };
+    let a = tag_prefix(&raw);
+    let edited = |x: Source| x == Source::Edit;
+    let mut attrs = Vec::new();
+    if edited(s.size) {
+        attrs.push(("sz", ((r.size * 100.0).round() as i64).to_string()));
+    }
+    if edited(s.bold) {
+        attrs.push(("b", on_off(r.bold)));
+    }
+    if edited(s.italic) {
+        attrs.push(("i", on_off(r.italic)));
+    }
+    if edited(s.underline) {
+        attrs.push(("u", if r.underline { "sng" } else { "none" }.to_owned()));
+    }
+    if edited(s.strike) {
+        let v = if r.strike { "sngStrike" } else { "noStrike" };
+        attrs.push(("strike", v.to_owned()));
+    }
+    if edited(s.baseline) {
+        attrs.push((
+            "baseline",
+            ((r.baseline * 1000.0).round() as i64).to_string(),
+        ));
+    }
+    if edited(s.caps) {
+        let v = match r.caps {
+            presentation_model::Caps::All => "all",
+            presentation_model::Caps::Small => "small",
+            presentation_model::Caps::None => "none",
+        };
+        attrs.push(("cap", v.to_owned()));
+    }
+    let mut remove: Vec<&str> = Vec::new();
+    let mut add = Vec::new();
+    if edited(s.color) {
+        remove.extend(FILLS);
+        add.push(("solidFill", solid_fill(a, r.color)));
+    }
+    if edited(s.font) {
+        remove.push("latin");
+        add.push((
+            "latin",
+            format!(r#"<{a}latin typeface="{}"/>"#, escape(&r.font)),
+        ));
+    }
+    rebuild(&raw, RUN_ORDER, &attrs, &remove, &add)
+}
+
+/// A bullet's elements, each with its name: `None` is no bullet.
+fn bullet_markup(bullet: Option<&Bullet>, a: &str) -> Vec<(&'static str, String)> {
+    let Some(b) = bullet else {
+        return vec![("buNone", format!("<{a}buNone/>"))];
+    };
+    let mut out = Vec::new();
+    out.push(match b.color {
+        Some(c) => ("buClr", format!("<{a}buClr>{}</{a}buClr>", srgb(a, c))),
+        None => ("buClrTx", format!("<{a}buClrTx/>")),
+    });
+    out.push(match b.size {
+        BulletSize::FollowText => ("buSzTx", format!("<{a}buSzTx/>")),
+        BulletSize::Percent(f) => (
+            "buSzPct",
+            format!(r#"<{a}buSzPct val="{}"/>"#, (f * 100_000.0).round() as i64),
+        ),
+        BulletSize::Points(p) => (
+            "buSzPts",
+            format!(r#"<{a}buSzPts val="{}"/>"#, (p * 100.0).round() as i64),
+        ),
+    });
+    out.push(match &b.font {
+        Some(f) => (
+            "buFont",
+            format!(r#"<{a}buFont typeface="{}"/>"#, escape(f)),
+        ),
+        None => ("buFontTx", format!("<{a}buFontTx/>")),
+    });
+    out.push(match &b.autonumber {
+        Some(n) => {
+            let start = match n.start {
+                1 => String::new(),
+                s => format!(r#" startAt="{s}""#),
+            };
+            (
+                "buAutoNum",
+                format!(r#"<{a}buAutoNum type="{}"{start}/>"#, escape(&n.scheme)),
+            )
+        }
+        None => (
+            "buChar",
+            format!(r#"<{a}buChar char="{}"/>"#, escape(&b.text)),
+        ),
+    });
+    out
+}
+
+/// A paragraph's properties element: as read, with the alignment and bullet an edit set
+/// (`Source::Edit`) written on it.
+fn paragraph_props(p: &Paragraph, a: &str) -> io::Result<String> {
+    let align = p.sources.align == Source::Edit;
+    let bullet = p.sources.bullet == Source::Edit;
+    if !align && !bullet {
+        return Ok(p.markup.to_string());
+    }
+    let raw = match &*p.markup {
+        "" => format!("<{a}pPr/>"),
+        markup => markup.to_owned(),
+    };
+    let a = tag_prefix(&raw);
+    let mut attrs = Vec::new();
+    if p.markup.is_empty() && p.level > 0 {
+        attrs.push(("lvl", p.level.to_string()));
+    }
+    if align {
+        let code = match p.align {
+            Align::Left => "l",
+            Align::Centre => "ctr",
+            Align::Right => "r",
+            Align::Justify => "just",
+            Align::Distributed => "dist",
+        };
+        attrs.push(("algn", code.to_owned()));
+    }
+    let (remove, add) = if bullet {
+        attrs.push(("marL", p.margin_left.to_string()));
+        attrs.push(("indent", p.indent.to_string()));
+        (BULLETS, bullet_markup(p.bullet.as_ref(), a))
+    } else {
+        (&[][..], Vec::new())
+    };
+    rebuild(&raw, PARAGRAPH_ORDER, &attrs, remove, &add)
 }
 
 /// The prefix of relationship attributes on element `e` (`r:` of `r:id`).
@@ -327,19 +739,19 @@ fn field_close(start: &str) -> Option<String> {
 }
 
 /// A text body's paragraphs as DrawingML, `a` the DrawingML prefix with its colon.
-fn paragraphs(body: &TextBody, a: &str) -> String {
+fn paragraphs(body: &TextBody, a: &str) -> io::Result<String> {
     let mut out = String::new();
     for p in &body.paragraphs {
-        paragraph(&mut out, p, a);
+        paragraph(&mut out, p, a)?;
     }
-    out
+    Ok(out)
 }
 
-fn paragraph(out: &mut String, p: &Paragraph, a: &str) {
+fn paragraph(out: &mut String, p: &Paragraph, a: &str) -> io::Result<()> {
     out.push_str(&format!("<{a}p>"));
-    out.push_str(&p.markup);
+    out.push_str(&paragraph_props(p, a)?);
     for r in &p.runs {
-        let props = retag(&r.markup.props, "rPr");
+        let props = run_props(r, "rPr", a)?;
         if r.text == "\n" {
             out.push_str(&format!("<{a}br>{props}</{a}br>"));
             continue;
@@ -350,8 +762,16 @@ fn paragraph(out: &mut String, p: &Paragraph, a: &str) {
             None => out.push_str(&format!("<{a}r>{props}{t}</{a}r>")),
         }
     }
-    out.push_str(&retag(&p.end.markup.props, "endParaRPr"));
+    out.push_str(&run_props(&p.end, "endParaRPr", a)?);
     out.push_str(&format!("</{a}p>"));
+    Ok(())
+}
+
+/// A shape's non-visual properties (`nvSpPr`, `nvPicPr`, ...).
+fn nv_of(shape: &Element) -> Option<&Element> {
+    shape
+        .elements()
+        .find(|c| c.name.starts_with("nv") && c.name.ends_with("Pr"))
 }
 
 /// The shape with id `id` in `tree`, groups searched.
@@ -363,9 +783,7 @@ fn find_shape(tree: &Element, id: u32) -> Option<&Element> {
             }
             continue;
         }
-        let own = e
-            .elements()
-            .find(|c| c.name.starts_with("nv") && c.name.ends_with("Pr"))
+        let own = nv_of(e)
             .and_then(|nv| nv.child("cNvPr"))
             .and_then(|c| c.num::<u32>("id"));
         if own == Some(id) {
@@ -375,35 +793,79 @@ fn find_shape(tree: &Element, id: u32) -> Option<&Element> {
     None
 }
 
-/// What changed on a slide, by shape id: text bodies and boxes.
+/// A shape's new fill and outline, by id; `None` for what stays.
+type Look<'a> = (u32, Option<&'a Fill>, Option<Option<Outline>>);
+
+/// What changed on a slide, by shape id: text bodies, boxes, fills and outlines,
+/// placeholder slots, shapes gone and placeholders added; the background, and the layout.
+#[derive(Default)]
 struct Edits<'a> {
     text: Vec<(u32, &'a TextBody)>,
     frames: Vec<(u32, Frame)>,
+    looks: Vec<Look<'a>>,
+    slots: Vec<(u32, &'a PlaceholderSlot)>,
+    removed: Vec<u32>,
+    added: Vec<&'a Shape>,
+    background: Option<Color>,
+    /// The layout the slide moved to.
+    layout: Option<usize>,
 }
 
 impl Edits<'_> {
     fn is_empty(&self) -> bool {
-        self.text.is_empty() && self.frames.is_empty()
+        self.text.is_empty()
+            && self.frames.is_empty()
+            && self.looks.is_empty()
+            && !self.has_structure()
     }
 
-    fn ids(&self) -> (Vec<u32>, Vec<u32>) {
-        (
-            self.text.iter().map(|(id, _)| *id).collect(),
-            self.frames.iter().map(|(id, _)| *id).collect(),
-        )
+    /// Whether shapes come or go, placeholders change slots, or the background changes.
+    fn has_structure(&self) -> bool {
+        !self.slots.is_empty()
+            || !self.removed.is_empty()
+            || !self.added.is_empty()
+            || self.background.is_some()
+    }
+
+    /// What writing these edits wrote, given the shapes whose looks it wrote.
+    fn wrote(&self, looks: Vec<u32>) -> Wrote {
+        Wrote {
+            text: self.text.iter().map(|(id, _)| *id).collect(),
+            frames: self.frames.iter().map(|(id, _)| *id).collect(),
+            looks,
+            background: self.background.is_some(),
+            layout: self.layout.is_some(),
+        }
     }
 }
 
-/// The shapes of `now` whose text or box differs from `base`'s, matched by id. Only the
-/// slide's own shapes outside groups have boxes a save writes.
-fn edits<'a>(base: &Slide, now: &'a Slide) -> Edits<'a> {
-    let mut out = Edits {
-        text: Vec::new(),
-        frames: Vec::new(),
-    };
+/// What differs between `now` and `base`, its shapes matched by id. Only the slide's own
+/// shapes outside groups have boxes a save writes; fills, outlines, and backgrounds are
+/// written when an edit set them (`Source::Edit`) to what the base doesn't have on itself.
+/// `template` is the new slide of the layout `now` moved to, when it moved: placeholders
+/// the base doesn't have are compared with its.
+fn edits<'a>(base: &'a Slide, now: &'a Slide, template: Option<&'a Slide>) -> Edits<'a> {
+    let mut out = Edits::default();
     for s in now.shapes.iter().filter(|s| s.layer == Layer::Slide) {
         let Some(id) = s.id else { continue };
-        let old = base.shapes.iter().find(|b| b.id == Some(id));
+        let old = match base.shapes.iter().find(|b| b.id == Some(id)) {
+            Some(o) => {
+                if let Some(slot) = s.slot.as_ref().filter(|slot| o.slot.as_ref() != Some(slot)) {
+                    out.slots.push((id, slot));
+                }
+                Some(o)
+            }
+            None => {
+                if s.slot.is_some() && !s.grouped {
+                    out.added.push(s);
+                }
+                template.and_then(|t| {
+                    t.shapes
+                        .iter()
+                        .find(|t| t.layer == Layer::Slide && t.slot.is_some() && t.slot == s.slot)
+                })
+            }
+        };
         if let Some(body) = &s.text {
             if old.and_then(|o| o.text.as_ref()).map(|o| &o.paragraphs) != Some(&body.paragraphs) {
                 out.text.push((id, body));
@@ -412,19 +874,149 @@ fn edits<'a>(base: &Slide, now: &'a Slide) -> Edits<'a> {
         if !s.grouped && old.map(|o| o.frame) != Some(s.frame) {
             out.frames.push((id, s.frame));
         }
+        let fill = (s.sources.fill == Source::Edit
+            && matches!(s.fill, Fill::None | Fill::Solid(_))
+            && old.is_none_or(|o| o.fill != s.fill || !o.sources.fill.is_own()))
+        .then_some(&s.fill);
+        let outline = (s.sources.outline == Source::Edit
+            && old.is_none_or(|o| o.outline != s.outline || !o.sources.outline.is_own()))
+        .then_some(s.outline);
+        if fill.is_some() || outline.is_some() {
+            out.looks.push((id, fill, outline));
+        }
     }
+    out.removed = base
+        .shapes
+        .iter()
+        .filter(|b| b.layer == Layer::Slide)
+        .filter_map(|b| b.id)
+        .filter(|id| !now.shapes.iter().any(|s| s.id == Some(*id)))
+        .collect();
+    if let Background::Solid(c) = now.background {
+        if now.background_source == Source::Edit
+            && (now.background != base.background || !base.background_source.is_own())
+        {
+            out.background = Some(c);
+        }
+    }
+    out.layout = now.layout.filter(|_| now.layout != base.layout);
     out
 }
 
-/// Slide part `xml` (named `name`) with the `edits` written into it.
-fn patch_slide(xml: &str, name: &str, edits: &Edits<'_>) -> io::Result<String> {
-    if edits.is_empty() {
-        return Ok(xml.to_owned());
+/// Slide part `xml` (named `name`) with the `edits` written into it, and the ids of the
+/// shapes whose looks it wrote. Shapes come and go first, so text and boxes find them;
+/// fills and outlines last, as they rewrite the shape properties boxes are written in.
+fn patch_slide(xml: &str, name: &str, edits: &Edits<'_>) -> io::Result<(String, Vec<u32>)> {
+    let mut xml = xml.to_owned();
+    if edits.has_structure() {
+        xml = patch_structure(&xml, name, edits)?;
     }
+    if !edits.text.is_empty() || !edits.frames.is_empty() {
+        xml = patch_content(&xml, name, edits)?;
+    }
+    let mut looks = Vec::new();
+    if !edits.looks.is_empty() {
+        (xml, looks) = patch_looks(&xml, name, edits)?;
+    }
+    Ok((xml, looks))
+}
+
+/// A slide part's root and its shape tree.
+fn shape_tree<'a>(root: &'a Element, name: &str) -> io::Result<&'a Element> {
+    root.path(&["cSld", "spTree"])
+        .ok_or_else(|| damaged(format!("{name} has no shapes")))
+}
+
+/// `<p:ph>` for `slot`: its type (none for `obj`) and index.
+fn ph_tag(p: &str, slot: &PlaceholderSlot) -> String {
+    let kind = match &*slot.kind {
+        "obj" => String::new(),
+        k => format!(r#" type="{}""#, escape(k)),
+    };
+    let idx = slot
+        .idx
+        .map(|i| format!(r#" idx="{i}""#))
+        .unwrap_or_default();
+    format!("<{p}ph{kind}{idx}/>")
+}
+
+/// Shapes gone and placeholders added, placeholder slots, and the background.
+fn patch_structure(xml: &str, name: &str, edits: &Edits<'_>) -> io::Result<String> {
     let root = parse(xml, name)?;
-    let tree = root
-        .path(&["cSld", "spTree"])
-        .ok_or_else(|| damaged(format!("{name} has no shapes")))?;
+    let tree = shape_tree(&root, name)?;
+    let p = prefix(xml, tree);
+    let a = ns_prefix(xml, &root, DRAWINGML_NS, "a:");
+    let mut spans = Vec::new();
+    for id in &edits.removed {
+        if let Some(s) = find_shape(tree, *id) {
+            spans.push((s.span.clone(), String::new()));
+        }
+    }
+    for (id, slot) in &edits.slots {
+        let nv_pr = find_shape(tree, *id)
+            .and_then(nv_of)
+            .and_then(|nv| nv.child("nvPr"))
+            .ok_or_else(|| damaged(format!("{name} has no shape {id}")))?;
+        match nv_pr.child("ph") {
+            Some(ph) => spans.push((ph.span.clone(), ph_tag(prefix(xml, ph), slot))),
+            None => {
+                let raw = &xml[nv_pr.span.clone()];
+                let ph = ph_tag(prefix(xml, nv_pr), slot);
+                let with = rebuild(raw, &[&["ph"]], &[], &[], &[("ph", ph)])?;
+                spans.push((nv_pr.span.clone(), with));
+            }
+        }
+    }
+    if !edits.added.is_empty() {
+        let at = match tree.child("grpSpPr").or_else(|| tree.child("nvGrpSpPr")) {
+            Some(e) => e.span.end,
+            None => inner(xml, tree)?.start,
+        };
+        let shapes: String = edits
+            .added
+            .iter()
+            .map(|s| {
+                let ph = s.slot.as_ref().map(|slot| ph_tag(p, slot)).unwrap_or_default();
+                format!(
+                    concat!(
+                        r#"<{p}sp><{p}nvSpPr><{p}cNvPr id="{id}" name="{name}"/><{p}cNvSpPr>"#,
+                        r#"<{a}spLocks noGrp="1"/></{p}cNvSpPr><{p}nvPr>{ph}</{p}nvPr></{p}nvSpPr>"#,
+                        r#"<{p}spPr/><{p}txBody><{a}bodyPr/><{a}lstStyle/><{a}p/></{p}txBody></{p}sp>"#,
+                    ),
+                    p = p,
+                    a = a,
+                    id = s.id.unwrap_or_default(),
+                    name = escape(&s.name),
+                    ph = ph,
+                )
+            })
+            .collect();
+        spans.push((at..at, shapes));
+    }
+    if let Some(c) = edits.background {
+        let c_sld = root
+            .child("cSld")
+            .ok_or_else(|| damaged(format!("{name} has no shapes")))?;
+        let pc = prefix(xml, c_sld);
+        let bg = format!(
+            "<{pc}bg><{pc}bgPr>{}<{a}effectLst/></{pc}bgPr></{pc}bg>",
+            solid_fill(&a, c)
+        );
+        match c_sld.child("bg") {
+            Some(old) => spans.push((old.span.clone(), bg)),
+            None => {
+                let at = inner(xml, c_sld)?.start;
+                spans.push((at..at, bg));
+            }
+        }
+    }
+    Ok(splice(xml, spans))
+}
+
+/// Text and boxes.
+fn patch_content(xml: &str, name: &str, edits: &Edits<'_>) -> io::Result<String> {
+    let root = parse(xml, name)?;
+    let tree = shape_tree(&root, name)?;
     let mut spans = Vec::new();
     for (id, body) in &edits.text {
         let tx = find_shape(tree, *id)
@@ -438,7 +1030,7 @@ fn patch_slide(xml: &str, name: &str, edits: &Edits<'_>) -> io::Result<String> {
                 at..at
             }
         };
-        spans.push((range, paragraphs(body, a)));
+        spans.push((range, paragraphs(body, a)?));
     }
     for (id, frame) in &edits.frames {
         let shape =
@@ -446,6 +1038,77 @@ fn patch_slide(xml: &str, name: &str, edits: &Edits<'_>) -> io::Result<String> {
         spans.extend(frame_spans(xml, shape, frame)?);
     }
     Ok(splice(xml, spans))
+}
+
+/// Fills and outlines, in each shape's `spPr`; graphic frames, which have none, are left
+/// as they are. Gives the ids of the shapes written.
+fn patch_looks(xml: &str, name: &str, edits: &Edits<'_>) -> io::Result<(String, Vec<u32>)> {
+    let root = parse(xml, name)?;
+    let tree = shape_tree(&root, name)?;
+    let fallback = ns_prefix(xml, &root, DRAWINGML_NS, "a:");
+    let mut spans = Vec::new();
+    let mut ids = Vec::new();
+    for (id, fill, outline) in &edits.looks {
+        let shape =
+            find_shape(tree, *id).ok_or_else(|| damaged(format!("{name} has no shape {id}")))?;
+        let Some(sp_pr) = shape.child("spPr") else {
+            continue;
+        };
+        let a = sp_pr
+            .elements()
+            .next()
+            .map_or(fallback.as_str(), |c| prefix(xml, c));
+        let mut remove: Vec<&str> = Vec::new();
+        let mut add = Vec::new();
+        if let Some(fill) = fill {
+            remove.extend(FILLS);
+            add.push(match fill {
+                Fill::Solid(c) => ("solidFill", solid_fill(a, *c)),
+                _ => ("noFill", format!("<{a}noFill/>")),
+            });
+        }
+        if let Some(outline) = outline {
+            let old = sp_pr.child("ln");
+            let raw = old.map_or_else(|| format!("<{a}ln/>"), |l| xml[l.span.clone()].to_owned());
+            let la = tag_prefix(&raw).to_owned();
+            let ln = match outline {
+                Some(o) => {
+                    let dash = match o.dash {
+                        Dash::Solid => "solid",
+                        Dash::Dot => "sysDot",
+                        Dash::Dash => "dash",
+                        Dash::DashDot => "dashDot",
+                        Dash::LongDash => "lgDash",
+                    };
+                    let mut gone = FILLS.to_vec();
+                    gone.extend(["prstDash", "custDash"]);
+                    rebuild(
+                        &raw,
+                        LINE_ORDER,
+                        &[("w", o.width.to_string())],
+                        &gone,
+                        &[
+                            ("solidFill", solid_fill(&la, o.color)),
+                            ("prstDash", format!(r#"<{la}prstDash val="{dash}"/>"#)),
+                        ],
+                    )?
+                }
+                None => rebuild(
+                    &raw,
+                    LINE_ORDER,
+                    &[],
+                    FILLS,
+                    &[("noFill", format!("<{la}noFill/>"))],
+                )?,
+            };
+            remove.push("ln");
+            add.push(("ln", ln));
+        }
+        let with = rebuild(&xml[sp_pr.span.clone()], SHAPE_ORDER, &[], &remove, &add)?;
+        spans.push((sp_pr.span.clone(), with));
+        ids.push(*id);
+    }
+    Ok((splice(xml, spans), ids))
 }
 
 /// Where `shape`'s box is written (`<a:off>` and `<a:ext>` in its `xfrm`), rewritten for
@@ -656,25 +1319,50 @@ fn write(
         }
     }
 
+    // The new slide of the layout a slide moved to.
+    let moved_to = |base: &Slide, slide: &Slide| {
+        slide
+            .layout
+            .filter(|_| slide.layout != base.layout)
+            .and_then(|l| deck.layouts.get(l))
+            .map(|l| &l.slide)
+    };
     for (plan, slide) in plans.iter().zip(&deck.slides) {
         match plan {
             Plan::Keep { part, base } => {
-                let ed = edits(base, slide);
+                let ed = edits(base, slide, moved_to(base, slide));
+                let mut looks = Vec::new();
                 if !ed.is_empty() {
                     let xml = read_text(&mut src, part)?.unwrap_or_default();
-                    let patched = patch_slide(&xml, part, &ed)?;
+                    let patched;
+                    (patched, looks) = patch_slide(&xml, part, &ed)?;
                     changes.parts.insert(part.clone(), Some(patched));
                 }
-                written.push(ed.ids());
+                if let Some(l) = ed.layout {
+                    let name = rels_name(part);
+                    let rels = read_text(&mut src, &name)?;
+                    let layout = &deck.layouts[l].part;
+                    let retargeted = retarget_layout(rels.as_deref().unwrap_or(""), part, layout)?;
+                    if rels.is_some() {
+                        changes.parts.insert(name, Some(retargeted));
+                    } else {
+                        changes.add(&name, retargeted, None);
+                    }
+                }
+                written.push(ed.wrote(looks));
             }
             Plan::Copy { from, part, base } => {
-                let ed = edits(base, slide);
+                let ed = edits(base, slide, moved_to(base, slide));
                 let xml = read_text(&mut src, from)?.unwrap_or_default();
-                changes.add(part, patch_slide(&xml, part, &ed)?, Some(SLIDE_TYPE));
+                let (patched, looks) = patch_slide(&xml, part, &ed)?;
+                changes.add(part, patched, Some(SLIDE_TYPE));
                 let rels = read_text(&mut src, &rels_name(from))?.unwrap_or_default();
-                let rels = copy_rels(&mut src, &rels, from, part, &mut names, &mut changes)?;
+                let mut rels = copy_rels(&mut src, &rels, from, part, &mut names, &mut changes)?;
+                if let Some(l) = ed.layout {
+                    rels = retarget_layout(&rels, part, &deck.layouts[l].part)?;
+                }
                 changes.add(&rels_name(part), rels, None);
-                written.push(ed.ids());
+                written.push(ed.wrote(looks));
             }
             Plan::New { layout, part } => {
                 let layout = &deck.layouts[*layout];
@@ -687,14 +1375,15 @@ fn write(
                     .find(|l| l.part == layout.part)
                     .unwrap_or(layout)
                     .slide;
-                let ed = edits(base, slide);
-                changes.add(part, patch_slide(&blank, part, &ed)?, Some(SLIDE_TYPE));
+                let ed = edits(base, slide, None);
+                let (patched, looks) = patch_slide(&blank, part, &ed)?;
+                changes.add(part, patched, Some(SLIDE_TYPE));
                 let rels = format!(
                     r#"{XML_DECLARATION}<Relationships xmlns="{RELS_NS}">{}</Relationships>"#,
                     relationship("rId1", "slideLayout", dir(part), &layout.part)
                 );
                 changes.add(&rels_name(part), rels, None);
-                written.push(ed.ids());
+                written.push(ed.wrote(looks));
             }
         }
     }
@@ -915,6 +1604,32 @@ fn in_order(sections: &[Option<usize>]) -> Vec<bool> {
     keep
 }
 
+/// Slide `part`'s relationships (`text`) with its layout relationship pointing at the
+/// part `layout`; one is added when it has none.
+fn retarget_layout(text: &str, part: &str, layout: &str) -> io::Result<String> {
+    let rels = rels_of(text, part)?;
+    if let Some(r) = rels.iter().find(|r| r.kind == "slideLayout" && !r.external) {
+        let with = relationship(&r.id, "slideLayout", dir(part), layout);
+        return Ok(splice(text, vec![(r.span.clone(), with)]));
+    }
+    let mut ids: HashSet<String> = rels.iter().map(|r| r.id.clone()).collect();
+    let rel = relationship(&next_rid(&mut ids), "slideLayout", dir(part), layout);
+    if text.trim().is_empty() {
+        return Ok(format!(
+            r#"{XML_DECLARATION}<Relationships xmlns="{RELS_NS}">{rel}</Relationships>"#
+        ));
+    }
+    let root = parse(text, &rels_name(part))?;
+    let with = rebuild(
+        &text[root.span.clone()],
+        &[],
+        &[],
+        &[],
+        &[("Relationship", rel)],
+    )?;
+    Ok(splice(text, vec![(root.span.clone(), with)]))
+}
+
 /// A duplicate's relationships: its source's (`text`, of part `from`), with its own copy
 /// of the source's notes, which points back at `part`.
 fn copy_rels(
@@ -1005,6 +1720,51 @@ mod tests {
         assert_eq!(
             field_close(r#"<a:fld id="{1}" type="slidenum">"#).as_deref(),
             Some("</a:fld>")
+        );
+    }
+
+    #[test]
+    fn rebuilt_elements_keep_their_schema_order() {
+        // Attributes set in place or added; a fill replaced, a font put after the fill
+        // and before the hyperlink.
+        let raw = r#"<a:rPr lang="en-US" b='0'><a:noFill/><a:hlinkClick r:id="rId2"/></a:rPr>"#;
+        let add = [
+            ("latin", r#"<a:latin typeface="Arial"/>"#.to_owned()),
+            ("solidFill", solid_fill("a:", Color::rgb(255, 0, 0))),
+        ];
+        let attrs = [("b", "1".to_owned()), ("sz", "4000".to_owned())];
+        assert_eq!(
+            rebuild(raw, RUN_ORDER, &attrs, FILLS, &add).unwrap(),
+            concat!(
+                r#"<a:rPr lang="en-US" b="1" sz="4000"><a:solidFill><a:srgbClr val="FF0000"/>"#,
+                r#"</a:solidFill><a:latin typeface="Arial"/><a:hlinkClick r:id="rId2"/></a:rPr>"#
+            )
+        );
+        // An empty element opens for its children, and stays empty without any.
+        let ln = [("ln", "<a:ln/>".to_owned())];
+        assert_eq!(
+            rebuild("<p:spPr/>", SHAPE_ORDER, &[], &[], &ln).unwrap(),
+            "<p:spPr><a:ln/></p:spPr>"
+        );
+        assert_eq!(
+            rebuild(
+                "<a:pPr/>",
+                PARAGRAPH_ORDER,
+                &[("algn", "r".into())],
+                &[],
+                &[]
+            )
+            .unwrap(),
+            r#"<a:pPr algn="r"/>"#
+        );
+        // Alpha below opaque is written in thousandths of a percent.
+        let half = Color {
+            alpha: 128,
+            ..Color::BLACK
+        };
+        assert_eq!(
+            srgb("a:", half),
+            r#"<a:srgbClr val="000000"><a:alpha val="50196"/></a:srgbClr>"#
         );
     }
 }

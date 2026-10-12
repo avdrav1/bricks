@@ -79,6 +79,8 @@ pub struct Size {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Slide {
     pub background: Background,
+    /// Where the background is set: the slide's own, its layout's, or its master's.
+    pub background_source: Source,
     /// Shapes in drawing order (z-order, bottom first): the master's and the layout's
     /// own shapes (see [`Layer`]) under the slide's.
     pub shapes: Vec<Shape>,
@@ -198,6 +200,15 @@ pub enum PlaceholderKind {
     Content,
 }
 
+/// How the file links a placeholder to its layout's (`<p:ph type idx>`): the type as
+/// written (`obj` when it has none) and the index. Opaque to everything but the file
+/// format and layout changes, which match placeholders by it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PlaceholderSlot {
+    pub kind: Arc<str>,
+    pub idx: Option<u32>,
+}
+
 /// What a shape is.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ShapeKind {
@@ -228,8 +239,12 @@ pub struct Shape {
     pub kind: ShapeKind,
     pub fill: Fill,
     pub outline: Option<Outline>,
+    /// Where the fill and outline are set.
+    pub sources: ShapeSources,
     /// The placeholder role, for placeholders.
     pub placeholder: Option<PlaceholderKind>,
+    /// The placeholder's slot in its layout, for placeholders.
+    pub slot: Option<PlaceholderSlot>,
     pub layer: Layer,
     /// The shape's text, when it has a text body with any paragraph.
     pub text: Option<TextBody>,
@@ -454,6 +469,10 @@ pub struct TextBody {
     pub line_reduction: f64,
     /// Text turned a quarter: `vert="vert"` (90 degrees clockwise) or `vert270`.
     pub vertical: Vertical,
+    /// What a paragraph without looks of its own gets at each level (0 to 8) from the
+    /// body's list styles, its runs empty: the looks a paragraph takes when its level
+    /// changes or its text moves to another placeholder. Empty for bodies nobody edits.
+    pub levels: Arc<[Paragraph]>,
 }
 
 impl TextBody {
@@ -584,6 +603,23 @@ pub struct Paragraph {
     /// The paragraph's properties element (`<a:pPr …>…</a:pPr>`) as read, for a save to
     /// write back; empty when it has none. Opaque to everything but the file format.
     pub markup: Arc<str>,
+    /// Where the alignment and the bullet are set.
+    pub sources: ParagraphSources,
+}
+
+/// Where a paragraph's alignment and bullet are set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ParagraphSources {
+    pub align: Source,
+    pub bullet: Source,
+}
+
+/// Where a shape's fill and outline are set: its own `spPr`, its layout's or master's
+/// placeholder, or its style (`Presentation`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ShapeSources {
+    pub fill: Source,
+    pub outline: Source,
 }
 
 impl Paragraph {
@@ -753,7 +789,8 @@ fn alpha(n: u32) -> String {
 
 /// Where a resolved value is set (ADR 0006): on the shape itself, or inherited from its
 /// layout's or master's placeholder or text styles, or from the presentation (its
-/// default text style, a table style, PowerPoint's defaults).
+/// default text style, a table style, PowerPoint's defaults); or by an edit since the
+/// deck was read, which a save writes on the shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Source {
     Own,
@@ -761,6 +798,14 @@ pub enum Source {
     Master,
     #[default]
     Presentation,
+    Edit,
+}
+
+impl Source {
+    /// Set on the shape (or slide) itself: in the file, or by an edit.
+    pub fn is_own(self) -> bool {
+        matches!(self, Source::Own | Source::Edit)
+    }
 }
 
 /// Where each of a run's looks is set.

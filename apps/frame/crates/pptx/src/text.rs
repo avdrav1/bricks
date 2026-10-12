@@ -23,8 +23,8 @@
 use crate::color::Palette;
 use crate::xml::Element;
 use presentation_model::{
-    Align, Anchor, AutoNumber, Bullet, BulletSize, Caps, Color, Insets, Paragraph, Run, RunMarkup,
-    RunSources, Source, Spacing, TextBody, Vertical,
+    Align, Anchor, AutoNumber, Bullet, BulletSize, Caps, Color, Insets, Paragraph,
+    ParagraphSources, Run, RunMarkup, RunSources, Source, Spacing, TextBody, Vertical,
 };
 use std::sync::Arc;
 
@@ -143,6 +143,8 @@ struct ParaProps {
     bullet_font: Option<Option<String>>,
     bullet_color: Option<Option<Color>>,
     bullet_size: Option<BulletSize>,
+    /// Where `align` and `bullet` were set.
+    from: ParagraphSources,
     run: RunProps,
 }
 
@@ -233,6 +235,7 @@ impl ParaProps {
                 "dist" | "thaiDist" => Align::Distributed,
                 _ => Align::Left,
             });
+            self.from.align = source;
         }
         if let Some(m) = ppr.num("marL") {
             self.margin_left = Some(m);
@@ -245,19 +248,27 @@ impl ParaProps {
                 "lnSpc" => self.line_spacing = spacing(e).or(self.line_spacing),
                 "spcBef" => self.space_before = spacing(e).or(self.space_before),
                 "spcAft" => self.space_after = spacing(e).or(self.space_after),
-                "buNone" => self.bullet = Some(BulletKind::Off),
+                "buNone" => {
+                    self.bullet = Some(BulletKind::Off);
+                    self.from.bullet = source;
+                }
                 "buChar" => {
                     self.bullet = Some(BulletKind::Char(
                         e.attr("char").unwrap_or("\u{2022}").to_owned(),
-                    ))
+                    ));
+                    self.from.bullet = source;
                 }
                 "buAutoNum" => {
                     self.bullet = Some(BulletKind::Number {
                         scheme: e.attr("type").unwrap_or("arabicPeriod").to_owned(),
                         start: e.num("startAt").unwrap_or(1),
-                    })
+                    });
+                    self.from.bullet = source;
                 }
-                "buBlip" => self.bullet = Some(BulletKind::Char("\u{2022}".into())),
+                "buBlip" => {
+                    self.bullet = Some(BulletKind::Char("\u{2022}".into()));
+                    self.from.bullet = source;
+                }
                 "buFontTx" => self.bullet_font = Some(None),
                 "buFont" => {
                     self.bullet_font = Some(e.attr("typeface").map(|f| ctx.fonts.resolve(f)))
@@ -362,6 +373,9 @@ pub(crate) fn body(
         font_scale: 1.0,
         line_reduction: 0.0,
         vertical: Vertical::Horizontal,
+        levels: (0..LEVELS.len())
+            .map(|l| paragraph(l, &styles.level(l, ctx), Vec::new(), ctx))
+            .collect(),
     };
     let own_body = tx_body.child("bodyPr");
     for b in styles.body.iter().copied().chain(own_body) {
@@ -422,30 +436,39 @@ pub(crate) fn body(
             run.slide_number = r.name == "fld" && r.attr("type") == Some("slidenum");
             runs.push(run);
         }
-        let mut paragraph = Paragraph {
-            level: level as u8,
-            align: props.align.unwrap_or_default(),
-            margin_left: props.margin_left.unwrap_or(0),
-            indent: props.indent.unwrap_or(0),
-            line_spacing: props.line_spacing.unwrap_or(Spacing::Lines(1.0)),
-            space_before: props.space_before.unwrap_or(Spacing::Points(0.0)),
-            space_after: props.space_after.unwrap_or(Spacing::Points(0.0)),
-            bullet: bullet(&props),
-            runs,
-            end: Run {
-                markup: RunMarkup {
-                    field: Arc::from(""),
-                    props: end_markup,
-                },
-                ..run(String::new(), &end, ctx)
+        let mut paragraph = paragraph(level, &props, runs, ctx);
+        paragraph.end = Run {
+            markup: RunMarkup {
+                field: Arc::from(""),
+                props: end_markup,
             },
-            markup: ppr.map_or_else(|| Arc::from(""), |e| raw(source, e)),
+            ..run(String::new(), &end, ctx)
         };
+        paragraph.markup = ppr.map_or_else(|| Arc::from(""), |e| raw(source, e));
         paragraph.merge_runs();
         text.paragraphs.push(paragraph);
     }
     text.number_bullets();
     Some(text)
+}
+
+/// A paragraph at `level` with `props` and `runs`, its mark the props' run look; no
+/// markup.
+fn paragraph(level: usize, props: &ParaProps, runs: Vec<Run>, ctx: &TextContext<'_>) -> Paragraph {
+    Paragraph {
+        level: level as u8,
+        align: props.align.unwrap_or_default(),
+        margin_left: props.margin_left.unwrap_or(0),
+        indent: props.indent.unwrap_or(0),
+        line_spacing: props.line_spacing.unwrap_or(Spacing::Lines(1.0)),
+        space_before: props.space_before.unwrap_or(Spacing::Points(0.0)),
+        space_after: props.space_after.unwrap_or(Spacing::Points(0.0)),
+        bullet: bullet(props),
+        runs,
+        end: run(String::new(), &props.run, ctx),
+        markup: Arc::from(""),
+        sources: props.from,
+    }
 }
 
 fn body_props(text: &mut TextBody, b: &Element) {
