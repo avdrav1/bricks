@@ -57,7 +57,7 @@ fn type_text(
 ) -> TextPos {
     for c in text.chars() {
         let edit = TextEdit::typing(deck, s, at, at, &c.to_string()).unwrap();
-        at = history.apply(deck, edit).caret;
+        at = history.apply(deck, edit).caret().unwrap();
     }
     at
 }
@@ -153,11 +153,14 @@ fn undo_and_redo_restore_each_step() {
     // Enter between them, then a line break.
     let mid = TextPos::new(0, at.offset - "world".len());
     let enter = TextEdit::new_paragraph(&deck, tb, mid, mid).unwrap();
-    let at = history.apply(&mut deck, enter).caret;
+    let at = history.apply(&mut deck, enter).caret().unwrap();
     assert_eq!(at, TextPos::new(1, 0));
     step(&deck);
     let br = TextEdit::line_break(&deck, tb, at, at).unwrap();
-    assert_eq!(history.apply(&mut deck, br).caret, TextPos::new(1, 1));
+    assert_eq!(
+        history.apply(&mut deck, br).caret(),
+        Some(TextPos::new(1, 1))
+    );
     step(&deck);
     // Backspace twice: the line break, then the paragraph end (the paragraphs merge).
     for at in [TextPos::new(1, 1), TextPos::new(1, 0)] {
@@ -223,7 +226,7 @@ fn new_paragraphs_take_their_numbers() {
     // Enter after "First level": an empty paragraph shows no number until typed into.
     let end = TextPos::new(0, "First level".len());
     let enter = TextEdit::new_paragraph(&deck, list, end, end).unwrap();
-    let at = history.apply(&mut deck, enter).caret;
+    let at = history.apply(&mut deck, enter).caret().unwrap();
     assert_eq!(marks(&deck)[1], None);
     type_text(&mut deck, &mut history, list, at, "Inserted");
     let now = marks(&deck);

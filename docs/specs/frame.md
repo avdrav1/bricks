@@ -38,7 +38,8 @@ Editing slide text on the slide and in the outline view, moving and resizing sha
 Built so far:
 
 - **Slide text.** A click in a text box or placeholder puts the caret where it lands (Shift+click selects to it); the canvas outlines empty placeholders, dashed, so there's somewhere to click. Typing, Backspace, Delete, Enter (a new paragraph with the same level, alignment, and bullet; numbers renumber), Shift+Enter (a line break), the arrows, Home and End (with Ctrl, the whole text's), Shift with any of them to select, Ctrl+A, and Escape to stop. Typed text takes the look of the character before the caret, or of an empty paragraph's mark, so a placeholder keeps its layout's style. While text is edited the arrows move the caret; Page Up and Page Down stop editing and change slides.
-- **Undo.** Ctrl+Z undoes and Ctrl+Shift+Z or Ctrl+Y redoes, a word of typing at a time, going to the slide the step changed.
+- **Slides.** New Slide (Ctrl+M, or the header bar's New Slide button) adds a slide after the current one on its layout, or on Title and Content after a title slide; the menu beside the button shows the deck's layouts as thumbnails of the slides they make, with their names, and picking one adds a slide on it. A new slide has its layout's placeholders, empty and outlined, ready to type into. Ctrl+D duplicates the current slide; Delete or Backspace in the slide list deletes it; Ctrl+Up and Ctrl+Down, or dragging a thumbnail, move it. The slide list's context menu has New Slide, Duplicate Slide, and Delete Slide. The canvas's accessible name says the slide's layout ("Slide 2, Title and Content").
+- **Undo.** Ctrl+Z undoes and Ctrl+Shift+Z or Ctrl+Y redoes, a word of typing or one slide change at a time, going to the slide the step changed.
 
 ## Non-goals for now
 

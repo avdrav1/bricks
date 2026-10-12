@@ -13,11 +13,32 @@ pub const EMU_PER_INCH: i64 = 914_400;
 /// EMU per typographic point.
 pub const EMU_PER_POINT: i64 = 12_700;
 
-/// A whole deck: the slide size and the slides in show order.
+/// A whole deck: the slide size, the slides in show order, and the slide layouts new
+/// slides are made from.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Presentation {
     pub size: Size,
     pub slides: Vec<Slide>,
+    /// The deck's slide layouts, master by master, in the file's order.
+    pub layouts: Vec<Layout>,
+}
+
+/// A slide layout (Title Slide, Title and Content, ...).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Layout {
+    /// Its name, as PowerPoint's New Slide menu shows it (`cSld name`).
+    pub name: String,
+    /// Its type (`sldLayout type`): `title`, `obj` (Title and Content), `twoObj`,
+    /// `titleOnly`, `blank`, `secHead`, ..., `cust` for a custom one.
+    pub kind: String,
+    /// The layout's part in the package (`ppt/slideLayouts/slideLayout2.xml`).
+    pub part: String,
+    /// The master it belongs to, by position in the deck's list of masters.
+    pub master: usize,
+    /// A new slide on this layout, as PowerPoint makes one: the layout's placeholders
+    /// (but date, footer, and slide number), empty, and what the layout and its master
+    /// show.
+    pub slide: Slide,
 }
 
 /// A width and height in EMU.
@@ -38,6 +59,12 @@ pub struct Slide {
     pub hidden: bool,
     /// The speaker notes' text, paragraphs joined by `\n`; empty without notes.
     pub notes: String,
+    /// Its layout, by index into [`Presentation::layouts`]; `None` when the deck doesn't
+    /// list the layout the slide names.
+    pub layout: Option<usize>,
+    /// The part it was read from, or copied from for a duplicate; `None` for a slide made
+    /// from a layout.
+    pub part: Option<String>,
 }
 
 impl Slide {

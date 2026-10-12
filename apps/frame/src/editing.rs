@@ -9,7 +9,7 @@
 
 use crate::slide_view::Editing;
 use crate::window::DeckWindow;
-use deck_edit::{Change, ShapeRef, TextEdit, TextPos};
+use deck_edit::{ShapeRef, TextEdit, TextPos};
 use gtk::prelude::*;
 use gtk::{gdk, glib};
 use presentation_model::Presentation;
@@ -66,7 +66,7 @@ pub fn attach(view: &Rc<DeckWindow>) {
 }
 
 /// Show `editing` on the canvas (`None`: not editing), with the input method's caret.
-fn show(view: &DeckWindow, editing: Option<Editing>) {
+pub(crate) fn show(view: &DeckWindow, editing: Option<Editing>) {
     view.canvas.set_editing(editing);
     if let Some(area) = view.canvas.caret_area() {
         view.im.set_cursor_location(&area);
@@ -76,7 +76,7 @@ fn show(view: &DeckWindow, editing: Option<Editing>) {
 fn clicked(view: &DeckWindow, x: f64, y: f64, shift: bool) {
     view.canvas.grab_focus();
     view.im.reset();
-    view.history.borrow_mut().seal();
+    view.seal();
     let editing = match (view.canvas.text_at(x, y), view.canvas.editing()) {
         (Some((shape, pos)), Some(e)) if shift && e.shape == shape => Some(Editing {
             caret: pos,
@@ -102,54 +102,10 @@ fn edit(
         shape: e.shape,
     };
     let (from, to) = e.range();
-    let Some(edit) = make(&view.deck.presentation(), shape, from, to) else {
-        return;
-    };
-    let change = view
-        .history
-        .borrow_mut()
-        .apply(&mut view.deck.presentation_mut(), edit);
-    changed(view, change, true);
-}
-
-/// Show what `change` changed: its slide, redrawn with its thumbnail and accessible
-/// description, and, when `caret`, the caret where it leaves the text.
-fn changed(view: &DeckWindow, change: Change, caret: bool) {
-    let slide = change.shape.slide;
-    if view.canvas.index() != slide {
-        view.go(slide);
-    }
-    view.describe(slide);
-    if let Some(thumb) = view.thumbs.get(slide) {
-        thumb.queue_draw();
-    }
-    show(
-        view,
-        caret.then(|| Editing::at(change.shape.shape, change.caret)),
-    );
-}
-
-/// Ctrl+Z: undo the last step, showing where it was.
-pub fn undo(view: &DeckWindow) {
-    let editing = view.canvas.editing().is_some();
-    let change = view
-        .history
-        .borrow_mut()
-        .undo(&mut view.deck.presentation_mut());
-    if let Some(change) = change {
-        changed(view, change, editing);
-    }
-}
-
-/// Ctrl+Shift+Z, Ctrl+Y: redo the last step undone.
-pub fn redo(view: &DeckWindow) {
-    let editing = view.canvas.editing().is_some();
-    let change = view
-        .history
-        .borrow_mut()
-        .redo(&mut view.deck.presentation_mut());
-    if let Some(change) = change {
-        changed(view, change, editing);
+    // Built before applying: the deck is borrowed to build it.
+    let edit = make(&view.deck.presentation(), shape, from, to);
+    if let Some(edit) = edit {
+        view.apply(edit);
     }
 }
 
@@ -173,7 +129,7 @@ fn key_pressed(view: &DeckWindow, key: gdk::Key, mods: gdk::ModifierType) -> gli
     let alt = mods.contains(gdk::ModifierType::ALT_MASK);
     match key {
         Key::Escape => {
-            view.history.borrow_mut().seal();
+            view.seal();
             show(view, None);
         }
         Key::BackSpace | Key::Delete | Key::KP_Delete => {
@@ -211,7 +167,7 @@ fn key_pressed(view: &DeckWindow, key: gdk::Key, mods: gdk::ModifierType) -> gli
         | Key::KP_End => move_caret(view, e, key, shift, ctrl),
         Key::a | Key::A if ctrl && !alt => {
             let end = text_end(view, e.shape);
-            view.history.borrow_mut().seal();
+            view.seal();
             show(
                 view,
                 Some(Editing {
@@ -223,7 +179,7 @@ fn key_pressed(view: &DeckWindow, key: gdk::Key, mods: gdk::ModifierType) -> gli
             );
         }
         Key::Page_Up | Key::KP_Page_Up | Key::Page_Down | Key::KP_Page_Down => {
-            view.history.borrow_mut().seal();
+            view.seal();
             show(view, None);
             let down = matches!(key, Key::Page_Down | Key::KP_Page_Down);
             view.step(if down { 1 } else { -1 });
@@ -277,7 +233,7 @@ fn move_caret(view: &DeckWindow, e: Editing, key: gdk::Key, shift: bool, ctrl: b
         Key::Home | Key::KP_Home => placed.line_ends(e.caret).0,
         _ => placed.line_ends(e.caret).1,
     };
-    view.history.borrow_mut().seal();
+    view.seal();
     show(
         view,
         Some(Editing {

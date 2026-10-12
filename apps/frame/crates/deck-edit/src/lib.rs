@@ -1,12 +1,14 @@
 //! Frame's edits (ADR 0006): every change to a deck is a command that stores the operation
-//! and what undoes it, never a snapshot of the deck, and names the slide, shape, and
-//! property it changes, so a save can patch only those. [`History`] keeps the steps for
+//! and what undoes it, never a snapshot of the deck, and names what it changes (a shape's
+//! text, the slide list), so a save can patch only those. [`History`] keeps the steps for
 //! undo and redo.
 //!
 //! Toolkit-free: no GTK, no I/O.
 
+mod slides;
 mod text;
 
+pub use slides::{next_layout, SlideEdit};
 pub use text::{after, before, look, text_end, TextEdit, TextPos};
 
 use presentation_model::Presentation;
@@ -22,37 +24,52 @@ pub struct ShapeRef {
     pub shape: usize,
 }
 
-/// The part of a shape an edit changes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Property {
-    /// The text: paragraphs and runs.
-    Text,
+/// What applying, undoing, or redoing an edit changed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Change {
+    /// A shape's text, and where the caret goes in it.
+    Text { shape: ShapeRef, caret: TextPos },
+    /// The slide list (slides added, removed, or moved), and the slide to show.
+    Slides { show: usize },
 }
 
-/// What applying, undoing, or redoing an edit changed, and where the caret goes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Change {
-    pub shape: ShapeRef,
-    pub property: Property,
-    pub caret: TextPos,
+impl Change {
+    /// The slide to show.
+    pub fn slide(&self) -> usize {
+        match self {
+            Change::Text { shape, .. } => shape.slide,
+            Change::Slides { show } => *show,
+        }
+    }
+
+    /// Where the caret goes, for a text change.
+    pub fn caret(&self) -> Option<TextPos> {
+        match self {
+            Change::Text { caret, .. } => Some(*caret),
+            Change::Slides { .. } => None,
+        }
+    }
 }
 
 /// One undoable change to a deck.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Edit {
     Text(TextEdit),
+    Slides(SlideEdit),
 }
 
 impl Edit {
     fn apply(&self, deck: &mut Presentation) -> Change {
         match self {
             Edit::Text(e) => e.apply(deck),
+            Edit::Slides(e) => e.apply(deck),
         }
     }
 
     fn revert(&self, deck: &mut Presentation) -> Change {
         match self {
             Edit::Text(e) => e.revert(deck),
+            Edit::Slides(e) => e.revert(deck),
         }
     }
 
@@ -60,6 +77,7 @@ impl Edit {
     fn absorb(&mut self, next: &Edit) -> bool {
         match (self, next) {
             (Edit::Text(a), Edit::Text(b)) => a.absorb(b),
+            _ => false,
         }
     }
 }
@@ -67,6 +85,12 @@ impl Edit {
 impl From<TextEdit> for Edit {
     fn from(e: TextEdit) -> Edit {
         Edit::Text(e)
+    }
+}
+
+impl From<SlideEdit> for Edit {
+    fn from(e: SlideEdit) -> Edit {
+        Edit::Slides(e)
     }
 }
 

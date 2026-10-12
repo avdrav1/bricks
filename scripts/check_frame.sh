@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# FRAME-4 acceptance: Frame's viewer window; FRAME-5: its slideshow; FRAME-6: text editing.
+# FRAME-4 acceptance: Frame's viewer window; FRAME-5: its slideshow; FRAME-6: text editing;
+# FRAME-7: adding, duplicating, deleting, and moving slides.
 #
 #   scripts/check_frame.sh [BINARY]   (default target/release/frame)
 #
@@ -37,6 +38,14 @@
 #      paragraph; Ctrl+A and Delete empty the placeholder, and typing fills it; Escape
 #      stops editing, so Page Down shows slide 2. On the fixture, a click at the end of
 #      slide 3's text box and "!" change it. Clicks go through the virtual pointer.
+# FRAME-7 acceptance: slides, with undo.
+#  10. in layouts.pptx, Ctrl+M on the title slide adds slide 2 on Title and Content (the
+#      canvas's accessible name says the layout) and the list grows to 11; the New Slide
+#      button adds one on the current layout; the menu beside it lists the layouts, and
+#      picking Two Content adds a slide on it; each Ctrl+Z takes one out again, Ctrl+Y puts
+#      one back; Ctrl+D duplicates slide 3 and Ctrl+Up twice moves the copy to 2; a click
+#      on thumbnail 1 and Delete delete it, Ctrl+Z restores it; dragging thumbnail 1 to
+#      the lower half of thumbnail 3 moves the slide to 3, and Ctrl+Z moves it back.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -123,6 +132,23 @@ def ink(path, name, fx0, fy0, fx1, fy1):
     ys = range(round(top + float(fy0) * h), round(top + float(fy1) * h))
     print(f"ink {name}: {sum(1 for y in ys for x in xs if max(at(x, y)) < 200)}")
 
+def where(name):
+    # The centre of the first widget named NAME, to click or drag it.
+    desktop = Atspi.get_desktop(0)
+    stack = [desktop.get_child_at_index(i) for i in range(desktop.get_child_count())]
+    stack = [a for a in stack if a is not None and a.get_name() == "frame"]
+    while stack:
+        n = stack.pop(0)
+        if n is None:
+            continue
+        if n.get_name() == name and n.get_component_iface() is not None:
+            e = n.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+            if e.width > 0:
+                print(e.x + e.width // 2, e.y + e.height // 2)
+                return
+        stack.extend(n.get_child_at_index(i) for i in range(n.get_child_count()))
+    sys.exit(f"nothing named {name}")
+
 def screen(path, points):
     # Absolute points (the slideshow fills the screen) and the share of white pixels.
     p = GdkPixbuf.Pixbuf.new_from_file(path)
@@ -143,6 +169,8 @@ elif sys.argv[1] == "point":
     point(*sys.argv[2:5])
 elif sys.argv[1] == "ink":
     ink(*sys.argv[2:8])
+elif sys.argv[1] == "where":
+    where(sys.argv[2])
 else:
     main(sys.argv[1], sys.argv[2:])
 PY
@@ -206,7 +234,7 @@ session() {
   shot edit0
   python3 /tmp/px.py ink /shots/edit0.png before 0.15 0.57 0.85 0.65
   read x y < <(python3 /tmp/px.py point /shots/edit0.png 0.828 0.6095)
-  python3 /scripts/dnd_helpers.py drag $x $y $x $y; sleep 0.5
+  python3 /scripts/dnd_helpers.py click $x $y; sleep 0.5
   keys -k Left; sleep 0.3; shown left
   keys -k End " here"; sleep 0.5; shot edit1; shown typed
   python3 /tmp/px.py ink /shots/edit1.png after 0.15 0.57 0.85 0.65
@@ -222,8 +250,31 @@ session() {
   frame /tmp/f/fixture.pptx >>/tmp/app.log 2>&1 & sleep 3
   keys -k Next -k Next; sleep 0.5; shot textbox0
   read x y < <(python3 /tmp/px.py point /shots/textbox0.png 0.730 0.878)
-  python3 /scripts/dnd_helpers.py drag $x $y $x $y; sleep 0.5
+  python3 /scripts/dnd_helpers.py click $x $y; sleep 0.5
   keys "!"; sleep 0.5; shot textbox1; shown textbox
+  pkill -x frame; sleep 0.5
+
+  echo "== 10 slides"
+  frame /tmp/f/layouts.pptx >>/tmp/app.log 2>&1 & sleep 3
+  keys -M ctrl m -m ctrl; sleep 0.5; shown ctrlm
+  python3 /tmp/a11y.py press "New Slide"; sleep 0.5; shown button
+  read x y < <(python3 /tmp/px.py where Layouts)
+  python3 /scripts/dnd_helpers.py click $x $y; sleep 1; shot layouts; shown menu
+  python3 /tmp/a11y.py press "Two Content"; sleep 1; shown picked
+  keys -M ctrl z -m ctrl; sleep 0.5; shown undo1
+  keys -M ctrl z -m ctrl -M ctrl z -m ctrl; sleep 0.5; shown undo3
+  keys -M ctrl y -m ctrl; sleep 0.5; shown redo1
+  keys -M ctrl z -m ctrl; sleep 0.5
+  keys -k Next -k Next -M ctrl d -m ctrl; sleep 0.5; shown dup
+  keys -M ctrl -k Up -k Up -m ctrl; sleep 0.5; shown up
+  read x y < <(python3 /tmp/px.py where "Slide 1")
+  python3 /scripts/dnd_helpers.py click $x $y; sleep 0.5
+  keys -k Delete; sleep 0.5; shown deleted
+  keys -M ctrl z -m ctrl; sleep 0.5; shown undelete
+  read x1 y1 < <(python3 /tmp/px.py where "Slide 1")
+  read x3 y3 < <(python3 /tmp/px.py where "Slide 3")
+  python3 /scripts/dnd_helpers.py drag $x1 $y1 $x3 $((y3 + 30)); sleep 1; shot dragged; shown dragged
+  keys -M ctrl z -m ctrl; sleep 0.5; shown undrag
   pkill -x frame; sleep 0.5
 
   echo "== 5 drop"
@@ -246,7 +297,7 @@ session() {
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
-echo "== app log"; grep "^frame:" /tmp/app.log | head -20
+echo "== app log"; grep -E "^frame:|panicked|^thread" -A2 /tmp/app.log | head -30
 ' 2>&1) || true
 [ -n "${VERBOSE:-}" ] && sed 's/^/  /' <<<"$out"
 section() { awk -v s="== $1" '/^== /{on=($0 ~ "^" s)} on' <<<"$out"; }
@@ -315,6 +366,30 @@ absent "9: Ctrl+A and Delete empty the placeholder" "9 editing" "^cleared: (subt
 check "9: typing fills the empty placeholder" "9 editing" "^retyped: Typed$"
 check "9: Escape stops editing; Page Down changes slides again" "9 editing" "^escape: Slide 2 of 10$"
 check "9: typing in a text box changes it" "9 editing" "^textbox: Text box: bold blue and theme in Liberation Serif!$"
+# FRAME-7: adding, duplicating, deleting, and moving slides.
+check "10: Ctrl+M after the title slide adds slide 2" "10 slides" "^ctrlm: Slide 2 of 11$"
+check "10: ... on Title and Content" "10 slides" "^ctrlm: Slide 2, Title and Content$"
+check "10: ... and the slide list follows" "10 slides" "^ctrlm: Slide 11$"
+check "10: New Slide adds one on the current slide's layout" "10 slides" "^button: Slide 3, Title and Content$"
+check "10: ... after it" "10 slides" "^button: Slide 3 of 12$"
+for l in "Title Slide" "Title and Content" "Two Content" "Picture with Caption" "Vertical Title and Text"; do
+  check "10: the New Slide menu shows the layout $l" "10 slides" "^menu: $l$"
+done
+check "10: picking Two Content adds a slide on it" "10 slides" "^picked: Slide 4, Two Content$"
+check "10: ... after the current one" "10 slides" "^picked: Slide 4 of 13$"
+check "10: Ctrl+Z takes it out, back on the slide before" "10 slides" "^undo1: Slide 3 of 12$"
+check "10: ... and the others, one step each" "10 slides" "^undo3: Slide 1 of 10$"
+absent "10: ... the list too" "10 slides" "^undo3: Slide 11$"
+check "10: Ctrl+Y adds the first back" "10 slides" "^redo1: Slide 2, Title and Content$"
+check "10: Ctrl+D duplicates slide 3" "10 slides" "^dup: Slide 4, Section Header$"
+check "10: ... after it" "10 slides" "^dup: Slide 4 of 11$"
+check "10: Ctrl+Up twice moves the copy to slide 2" "10 slides" "^up: Slide 2, Section Header$"
+check "10: Delete in the slide list deletes slide 1" "10 slides" "^deleted: Slide 1 of 10$"
+absent "10: ... and its text is gone" "10 slides" "^deleted: Centered Title$"
+check "10: Ctrl+Z brings it back" "10 slides" "^undelete: Slide 1, Title Slide$"
+check "10: dragging slide 1 below slide 3 moves it to 3" "10 slides" "^dragged: Slide 3, Title Slide$"
+check "10: ... the slide list shows it there" "10 slides" "^dragged: Slide 3 of 11$"
+check "10: Ctrl+Z moves it back" "10 slides" "^undrag: Slide 1, Title Slide$"
 if [ $fail = 0 ]; then echo "FRAME OK"; else
   echo "FRAME CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1
