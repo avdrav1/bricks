@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # FRAME-4 acceptance: Frame's viewer window; FRAME-5: its slideshow; FRAME-6: text editing;
 # FRAME-7: adding, duplicating, deleting, and moving slides; FRAME-8: saving; FRAME-12:
-# inserting; FRAME-13: the outline; FRAME-14: new decks.
+# inserting; FRAME-13: the outline; FRAME-14: new decks; FRAME-15: the reference task.
 #
 #   scripts/check_frame.sh [BINARY]   (default target/release/frame)
 #
@@ -99,18 +99,35 @@
 #      path saves it; the window takes the file name, the slide part holds the title and
 #      the package five layouts. Ctrl+N opens another Untitled window, and Ctrl+N again
 #      an Untitled 2.
-# Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
+# FRAME-15 acceptance: the spec's reference task (a 4-slide deck: "Quarterly review" with
+# a subtitle; "Highlights" with three bullets, one at the second level; "Revenue" with a
+# picture from a file; "Next steps" with two bullets; saved as .pptx) from `frame` without
+# a file, by keyboard and pointer, its input actions counted (clicks, and key presses or
+# chords other than the content's own characters):
+#  17. on the canvas: Ctrl+Enter from placeholder to placeholder and on to new slides,
+#      Tab for the second level, Insert, Picture…, Ctrl+M, Ctrl+S;
+#  18. in the outline: Enter, Tab, Shift+Tab, Ctrl+Enter for a new slide, Insert,
+#      Picture… from the outline, Ctrl+S.
+#      Each count is below PowerPoint's (the BACKLOG.md note on FRAME-15), and LibreOffice
+#      on this machine (scripts/lo_pptx.py dump) reads each saved deck as the task.
+# Needs docker, and LibreOffice for 17 and 18. VERBOSE=1 prints the transcript; SHOTS=DIR
+# saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 bin=$(realpath "${1:-target/release/frame}")
 [ -x "$bin" ] || { echo "no binary at $bin (cargo build --release -p frame)"; exit 1; }
 data=$(realpath apps/frame/crates/pptx/tests/data)
+# PowerPoint's input actions for the reference task: Microsoft 365's shortest documented
+# path, step by step with sources in the BACKLOG.md note on FRAME-15.
+powerpoint=21
 
 shots=()
 if [ -n "${SHOTS:-}" ]; then mkdir -p "$SHOTS"; shots=(-v "$(realpath "$SHOTS"):/shots"); fi
+# The task decks (17, 18) come out here, for LibreOffice on this machine to read.
+ref=$(mktemp -d); trap 'rm -rf "$ref"' EXIT
 # Arch's sway binary carries cap_sys_nice: exec fails without it in the container's set.
 out=$(docker run --rm --cap-add SYS_NICE -v "$bin:/usr/local/bin/frame:ro" -v "$data:/data:ro" \
-  -v "$PWD/scripts:/scripts:ro" "${shots[@]}" archlinux:latest bash -c '
+  -v "$PWD/scripts:/scripts:ro" -v "$ref:/out" "${shots[@]}" archlinux:latest bash -c '
 set -uo pipefail
 pacman -Syu --noconfirm --needed sway wtype grim gtk4 ttf-dejavu dbus python-gobject at-spi2-core \
   python-pywayland wlr-protocols wayland pkgconf >/dev/null 2>&1
@@ -643,11 +660,98 @@ session() {
   keys -M ctrl n -m ctrl; sleep 3; shown second
   keys -M ctrl n -m ctrl; sleep 3; shot new2; shown third
   pkill -x frame; sleep 0.5
+
+  # FRAME-15: the spec reference task, by keyboard and pointer, on the canvas (17) and in
+  # the outline (18), its input actions counted: press (each a key or a chord: Return,
+  # shift+Tab, ctrl+Return) and tap (a click on the widget named) count one each; say
+  # types the content (titles, bullets, file paths), which does not count.
+  press() {
+    local k key m a mods
+    for k in "$@"; do
+      key=${k##*+}; a=(); mods=()
+      [ "$key" != "$k" ] && IFS=+ read -ra mods <<<"${k%+*}"
+      for m in "${mods[@]}"; do a+=(-M "$m"); done
+      if [ ${#key} = 1 ]; then a+=("$key"); else a+=(-k "$key"); fi
+      for m in "${mods[@]}"; do a+=(-m "$m"); done
+      keys "${a[@]}"; n=$((n + 1))
+    done
+  }
+  tap() {
+    read x y < <(python3 /tmp/px.py where "$1")
+    python3 /scripts/dnd_helpers.py click $x $y; n=$((n + 1)); sleep 1
+  }
+  say() { keys "$1"; }
+  python3 /tmp/px.py png /tmp/f/green.png
+
+  echo "== 17 task on the canvas"
+  n=0
+  frame >>/tmp/app.log 2>&1 & sleep 3
+  say "Quarterly review"; press ctrl+Return
+  say "Frame against PowerPoint"; press ctrl+Return
+  say "Highlights"; press ctrl+Return
+  say "Growth"; press Return
+  say "Margins"; press Return Tab
+  say "Up 3%"; press ctrl+Return
+  say "Revenue"; tap Insert; tap "Picture…"
+  say "/tmp/f/green.png"; press Return; sleep 3
+  press ctrl+m
+  say "Next steps"; press ctrl+Return
+  say "Hire"; press Return
+  say "Ship"; sleep 1; shot task-canvas; shown canvas
+  press ctrl+s; sleep 2
+  say "/tmp/f/canvas-task"; press Return; sleep 3; shown saved
+  echo "actions: $n"
+  cp /tmp/f/canvas-task.pptx /out/
+  pkill -x frame; sleep 0.5
+
+  echo "== 18 task in the outline"
+  n=0
+  frame >>/tmp/app.log 2>&1 & sleep 3
+  press ctrl+shift+o; sleep 1
+  say "Quarterly review"; press Return
+  say "Frame against PowerPoint"; press Tab ctrl+Return
+  say "Highlights"; press Return
+  say "Growth"; press Tab Return
+  say "Margins"; press Return Tab
+  say "Up 3%"; press ctrl+Return
+  say "Revenue"; tap Insert; tap "Picture…"
+  say "/tmp/f/green.png"; press Return; sleep 3
+  press ctrl+Return
+  say "Next steps"; press Return
+  say "Hire"; press Tab Return
+  say "Ship"; sleep 1; shot task-outline; shown outline
+  press ctrl+s; sleep 2
+  say "/tmp/f/outline-task"; press Return; sleep 3; shown saved
+  echo "actions: $n"
+  cp /tmp/f/outline-task.pptx /out/
+  pkill -x frame; sleep 0.5
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
 echo "== app log"; grep -E "^frame:|panicked|^thread" -A2 /tmp/app.log | head -30
 ' 2>&1) || true
+# 17, 18: the task decks as LibreOffice reads them: a line per paragraph with text (slide,
+# shape kind, level, text) and per picture (slide, type, pixel size), then the slides.
+lo_summary='
+import sys
+slide, kind, slides = 0, "", 0
+for line in sys.stdin:
+    f = line.rstrip("\n").split("\t")
+    if f[0] == "slide":
+        slide, slides = int(f[1]), slides + 1
+    elif f[0] == "shape":
+        kind = f[2]
+    elif f[0] == "para" and f[3]:
+        print(f"lo {slide} {kind} {f[1]} {f[3]}")
+    elif f[0] == "picture":
+        print(f"lo {slide} picture {f[1]} {f[2]}")
+print(f"lo slides: {slides}")
+'
+for d in 17:canvas-task 18:outline-task; do
+  [ -f "$ref/${d#*:}.pptx" ] || continue
+  out+=$'\n== '"${d%%:*} lo"$'\n'$(python3 scripts/lo_pptx.py dump "$ref/${d#*:}.pptx" 2>&1 |
+    python3 -c "$lo_summary")
+done
 [ -n "${VERBOSE:-}" ] && sed 's/^/  /' <<<"$out"
 section() { awk -v s="== $1" '/^== /{on=($0 ~ "^" s)} on' <<<"$out"; }
 fail=0
@@ -865,6 +969,36 @@ check "16: ... and the five layouts into the package" "16 new" "^parts .*slideLa
 check "16: Ctrl+N opens another Untitled window" "16 new" "^second: Untitled$"
 check "16: ... beside the saved one" "16 new" "^second: new\.pptx$"
 check "16: Ctrl+N again opens Untitled 2" "16 new" "^third: Untitled 2$"
+# FRAME-15: each way builds the task in fewer input actions than PowerPoint, and
+# LibreOffice reads the saved deck as the task: these lines, no others.
+task="lo 1 TitleTextShape 0 Quarterly review
+lo 1 SubtitleShape 0 Frame against PowerPoint
+lo 2 TitleTextShape 0 Highlights
+lo 2 OutlinerShape 0 Growth
+lo 2 OutlinerShape 0 Margins
+lo 2 OutlinerShape 1 Up 3%
+lo 3 TitleTextShape 0 Revenue
+lo 3 picture image/png 400x200
+lo 4 TitleTextShape 0 Next steps
+lo 4 OutlinerShape 0 Hire
+lo 4 OutlinerShape 0 Ship
+lo slides: 4"
+for t in "17 task on the canvas:canvas-task" "18 task in the outline:outline-task"; do
+  run=${t%%:*}; file=${t#*:}; n=${run%% *}
+  check "$n: Ctrl+S and a typed path save the task" "$run" "^saved: Saved “$file\.pptx”$"
+  actions=$(section "$run" | sed -n "s/^actions: //p")
+  if [ -n "$actions" ] && [ "$actions" -lt "$powerpoint" ]; then
+    echo "ok   $n: the task ${run#* task } takes $actions input actions, fewer than PowerPoint's $powerpoint"
+  else
+    echo "FAIL $n: the task ${run#* task } takes ${actions:-uncounted} input actions, not fewer than PowerPoint's $powerpoint"
+    fail=1
+  fi
+  got=$(section "$n lo" | grep "^lo ")
+  if [ "$got" = "$task" ]; then echo "ok   $n: LibreOffice reads the saved deck as the task"; else
+    echo "FAIL $n: LibreOffice reads the saved deck as:"
+    sed "s/^/       /" <<<"${got:-(nothing; is LibreOffice installed?)}"; fail=1
+  fi
+done
 if [ $fail = 0 ]; then echo "FRAME OK"; else
   echo "FRAME CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

@@ -2,11 +2,13 @@
 //! rebuilt whenever slides come and go. New Slide (Ctrl+M, the header bar's button)
 //! adds a slide after the current one on its layout, or on Title and Content after a
 //! title slide; the button's menu shows the deck's layouts as thumbnails to pick from.
-//! Ctrl+D duplicates the slide, Delete in the list deletes it, and Ctrl+Up and Ctrl+Down
-//! or dragging a thumbnail move it; the list's context menu has New, Duplicate, and Delete.
+//! A slide New Slide adds starts with the caret in its title (FRAME-15). Ctrl+D
+//! duplicates the slide, Delete in the list deletes it, and Ctrl+Up and Ctrl+Down or
+//! dragging a thumbnail move it; the list's context menu has New, Duplicate, and Delete.
 //! Each is one step in the deck's undo history; nothing asks for confirmation.
 
 use crate::deck::Deck;
+use crate::editing;
 use crate::slide_view::SlideView;
 use crate::window::DeckWindow;
 use deck_edit::SlideEdit;
@@ -95,19 +97,21 @@ fn current(view: &DeckWindow) -> Option<usize> {
     (view.count() > 0).then(|| view.canvas.index())
 }
 
-/// Ctrl+M: a new slide after the current one.
+/// Ctrl+M: a new slide after the current one, the caret in its title.
 pub fn new_slide(view: &DeckWindow) {
     let edit = SlideEdit::new_slide(&view.deck.presentation(), current(view));
     if let Some(edit) = edit {
         view.apply(edit);
+        editing::edit_title(view);
     }
 }
 
-/// A new slide on layout `layout` after the current one.
+/// A new slide on layout `layout` after the current one, the caret in its title.
 fn on_layout(view: &DeckWindow, layout: usize) {
     let edit = SlideEdit::on_layout(&view.deck.presentation(), current(view), layout);
     if let Some(edit) = edit {
         view.apply(edit);
+        editing::edit_title(view);
     }
 }
 

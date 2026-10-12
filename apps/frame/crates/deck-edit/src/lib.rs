@@ -5,6 +5,7 @@
 //!
 //! Toolkit-free: no GTK, no I/O.
 
+mod canvas;
 mod frame;
 mod insert;
 mod layout;
@@ -13,6 +14,7 @@ mod slides;
 mod style;
 mod text;
 
+pub use canvas::{next_placeholder, relevel, MAX_LEVEL};
 pub use frame::{movable, snap, FrameEdit, Grab, Guide, Snapped};
 pub use insert::{
     shrinks, takes_picture, Fit, FitEdit, ShapeEdit, ACCENT, ACCENT_DARK, BAND_1, BAND_2,

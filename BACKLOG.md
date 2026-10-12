@@ -143,12 +143,45 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | FRAME-12 | FR1 | P0 | done | FRAME-10 | Insert text boxes, shapes, pictures, and tables; text shrinks to fit | A dropped, pasted, or inserted picture fills the first empty picture or content placeholder, else lands centred and scaled to fit; overflowing placeholder text shrinks and saves as normAutofit; each insert undoes |
 | FRAME-13 | FR1 | P0 | done | FRAME-7 | Outline view of titles and bullets (ADR 0006) | Typing an outline makes its slides with Title and Content; Enter after a title starts a slide; Tab and Shift+Tab change levels and turn titles into bullets and back; text outside title and body placeholders is untouched (saved deck dump); outline and slide edits share undo |
 | FRAME-14 | FR1 | P0 | done | FRAME-8 | File → New from the built-in blank deck | Ctrl+N and frame without a file open a 16:9 deck with a title slide and the five standard layouts; typing a title and saving gives a .pptx LibreOffice reads with that title and all five layouts |
-| FRAME-15 | FR1 | P0 | todo | FRAME-11, FRAME-12, FRAME-13, FRAME-14 | Reference task in fewer input actions than PowerPoint | check_frame.sh builds the spec's reference deck by keyboard and pointer and counts its input actions; the count is below PowerPoint's hand count recorded in Notes; the saved deck matches the task in LibreOffice's dump |
+| FRAME-15 | FR1 | P0 | done | FRAME-11, FRAME-12, FRAME-13, FRAME-14 | Reference task in fewer input actions than PowerPoint | check_frame.sh builds the spec's reference deck by keyboard and pointer and counts its input actions; the count is below PowerPoint's hand count recorded in Notes; the saved deck matches the task in LibreOffice's dump |
 
 ## Notes
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-12 FRAME-15:** Frame does the spec's reference task in fewer input actions than PowerPoint: 15 on the canvas and 19 in the outline, against PowerPoint's 21. Measured on the task the spec names: "Quarterly review" with a subtitle; "Highlights" with Growth, Margins, and Up 3% at the second level; "Revenue" with a 400×200 PNG from a file; "Next steps" with Hire and Ship; saved as .pptx. The user chose to build both a canvas and an outline flow:
+  - Canvas flow, as PowerPoint's (`deck-edit` `canvas.rs`: `next_placeholder` and `relevel`; app `editing.rs` and `slide_list.rs`):
+    - A new deck opens, and a slide New Slide adds (Ctrl+M, the button, a picked layout, the list's menu) opens, with the caret in its title.
+    - Ctrl+Enter goes to the end of the slide's next title, subtitle, body, or content placeholder, in shape order, skipping date, footer, slide number, and header. With nothing edited it goes to the first. After the last it adds a slide as Ctrl+M does.
+    - Tab and Shift+Tab, with the caret at the start of a paragraph or a selection over several, move the paragraphs a level with that level's looks, as one step. Elsewhere they do nothing, and they never move focus off the canvas.
+  - Outline: Ctrl+Enter (`OutlineKey::NewSlide`) adds an empty Title and Content slide after the caret's slide; no text moves. Insert while the outline is shown works on the caret's slide.
+  - Bug fixed: after Insert the keys went to the hidden canvas, so the next Return hit a header button and opened a new window. The keys now go to the outline when it's shown (`insert::to_page`).
+  - PowerPoint's count (the user's call, since PowerPoint isn't available here): derived from Microsoft's documentation, not timed by hand. Counting rules, the same for Frame:
+    - Each click, key, or chord counts as one action, and each keytip key as one.
+    - Typed titles, bullets, and file paths don't count.
+    - The count runs from launch, so PowerPoint's Start screen counts.
+  - PowerPoint's shortest documented path, 21 actions:
+    - Enter (Blank presentation is focused on the Start screen); Tab to the title; Ctrl+Enter to the subtitle.
+    - The New Slide arrow, Title and Content, and a click in the title (3). Microsoft documents Ctrl+M and Ctrl+Enter as keeping the title slide's layout.
+    - Ctrl+Enter to the body; Enter; Enter; Alt+Shift+Right; Ctrl+Enter for a new slide.
+    - Insert, Pictures, This Device, and Enter.
+    - Ctrl+M, a click in the title, Ctrl+Enter, and Enter.
+    - F12, then Enter. Ctrl+S on a new file opens the OneDrive-first save pane, which costs 2 or more extra actions.
+  - Sources (support.microsoft.com, read 2026-10-12): [shortcuts](https://support.microsoft.com/en-us/accessibility/powerpoint/use-keyboard-shortcuts-to-create-powerpoint-presentations), [basic tasks with a screen reader](https://support.microsoft.com/en-us/accessibility/powerpoint/basic-tasks-to-create-a-presentation-in-powerpoint-with-a-screen-reader), [add slides](https://support.microsoft.com/en-us/powerpoint/training/add-rearrange-duplicate-and-delete-slides-in-powerpoint), [insert a picture](https://support.microsoft.com/en-us/powerpoint/training/insert-a-picture-in-powerpoint), [pictures with a screen reader](https://support.microsoft.com/en-us/accessibility/powerpoint/use-a-screen-reader-to-insert-and-edit-pictures-and-tables-in-powerpoint), [customize the save experience](https://support.microsoft.com/en-us/office/collab-files/customize-the-save-experience-in-office), [save with a screen reader](https://support.microsoft.com/en-us/accessibility/powerpoint/use-a-screen-reader-to-save-your-presentation-in-powerpoint), [outline view](https://support.microsoft.com/en-us/powerpoint/create-and-print-a-presentation-in-outline-view).
+  - Other PowerPoint routes:
+    - The content placeholder's picture icon: 19. Microsoft only implies that the icon opens the dialog.
+    - Keytips Alt, N, P, D for the picture: 22.
+    - Ctrl+S to save: 23 or more.
+    - Outline view: 26, or 24 with the icon.
+    - Third-party sources report that Ctrl+Enter after a title slide gives Title and Content. If so, PowerPoint takes 19, or 17 with the icon. Frame's canvas path, at 15, is below every variant.
+    - A hand count in PowerPoint can replace `powerpoint=21` in `scripts/check_frame.sh`.
+  - Follow-ups:
+    - In the outline, Tab on a new, still empty title does nothing when the slide before has an empty body. `demote`'s body edit is a no-op, and an empty body has no outline line for the caret. The paths type the title first; PowerPoint lets Tab come first.
+    - On the canvas, Tab at the start of a title placeholder also changes its level. PowerPoint inserts a tab there.
+  - Acceptance:
+    - `scripts/check_frame.sh` prints `FRAME OK` on this story's binary, every earlier check included. 17 (canvas) counts 15 and 18 (outline) counts 19, both below 21. LibreOffice reads each saved deck as exactly the task, with no extra paragraphs: per slide, the title and subtitle or bullets with their levels, and on slide 3 an `image/png 400x200` picture.
+    - `cargo test -p deck-edit --test canvas` (5): Ctrl+Enter's order and what it skips; Tab with looks per level, over several paragraphs as one step, and at the limits.
+    - `cargo test -p deck-edit --test outline` adds `ctrl_enter_starts_an_empty_slide_after_the_carets`.
 - **2026-10-12 SLATE-7:** Slate saves .txt and .md files. Ctrl+S (File → Save) saves over the file, and Ctrl+Shift+S (File → Save As…) saves as .md or .txt by the extension chosen. The bytes are made and written off the UI thread through `suite_file::save_atomic` (temp file, fsync, verify by re-reading, rename); editing goes on meanwhile, and a save asked for during one waits for it.
   - Writers in `document-model` (a subagent built them against a fixed contract; integrated here): `encode`, `write_text`, `write_markdown`, `Unencodable`, `MarkdownSource`, `read_markdown_source`.
     - Plain text is written back in its encoding (UTF-8 with or without BOM, UTF-16 LE/BE, Windows-1252), line ending, and final newline. Text the encoding can't hold is refused with an alert naming the character; Save As then writes UTF-8.
