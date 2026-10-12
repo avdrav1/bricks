@@ -10,6 +10,7 @@ publish = false
 [dependencies]
 encoding_rs = "0.8.35"
 pulldown-cmark = { version = "0.13", default-features = false }
+serde.workspace = true
 
 [lints]
 workspace = true

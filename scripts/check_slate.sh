@@ -61,7 +61,17 @@
 #      (AT-SPI); commit replaces it with 仮名; the input method reads "Hello world仮名"
 #      and the caret's byte offset 17 around the caret; deleting 3 bytes before the
 #      caret removes 名. Sway sends a window text input only on a focus change, so a
-#      second window takes focus and gives it back first.
+#      second window takes focus and gives it back first;
+#  18. selection and clipboard, read back with wl-paste and AT-SPI: in sel.md ("Alpha beta
+#      gamma", "Before", a 2x2 table, "After"), Shift+End, Shift+Down, Shift+Down into the
+#      table (the selection takes the whole table), and Shift+Ctrl+End each copy what they
+#      select as plain text, cells one a line; a double click on "beta" copies the word and
+#      a triple click the paragraph; Ctrl+X of the first line, then undo and redo; Ctrl+A,
+#      Ctrl+X empties the page and Ctrl+V brings it back, table included (Slate's rich
+#      clipboard), and undo empties it again; bold text copied in another Slate process
+#      offers Slate's format and plain text, and pastes into target.md still bold (ink at
+#      least 1.15 times the plain line's); text copied by another app (wl-copy) pastes as
+#      paragraphs, and undo takes the paste back.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -84,6 +94,29 @@ python -m pywayland.scanner -i /usr/share/wayland/wayland.xml \
   /usr/share/wlr-protocols/unstable/wlr-virtual-pointer-unstable-v1.xml -o /tmp/proto/wlr_proto >/dev/null
 python -m pywayland.scanner -i /usr/share/wayland/wayland.xml \
   /protocols/input-method-unstable-v2.xml -o /tmp/proto/im_proto >/dev/null 2>&1
+cat > /tmp/words.py <<"PY"
+import sys
+import gi
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import GdkPixbuf
+p = GdkPixbuf.Pixbuf.new_from_file(sys.argv[1])
+w, h, rs, n, px = p.get_width(), p.get_height(), p.get_rowstride(), p.get_n_channels(), p.get_pixels()
+dark = lambda x, y: px[y * rs + x * n] + px[y * rs + x * n + 1] + px[y * rs + x * n + 2] < 300
+rows = [y for y in range(60, h - 40) if any(dark(x, y) for x in range(w))]
+y0 = rows[0]
+y1 = y0
+while y1 + 1 in rows:
+    y1 += 1
+cols = [x for x in range(w) if any(dark(x, y) for y in range(y0, y1 + 1))]
+words, start, last = [], cols[0], cols[0]
+for x in cols[1:]:
+    if x - last > 6:
+        words.append((start + last) // 2)
+        start = x
+    last = x
+words.append((start + last) // 2)
+print("words: " + str((y0 + y1) // 2) + " " + " ".join(map(str, words)))
+PY
 cat > /tmp/preedit.py <<"PY"
 import sys
 import gi
@@ -164,13 +197,15 @@ import gi
 gi.require_version("Atspi", "2.0")
 from gi.repository import Atspi
 
-def app():
+def apps():
     d = Atspi.get_desktop(0)
     for i in range(d.get_child_count()):
         a = d.get_child_at_index(i)
         if a is not None and a.get_name() == "slate":
-            return a
-    return None
+            yield a
+
+def app():
+    return next(apps(), None)
 
 def walk(node, depth=0):
     if node is None or depth > 80:
@@ -213,9 +248,12 @@ elif cmd == "contains":
     for m in missing:
         print(f"missing: {m}")
 elif cmd == "page":
-    for node in walk(app()):
-        ti = node.get_text_iface() if node.get_role_name() == "text" else None
-        if ti is not None:
+    # The page of the document named argv[2] (its accessible name), else the first.
+    name = sys.argv[2] if len(sys.argv) > 2 else None
+    pages = (n for a in apps() for n in walk(a) if n.get_role_name() == "text")
+    for node in pages:
+        ti = node.get_text_iface()
+        if ti is not None and name in (None, node.get_name()):
             print("page: " + Atspi.Text.get_text(ti, 0, -1).replace("\n", "|"))
             break
 PY
@@ -274,6 +312,7 @@ if len(bands) >= 3:
     height = lambda b: b[1] - b[0] + 1
     print(f"heading height: {height(bands[0]) * 100 // height(bands[1])}")
     print(f"bold ink: {bands[2][2] * 100 // bands[1][2]}")
+    print(f"third ink: {bands[2][2] * 100 // bands[0][2]}")
     print("mids: " + " ".join(str((b[0] + b[1]) // 2) for b in bands[:3]))
 PY
 cat > /tmp/col.py <<"PY"
@@ -471,6 +510,40 @@ session() {
   ime "surrounding"; grep "^surrounding:" /tmp/ime.log | tail -1
   ime "delete 3 0"; a11y page | sed "s/^/deleted /"; shot ime-after
   kill $board; quit
+  echo "== 18 clipboard"
+  printf "Alpha beta gamma\n\nBefore\n\n| a | b |\n|---|---|\n| c | d |\n\nAfter\n" > /tmp/sel.md
+  printf "**HHHHHHHH**\n" > /tmp/bold.md
+  printf "HHHHHHHH\n\nZ\n" > /tmp/target.md
+  copied() { echo "$1: $(wl-paste -n 2>/dev/null | tr "\n" "|")"; }
+  slate /tmp/sel.md >>/tmp/app.log 2>&1 & sleep 4
+  keys -M ctrl -k Home -m ctrl -s 200 -M shift -k End -m shift -s 200 -M ctrl c -m ctrl; copied shift-end
+  keys -M shift -k Down -m shift -s 200 -M ctrl c -m ctrl; copied shift-down
+  keys -M shift -k Down -m shift -s 200 -M ctrl c -m ctrl; copied into-table
+  keys -M ctrl -M shift -k End -m shift -m ctrl -s 200 -M ctrl c -m ctrl; copied to-end
+  keys -M ctrl -k Home -m ctrl; sleep 1; shot sel
+  read -r y _ beta _ <<<"$(python3 /tmp/words.py /shots/sel.png | sed -n "s/^words: //p")"
+  python /dnd.py click "$beta" "$y" 2; keys -M ctrl c -m ctrl; copied double
+  python /dnd.py click "$beta" "$y" 3; keys -M ctrl c -m ctrl; copied triple
+  keys -M ctrl -k Home -m ctrl -s 200 -M shift -k End -m shift -s 200 -M ctrl x -m ctrl; sleep 1
+  a11y page | sed "s/^/cut /"
+  keys -M ctrl z -m ctrl; sleep 1; a11y page | sed "s/^/cut-undone /"
+  keys -M ctrl -M shift z -m shift -m ctrl; sleep 1; a11y page | sed "s/^/cut-redone /"
+  keys -M ctrl z -m ctrl -s 200 -M ctrl a -m ctrl -s 200 -M ctrl x -m ctrl; sleep 1
+  a11y page | sed "s/^/all-cut /"
+  keys -M ctrl v -m ctrl; sleep 2; a11y page | sed "s/^/all-pasted /"
+  keys -M ctrl z -m ctrl; sleep 1; a11y page | sed "s/^/paste-undone /"; quit
+  slate /tmp/bold.md >>/tmp/app.log 2>&1 & sleep 4
+  keys -M ctrl a -m ctrl -s 200 -M ctrl c -m ctrl; sleep 1
+  echo "offers: $(wl-paste -l 2>/dev/null | tr "\n" " ")"; copied bold-plain
+  slate /tmp/target.md >>/tmp/app.log 2>&1 & sleep 4
+  swaymsg "[title=target.md] focus, layout tabbed" >/dev/null; sleep 1
+  keys -M ctrl -k End -m ctrl -s 200 -k Return -s 200 -M ctrl v -m ctrl; sleep 2
+  a11y page target.md | sed "s/^/rich-pasted /"; shot rich
+  python3 /tmp/px.py /shots/rich.png | sed -n "s/^third ink: /rich bold ink: /p"
+  wl-copy "plain one
+plain two" & sleep 1
+  keys -M ctrl v -m ctrl; sleep 2; a11y page target.md | sed "s/^/plain-pasted /"
+  keys -M ctrl z -m ctrl; sleep 1; a11y page target.md | sed "s/^/plain-undone /"; quit
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -561,6 +634,28 @@ check "17: the preedit isn't in the document" "17 ime" "^composing page: Hello w
 check "17: commit replaces the preedit with the text" "17 ime" "^committed page: Hello world仮名$"
 check "17: the input method reads the text around the caret" "17 ime" "^surrounding: Hello world仮名\|17\|17$"
 check "17: the input method deletes before the caret" "17 ime" "^deleted page: Hello world仮$"
+check "18: Shift+End selects to the line's end" "18 clipboard" "^shift-end: Alpha beta gamma$"
+check "18: Shift+Down extends to the next paragraph" "18 clipboard" "^shift-down: Alpha beta gamma\|Before$"
+check "18: a selection into a table takes the whole table, cells one a line" "18 clipboard" \
+  "^into-table: Alpha beta gamma\|Before\|a\|b\|c\|d$"
+check "18: Shift+Ctrl+End selects to the document's end" "18 clipboard" "^to-end: Alpha beta gamma\|Before\|a\|b\|c\|d\|After$"
+check "18: a double click selects the word" "18 clipboard" "^double: beta$"
+check "18: a triple click selects the paragraph" "18 clipboard" "^triple: Alpha beta gamma$"
+check "18: Ctrl+X cuts the selection" "18 clipboard" "^cut page: \|Before\|a\|b\|c\|d\|After$"
+check "18: undo gives the cut text back" "18 clipboard" "^cut-undone page: Alpha beta gamma\|Before\|a\|b\|c\|d\|After$"
+check "18: redo cuts it again" "18 clipboard" "^cut-redone page: \|Before\|a\|b\|c\|d\|After$"
+check "18: cutting everything cuts through the table" "18 clipboard" "^all-cut page: $"
+check "18: pasting it back brings the table back (Slate's rich clipboard)" "18 clipboard" \
+  "^all-pasted page: Alpha beta gamma\|Before\|a\|b\|c\|d\|After$"
+check "18: undo takes the paste back" "18 clipboard" "^paste-undone page: $"
+check "18: a copy offers Slate's format and plain text" "18 clipboard" \
+  "^offers: .*application/x-slate-fragment.*text/plain|^offers: .*text/plain.*application/x-slate-fragment"
+check "18: other apps get plain text" "18 clipboard" "^bold-plain: HHHHHHHH$"
+check "18: a copy pastes into another Slate process" "18 clipboard" "^rich-pasted page: HHHHHHHH\|Z\|HHHHHHHH$"
+at_least "18: it pastes still bold (percent ink)" "18 clipboard" "rich bold ink" 115
+check "18: text from another app pastes as paragraphs" "18 clipboard" \
+  "^plain-pasted page: HHHHHHHH\|Z\|HHHHHHHHplain one\|plain two$"
+check "18: undo takes that paste back" "18 clipboard" "^plain-undone page: HHHHHHHH\|Z\|HHHHHHHH$"
 if [ $fail = 0 ]; then echo "SLATE OK"; else
   echo "SLATE CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

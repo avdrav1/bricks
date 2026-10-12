@@ -720,6 +720,17 @@ impl Flow {
         }
     }
 
+    /// The numbers of the leaves in top-level block `block`, in document order.
+    pub fn block_leaves(&self, block: usize) -> std::ops::Range<usize> {
+        let first = self
+            .leaves
+            .partition_point(|l| (l.path[0] as usize) < block);
+        let end = self
+            .leaves
+            .partition_point(|l| (l.path[0] as usize) <= block);
+        first..end
+    }
+
     /// The leaf at `path` (see [`Flow::path`]), if there is one.
     pub fn leaf_at(&self, path: &[u32]) -> Option<LeafId> {
         let i = self

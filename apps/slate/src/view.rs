@@ -22,7 +22,7 @@ mod caret;
 mod shaper;
 
 use crate::settings::TextWidth;
-use document_edit::{Change, Container, Edit, Flag, History, Pos};
+use document_edit::{Change, Container, Edit, Flag, Fragment, History, Pos};
 use document_model::{ParagraphStyle, RunStyle};
 use flow::{Flow, Located, Paint, Splice, LEVEL_INDENT};
 use gtk::prelude::*;
@@ -109,6 +109,10 @@ pub enum Command {
     Style(u8),
     Bullets,
     Numbers,
+    Cut,
+    Copy,
+    Paste,
+    SelectAll,
 }
 
 /// The document, its layouts, and its editing state.
@@ -128,6 +132,9 @@ struct State {
     revision: u64,
     /// The input method's preedit at the caret: its text, looks, and cursor (bytes into it).
     preedit: Option<(String, pango::AttrList, usize)>,
+    /// Where the selection was started, as made (the flow holds it with its ends that run
+    /// into a table moved to the table's edges).
+    anchor: Option<flow::Position>,
 }
 
 impl State {
@@ -169,6 +176,8 @@ mod imp {
         im: OnceCell<gtk::IMMulticontext>,
         /// Scroll the caret into view at the next allocation.
         pub(super) reveal: Cell<bool>,
+        /// The last press: when, where, and how many presses in a row it made.
+        presses: Cell<Option<(Instant, f64, f64, u32)>>,
     }
 
     #[glib::object_subclass]
@@ -614,8 +623,8 @@ mod imp {
                 return;
             };
             if let Some(st) = self.state.borrow_mut().as_mut() {
-                let anchor = st.flow.selection_anchor().unwrap_or(focus.position);
-                st.flow.select(anchor, focus.position);
+                let anchor = st.anchor.unwrap_or(focus.position);
+                caret::select(st, anchor, focus.position);
                 if let Some(c) = caret::to_model(st, focus.position, true) {
                     st.caret = Some(c);
                 }
@@ -634,10 +643,21 @@ mod imp {
                 page.grab_focus();
                 let imp = page.imp();
                 imp.reset_im();
+                let shift = gesture
+                    .current_event_state()
+                    .contains(gdk::ModifierType::SHIFT_MASK);
+                let presses = imp.press_count(x, y);
                 if let Some(at) = imp.locate(x, y) {
                     if let Some(st) = imp.state.borrow_mut().as_mut() {
-                        st.flow.select(at.position, at.position);
-                        if let Some(c) = caret::to_model(st, at.position, true) {
+                        let p = at.position;
+                        let (anchor, focus) = match presses {
+                            2 => caret::word_at(st, p),
+                            3 => caret::paragraph_at(st, p),
+                            _ if shift => (caret::anchor(st).unwrap_or(p), p),
+                            _ => (p, p),
+                        };
+                        caret::select(st, anchor, focus);
+                        if let Some(c) = caret::to_model(st, focus, true) {
                             st.caret = Some(c);
                         }
                         st.goal = None;
@@ -753,6 +773,10 @@ mod imp {
                     K::i | K::I => Some(Command::Italic),
                     K::asterisk | K::_8 if shift => Some(Command::Bullets),
                     K::ampersand | K::_7 if shift => Some(Command::Numbers),
+                    K::a | K::A => Some(Command::SelectAll),
+                    K::c | K::C | K::Insert => Some(Command::Copy),
+                    K::x | K::X => Some(Command::Cut),
+                    K::v | K::V => Some(Command::Paste),
                     _ => match digit {
                         Some(n @ 0..=6) if !shift => Some(Command::Style(n as u8)),
                         _ => None,
@@ -762,65 +786,49 @@ mod imp {
                     self.command(command);
                     return glib::Propagation::Stop;
                 }
-                if matches!(key, K::a | K::A) {
-                    if let Some(st) = self.state.borrow_mut().as_mut() {
-                        st.flow.select_all();
-                        st.caret = caret::last(st);
-                    }
-                    self.selection_changed();
-                    return glib::Propagation::Stop;
-                }
-                if matches!(key, K::c | K::C | K::Insert) {
-                    let text = self
-                        .state
-                        .borrow()
-                        .as_ref()
-                        .map(|s| s.flow.selected_text())
-                        .unwrap_or_default();
-                    if !text.is_empty() {
-                        self.obj().clipboard().set_text(&text);
-                    }
-                    return glib::Propagation::Stop;
-                }
             }
             match key {
+                K::Insert | K::KP_Insert if shift => self.command(Command::Paste),
+                K::Delete | K::KP_Delete if shift => self.command(Command::Cut),
                 K::BackSpace => self.backspace(),
                 K::Delete | K::KP_Delete => self.delete(),
                 K::Return | K::KP_Enter | K::ISO_Enter if shift => self.type_text("\n"),
                 K::Return | K::KP_Enter | K::ISO_Enter => self.enter(),
                 K::Tab | K::KP_Tab | K::ISO_Left_Tab => self.tab(shift || key == K::ISO_Left_Tab),
                 K::Left | K::KP_Left => {
-                    self.move_caret(false, |st, c| match caret::selection(st) {
-                        Some((s, _)) if !ctrl => s,
+                    self.move_caret(false, shift, |st, c| match caret::selection(st) {
+                        Some((s, _)) if !ctrl && !shift => s,
                         _ if ctrl => caret::word_left(st, c),
                         _ => caret::left(st, c),
                     })
                 }
                 K::Right | K::KP_Right => {
-                    self.move_caret(false, |st, c| match caret::selection(st) {
-                        Some((_, e)) if !ctrl => e,
+                    self.move_caret(false, shift, |st, c| match caret::selection(st) {
+                        Some((_, e)) if !ctrl && !shift => e,
                         _ if ctrl => caret::word_right(st, c),
                         _ => caret::right(st, c),
                     })
                 }
                 K::Up | K::KP_Up | K::Down | K::KP_Down => {
                     let down = matches!(key, K::Down | K::KP_Down);
-                    self.move_caret(true, |st, c| {
+                    self.move_caret(true, shift, |st, c| {
                         let (to, goal) = caret::vertical(st, c, st.goal, down);
                         st.goal = goal;
                         to
                     });
                 }
                 K::Home | K::KP_Home if ctrl => {
-                    self.move_caret(false, |st, c| caret::first(st).unwrap_or(c))
+                    self.move_caret(false, shift, |st, c| caret::first(st).unwrap_or(c))
                 }
                 K::End | K::KP_End if ctrl => {
-                    self.move_caret(false, |st, c| caret::last(st).unwrap_or(c))
+                    self.move_caret(false, shift, |st, c| caret::last(st).unwrap_or(c))
                 }
                 K::Home | K::KP_Home => {
-                    self.move_caret(false, |st, c| caret::line_edge(st, c, false))
+                    self.move_caret(false, shift, |st, c| caret::line_edge(st, c, false))
                 }
-                K::End | K::KP_End => self.move_caret(false, |st, c| caret::line_edge(st, c, true)),
+                K::End | K::KP_End => {
+                    self.move_caret(false, shift, |st, c| caret::line_edge(st, c, true))
+                }
                 K::Page_Up | K::KP_Page_Up | K::Page_Down | K::KP_Page_Down => {
                     let Some(adj) = self.vadj.borrow().clone() else {
                         return glib::Propagation::Proceed;
@@ -840,6 +848,26 @@ mod imp {
         }
 
         // ---- editing ----
+
+        /// How many presses in a row the press at (`x`, `y`) makes: 1, 2 (a double click), or
+        /// 3 (a triple click), by GTK's double-click time and distance; a fourth starts over.
+        fn press_count(&self, x: f64, y: f64) -> u32 {
+            let (time, distance) = gtk::Settings::default().map_or((400, 5), |s| {
+                (s.gtk_double_click_time(), s.gtk_double_click_distance())
+            });
+            let now = Instant::now();
+            let near = |(at, px, py, _): (Instant, f64, f64, u32)| {
+                now.duration_since(at).as_millis() <= time.max(0) as u128
+                    && (x - px).abs() <= f64::from(distance)
+                    && (y - py).abs() <= f64::from(distance)
+            };
+            let count = match self.presses.get() {
+                Some(last) if near(last) => last.3 % 3 + 1,
+                _ => 1,
+            };
+            self.presses.set(Some((now, x, y, count)));
+            count
+        }
 
         /// Drop the input method's composition (the caret moved under it).
         fn reset_im(&self) {
@@ -923,9 +951,15 @@ mod imp {
             true
         }
 
-        /// Move the caret where `to` says, dropping the selection, and show it. Up and Down
-        /// (`keep_goal`) keep the column they aim for; other moves forget it.
-        fn move_caret(&self, keep_goal: bool, to: impl FnOnce(&mut State, Pos) -> Pos) {
+        /// Move the caret where `to` says and show it: with `extend` (Shift), the selection
+        /// runs from its anchor (else the caret's old place) to it; otherwise the selection
+        /// goes. Up and Down (`keep_goal`) keep the column they aim for; other moves forget it.
+        fn move_caret(
+            &self,
+            keep_goal: bool,
+            extend: bool,
+            to: impl FnOnce(&mut State, Pos) -> Pos,
+        ) {
             self.reset_im();
             {
                 let mut state = self.state.borrow_mut();
@@ -938,10 +972,15 @@ mod imp {
                 if !keep_goal {
                     st.goal = None;
                 }
-                st.caret = Some(to(st, c));
+                let anchor = caret::anchor(st);
+                let moved = to(st, c);
+                st.caret = Some(moved);
                 st.typing = None;
                 st.history.seal();
-                st.flow.clear_selection();
+                match (extend, anchor, caret::to_flow(st, moved)) {
+                    (true, Some(anchor), Some(focus)) => caret::select(st, anchor, focus),
+                    _ => caret::clear_selection(st),
+                }
             }
             self.reveal_caret();
         }
@@ -1052,12 +1091,16 @@ mod imp {
                     // The edit rebuilt the caret's leaf: show the preedit in it again.
                     show_preedit(st);
                 }
-                if let Some(anchor) = change.anchor {
-                    if let (Some(a), Some(c)) =
-                        (caret::to_flow(st, anchor), caret::to_flow(st, change.caret))
-                    {
-                        st.flow.select(a, c);
+                match change.anchor {
+                    Some(anchor) => {
+                        if let (Some(a), Some(c)) =
+                            (caret::to_flow(st, anchor), caret::to_flow(st, change.caret))
+                        {
+                            caret::select(st, a, c);
+                        }
                     }
+                    // The flow dropped the selection with the edit.
+                    None => st.anchor = None,
                 }
                 (st.flow.is_complete(), st.flow.page_break_count())
             };
@@ -1097,14 +1140,21 @@ mod imp {
                         .clone()
                         .unwrap_or_else(|| document_edit::look(st.flow.document(), from))
                 };
-                document_edit::replace(st.flow.document(), from, to, text, &style)
+                let doc = st.flow.document();
+                // Typing over a selection that runs into a table replaces it all, the
+                // table with it, as a paste of the typed text does.
+                document_edit::replace(doc, from, to, text, &style).or_else(|| {
+                    document_edit::paste(doc, from, to, &Fragment::from_plain(text, &style))
+                })
             });
         }
 
         fn enter(&self) {
             self.edit_with(false, |st| {
                 let (from, to) = Self::target(st)?;
-                document_edit::split(st.flow.document(), from, to)
+                let doc = st.flow.document();
+                // A selection split can't make (it runs into a table) is deleted instead.
+                document_edit::split(doc, from, to).or_else(|| document_edit::delete(doc, from, to))
             });
         }
 
@@ -1112,7 +1162,7 @@ mod imp {
             self.edit_with(false, |st| {
                 let doc = st.flow.document();
                 if let Some((s, e)) = caret::selection(st) {
-                    return document_edit::replace(doc, s, e, "", &RunStyle::default());
+                    return document_edit::delete(doc, s, e);
                 }
                 let c = st.caret?;
                 match caret::char_before(st, c) {
@@ -1128,7 +1178,7 @@ mod imp {
             self.edit_with(false, |st| {
                 let doc = st.flow.document();
                 if let Some((s, e)) = caret::selection(st) {
-                    return document_edit::replace(doc, s, e, "", &RunStyle::default());
+                    return document_edit::delete(doc, s, e);
                 }
                 let c = st.caret?;
                 match caret::char_after(st, c) {
@@ -1136,6 +1186,84 @@ mod imp {
                     None => document_edit::join_forward(doc, c),
                 }
             });
+        }
+
+        /// The selection as a fragment, for the clipboard.
+        fn selected_fragment(&self) -> Option<Fragment> {
+            let state = self.state.borrow();
+            let st = state.as_ref()?;
+            let (s, e) = caret::selection(st)?;
+            document_edit::copy(st.flow.document(), s, e)
+        }
+
+        /// Put the selection on the clipboard: Slate's fragment for Slate windows, plain text
+        /// for other apps. False when nothing is selected.
+        fn copy(&self) -> bool {
+            let Some(fragment) = self.selected_fragment() else {
+                return false;
+            };
+            let rich = glib::Bytes::from_owned(fragment.to_json().into_bytes());
+            let provider = gdk::ContentProvider::new_union(&[
+                gdk::ContentProvider::for_bytes(Fragment::MIME, &rich),
+                gdk::ContentProvider::for_value(&fragment.plain_text().to_value()),
+            ]);
+            if let Err(e) = self.obj().clipboard().set_content(Some(&provider)) {
+                tracing::warn!("cannot copy: {e}");
+                return false;
+            }
+            true
+        }
+
+        fn cut(&self) {
+            if self.copy() {
+                self.edit_with(false, |st| {
+                    let (s, e) = caret::selection(st)?;
+                    document_edit::delete(st.flow.document(), s, e)
+                });
+            }
+        }
+
+        /// Paste the clipboard over the selection or at the caret: a Slate fragment with its
+        /// looks, else plain text in the caret's look. The clipboard is read asynchronously;
+        /// the paste is one undoable step.
+        fn paste(&self) {
+            let page = self.obj().downgrade();
+            let clipboard = self.obj().clipboard();
+            glib::spawn_future_local(async move {
+                let clip = read_clipboard(&clipboard).await;
+                if let (Some(page), Some(clip)) = (page.upgrade(), clip) {
+                    page.imp().paste_clip(clip);
+                }
+            });
+        }
+
+        fn paste_clip(&self, clip: Clip) {
+            self.edit_with(false, |st| {
+                let (from, to) = Self::target(st)?;
+                let doc = st.flow.document();
+                let fragment = match clip {
+                    Clip::Rich(fragment) => fragment,
+                    Clip::Plain(text) => {
+                        let look = if st.plain {
+                            RunStyle::default()
+                        } else {
+                            document_edit::look(doc, from)
+                        };
+                        Fragment::from_plain(&text, &look)
+                    }
+                };
+                (!fragment.blocks.is_empty()).then_some(())?;
+                document_edit::paste(doc, from, to, &fragment)
+            });
+        }
+
+        fn select_all(&self) {
+            if let Some(st) = self.state.borrow_mut().as_mut() {
+                st.flow.select_all();
+                st.anchor = st.flow.selection_anchor();
+                st.caret = caret::last(st);
+            }
+            self.selection_changed();
         }
 
         /// Tab in a table cell goes to the next cell (Shift+Tab the one before), and out of
@@ -1150,7 +1278,9 @@ mod imp {
                 )
             });
             if in_cell {
-                self.move_caret(false, |st, c| caret::next_cell(st, c, !back).unwrap_or(c));
+                self.move_caret(false, false, |st, c| {
+                    caret::next_cell(st, c, !back).unwrap_or(c)
+                });
             } else if in_list {
                 self.edit_with(true, |st| {
                     let (at, blocks) = caret::blocks(st)?;
@@ -1209,6 +1339,12 @@ mod imp {
                         command == Command::Numbers,
                     )
                 }),
+                Command::Cut => self.cut(),
+                Command::Copy => {
+                    self.copy();
+                }
+                Command::Paste => self.paste(),
+                Command::SelectAll => self.select_all(),
             }
         }
     }
@@ -1245,6 +1381,7 @@ impl Page {
             plain,
             revision: 0,
             preedit: None,
+            anchor: None,
         };
         state.caret = caret::first(&state);
         imp.state.replace(Some(state));
@@ -1267,7 +1404,7 @@ impl Page {
         let imp = self.imp();
         if let Some(st) = imp.state.borrow_mut().as_mut() {
             st.caret = caret::middle_from(st, block).or(st.caret);
-            st.flow.clear_selection();
+            caret::clear_selection(st);
         }
         self.queue_allocate();
         imp.reveal.set(true);
@@ -1325,6 +1462,47 @@ fn show_preedit(st: &mut State) {
     if let Some(leaf) = leaf {
         st.flow.remeasure(leaf);
     }
+}
+
+/// What a paste reads from the clipboard.
+enum Clip {
+    /// Copied in Slate, with its looks.
+    Rich(Fragment),
+    /// From another app.
+    Plain(String),
+}
+
+/// The clipboard's content: Slate's fragment when it offers one, else its text.
+async fn read_clipboard(clipboard: &gdk::Clipboard) -> Option<Clip> {
+    if clipboard.formats().contain_mime_type(Fragment::MIME) {
+        if let Ok((stream, _)) = clipboard
+            .read_future(&[Fragment::MIME], glib::Priority::DEFAULT)
+            .await
+        {
+            let mut bytes = Vec::new();
+            loop {
+                match stream
+                    .read_bytes_future(1 << 16, glib::Priority::DEFAULT)
+                    .await
+                {
+                    Ok(chunk) if !chunk.is_empty() => bytes.extend_from_slice(&chunk),
+                    Ok(_) => break,
+                    Err(e) => {
+                        tracing::warn!("cannot read the clipboard: {e}");
+                        break;
+                    }
+                }
+            }
+            if let Some(fragment) = std::str::from_utf8(&bytes)
+                .ok()
+                .and_then(Fragment::from_json)
+            {
+                return Some(Clip::Rich(fragment));
+            }
+        }
+    }
+    let text = clipboard.read_text_future().await.ok()??;
+    Some(Clip::Plain(text.to_string()))
 }
 
 /// The top-level blocks an edit's change replaced, for the flow: an edit in a cell
