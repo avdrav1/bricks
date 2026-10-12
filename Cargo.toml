@@ -33,7 +33,7 @@ members = [
 # `version` is Brick's release version (scripts/ship.sh bumps it); Brick and its crates
 # inherit it. Slate, Frame, and the suite-* crates set their own.
 [workspace.package]
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/avdrav1/cronkite"

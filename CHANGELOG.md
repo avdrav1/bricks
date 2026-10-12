@@ -2,6 +2,13 @@
 
 Releases are added by the ship-it skill.
 
+## v0.3.0 (2026-10-12)
+
+Bricks is now Brick. The command is `brick`, the app is installed from brick.cronkite.cc, and installing it replaces Bricks (or the older Spreadsheet) with your recent files and unsaved-edit recovery kept. The old install command still works. Empty cells now fill the window past your data, as in Excel and Calc.
+
+- PKG-5: Rename the app to Brick: `brick` command, app ID, window titles, state folder, download site
+- GRID-6: Fill the window with empty cells past the data and grow as you go
+
 ## Frame v0.1.0 (2026-10-12)
 
 Frame's first release, milestones FR0 and FR1: a lightweight presentation app that opens, shows, edits, and saves PowerPoint decks (.pptx). Edit on the slide or in an outline, format with one inspector instead of a ribbon, and play the deck full screen. Saving patches the original file, so everything you didn't edit stays as it was. The spec's four-slide reference deck takes 15 keys and clicks; PowerPoint's shortest documented way takes 21.
