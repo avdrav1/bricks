@@ -732,11 +732,20 @@ fn bullet_markup(bullet: Option<&Bullet>, a: &str) -> Vec<(&'static str, String)
 }
 
 /// A paragraph's properties element: as read, with the alignment and bullet an edit set
-/// (`Source::Edit`) written on it.
+/// (`Source::Edit`) written on it, and its level when that isn't the one written.
 fn paragraph_props(p: &Paragraph, a: &str) -> io::Result<String> {
     let align = p.sources.align == Source::Edit;
     let bullet = p.sources.bullet == Source::Edit;
-    if !align && !bullet {
+    // The level the markup says, against the paragraph's (an outline edit changes it).
+    let start = p
+        .markup
+        .find('>')
+        .map_or(&*p.markup, |end| &p.markup[..=end]);
+    let written = attr_value(start, "lvl")
+        .and_then(|r| start[r].parse::<u8>().ok())
+        .unwrap_or(0);
+    let level = written != p.level;
+    if !align && !bullet && !level {
         return Ok(p.markup.to_string());
     }
     let raw = match &*p.markup {
@@ -745,7 +754,7 @@ fn paragraph_props(p: &Paragraph, a: &str) -> io::Result<String> {
     };
     let a = tag_prefix(&raw);
     let mut attrs = Vec::new();
-    if p.markup.is_empty() && p.level > 0 {
+    if level {
         attrs.push(("lvl", p.level.to_string()));
     }
     if align {

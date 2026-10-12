@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # FRAME-4 acceptance: Frame's viewer window; FRAME-5: its slideshow; FRAME-6: text editing;
 # FRAME-7: adding, duplicating, deleting, and moving slides; FRAME-8: saving; FRAME-12:
-# inserting.
+# inserting; FRAME-13: the outline.
 #
 #   scripts/check_frame.sh [BINARY]   (default target/release/frame)
 #
@@ -79,6 +79,17 @@
 #      selected table and Ctrl+Z restores it. Ctrl+S writes normAutofit, the pictures,
 #      the oval, the table, and the text box into the slide parts, the pictures into the
 #      package.
+# FRAME-13 acceptance, the window's half (the edits: `cargo test -p deck-edit --test
+# outline`):
+#  15. on a copy of layouts.pptx, the Outline button shows the outline; at the end of
+#      slide 1's title, Enter, Highlights, Enter, Growth, Tab, Enter, Margins, Enter, Tab,
+#      and Up 3% make slide 2 on Title and Content with those bullets, Up 3% a level down,
+#      11 slides; Ctrl+Shift+O shows the canvas on slide 2 with that text. Shift+Tab twice
+#      on Up 3% makes it slide 3's title; each Ctrl+Z steps back one. Text typed on the
+#      canvas shows in the outline; Home there goes to the title text, past the slide
+#      number; Ctrl+Z in the outline undoes the canvas typing too (one history).
+#      Ctrl+S writes the new slide into a part of its own, Up 3% at lvl="1", slide 1 as
+#      it was. On the fixture, a slide with shapes shows how many other items it holds.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -544,6 +555,35 @@ session() {
   python3 /tmp/px.py pictures /tmp/f/insert.pptx slide12.xml
   pkill -x frame; sleep 0.5
 
+  echo "== 15 outline"
+  cp /tmp/f/layouts.pptx /tmp/f/outline.pptx
+  frame /tmp/f/outline.pptx >>/tmp/app.log 2>&1 & sleep 3
+  python3 /tmp/a11y.py press Outline; sleep 1; shot out0; shown on
+  keys -M ctrl -k Home -m ctrl -k End -k Return "Highlights" -k Return "Growth" -k Tab \
+    -k Return "Margins" -k Return -k Tab "Up 3%"; sleep 1; shot out1; shown typed
+  keys -M ctrl -M shift o -m shift -m ctrl; sleep 1; shot out2; shown off
+  python3 /tmp/a11y.py press Outline; sleep 1
+  keys -k Down -k Down -k Down -k End -M shift -k Tab -k Tab -m shift; sleep 1; shot out3; shown promoted
+  keys -M ctrl z -m ctrl; sleep 0.5; shown undo1
+  keys -M ctrl z -m ctrl; sleep 0.5; shown undo2
+  keys -M ctrl -M shift o -m shift -m ctrl; sleep 1; shot out4
+  read x y < <(python3 /tmp/px.py point /shots/out4.png 0.5 0.1234)
+  python3 /scripts/dnd_helpers.py click $x $y; sleep 0.5
+  keys -k End " 2027" -k Escape; sleep 0.5
+  python3 /tmp/a11y.py press Outline; sleep 1; shot out5; shown canvas
+  keys -k Home "Q"; sleep 0.5; shown home
+  keys -M ctrl z -m ctrl -M ctrl z -m ctrl; sleep 0.5; shown shared
+  keys -M ctrl y -m ctrl -M ctrl s -m ctrl; sleep 3; shown saved
+  python3 /tmp/px.py part /tmp/f/outline.pptx ppt/presentation.xml "<p:sldId "
+  for n in ">Highlights 2027<" ">Growth<" ">Margins<" ">Up 3%<" "lvl=\"1\""; do
+    python3 /tmp/px.py part /tmp/f/outline.pptx ppt/slides/slide11.xml "$n"
+  done
+  python3 /tmp/px.py part /tmp/f/outline.pptx ppt/slides/slide1.xml ">subtitle<"
+  pkill -x frame; sleep 0.5
+  frame /tmp/f/fixture.pptx >>/tmp/app.log 2>&1 & sleep 3
+  python3 /tmp/a11y.py press Outline; sleep 1; shot out6; shown fixture
+  pkill -x frame; sleep 0.5
+
   echo "== 5 drop"
   frame >>/tmp/app.log 2>&1 & sleep 2
   python3 /scripts/dnd_helpers.py source /tmp/f/layouts.pptx >/dev/null 2>&1 & src=$!; sleep 2
@@ -733,6 +773,35 @@ check "14: ... the table" "14 insert" "^part ppt/slides/slide12.xml <a:tbl>: [1-
 check "14: ... the text box" "14 insert" "^part ppt/slides/slide12.xml >Inserted<: [1-9]"
 check "14: ... and their pictures into the package" "14 insert" "^pictures slide11.xml: 1 of 1$"
 check "14: ... (the dropped one)" "14 insert" "^pictures slide12.xml: 1 of 1$"
+# FRAME-13: the outline.
+check "15: the Outline button shows the outline" "15 outline" "^on: 1  Centered Title$"
+check "15: ... the bullets under their title" "15 outline" "^on: • subtitle$"
+check "15: Enter after a title starts a slide, its title typed" "15 outline" "^typed: 2  Highlights$"
+check "15: ... Tab turns the next title into its bullet" "15 outline" "^typed: • Growth$"
+check "15: ... Enter starts a bullet" "15 outline" "^typed: • Margins$"
+check "15: ... and Tab takes it a level down" "15 outline" "^typed: ◦ Up 3%$"
+check "15: ... slide 1 as it was" "15 outline" "^typed: • subtitle$"
+check "15: ... the slides are 11, slide 2 shown" "15 outline" "^typed: Slide 2 of 11$"
+check "15: ... the slide list has 11" "15 outline" "^typed: Slide 11$"
+absent "15: ... not 12" "15 outline" "^typed: Slide 12$"
+check "15: Ctrl+Shift+O shows the canvas on slide 2, Title and Content" "15 outline" "^off: Slide 2, Title and Content$"
+for t in Highlights Growth Margins "Up 3%"; do check "15: ... the slide holds $t" "15 outline" "^off: $t$"; done
+check "15: Shift+Tab twice makes Up 3% slide 3's title" "15 outline" "^promoted: 3  Up 3%$"
+check "15: ... a slide of its own" "15 outline" "^promoted: Slide 3 of 12$"
+check "15: Ctrl+Z makes it a bullet again" "15 outline" "^undo1: • Up 3%$"
+absent "15: ... not a slide" "15 outline" "^undo1: 3  Up 3%$"
+check "15: ... the slides 11 again" "15 outline" "^undo1: Slide 2 of 11$"
+check "15: Ctrl+Z again takes it a level down again" "15 outline" "^undo2: ◦ Up 3%$"
+check "15: text typed on the canvas shows in the outline" "15 outline" "^canvas: 2  Highlights 2027$"
+check "15: Home in the outline goes to the start of the title, past its number" "15 outline" "^home: 2  QHighlights 2027$"
+check "15: Ctrl+Z in the outline undoes the canvas typing" "15 outline" "^shared: 2  Highlights $"
+check "15: Ctrl+S saves" "15 outline" "^saved: Saved “outline\.pptx”$"
+check "15: ... 11 slides" "15 outline" "^part ppt/presentation.xml <p:sldId : 11$"
+for n in ">Highlights 2027<" ">Growth<" ">Margins<" ">Up 3%<" "lvl=\"1\""; do
+  check "15: ... $n into the new slide part" "15 outline" "^part ppt/slides/slide11.xml $n: [1-9]"
+done
+check "15: ... slide 1 as it was" "15 outline" "^part ppt/slides/slide1.xml >subtitle<: 1$"
+check "15: a slide with shapes shows how many other items it holds" "15 outline" "^fixture: 8 other items$"
 if [ $fail = 0 ]; then echo "FRAME OK"; else
   echo "FRAME CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

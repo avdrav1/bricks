@@ -13,8 +13,9 @@
 mod common;
 
 use deck_edit::{
-    BackgroundEdit, Fit, FitEdit, FrameEdit, History, LayoutEdit, LookEdit, ParagraphLook,
-    ShapeEdit, ShapeLook, ShapeLookEdit, ShapeRef, SlideEdit, TextEdit, TextLook, TextPos,
+    BackgroundEdit, Fit, FitEdit, FrameEdit, History, LayoutEdit, LookEdit, OutlineKey, OutlinePos,
+    ParagraphLook, ShapeEdit, ShapeLook, ShapeLookEdit, ShapeRef, SlideEdit, TextEdit, TextLook,
+    TextPos,
 };
 use presentation_model::{
     Align, Autofit, Background, Color, Dash, Fill, Frame, Image, ImageFormat, Layer, Outline,
@@ -1352,5 +1353,174 @@ fn libreoffice_reads_the_inserts() {
     // Every other slide as LibreOffice read it before.
     for j in [1, 2, 3, 4, 5, 7, 8, 9] {
         assert_eq!(new[j + 2], old[j], "saved slide {}", j + 3);
+    }
+}
+
+/// Outline edits on `deck`: `steps` of (the text of the line to put the caret at the end
+/// of, or at the start of with a leading `^`; then keys and text to type).
+fn outlined(deck: &Presentation, steps: &[(&str, &[Step])]) -> Presentation {
+    let mut deck = deck.clone();
+    let mut h = History::new();
+    for (line, keys) in steps {
+        let o = deck_edit::outline(&deck);
+        let (text, start) = match line.strip_prefix('^') {
+            Some(t) => (t, true),
+            None => (*line, false),
+        };
+        let n = o
+            .lines
+            .iter()
+            .position(|l| l.text == text)
+            .unwrap_or_else(|| panic!("no line {text:?}"));
+        let mut at = OutlinePos::new(n, if start { 0 } else { text.len() });
+        h.seal();
+        for step in *keys {
+            let o = deck_edit::outline(&deck);
+            let done = match step {
+                Step::Key(k) => deck_edit::key(&deck, &o, at, *k),
+                Step::Type(t) => deck_edit::typing(&deck, &o, at, at, t),
+            };
+            let (edit, caret) = done.unwrap_or_else(|| panic!("{step:?} at {at:?}"));
+            h.apply(&mut deck, edit);
+            at = caret;
+        }
+    }
+    deck
+}
+
+#[derive(Debug)]
+enum Step {
+    Key(OutlineKey),
+    Type(&'static str),
+}
+
+/// layouts.pptx written in the outline: after slide 1, "Highlights" with Growth, Margins,
+/// and "Up 3%" a level down; slide 2's first bullet made a slide of its own.
+fn outlined_layouts() -> (Presentation, Presentation) {
+    use OutlineKey::{Enter, ShiftTab, Tab};
+    use Step::{Key, Type};
+    let read = pptx::read(&common::data("layouts.pptx")).unwrap();
+    let deck = outlined(
+        &read,
+        &[
+            (
+                "Centered Title",
+                &[
+                    Key(Enter),
+                    Type("Highlights"),
+                    Key(Enter),
+                    Type("Growth"),
+                    Key(Tab),
+                    Key(Enter),
+                    Type("Margins"),
+                    Key(Enter),
+                    Key(Tab),
+                    Type("Up 3%"),
+                ],
+            ),
+            ("^Content", &[Key(ShiftTab)]),
+        ],
+    );
+    (read, deck)
+}
+
+/// fixture.pptx with slide 3's title typed into and a slide after it, from the outline.
+fn outlined_fixture() -> (Presentation, Presentation) {
+    use OutlineKey::Enter;
+    use Step::{Key, Type};
+    let read = pptx::read(&common::data("fixture.pptx")).unwrap();
+    let deck = outlined(&read, &[("Shapes", &[Type("!"), Key(Enter), Type("Next")])]);
+    (read, deck)
+}
+
+#[test]
+fn outline_edits_save_and_read_back() {
+    for (name, (read, deck)) in [
+        ("layouts.pptx", outlined_layouts()),
+        ("fixture.pptx", outlined_fixture()),
+    ] {
+        let source = common::data(name);
+        let dest = temp("outline", name);
+        pptx::save(&dest, &source, &read, &deck, &AtomicBool::new(false)).unwrap();
+        let back = pptx::read(&dest).unwrap();
+        reads_as(&back, &deck);
+        assert_eq!(
+            deck_edit::outline(&back),
+            deck_edit::outline(&deck),
+            "{name}: the outline reads back"
+        );
+    }
+}
+
+#[test]
+#[ignore = "needs LibreOffice: cargo test -p pptx --test save -- --ignored"]
+fn libreoffice_reads_the_outline_edits() {
+    // layouts.pptx: the new slide's paragraphs, at their levels.
+    let (read, deck) = outlined_layouts();
+    let source = private_copy("libreoffice-outline", "layouts.pptx");
+    let dest = temp("libreoffice-outline", "saved.pptx");
+    pptx::save(&dest, &source, &read, &deck, &AtomicBool::new(false)).unwrap();
+    let (before, after) = (lo_dump(&source, 2174), lo_dump(&dest, 2174));
+    let (old, new) = (dump_slides(&before), dump_slides(&after));
+    assert_eq!(new.len(), read.slides.len() + 2);
+    let paras = |lines: &[&str]| -> Vec<String> {
+        lines
+            .iter()
+            .filter(|l| l.starts_with("para\t"))
+            .map(|l| {
+                let f: Vec<&str> = l.split('\t').collect();
+                format!("{} {}", f[1], f[3])
+            })
+            .collect()
+    };
+    assert_eq!(
+        paras(&new[1]),
+        ["0 Highlights", "0 Growth", "0 Margins", "1 Up 3%"],
+        "{:?}",
+        new[1]
+    );
+    // Slide 2's title stays; its bullets went to the slide made from "Content".
+    assert_eq!(paras(&new[2])[0], "0 Title");
+    assert_eq!(
+        paras(&new[3])[..2],
+        ["0 Content".to_owned(), "1 Level 2".to_owned()]
+    );
+    // Slide 1, and every slide after the ones the outline made, as before.
+    assert_eq!(new[0], old[0]);
+    for j in 2..old.len() {
+        assert_eq!(new[j + 2], old[j], "saved slide {}", j + 3);
+    }
+
+    // fixture.pptx: slide 3's other shapes exactly as LibreOffice read them before.
+    let (read, deck) = outlined_fixture();
+    let source = private_copy("libreoffice-outline", "fixture.pptx");
+    let dest = temp("libreoffice-outline", "saved-fixture.pptx");
+    pptx::save(&dest, &source, &read, &deck, &AtomicBool::new(false)).unwrap();
+    let (before, after) = (lo_dump(&source, 2174), lo_dump(&dest, 2174));
+    let (old, new) = (dump_slides(&before), dump_slides(&after));
+    // The title's lines are its own: the title shape and its paragraph and run.
+    let title_free = |lines: &[&str]| -> Vec<String> {
+        let mut out = Vec::new();
+        let mut in_title = false;
+        for l in lines {
+            if l.starts_with("shape\t") {
+                in_title = l.contains("TitleTextShape");
+            }
+            if !in_title {
+                out.push(l.to_string());
+            }
+        }
+        out
+    };
+    assert_eq!(title_free(&new[2]), title_free(&old[2]));
+    assert!(new[2]
+        .iter()
+        .any(|l| l.starts_with("para\t") && l.ends_with("\tShapes!")));
+    assert!(new[3]
+        .iter()
+        .any(|l| l.starts_with("para\t") && l.ends_with("\tNext")));
+    for (i, slide) in old.iter().enumerate().filter(|(i, _)| *i != 2) {
+        let j = if i < 3 { i } else { i + 1 };
+        assert_eq!(&new[j], slide, "saved slide {}", j + 1);
     }
 }
