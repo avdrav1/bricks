@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # FRAME-4 acceptance: Frame's viewer window; FRAME-5: its slideshow; FRAME-6: text editing;
-# FRAME-7: adding, duplicating, deleting, and moving slides; FRAME-8: saving.
+# FRAME-7: adding, duplicating, deleting, and moving slides; FRAME-8: saving; FRAME-12:
+# inserting.
 #
 #   scripts/check_frame.sh [BINARY]   (default target/release/frame)
 #
@@ -67,6 +68,17 @@
 #      Only through the Layout list and takes a light blue background. Ctrl+S writes them
 #      into the slide parts. On the fixture, slide 3's blue rectangle takes a red fill, and
 #      Ctrl+Z gives back the blue.
+# FRAME-12 acceptance, the window's half (the edits: `cargo test -p deck-edit --test insert`):
+#  14. on a copy of layouts.pptx, a long word typed onto slide 1's subtitle shrinks it into
+#      its box (more ink inside, none below it), and one Ctrl+Z undoes the word and the
+#      shrink (the ink as before). Ctrl+M adds a Title and Content slide; Insert, Picture…
+#      and a typed path to a green PNG fill its body placeholder; Ctrl+Z empties it. On
+#      a new Title Only slide, the PNG dropped on the canvas lands centred at its size.
+#      Insert, Text and typing make a text box; Insert, Shape, Oval adds an accent oval;
+#      Insert, Table a table with an accent header and banded rows; Delete deletes the
+#      selected table and Ctrl+Z restores it. Ctrl+S writes normAutofit, the pictures,
+#      the oval, the table, and the text box into the slide parts, the pictures into the
+#      package.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -215,6 +227,27 @@ def screen(path, points):
         res = "no" if any(abs(got[k] - wc[k]) > 12 for k in range(3)) else "yes"
         print(f"match {name}: {res} (got {bytes(got).hex().upper()})")
 
+def png(path):
+    # A 400x200 PNG all 00FF00, to insert.
+    import struct, zlib
+    w, h = 400, 200
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+    rows = b"".join(b"\x00" + bytes([0, 255, 0]) * w for _ in range(h))
+    head = struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)
+    with open(path, "wb") as f:
+        f.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", head) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+
+def pictures(path, slide):
+    # How many of the pictures slide part SLIDE links to are in the package at PATH.
+    import posixpath, zipfile
+    import xml.etree.ElementTree as ET
+    z = zipfile.ZipFile(path)
+    rels = ET.fromstring(z.read(f"ppt/slides/_rels/{slide}.rels"))
+    links = [r.get("Target") for r in rels if r.get("Type", "").endswith("/image")]
+    there = [t for t in links if posixpath.normpath(posixpath.join("ppt/slides", t)) in z.namelist()]
+    print(f"pictures {slide}: {len(there)} of {len(links)}")
+
 if sys.argv[1] == "screen":
     screen(sys.argv[2], sys.argv[3:])
 elif sys.argv[1] == "point":
@@ -229,6 +262,10 @@ elif sys.argv[1] == "blue":
     blue(*sys.argv[2:5])
 elif sys.argv[1] == "count":
     count(*sys.argv[2:9])
+elif sys.argv[1] == "png":
+    png(sys.argv[2])
+elif sys.argv[1] == "pictures":
+    pictures(*sys.argv[2:4])
 else:
     main(sys.argv[1], sys.argv[2:])
 PY
@@ -444,6 +481,69 @@ session() {
   python3 /tmp/px.py /shots/fill2.png unfilled:0.125:0.3492:4472C4
   pkill -x frame; sleep 0.5
 
+  echo "== 14 insert"
+  cp /tmp/f/layouts.pptx /tmp/f/insert.pptx
+  python3 /tmp/px.py png /tmp/f/green.png
+  frame /tmp/f/insert.pptx >>/tmp/app.log 2>&1 & sleep 3
+  shot ins0
+  python3 /tmp/px.py ink /shots/ins0.png fit-before 0.16 0.57 0.84 0.82
+  read x y < <(python3 /tmp/px.py point /shots/ins0.png 0.6 0.62)
+  python3 /scripts/dnd_helpers.py click $x $y; sleep 0.5
+  keys -k End "$(printf "M%.0s" $(seq 120))"; sleep 1; shot ins1
+  python3 /tmp/px.py ink /shots/ins1.png fit-inside 0.16 0.57 0.84 0.82
+  python3 /tmp/px.py ink /shots/ins1.png fit-below 0.16 0.835 0.84 0.92
+  keys -M ctrl z -m ctrl -k Escape; sleep 0.5; shot ins2; shown undone
+  python3 /tmp/px.py ink /shots/ins2.png fit-undone 0.16 0.57 0.84 0.82
+  keys -M ctrl y -m ctrl -M ctrl m -m ctrl; sleep 1; shot ins3
+  python3 /tmp/px.py /shots/ins3.png empty:0.5:0.6:FFFFFF
+  read x y < <(python3 /tmp/px.py where Insert)
+  python3 /scripts/dnd_helpers.py click $x $y; sleep 1
+  python3 /tmp/a11y.py press "Picture…"; sleep 2
+  keys -M ctrl l -m ctrl; keys "/tmp/f/green.png"; keys -k Return; sleep 3; shot ins4
+  python3 /tmp/px.py /shots/ins4.png filled:0.5:0.6:00FF00
+  python3 /tmp/a11y.py text | grep -E "^[0-9]+ × [0-9]+$" | sed "s/^/picture: /"
+  keys -M ctrl z -m ctrl; sleep 0.5; shot ins5
+  python3 /tmp/px.py /shots/ins5.png unfilled:0.5:0.6:FFFFFF
+  keys -M ctrl y -m ctrl; sleep 0.5
+  read x y < <(python3 /tmp/px.py where Layouts)
+  python3 /scripts/dnd_helpers.py click $x $y; sleep 1
+  python3 /tmp/a11y.py press "Title Only"; sleep 1
+  # The drag source floats at the bottom right, over the inspector, so the canvas keeps
+  # its size.
+  python3 /scripts/dnd_helpers.py source /tmp/f/green.png >/dev/null 2>&1 & src=$!; sleep 2
+  SWAYSOCK=$(ls /tmp/rt/sway-ipc.*.sock | head -1) swaymsg "[title=dragsrc] floating enable, resize set 200 120, move position 1060 580"; sleep 1
+  shot ins6
+  read x y < <(python3 /tmp/px.py point /shots/ins6.png 0.5 0.5)
+  python3 /scripts/dnd_helpers.py drag 1160 640 $x $y
+  sleep 2; kill $src; wait $src 2>/dev/null; sleep 1; shot ins7
+  python3 /tmp/px.py /shots/ins7.png dropped:0.5:0.5:00FF00 beside:0.1:0.5:FFFFFF
+  read x y < <(python3 /tmp/px.py where Insert)
+  python3 /scripts/dnd_helpers.py click $x $y; sleep 1
+  python3 /tmp/a11y.py press Text; sleep 1
+  keys "Inserted"; sleep 0.5; shown text; keys -k Escape
+  read x y < <(python3 /tmp/px.py where Insert)
+  python3 /scripts/dnd_helpers.py click $x $y; sleep 1
+  python3 /tmp/a11y.py press Shape; sleep 0.5
+  python3 /tmp/a11y.py press Oval; sleep 1; shot ins8
+  python3 /tmp/px.py /shots/ins8.png oval:0.5:0.45:4472C4
+  read x y < <(python3 /tmp/px.py where Insert)
+  python3 /scripts/dnd_helpers.py click $x $y; sleep 1
+  python3 /tmp/a11y.py press Table; sleep 1; shot ins9
+  python3 /tmp/px.py /shots/ins9.png header:0.2:0.445:4472C4 band:0.2:0.5:CFD5EA
+  keys -k Delete; sleep 0.5; shot ins10
+  python3 /tmp/px.py /shots/ins10.png deleted:0.2:0.5:FFFFFF
+  keys -M ctrl z -m ctrl; sleep 0.5; shot ins11
+  python3 /tmp/px.py /shots/ins11.png restored:0.2:0.5:CFD5EA
+  keys -M ctrl s -m ctrl; sleep 3; shown saved
+  python3 /tmp/px.py part /tmp/f/insert.pptx ppt/slides/slide1.xml "normAutofit fontScale="
+  python3 /tmp/px.py part /tmp/f/insert.pptx ppt/slides/slide11.xml "<p:pic"
+  for n in "<p:pic" "prst=\"ellipse\"" "<a:tbl>" ">Inserted<"; do
+    python3 /tmp/px.py part /tmp/f/insert.pptx ppt/slides/slide12.xml "$n"
+  done
+  python3 /tmp/px.py pictures /tmp/f/insert.pptx slide11.xml
+  python3 /tmp/px.py pictures /tmp/f/insert.pptx slide12.xml
+  pkill -x frame; sleep 0.5
+
   echo "== 5 drop"
   frame >>/tmp/app.log 2>&1 & sleep 2
   python3 /scripts/dnd_helpers.py source /tmp/f/layouts.pptx >/dev/null 2>&1 & src=$!; sleep 2
@@ -605,6 +705,34 @@ check "13: ... the Title Only layout into slide 2's relationships" "13 inspector
 check "13: ... the background into slide 2's part" "13 inspector" "^part ppt/slides/slide2.xml 00B0F0: [1-9]"
 check "13: Fill colours the fixture's rectangle red" "13 inspector" "^match filled: yes"
 check "13: ... and Ctrl+Z gives back the blue" "13 inspector" "^match unfilled: yes"
+# FRAME-12: inserting, and text shrinking to fit.
+v14() { section "14 insert" | sed -n "s/^$1: //p" | head -1; }
+b=$(v14 "ink fit-before"); a=$(v14 "ink fit-inside"); o=$(v14 "ink fit-below")
+if [ -n "$a" ] && [ -n "$b" ] && [ -n "$o" ] && [ "$a" -gt $((2 * b)) ] && [ "$o" -le 20 ]; then echo "ok   14: a long word typed into the subtitle shrinks to fit its box ($b -> $a dark pixels, $o below it)"; else echo "FAIL 14: a long word typed into the subtitle shrinks to fit its box (${b:-?} -> ${a:-?} dark pixels, ${o:-?} below it)"; fail=1; fi
+u=$(v14 "ink fit-undone")
+if [ -n "$u" ] && [ -n "$b" ] && [ "$u" -ge $((b * 9 / 10)) ] && [ "$u" -le $((b * 11 / 10)) ]; then echo "ok   14: ... one Ctrl+Z undoes the typing and the shrink ($u dark pixels, $b before)"; else echo "FAIL 14: one Ctrl+Z undoes the typing and the shrink (${u:-?} dark pixels, ${b:-?} before)"; fail=1; fi
+check "14: ... the subtitle as it was" "14 insert" "^undone: subtitle$"
+check "14: Ctrl+M adds a Title and Content slide, its body empty" "14 insert" "^match empty: yes"
+check "14: Insert, Picture… and a typed path fill the body placeholder" "14 insert" "^match filled: yes"
+check "14: ... the inspector shows the picture" "14 insert" "^picture: 400 × 200$"
+check "14: ... and Ctrl+Z empties it again" "14 insert" "^match unfilled: yes"
+check "14: a picture dropped on a Title Only slide lands centred" "14 insert" "^match dropped: yes"
+check "14: ... at its size, not over the whole slide" "14 insert" "^match beside: yes"
+check "14: Insert, Text and typing make a text box" "14 insert" "^text: Inserted$"
+check "14: Insert, Shape, Oval adds an accent oval at the centre" "14 insert" "^match oval: yes"
+check "14: Insert, Table adds a table with an accent header" "14 insert" "^match header: yes"
+check "14: ... and banded rows" "14 insert" "^match band: yes"
+check "14: Delete deletes the selected table" "14 insert" "^match deleted: yes"
+check "14: ... and Ctrl+Z restores it" "14 insert" "^match restored: yes"
+check "14: Ctrl+S saves" "14 insert" "^saved: Saved “insert\.pptx”$"
+check "14: ... the shrunk subtitle as normAutofit" "14 insert" "^part ppt/slides/slide1.xml normAutofit fontScale=: [1-9]"
+check "14: ... the filled placeholder as a picture" "14 insert" "^part ppt/slides/slide11.xml <p:pic: [1-9]"
+check "14: ... the dropped picture" "14 insert" "^part ppt/slides/slide12.xml <p:pic: [1-9]"
+check "14: ... the oval" "14 insert" "^part ppt/slides/slide12.xml prst=\"ellipse\": [1-9]"
+check "14: ... the table" "14 insert" "^part ppt/slides/slide12.xml <a:tbl>: [1-9]"
+check "14: ... the text box" "14 insert" "^part ppt/slides/slide12.xml >Inserted<: [1-9]"
+check "14: ... and their pictures into the package" "14 insert" "^pictures slide11.xml: 1 of 1$"
+check "14: ... (the dropped one)" "14 insert" "^pictures slide12.xml: 1 of 1$"
 if [ $fail = 0 ]; then echo "FRAME OK"; else
   echo "FRAME CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

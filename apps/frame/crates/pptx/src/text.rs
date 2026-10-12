@@ -23,7 +23,7 @@
 use crate::color::Palette;
 use crate::xml::Element;
 use presentation_model::{
-    Align, Anchor, AutoNumber, Bullet, BulletSize, Caps, Color, Insets, Paragraph,
+    Align, Anchor, AutoNumber, Autofit, Bullet, BulletSize, Caps, Color, Insets, Paragraph,
     ParagraphSources, Run, RunMarkup, RunSources, Source, Spacing, TextBody, Vertical,
 };
 use std::sync::Arc;
@@ -373,6 +373,7 @@ pub(crate) fn body(
         font_scale: 1.0,
         line_reduction: 0.0,
         vertical: Vertical::Horizontal,
+        autofit: Autofit::Unset,
         levels: (0..LEVELS.len())
             .map(|l| paragraph(l, &styles.level(l, ctx), Vec::new(), ctx))
             .collect(),
@@ -502,6 +503,14 @@ fn body_props(text: &mut TextBody, b: &Element) {
             "vert270" => Vertical::Up,
             _ => Vertical::Horizontal,
         };
+    }
+    for e in b.elements() {
+        match e.name.as_str() {
+            "noAutofit" => text.autofit = Autofit::Off,
+            "normAutofit" => text.autofit = Autofit::Shrink,
+            "spAutoFit" => text.autofit = Autofit::Grow,
+            _ => {}
+        }
     }
 }
 

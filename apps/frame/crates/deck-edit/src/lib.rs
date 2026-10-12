@@ -6,12 +6,17 @@
 //! Toolkit-free: no GTK, no I/O.
 
 mod frame;
+mod insert;
 mod layout;
 mod slides;
 mod style;
 mod text;
 
 pub use frame::{movable, snap, FrameEdit, Grab, Guide, Snapped};
+pub use insert::{
+    shrinks, takes_picture, Fit, FitEdit, ShapeEdit, ACCENT, ACCENT_DARK, BAND_1, BAND_2,
+    EMU_PER_PIXEL, FITS, SHAPES,
+};
 pub use layout::LayoutEdit;
 pub use slides::{next_layout, SlideEdit};
 pub use style::{
@@ -79,6 +84,10 @@ pub enum Edit {
     ShapeLook(ShapeLookEdit),
     Background(BackgroundEdit),
     Layout(LayoutEdit),
+    Shapes(ShapeEdit),
+    Fit(FitEdit),
+    /// Edits made as one step, in order (typing and the shrink it caused).
+    Steps(Vec<Edit>),
 }
 
 impl Edit {
@@ -91,6 +100,14 @@ impl Edit {
             Edit::ShapeLook(e) => e.apply(deck),
             Edit::Background(e) => e.apply(deck),
             Edit::Layout(e) => e.apply(deck),
+            Edit::Shapes(e) => e.apply(deck),
+            Edit::Fit(e) => e.apply(deck),
+            // The first edit says what the step changed.
+            Edit::Steps(steps) => steps
+                .iter()
+                .map(|e| e.apply(deck))
+                .reduce(|first, _| first)
+                .unwrap_or(Change::Slides { show: 0 }),
         }
     }
 
@@ -103,13 +120,38 @@ impl Edit {
             Edit::ShapeLook(e) => e.revert(deck),
             Edit::Background(e) => e.revert(deck),
             Edit::Layout(e) => e.revert(deck),
+            Edit::Shapes(e) => e.revert(deck),
+            Edit::Fit(e) => e.revert(deck),
+            Edit::Steps(steps) => steps
+                .iter()
+                .rev()
+                .map(|e| e.revert(deck))
+                .last()
+                .unwrap_or(Change::Slides { show: 0 }),
         }
     }
 
-    /// Join `next`, already applied, into this step when it continues it.
+    /// Join `next`, already applied, into this step when it continues it: typing after
+    /// typing, also when the step holds what the typing caused (a shrink to fit).
     fn absorb(&mut self, next: &Edit) -> bool {
         match (self, next) {
             (Edit::Text(a), Edit::Text(b)) => a.absorb(b),
+            (Edit::Steps(steps), Edit::Text(b)) => {
+                if let Some(Edit::Text(last)) = steps.last_mut() {
+                    if last.absorb(b) {
+                        return true;
+                    }
+                }
+                let typed = steps.iter().rev().find_map(|e| match e {
+                    Edit::Text(t) => Some(t.clone()),
+                    _ => None,
+                });
+                let continues = typed.is_some_and(|mut t| t.absorb(b));
+                if continues {
+                    steps.push(next.clone());
+                }
+                continues
+            }
             _ => false,
         }
     }
@@ -132,7 +174,9 @@ edit_from!(
     LookEdit => Look,
     ShapeLookEdit => ShapeLook,
     BackgroundEdit => Background,
-    LayoutEdit => Layout
+    LayoutEdit => Layout,
+    ShapeEdit => Shapes,
+    FitEdit => Fit
 );
 
 /// Undo and redo for one deck: the steps applied, newest last, and the steps undone.
@@ -163,6 +207,24 @@ impl History {
             }
         }
         self.sealed = false;
+        change
+    }
+
+    /// Apply `edit` as part of the last step, so one undo takes back both: what an edit
+    /// caused (its text shrunk to fit, its box grown). A step of its own when there is
+    /// none.
+    pub fn amend(&mut self, deck: &mut Presentation, edit: impl Into<Edit>) -> Change {
+        let edit = edit.into();
+        let change = edit.apply(deck);
+        self.undone.clear();
+        match self.done.pop_back() {
+            Some(Edit::Steps(mut steps)) => {
+                steps.push(edit);
+                self.done.push_back(Edit::Steps(steps));
+            }
+            Some(last) => self.done.push_back(Edit::Steps(vec![last, edit])),
+            None => self.done.push_back(edit),
+        }
         change
     }
 
