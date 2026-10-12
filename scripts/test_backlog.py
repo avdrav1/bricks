@@ -39,10 +39,10 @@ class ChainTest(unittest.TestCase):
 
     def test_an_open_bricks_gate_does_not_lock_slate(self):
         self.write(
-            ["- [ ] M4: bricks gate", "- [ ] SL0: slate viewer"],
+            ["- [ ] M4: brick gate", "- [ ] SL0: slate viewer"],
             [row("PKG-9", "M4", "done"), row("SLATE-1", "SL0", "todo")],
         )
-        self.assertEqual(backlog.next_story("bricks")["action"], "gate")
+        self.assertEqual(backlog.next_story("brick")["action"], "gate")
         got = backlog.next_story("slate")
         self.assertEqual((got["action"], got["id"]), ("start", "SLATE-1"))
 

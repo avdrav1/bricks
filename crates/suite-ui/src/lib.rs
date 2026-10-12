@@ -7,7 +7,7 @@
 
 use suite_core::AppKind;
 
-/// The line an app prints when it starts: `Bricks starting...`.
+/// The line an app prints when it starts: `Brick starting...`.
 pub fn startup_message(app: AppKind) -> String {
     format!("{} starting...", app.display_name())
 }
@@ -18,7 +18,7 @@ mod tests {
 
     #[test]
     fn startup_message_names_the_app() {
-        assert_eq!(startup_message(AppKind::Bricks), "Bricks starting...");
+        assert_eq!(startup_message(AppKind::Brick), "Brick starting...");
         assert_eq!(startup_message(AppKind::Slate), "Slate starting...");
         assert_eq!(startup_message(AppKind::Frame), "Frame starting...");
     }

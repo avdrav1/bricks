@@ -25,7 +25,7 @@ If the user named a story ID, use `python3 scripts/backlog.py show <ID>` instead
 
 ## 2. Load context
 
-Read, in this order: `CLAUDE.md` (invariants), the ADRs in `apps/bricks/docs/decisions/` that touch this area, `apps/bricks/docs/BENCHMARKS.md` if the criterion has a number, then the code in the owning crate. Read `apps/bricks/docs/SPEC.md` only when the story's intent is unclear.
+Read, in this order: `CLAUDE.md` (invariants), the ADRs in `apps/brick/docs/decisions/` that touch this area, `apps/brick/docs/BENCHMARKS.md` if the criterion has a number, then the code in the owning crate. Read `apps/brick/docs/SPEC.md` only when the story's intent is unclear.
 
 Stop and ask the user if:
 
@@ -48,8 +48,8 @@ State a plan in five lines or fewer: owning crate, the test that proves the crit
 
 1. Build each option's spike in `spikes/<id>/<option>/`. Keep them throwaway and small.
 2. Measure exactly what the criterion names. Record hardware, corpus file, and numbers.
-3. Write `apps/bricks/docs/decisions/NNNN-<slug>.md` from `0000-template.md` with status `proposed`.
-4. Set the story to `review`, summarize the recommendation, and stop. A human accepts the ADR. Only then mark it `done` and apply the choice (for DEC-1, add the toolkit to `apps/bricks/Cargo.toml` and its dev packages to CI).
+3. Write `apps/brick/docs/decisions/NNNN-<slug>.md` from `0000-template.md` with status `proposed`.
+4. Set the story to `review`, summarize the recommendation, and stop. A human accepts the ADR. Only then mark it `done` and apply the choice (for DEC-1, add the toolkit to `apps/brick/Cargo.toml` and its dev packages to CI).
 
 **Feature stories:**
 
@@ -71,7 +71,7 @@ cargo test --workspace
 cargo test --workspace -- --ignored   # when the story has perf tests
 ```
 
-For perf criteria, report the measured number next to the target. If the machine is not the reference box in `apps/bricks/docs/BENCHMARKS.md`, say so; the number still counts as evidence but the gate check waits for the reference box. Update the "Latest" column in `apps/bricks/docs/BENCHMARKS.md` when a benchmark ran.
+For perf criteria, report the measured number next to the target. If the machine is not the reference box in `apps/brick/docs/BENCHMARKS.md`, say so; the number still counts as evidence but the gate check waits for the reference box. Update the "Latest" column in `apps/brick/docs/BENCHMARKS.md` when a benchmark ran.
 
 If verification fails and the fix is not clear after two attempts, set the story to `blocked`, write what failed in the Notes section, and stop.
 

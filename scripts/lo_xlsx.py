@@ -13,14 +13,14 @@ booleans as 1.0/0.0), the text for text and errors. `formula` is Excel syntax wi
 LibreOffice's API grammar (`$Data.B2`, `;` between arguments) turned into `Data!B2` and
 `,`, with spaces removed outside strings.
 
-The fixture (apps/bricks/crates/xlsx/tests/data/fixture.xlsx) has three sheets:
+The fixture (apps/brick/crates/xlsx/tests/data/fixture.xlsx) has three sheets:
 - Data: a header row and 50 rows of integers, decimals, zero-padded codes stored as text,
   dates, TRUE/FALSE, a sparse column with gaps, an empty row, and =1/0; plus a bold cell, a
-  comment, and a chart (content Bricks drops, for XLSX-2).
+  comment, and a chart (content Brick drops, for XLSX-2).
 - Q1 Sales: =Data!B2*2 down 10 rows, =SUM(Data!B2:B51), =SUM(Rates) over the named range
   Rates = Data!$C$2:$C$51, and =ROW()*2.
 - Summary: a bold title merged over A1:B1, =AVERAGE('Q1 Sales'!A1:A10), and =BAHTTEXT(1), a
-  function Bricks doesn't implement (its result comes from the file).
+  function Brick doesn't implement (its result comes from the file).
 - Styles (STYLE-1): fonts, colours, fills, every border style, alignments, wrap, rotation,
   indent, number formats, merged ranges, column widths, row heights, a hidden row and
   column, a conditional format, a validation list, and a hyperlink.
@@ -235,7 +235,7 @@ def build_styles(doc, sheets):
     cell(8, 0).setString("hidden column")
     cell(0, 15).setString("hidden row")
 
-    # Content Bricks keeps but doesn't edit (STYLE-5): a conditional format, a validation
+    # Content Brick keeps but doesn't edit (STYLE-5): a conditional format, a validation
     # list, and a hyperlink.
     cond = st.getCellRangeByName("C8:C15")
     entries = cond.ConditionalFormat

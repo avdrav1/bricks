@@ -3,7 +3,7 @@
 # reference; editing in the bar is one undo step; the name box goes where it is told; a
 # formula with a syntax error is refused with the character where it fails.
 #
-#   scripts/check_formula_bar.sh [BINARY]   (default target/release/bricks)
+#   scripts/check_formula_bar.sh [BINARY]   (default target/release/brick)
 #
 # In an Arch container under headless sway; the entries' text, the note under them, and
 # the grid's description of the cursor cell (`B2: 4`) are read through the accessibility
@@ -18,13 +18,13 @@
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-bin=$(realpath "${1:-target/release/bricks}")
-[ -x "$bin" ] || { echo "no binary at $bin (cargo build --release -p bricks)"; exit 1; }
+bin=$(realpath "${1:-target/release/brick}")
+[ -x "$bin" ] || { echo "no binary at $bin (cargo build --release -p brick)"; exit 1; }
 
 shots=()
 if [ -n "${SHOTS:-}" ]; then mkdir -p "$SHOTS"; shots=(-v "$(realpath "$SHOTS"):/shots"); fi
 # Arch's sway binary carries cap_sys_nice: exec fails without it in the container's set.
-out=$(docker run --rm --cap-add SYS_NICE -v "$bin:/usr/local/bin/bricks:ro" \
+out=$(docker run --rm --cap-add SYS_NICE -v "$bin:/usr/local/bin/brick:ro" \
   -v "$PWD/scripts/a11y_helpers.py:/a11y.py:ro" "${shots[@]}" archlinux:latest bash -c '
 set -uo pipefail
 pacman -Syu --noconfirm --needed sway wtype grim gtk4 ttf-dejavu dbus python-gobject at-spi2-core >/dev/null 2>&1
@@ -43,7 +43,7 @@ session() {
   keys() { wtype -s 400 "$@" -s 400; }
   shown() { python3 /a11y.py text | sed "s/^/${1:-shown}: /"; }
 
-  bricks /tmp/t.csv >>/tmp/app.log 2>&1 & sleep 4
+  brick /tmp/t.csv >>/tmp/app.log 2>&1 & sleep 4
   echo "== 1 formula"
   keys -k Right; shot 1-formula; shown
 
@@ -70,11 +70,11 @@ session() {
   echo "== 7 paste"
   keys -M ctrl c -m ctrl; sleep 1; keys -k Down; keys -M ctrl v -m ctrl; sleep 1
   shot 7-paste; shown
-  pkill -x bricks
+  pkill -x brick
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
-echo "== app log"; grep "^bricks:" /tmp/app.log | head -20
+echo "== app log"; grep "^brick:" /tmp/app.log | head -20
 ' 2>&1) || true
 [ -n "${VERBOSE:-}" ] && sed 's/^/  /' <<<"$out"
 section() { awk -v s="== $1" '/^== /{on=($0 ~ "^" s)} on' <<<"$out"; }

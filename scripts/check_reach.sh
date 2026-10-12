@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # GRID-6 acceptance: empty cells fill the window past the data and grow as you go.
 #
-#   scripts/check_reach.sh [BINARY]   (default target/release/bricks)
+#   scripts/check_reach.sh [BINARY]   (default target/release/brick)
 #
 # In an Arch container under headless sway (1280x720); the cursor cell is read from the
 # grid's description through the accessibility tree (scripts/a11y_helpers.py), the
@@ -20,13 +20,13 @@
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-bin=$(realpath "${1:-target/release/bricks}")
-[ -x "$bin" ] || { echo "no binary at $bin (cargo build --release -p bricks)"; exit 1; }
+bin=$(realpath "${1:-target/release/brick}")
+[ -x "$bin" ] || { echo "no binary at $bin (cargo build --release -p brick)"; exit 1; }
 
 shots=()
 if [ -n "${SHOTS:-}" ]; then mkdir -p "$SHOTS"; shots=(-v "$(realpath "$SHOTS"):/shots"); fi
 # Arch's sway binary carries cap_sys_nice: exec fails without it in the container's set.
-out=$(docker run --rm --cap-add SYS_NICE -v "$bin:/usr/local/bin/bricks:ro" \
+out=$(docker run --rm --cap-add SYS_NICE -v "$bin:/usr/local/bin/brick:ro" \
   -v "$PWD/scripts:/scripts:ro" "${shots[@]}" archlinux:latest bash -c '
 set -uo pipefail
 pacman -Syu --noconfirm --needed sway wtype grim gtk4 ttf-dejavu dbus python-gobject \
@@ -50,16 +50,16 @@ session() {
   # wtype may drop its first key while the compositor takes its keymap: wait first.
   times() { local n=$1; shift; local args=(); for i in $(seq $n); do args+=("$@" -s 60); done; wtype -s 300 "${args[@]}"; sleep 0.5; }
 
-  bricks >>/tmp/app.log 2>&1 & sleep 3
+  brick >>/tmp/app.log 2>&1 & sleep 3
   echo "== 1 blank"
   keys -M ctrl n -m ctrl; sleep 2
   shot 1-blank
   times 30 -k Down; times 12 -k Right
   cursor blank
   shot 1-moved
-  pkill -x bricks; sleep 1
+  pkill -x brick; sleep 1
 
-  bricks /tmp/t.csv >>/tmp/app.log 2>&1 & sleep 3
+  brick /tmp/t.csv >>/tmp/app.log 2>&1 & sleep 3
   echo "== 2 typed"
   go E40; keys x -k Return; rows typed
   keys -M ctrl z -m ctrl; rows undone
@@ -85,11 +85,11 @@ session() {
   # A range from past the data into it, the cursor at its far end, cleared.
   go A60; keys -M shift -M ctrl -k Home -m ctrl -m shift; keys -k Delete; sleep 1
   rows cleared; go A2; cursor cleared
-  pkill -x bricks
+  pkill -x brick
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
-echo "== app log"; grep -E "^bricks:|panicked" /tmp/app.log | head -20
+echo "== app log"; grep -E "^brick:|panicked" /tmp/app.log | head -20
 ' 2>&1) || true
 [ -n "${VERBOSE:-}" ] && sed 's/^/  /' <<<"$out"
 section() { awk -v s="== $1" '/^== /{on=($0 ~ "^" s)} on' <<<"$out"; }

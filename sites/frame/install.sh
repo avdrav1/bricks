@@ -11,7 +11,7 @@
 # anything is installed. GTK 4 comes from the system: if it is missing, this says how to
 # install it. A release is a latest.json ({"version", "url", "sha256"}) beside a tarball
 # holding one folder with `frame`, dev.cronkite.Frame.desktop, and dev.cronkite.Frame.svg,
-# as Bricks' are (sites/bricks/install.sh).
+# as Brick's are (sites/brick/install.sh).
 set -eu
 
 # Where latest.json is: filled in when the page is deployed (scripts/ship.sh frame site).

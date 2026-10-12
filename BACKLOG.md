@@ -83,6 +83,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | PKG-3 | M4 | P0 | done | - | Portable release build: link against Ubuntu 24.04's glibc (build in a container) | The release binary starts on clean Arch, Ubuntu 24.04, and Fedora |
 | PKG-1 | M4 | P0 | done | APP-1, PKG-3 | curl installer (per user, no sudo): `install.sh` on the download site; .desktop file, icon, text/csv association; `--uninstall` | Piping `install.sh` from the site into `sh` installs on clean Arch, Ubuntu 24.04, Fedora; checksum verified; double-click opens CSVs; prints the distro's GTK 4 install command if missing |
 | PKG-4 | M4 | P0 | done | PKG-1 | Rename the app to Bricks: `bricks` command, window titles, app menu, state folder | `bricks` starts the app; installing over v0.1.0 leaves one app, named Bricks, with its recent files kept |
+| PKG-5 | M5 | P0 | done | PKG-4 | Rename the app to Brick: `brick` command, app ID, window titles, app menu, state folder, download site | `brick` starts the app; installing over v0.2.1 (Bricks) or v0.1.0 (Spreadsheet) leaves one app, named Brick, with its recent files kept; the old install URL still installs it |
 | PKG-2 | M4 | P2 | todo | PKG-1 | Flatpak manifest | Builds on Flathub CI |
 | DEC-6 | M5 | P0 | done | - | Workbook model: XLSX sheets as indexed CSV copies; references address file rows | ADR 0006 accepted |
 | DEC-7 | M5 | P0 | done | - | Formula engine: lazy evaluation over raw cells with a revision cache | ADR 0007 accepted |
@@ -153,6 +154,9 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-12 PKG-5:** the spreadsheet is Brick now (user decision: rename everything, especially what users see). Command `brick`, window title and dialogs, `--version`, log lines (`brick: …`), the app ID `dev.cronkite.Brick` (with Slate's and Frame's `dev.cronkite.*`; the desktop entry and icon take its name), the state folder `~/.local/state/brick`, the cache folder, the download site `brick.cronkite.cc`, the tarball `brick-X.Y.Z-x86_64-linux.tar.gz`, and the suite page. Internally: `apps/brick`, package `brick`, `sites/brick`, `AppKind::Brick`, `scripts/ship.sh brick`, `backlog.py next brick`, `BRICK_TIMINGS`.
+  - Kept: the recovery journals' magic (`BRICKSJ1`..`BRICKSJ3`), so journals written before the rename still restore; dated history (these notes, the CHANGELOG, ADRs, decisions, spikes); the Pages project (`spreadsheet`) and the bucket's root for its release; `v` tags.
+  - Upgrades: the first run moves `~/.local/state/bricks` (else `…/spreadsheet`) to `…/brick`. The installer removes what the Bricks and Spreadsheet installers put in place (only when their desktop entry runs their `~/.local/bin` binary) and drops their CSV defaults, and reports "Updated Brick 0.2.1 -> X". `bricks.cronkite.cc` stays attached to the same project: its `install.sh` is the new installer, and its page sends visitors to `brick.cronkite.cc`.
 - **2026-10-12 release Frame v0.1.0:** shipped (tag `frame-v0.1.0`).
   - Release: tarball `dl.cronkite.cc/frame/releases/v0.1.0/frame-0.1.0-x86_64-linux.tar.gz` (1.0 MB, sha256 a55c40e37f48…), with `dl.cronkite.cc/frame/latest.json`. The page and installer are at frame.cronkite.cc, and cronkite.cc lists Frame as available.
   - Pipeline (FRAME-9's follow-ups, now done):

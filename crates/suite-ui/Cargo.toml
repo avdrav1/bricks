@@ -1,6 +1,6 @@
 [package]
 name = "suite-ui"
-description = "User-interface conventions shared by Bricks, Slate, and Frame"
+description = "User-interface conventions shared by Brick, Slate, and Frame"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
@@ -15,5 +15,5 @@ suite-core.workspace = true
 workspace = true
 
 [lib]
-# `cargo bench` runs only apps/bricks/benches/corpus.rs (BENCH-1).
+# `cargo bench` runs only apps/brick/benches/corpus.rs (BENCH-1).
 bench = false

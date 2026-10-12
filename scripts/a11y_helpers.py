@@ -18,7 +18,7 @@ import gi
 gi.require_version("Atspi", "2.0")
 from gi.repository import Atspi  # noqa: E402
 
-APP = "bricks"
+APP = "brick"
 PRESSABLE = (Atspi.Role.BUTTON, Atspi.Role.TOGGLE_BUTTON)
 
 

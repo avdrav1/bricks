@@ -736,7 +736,7 @@ session() {
 
   echo "== 19 install"
   # A release as the installer takes it: latest.json beside a tarball of one folder with
-  # the binary, its desktop entry, and its icon (the layout of Bricks releases).
+  # the binary, its desktop entry, and its icon (the layout of Brick releases).
   rel=frame-9.9.9-x86_64-linux
   mkdir -p /tmp/site/$rel
   cp /usr/local/bin/frame /packaging/dev.cronkite.Frame.desktop /packaging/dev.cronkite.Frame.svg /tmp/site/$rel/

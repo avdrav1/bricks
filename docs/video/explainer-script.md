@@ -12,7 +12,7 @@ before recording.
 
 | Picture | Voiceover |
 | --- | --- |
-| A terminal. The cursor blinks next to `bricks big.csv` (1 GB). Enter. The grid is full of rows almost at once. Hard cut to black. | *(none; the keyboard click and then silence)* |
+| A terminal. The cursor blinks next to `brick big.csv` (1 GB). Enter. The grid is full of rows almost at once. Hard cut to black. | *(none; the keyboard click and then silence)* |
 | Title card: **Cronkite**. Beneath it: *A fast, native office suite for Linux.* | "That was a one-gigabyte spreadsheet, open in about a third of a second." |
 
 [BENCHMARKS.md: 1 GB CSV open to first rows visible, 314 ms]
@@ -21,19 +21,19 @@ before recording.
 
 | Picture | Voiceover |
 | --- | --- |
-| Three app icons slide in side by side: Bricks, Slate, Frame. | "Cronkite is an office suite for Linux, built from scratch in Rust. It has three apps: Bricks for spreadsheets, Slate for documents, and Frame for presentations." |
+| Three app icons slide in side by side: Brick, Slate, Frame. | "Cronkite is an office suite for Linux, built from scratch in Rust. It has three apps: Brick for spreadsheets, Slate for documents, and Frame for presentations." |
 | The icons sit in the GNOME app grid next to Files and Settings. | "They're native apps. No browser tab, no subscription, no account. Each one installs and runs on its own, so you take only what you need." |
 
-## 0:30 – Bricks (55 s)
+## 0:30 – Brick (55 s)
 
 | Picture | Voiceover |
 | --- | --- |
-| Bricks with the 1 GB CSV: 19 million rows. Drag the scrollbar to the bottom; it's instantly at row 19,100,000. Scroll fast. | "Bricks is the spreadsheet. It's built for the files other spreadsheets give up on. This one has nineteen million rows, and scrolling stays smooth." |
+| Brick with the 1 GB CSV: 19 million rows. Drag the scrollbar to the bottom; it's instantly at row 19,100,000. Scroll fast. | "Brick is the spreadsheet. It's built for the files other spreadsheets give up on. This one has nineteen million rows, and scrolling stays smooth." |
 | Click a numeric column header, then Sort. Done before the narrator finishes. | "Sorting all nineteen million rows takes under a second." |
 | Ctrl+F, type `portland`. The match count streams in. | "Search runs in the background, so the window never freezes." |
-| Zoom in on a cell holding `00123`. Edit another cell, press Ctrl+S, and the title bar's • clears. | "Your data stays your data. `00123` stays `00123`. Bricks never quietly turns it into a number. And every save is atomic: a crash can't leave you with half a file." |
+| Zoom in on a cell holding `00123`. Edit another cell, press Ctrl+S, and the title bar's • clears. | "Your data stays your data. `00123` stays `00123`. Brick never quietly turns it into a number. And every save is atomic: a crash can't leave you with half a file." |
 | Open `budget.xlsx`: several sheet tabs, bold headers, fills, and `=SUM` formulas. Change a value; the totals update. | "It opens Excel workbooks too, with formulas, multiple sheets, and cell styles." |
-| The same workbook open in LibreOffice: the chart and comments are still there. | "When you save, Bricks patches the original file rather than rewriting it, so charts, comments, and conditional formatting come through untouched." |
+| The same workbook open in LibreOffice: the chart and comments are still there. | "When you save, Brick patches the original file rather than rewriting it, so charts, comments, and conditional formatting come through untouched." |
 
 [BENCHMARKS.md: sort 0.82 s for 19.1M rows; find 224 ms; atomic save is CLAUDE.md invariant 6; XLSX patching is gate M5]
 
@@ -74,13 +74,13 @@ before recording.
 
 | Picture | Voiceover |
 | --- | --- |
-| The three icons, then the URL **cronkite.cc**. Beneath it: *Bricks and Slate available now · Frame coming soon · Open source*. | "Cronkite. Fast, native, and open source. Bricks and Slate are available today, and Frame is coming soon, at cronkite.cc." |
+| The three icons, then the URL **cronkite.cc**. Beneath it: *Brick and Slate available now · Frame coming soon · Open source*. | "Cronkite. Fast, native, and open source. Brick and Slate are available today, and Frame is coming soon, at cronkite.cc." |
 
 ---
 
 ## Production notes
 
-- **Machine:** record the Bricks timings on the reference box (8-core, NVMe; see `apps/bricks/docs/BENCHMARKS.md`). Show them in real time; never speed them up.
+- **Machine:** record the Brick timings on the reference box (8-core, NVMe; see `apps/brick/docs/BENCHMARKS.md`). Show them in real time; never speed them up.
 - **Files you need:**
   - `big.csv` (`python3 scripts/gen_corpus.py`, the 1 GB file);
   - a styled `.xlsx` with a chart and comments;

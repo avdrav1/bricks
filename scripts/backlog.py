@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Read and update BACKLOG.md.
 
-  backlog.py next [APP]        print the next story to build (JSON); APP is bricks, slate,
+  backlog.py next [APP]        print the next story to build (JSON); APP is brick, slate,
                                or frame (default: every app, in that order)
   backlog.py show ID           print one story (JSON)
   backlog.py set ID STATUS     set a story's status
@@ -18,7 +18,7 @@ BACKLOG = ROOT / "BACKLOG.md"
 # Each app's milestones, in order: a milestone unlocks when the previous one of the same
 # app has its gate checked.
 CHAINS = {
-    "bricks": ["S0", "M0", "M1", "M2", "M3", "M4", "M5"],
+    "brick": ["S0", "M0", "M1", "M2", "M3", "M4", "M5"],
     "slate": ["SL0", "SL1", "SL2"],
     "frame": ["FR0", "FR1"],
 }

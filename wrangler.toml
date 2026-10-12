@@ -1,4 +1,4 @@
-# Cloudflare Pages project for Bricks' download site. scripts/ship.sh deploys sites/bricks/
+# Cloudflare Pages project for Brick's download site. scripts/ship.sh deploys sites/brick/
 # from dist/site. Slate's and Frame's pages are their own projects (scripts/ship.sh slate|frame
 # site), and so is the suite page, sites/cronkite/ (scripts/ship.sh suite-site).
 name = "spreadsheet"

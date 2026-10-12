@@ -1,0 +1,16 @@
+[package]
+name = "formula"
+description = "Formula language: parse, render, references, values, evaluation, functions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true
+
+[lib]
+# `cargo bench` runs only apps/brick/benches/corpus.rs (BENCH-1).
+bench = false

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Release pipeline. Each step is separate so the ship-it skill can confirm
-# with the user before anything leaves the machine. APP is bricks (the default), slate, or
+# with the user before anything leaves the machine. APP is brick (the default), slate, or
 # frame.
 #
 #   scripts/ship.sh [APP] preflight          checks only, changes nothing
@@ -10,22 +10,22 @@
 #   scripts/ship.sh [APP] upload [--dry-run] tarball, checksum, latest.json -> Cloudflare R2
 #   scripts/ship.sh [APP] site   [--dry-run] the app's download page (sites/APP) -> Cloudflare Pages
 #   scripts/ship.sh suite-site [--dry-run]   suite install page (sites/cronkite) -> Cloudflare Pages
-#   scripts/ship.sh [APP] tag                annotated git tag (local only): vX.Y.Z for Bricks, slate-vX.Y.Z for
+#   scripts/ship.sh [APP] tag                annotated git tag (local only): vX.Y.Z for Brick, slate-vX.Y.Z for
 #                                            Slate, frame-vX.Y.Z for Frame
 #
-# Bricks' release sits at the bucket's root (latest.json, releases/), Slate's under slate/,
+# Brick's release sits at the bucket's root (latest.json, releases/), Slate's under slate/,
 # Frame's under frame/.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 [ -f .env.ship ] && set -a && . ./.env.ship && set +a
-APP=bricks
-case "${1:-}" in bricks|slate|frame) APP=$1; shift ;; esac
+APP=brick
+case "${1:-}" in brick|slate|frame) APP=$1; shift ;; esac
 TARGET=x86_64-unknown-linux-gnu
 case $APP in
-bricks)
-  ID=dev.bricks.Bricks  # desktop entry and icon names, as the app ID (APP_ID in apps/bricks/src/main.rs)
-  MANIFEST=Cargo.toml; SECTION=workspace.package  # Bricks' version is the workspace's
+brick)
+  ID=dev.cronkite.Brick  # desktop entry and icon names, as the app ID (APP_ID in apps/brick/src/main.rs)
+  MANIFEST=Cargo.toml; SECTION=workspace.package  # Brick's version is the workspace's
   PREFIX=""; PAGES_VAR=CF_PAGES_PROJECT; TAG_PREFIX=v
   INSTALL_CHECK=scripts/check_install.sh
   ;;
@@ -42,7 +42,7 @@ frame)
   INSTALL_CHECK=scripts/check_install_frame.sh
   ;;
 esac
-# Where the build puts latest.json and the deploy its copy of the site: dist/ for Bricks,
+# Where the build puts latest.json and the deploy its copy of the site: dist/ for Brick,
 # dist/slate/ for Slate, dist/frame/ for Frame.
 OUT="dist${PREFIX:+/${PREFIX%/}}"
 version() { sed -n "/^\[$SECTION\]/,/^\[/{s/^version = \"\(.*\)\"/\1/p}" "$MANIFEST"; }
@@ -51,14 +51,14 @@ TAG="$TAG_PREFIX$V"
 NAME="$APP-$V-x86_64-linux"
 TAR="dist/$NAME.tar.gz"
 DRY=false; [ "${2:-}" = "--dry-run" ] && DRY=true
-BUILD_IMAGE=bricks-build:ubuntu-24.04
+BUILD_IMAGE=brick-build:ubuntu-24.04
 need() { for v in "$@"; do [ -n "${!v:-}" ] || { echo "missing env: $v (see .env.ship.example)"; exit 1; }; done; }
 run() { if $DRY; then echo "[dry-run] $*"; else "$@"; fi; }
 wr() { npx --yes wrangler@4 "$@"; }
 # Where the app's latest.json and releases/ are.
 base() { echo "$DOWNLOAD_BASE_URL${PREFIX:+/${PREFIX%/}}"; }
 # Create Pages project $1 unless it exists. Match the name exactly: the list's domains
-# column holds bricks.cronkite.cc.
+# column holds brick.cronkite.cc.
 pages_project() {
   if ! wr pages project list --json | python3 -c 'import json, sys
 sys.exit(sys.argv[1] not in [p["Project Name"] for p in json.load(sys.stdin)])' "$1"; then
