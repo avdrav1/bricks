@@ -1,0 +1,55 @@
+{
+ "env": {
+  "cpu": "AMD Ryzen 9 5900 12-Core Processor",
+  "gpu": "NVIDIA Corporation GA102 [GeForce RTX 3080 Lite Hash Rate] (rev a1)",
+  "nvidia_smi": "Failed to initialize NVML: Driver/library version mismatch\nNVML library version: 615.78",
+  "nvidia_kernel_module": "NVRM version: NVIDIA UNIX Open Kernel Module for x86_64  615.71.09  Release Build  (root@alienware)",
+  "gtk4": "4.24.1",
+  "hyprland": "Hyprland 0.56.2 built from branch v0.56.2 at commit efb50993780079460b0cbed1363e2166a2de1d9f clean ([gha] Nix: update inputs).",
+  "monitor": "3840x2160@60.00000 at 0x0\n\tavailableModes: 3840x2160@60.00Hz 3840x2160@59.94Hz 3840x2160@60.00Hz 3840x2160@50.00Hz 3840x2160@29.97Hz 3840x2160@25.00Hz 3840x2160@23.98Hz 2560x1440@59.95Hz 1920x1080@60.00Hz 1920x1080@59.94Hz 1920x1080@50.00Hz 1920x1080@29.97Hz 1920x1080@25.00Hz 1920x1080@23.98Hz 1680x1050@59.95Hz 1600x900@60.00Hz 1280x1024@75.03Hz 1280x1024@60.02Hz 1440x900@59.89Hz 1280x800@59.81Hz 1152x864@75.00Hz 1280x720@60.00Hz 1280x720@59.94Hz 1280x720@50.00Hz 1024x768@75.03Hz 1024x768@70.07Hz 1024x768@60.00Hz 800x600@75.00Hz 800x600@72.19Hz 800x600@60.32Hz 720x576@50.00Hz 720x480@59.94Hz 640x480@75.00Hz 640x480@59.94Hz",
+  "GSK_RENDERER": null
+ },
+ "textview": {
+  "open": {
+   "spawn_to_ready_ms": 517.8,
+   "spawn_to_first_l_ms": 1608.0,
+   "peak_rss_mib": 344.4,
+   "stderr_tail": [
+    "load: insert 9 ms, 15274 tag ranges 62 ms",
+    "build: document 3 ms, buffer 126 ms, 50 tables"
+   ]
+  },
+  "scroll": {
+   "frames_measured": 263,
+   "interval_ms": {
+    "n": 262,
+    "p50": 33.4,
+    "p95": 36.39,
+    "p99": 37.71,
+    "max": 38.99,
+    "mean": 33.25
+   },
+   "missed_vsync": 261,
+   "cpu_ms": {
+    "n": 263,
+    "p50": 23.13,
+    "p95": 25.97,
+    "p99": 27.68,
+    "max": 28.89,
+    "mean": 23.22
+   },
+   "scrolled_px": 9657,
+   "spawn_to_ready_ms": 510.0,
+   "spawn_to_first_l_ms": 1588.2,
+   "peak_rss_mib": 374.9
+  },
+  "renderer": [
+   "Not using GL: renderer is llvmpipe",
+   "Using renderer 'GskGLRenderer' for surface 'GdkWaylandToplevel'",
+   "renderer: Some(\"GskGLRenderer\")"
+  ],
+  "renderer_label": "llvmpipe (NVIDIA driver/library mismatch)",
+  "quick": true,
+  "measured_at": "2026-10-11 21:06:02"
+ }
+}

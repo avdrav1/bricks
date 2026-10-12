@@ -1,0 +1,9 @@
+[package]
+name = "pango-flow"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+gtk = { workspace = true }
+libc = { workspace = true }
