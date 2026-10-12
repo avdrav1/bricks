@@ -22,7 +22,7 @@ Anything else is refused with a message naming the format (`.doc`, `.odt`, `.rtf
 
 - `slate FILE` opens it; File → Open (Ctrl+O) opens a file dialog filtered to `.txt`, `.md`, `.docx`; dropping a file on the window opens it. Each file opens in its own window.
 - Reading runs off the UI thread; the window shows "Opening…" until it is done. A file that can't be read gives an alert naming the file and the reason, and the window closes.
-- The document shows as one pageless column (see Pageless) at the chosen text width, centred, read-only, with the text selectable and copyable (Ctrl+C).
+- The document shows as one pageless column (see Pageless) at the chosen text width, centred, read-only, with the text selectable by dragging and copyable as plain text (Ctrl+A, Ctrl+C). Text is in one document font, Liberation Sans (metric-compatible with Arial) or else the system's sans, whatever the desktop font (user decision, SLATE-11: variable desktop fonts such as Adwaita Sans lay out twice as slowly).
 - The window title is the file name; the status bar shows the format and the word count.
 - Accessibility: the document's text is exposed to screen readers.
 

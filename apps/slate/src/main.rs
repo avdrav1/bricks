@@ -5,9 +5,15 @@
 //! Open. Ctrl+O picks a file through the desktop's file dialog, and files dropped on any
 //! window open too. A file is read off the UI thread while its window says "Opening…"; one
 //! that can't be read gets an alert naming it and the reason, and its window closes.
-//! Documents show as one pageless column (ADR 0005) whose width the menu's View → Text
-//! Width sets for every window at once, remembered in the user's settings.
+//! Documents show as one pageless column (ADR 0005), drawn by Slate's own flow (ADR 0007),
+//! whose width the menu's View → Text Width sets for every window at once, remembered in
+//! the user's settings.
+//!
+//! `slate FILE --bench-flow` measures the flow on FILE in a 1600x1000 window: re-wrapping
+//! after width changes and the frames of scrolling, printed as a JSON line (SLATE-11's
+//! acceptance test).
 
+mod bench;
 mod open;
 mod settings;
 mod view;
@@ -18,46 +24,40 @@ use settings::{Saver, Settings, TextWidth};
 use std::cell::RefCell;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
-use std::rc::{Rc, Weak};
 use suite_core::AppKind;
 
 const APP: AppKind = AppKind::Slate;
 const APP_ID: &str = "dev.cronkite.Slate";
-const USAGE: &str = "usage: slate [FILE.txt|FILE.md|FILE.docx]... [--version]";
+const USAGE: &str = "usage: slate [FILE.txt|FILE.md|FILE.docx]... [--version] [--bench-flow]";
 const START_WINDOW: &str = "start";
 
-/// The document is paper: dark text on white whatever the theme, as it was written.
+/// The page's text is one document font whatever the desktop's: Liberation Sans (metric-
+/// compatible with Arial), else the system's sans, at 11 pt. Variable desktop fonts such as
+/// Adwaita Sans take twice as long to lay out (SLATE-11). A page break's dashed line has
+/// room above and below it (`flow::PAGE_BREAK_HEIGHT` in all).
 const CSS: &str = "
-textview.slate-page, textview.slate-page > text,
-textview.slate-cell, textview.slate-cell > text {
-  background-color: #ffffff;
-  color: #1e1e1e;
-}
-textview.slate-page, textview.slate-cell { font-size: 11pt; }
-textview.slate-cell { border: 1px solid #c0bfbc; }
-grid.slate-table { margin: 6px 0; }
+slatepage { font-family: \"Liberation Sans\", sans-serif; font-size: 11pt; }
 separator.page-break {
   min-height: 0;
   background: none;
   border-top: 2px dashed #9a9996;
   margin: 18px 0;
 }
-separator.rule { min-height: 1px; background-color: #c0bfbc; margin: 12px 0; }
 ";
 
 thread_local! {
     /// The windows showing a file, by the file's canonical path.
     static OPEN: RefCell<Vec<(PathBuf, glib::WeakRef<gtk::ApplicationWindow>)>> =
         const { RefCell::new(Vec::new()) };
-    /// The documents shown, which follow the text width setting.
-    static COLUMNS: RefCell<Vec<Weak<view::Column>>> = const { RefCell::new(Vec::new()) };
+    /// The pages shown, which follow the text width setting.
+    static PAGES: RefCell<Vec<glib::WeakRef<view::Page>>> = const { RefCell::new(Vec::new()) };
     static SAVER: RefCell<Saver> = RefCell::new(Saver::default());
     /// Watches the settings file for changes made by other Slate processes.
     static SETTINGS_MONITOR: RefCell<Option<gio::FileMonitor>> = const { RefCell::new(None) };
 }
 
 fn main() -> glib::ExitCode {
-    let mut files = Vec::new();
+    let (mut files, mut bench) = (Vec::new(), false);
     for arg in std::env::args_os().skip(1) {
         match arg.to_str() {
             Some("--version") => {
@@ -68,12 +68,17 @@ fn main() -> glib::ExitCode {
                 println!("{USAGE}");
                 return glib::ExitCode::SUCCESS;
             }
+            Some("--bench-flow") => bench = true,
             Some(a) if a.starts_with('-') => {
                 eprintln!("slate: unknown option {a}\n{USAGE}");
                 return glib::ExitCode::from(2);
             }
             _ => files.push(PathBuf::from(arg)),
         }
+    }
+    if bench && files.len() != 1 {
+        eprintln!("slate: --bench-flow needs one file\n{USAGE}");
+        return glib::ExitCode::from(2);
     }
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
@@ -138,7 +143,7 @@ fn main() -> glib::ExitCode {
     app.connect_activate(move |app| match files.take() {
         Some(files) if !files.is_empty() => {
             for f in files {
-                open_window(app, &f);
+                open_window(app, &f, bench);
             }
         }
         _ if app.windows().is_empty() => start_window(app),
@@ -286,7 +291,7 @@ fn choose_and_open(app: &gtk::Application) {
 
 fn open_file(app: &gtk::Application, file: &gio::File, parent: Option<&gtk::Window>) {
     match file.path() {
-        Some(path) => open_window(app, &path),
+        Some(path) => open_window(app, &path, false),
         None => alert(
             parent,
             &format!("Cannot open {}", file.uri()),
@@ -332,19 +337,20 @@ fn alert(parent: Option<&gtk::Window>, message: &str, detail: &str) {
 }
 
 /// Show `path` in a window: its own if it is open, else a new one that says "Opening…"
-/// while the file is read in the background.
-fn open_window(app: &gtk::Application, path: &Path) {
+/// while the file is read in the background. `bench`: run `--bench-flow` on it.
+fn open_window(app: &gtk::Application, path: &Path, bench: bool) {
     let path = canonical(path);
     if let Some(window) = window_for(&path) {
         window.present();
         return;
     }
     let name = suite_file::document_name(&path).into_owned();
+    let (width, height) = if bench { bench::WINDOW } else { (900, 860) };
     let window = gtk::ApplicationWindow::builder()
         .application(app)
         .title(&name)
-        .default_width(900)
-        .default_height(860)
+        .default_width(width)
+        .default_height(height)
         .build();
     window.set_titlebar(Some(&header(&name)));
 
@@ -385,7 +391,7 @@ fn open_window(app: &gtk::Application, path: &Path) {
     glib::spawn_future_local(async move {
         let reason = match reading.await {
             Ok(Ok(opened)) => {
-                show(&app, &stack, &status, &name, opened);
+                show(&app, &stack, &status, &name, opened, bench);
                 close_start_window(&app);
                 return;
             }
@@ -393,6 +399,9 @@ fn open_window(app: &gtk::Application, path: &Path) {
             Err(_) => "Reading it failed unexpectedly.".to_owned(),
         };
         tracing::warn!("cannot open {}: {reason}", path.display());
+        if bench {
+            std::process::exit(1);
+        }
         let dialog = gtk::AlertDialog::builder()
             .message(format!("Cannot open “{name}”"))
             .detail(&reason)
@@ -414,10 +423,10 @@ fn apply_text_width(action: &gio::SimpleAction, width: TextWidth) -> bool {
         return false;
     }
     action.set_state(&state);
-    COLUMNS.with_borrow_mut(|columns| {
-        columns.retain(|c| c.strong_count() > 0);
-        for column in columns.iter().filter_map(Weak::upgrade) {
-            column.set_text_width(width);
+    PAGES.with_borrow_mut(|pages| {
+        pages.retain(|p| p.upgrade().is_some());
+        for page in pages.iter().filter_map(glib::WeakRef::upgrade) {
+            page.set_text_width(width);
         }
     });
     true
@@ -473,34 +482,15 @@ fn text_width(app: &gtk::Application) -> TextWidth {
         .unwrap_or_default()
 }
 
-/// Replace "Opening…" with the document.
+/// Replace "Opening…" with the document. `bench`: run `--bench-flow` on it.
 fn show(
     app: &gtk::Application,
     stack: &gtk::Stack,
     status: &gtk::Label,
     name: &str,
     opened: open::Opened,
+    bench: bool,
 ) {
-    let column = Rc::new(view::Column::new(
-        &opened.doc,
-        &opened.textures,
-        text_width(app),
-    ));
-    COLUMNS.with_borrow_mut(|columns| columns.push(Rc::downgrade(&column)));
-    column
-        .view
-        .update_property(&[gtk::accessible::Property::Label(name)]);
-    let scrolled = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Automatic)
-        .child(&column.view)
-        .build();
-    let hadj = scrolled.hadjustment();
-    hadj.connect_page_size_notify({
-        let column = column.clone();
-        move |adj| column.fit(adj.page_size() as i32)
-    });
-    stack.add_named(&scrolled, Some("document"));
-    stack.set_visible_child_name("document");
     let words = opened.words;
     status.set_text(&format!(
         "{} · {} word{}",
@@ -508,7 +498,24 @@ fn show(
         group_digits(words),
         if words == 1 { "" } else { "s" }
     ));
-    column.view.grab_focus();
+    let setting = if bench {
+        TextWidth::Full
+    } else {
+        text_width(app)
+    };
+    let page = view::Page::new(opened.doc, opened.textures, setting);
+    PAGES.with_borrow_mut(|pages| pages.push(page.downgrade()));
+    page.update_property(&[gtk::accessible::Property::Label(name)]);
+    let scrolled = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .child(&page)
+        .build();
+    stack.add_named(&scrolled, Some("document"));
+    stack.set_visible_child_name("document");
+    page.grab_focus();
+    if bench {
+        bench::run(app, &page, words);
+    }
 }
 
 /// `1234567` as `1,234,567`.

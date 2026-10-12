@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# SLATE-4 and SLATE-10 acceptance: the viewer window opens, shows, and refuses documents,
-# and its pageless column follows View → Text Width.
+# SLATE-4, SLATE-10, and SLATE-11 acceptance: the window opens, shows, and refuses documents,
+# its pageless column follows View → Text Width, and its text selects and copies.
 #
 #   scripts/check_slate.sh [BINARY]   (default target/release/slate)
 #
@@ -33,7 +33,10 @@
 #   9. after Ctrl+Q the settings file says full, and slate relaunched shows a Full column;
 #  10. Wide in a window resized to 640 px (floating) narrows the column to 592; Narrow
 #      there stays 480;
-#  11. `slate fixture.docx`: its page break is an accessible object named "Page break".
+#  11. `slate fixture.docx`: its page break is an accessible object named "Page break";
+#  12. Ctrl+A, Ctrl+C in w.txt: the clipboard holds the file's lines as plain text;
+#  13. in looks.md, a drag from left of the plain line to the right of the bold line below
+#      it, then Ctrl+C: the clipboard holds those two lines.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -49,7 +52,7 @@ out=$(docker run --rm --cap-add SYS_NICE -v "$bin:/usr/local/bin/slate:ro" \
   archlinux:latest bash -c '
 set -uo pipefail
 pacman -Syu --noconfirm --needed sway wtype grim gtk4 ttf-dejavu dbus python-gobject at-spi2-core \
-  python-pywayland wlr-protocols wayland pkgconf jq >/dev/null 2>&1
+  python-pywayland wlr-protocols wayland pkgconf jq wl-clipboard >/dev/null 2>&1
 mkdir -p /shots /tmp/rt /tmp/md /tmp/proto && chmod 700 /tmp/rt && touch /tmp/proto/__init__.py
 python -m pywayland.scanner -i /usr/share/wayland/wayland.xml \
   /usr/share/wlr-protocols/unstable/wlr-virtual-pointer-unstable-v1.xml -o /tmp/proto/wlr_proto >/dev/null
@@ -152,10 +155,11 @@ elif cmd == "contains":
         print(f"missing: {m}")
 PY
 cat > /tmp/px.py <<"PY"
+import sys
 import gi
 gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import GdkPixbuf
-p = GdkPixbuf.Pixbuf.new_from_file("/shots/looks.png")
+p = GdkPixbuf.Pixbuf.new_from_file(sys.argv[1] if len(sys.argv) > 1 else "/shots/looks.png")
 w, h, rs, n, px = p.get_width(), p.get_height(), p.get_rowstride(), p.get_n_channels(), p.get_pixels()
 bands, cur = [], None
 for y in range(70, h - 50):
@@ -176,6 +180,7 @@ if len(bands) >= 3:
     height = lambda b: b[1] - b[0] + 1
     print(f"heading height: {height(bands[0]) * 100 // height(bands[1])}")
     print(f"bold ink: {bands[2][2] * 100 // bands[1][2]}")
+    print("mids: " + " ".join(str((b[0] + b[1]) // 2) for b in bands[:3]))
 PY
 cat > /tmp/col.py <<"PY"
 import sys
@@ -205,6 +210,12 @@ for y in range(max(0, (rule_y or 0) - 60), rule_y or 0):
     if dark:
         text = max(text, dark[-1] - dark[0] + 1)
 print(f"rule {rule} text {text} off {rule_x + rule // 2 - w // 2}")
+PY
+cat > /tmp/copied.py <<"PY"
+import subprocess, sys
+raw = open(sys.argv[1], encoding=sys.argv[2], newline="").read()
+got = subprocess.run(["wl-paste", "-n"], capture_output=True, text=True).stdout
+print("copy equals the file" if got == "\n".join(raw.splitlines()) else f"copy differs: {got[:200]!r}")
 PY
 session() {
   WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 sway --unsupported-gpu -c /tmp/sway.conf >/tmp/sway.log 2>&1 &
@@ -293,6 +304,16 @@ session() {
   echo "== 11 page break"
   slate /tmp/fixture.docx >>/tmp/app.log 2>&1 & sleep 4
   echo "page breaks: $(a11y dump | grep -c "^Page break$")"; quit
+  echo "== 12 select all"
+  slate /tmp/w.txt >>/tmp/app.log 2>&1 & sleep 4
+  keys -M ctrl a -m ctrl; keys -M ctrl c -m ctrl; sleep 1; shot select-all
+  python3 /tmp/copied.py /tmp/w.txt cp1252; quit
+  echo "== 13 drag"
+  slate /tmp/looks.md >>/tmp/app.log 2>&1 & sleep 4
+  shot drag-before
+  read -r _ plain bold <<<"$(python3 /tmp/px.py /shots/drag-before.png | sed -n "s/^mids: //p")"
+  python /dnd.py drag 300 "$plain" 1000 "$bold"; keys -M ctrl c -m ctrl; sleep 1; shot drag
+  echo "dragged: $(wl-paste -n | tr "\n" "|")"; quit
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -359,6 +380,8 @@ column "10: Wide in a 1280 px window" "10 narrow window" "wide1280 col-a\.md" 81
 column "10: Wide in a 640 px window narrows to 592" "10 narrow window" "wide640 col-a\.md" 592
 column "10: Narrow in a 640 px window stays 480" "10 narrow window" "narrow640 col-a\.md" 480
 check "11: the .docx page break is named Page break to screen readers" "11 page break" "^page breaks: 1$"
+check "12: Ctrl+A, Ctrl+C copies the whole text as plain text" "12 select all" "^copy equals the file$"
+check "13: dragging over two lines copies exactly them" "13 drag" "^dragged: HHHHHHHH\|HHHHHHHH$"
 if [ $fail = 0 ]; then echo "SLATE OK"; else
   echo "SLATE CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1
