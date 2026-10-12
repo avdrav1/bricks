@@ -12,11 +12,17 @@
 //! Each style holds `defPPr` (all levels) and `lvl1pPr`..`lvl9pPr`; each of those may carry
 //! a `defRPr` with the level's run defaults. `bodyPr` (anchoring, insets, wrap, autofit)
 //! inherits master placeholder → layout placeholder → shape.
+//!
+//! Each run records where each of its looks is set (`Run::sources`, ADR 0006): the shape
+//! itself (steps 3 to 5 on the shape), its layout's or master's placeholder (step 4), the
+//! master's text styles (step 2), or the presentation (step 1 and PowerPoint's defaults),
+//! so an edit keeps inherited looks inherited. Neighbouring runs that look the same merge.
 
 use crate::color::Palette;
 use crate::xml::Element;
 use presentation_model::{
-    Align, Anchor, Bullet, Caps, Color, Insets, Paragraph, Run, Spacing, TextBody, Vertical,
+    Align, Anchor, AutoNumber, Bullet, BulletSize, Caps, Color, Insets, Paragraph, Run, RunSources,
+    Source, Spacing, TextBody, Vertical,
 };
 
 /// PowerPoint's text size when nothing sets one.
@@ -84,14 +90,17 @@ pub(crate) struct FontRef {
     /// Table styles' `tcTxStyle b`/`i`.
     pub bold: Option<bool>,
     pub italic: Option<bool>,
+    /// The shape's own style, or a table style (the presentation's).
+    pub source: Source,
 }
 
 /// A shape's text styles: `base` (default text style and master text style), its style
-/// reference, and `shape` (placeholder list styles and its own), lowest priority first.
+/// reference, and `shape` (placeholder list styles and its own), lowest priority first,
+/// each with where it's set.
 pub(crate) struct Styles<'a> {
-    pub base: Vec<&'a Element>,
+    pub base: Vec<(&'a Element, Source)>,
     pub font_ref: FontRef,
-    pub shape: Vec<&'a Element>,
+    pub shape: Vec<(&'a Element, Source)>,
     /// `bodyPr` elements, lowest priority first.
     pub body: Vec<&'a Element>,
 }
@@ -107,6 +116,8 @@ struct RunProps {
     color: Option<Color>,
     baseline: Option<f64>,
     caps: Option<Caps>,
+    /// Where each of the above was last set.
+    from: RunSources,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -114,13 +125,6 @@ enum BulletKind {
     Off,
     Char(String),
     Number { scheme: String, start: u32 },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum BulletSize {
-    FollowText,
-    Percent(f64),
-    Points(f64),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -144,24 +148,32 @@ fn on(v: &str) -> bool {
 }
 
 impl RunProps {
-    fn apply(&mut self, rpr: &Element, ctx: &TextContext<'_>) {
+    /// Apply `rpr`, set at `source`.
+    fn apply(&mut self, rpr: &Element, ctx: &TextContext<'_>, source: Source) {
+        let from = &mut self.from;
         if let Some(sz) = rpr.num::<f64>("sz") {
             self.size = Some(sz / 100.0);
+            from.size = source;
         }
         if let Some(b) = rpr.attr("b") {
             self.bold = Some(on(b));
+            from.bold = source;
         }
         if let Some(i) = rpr.attr("i") {
             self.italic = Some(on(i));
+            from.italic = source;
         }
         if let Some(u) = rpr.attr("u") {
             self.underline = Some(u != "none");
+            from.underline = source;
         }
         if let Some(s) = rpr.attr("strike") {
             self.strike = Some(s != "noStrike");
+            from.strike = source;
         }
         if let Some(b) = rpr.num::<f64>("baseline") {
             self.baseline = Some(b / 1000.0);
+            from.baseline = source;
         }
         if let Some(c) = rpr.attr("cap") {
             self.caps = Some(match c {
@@ -169,35 +181,31 @@ impl RunProps {
                 "small" => Caps::Small,
                 _ => Caps::None,
             });
+            from.caps = source;
         }
         for e in rpr.elements() {
-            match e.name.as_str() {
-                "solidFill" => {
-                    if let Some(c) = ctx.palette.first(e, None) {
-                        self.color = Some(c);
-                    }
-                }
+            let color = match e.name.as_str() {
+                "solidFill" => ctx.palette.first(e, None),
                 // Gradient text shows as its first stop's colour.
-                "gradFill" => {
-                    if let Some(c) = e
-                        .path(&["gsLst", "gs"])
-                        .and_then(|gs| ctx.palette.first(gs, None))
-                    {
-                        self.color = Some(c);
-                    }
-                }
-                "noFill" => {
-                    self.color = Some(Color {
-                        alpha: 0,
-                        ..Color::BLACK
-                    })
-                }
+                "gradFill" => e
+                    .path(&["gsLst", "gs"])
+                    .and_then(|gs| ctx.palette.first(gs, None)),
+                "noFill" => Some(Color {
+                    alpha: 0,
+                    ..Color::BLACK
+                }),
                 "latin" => {
                     if let Some(face) = e.attr("typeface").filter(|f| !f.is_empty()) {
                         self.font = Some(ctx.fonts.resolve(face));
+                        from.font = source;
                     }
+                    None
                 }
-                _ => {}
+                _ => None,
+            };
+            if let Some(c) = color {
+                self.color = Some(c);
+                from.color = source;
             }
         }
     }
@@ -212,7 +220,8 @@ fn spacing(e: &Element) -> Option<Spacing> {
 }
 
 impl ParaProps {
-    fn apply(&mut self, ppr: &Element, ctx: &TextContext<'_>) {
+    /// Apply `ppr`, set at `source`.
+    fn apply(&mut self, ppr: &Element, ctx: &TextContext<'_>, source: Source) {
         if let Some(a) = ppr.attr("algn") {
             self.align = Some(match a {
                 "ctr" => Align::Centre,
@@ -263,7 +272,7 @@ impl ParaProps {
                         self.bullet_size = Some(BulletSize::Points(v / 100.0));
                     }
                 }
-                "defRPr" => self.run.apply(e, ctx),
+                "defRPr" => self.run.apply(e, ctx, source),
                 _ => {}
             }
         }
@@ -280,28 +289,33 @@ impl Styles<'_> {
     /// The paragraph properties a level gets from the styles.
     fn level(&self, level: usize, ctx: &TextContext<'_>) -> ParaProps {
         let mut props = ParaProps::default();
-        let apply = |style: &Element, props: &mut ParaProps| {
+        let apply = |(style, source): &(&Element, Source), props: &mut ParaProps| {
             if let Some(d) = style.child("defPPr") {
-                props.apply(d, ctx);
+                props.apply(d, ctx, *source);
             }
             if let Some(l) = style.child(LEVELS[level]) {
-                props.apply(l, ctx);
+                props.apply(l, ctx, *source);
             }
         };
         for s in &self.base {
             apply(s, &mut props);
         }
-        if let Some(f) = &self.font_ref.font {
-            props.run.font = Some(f.clone());
+        let (fr, run) = (&self.font_ref, &mut props.run);
+        if let Some(f) = &fr.font {
+            run.font = Some(f.clone());
+            run.from.font = fr.source;
         }
-        if let Some(c) = self.font_ref.color {
-            props.run.color = Some(c);
+        if let Some(c) = fr.color {
+            run.color = Some(c);
+            run.from.color = fr.source;
         }
-        if let Some(b) = self.font_ref.bold {
-            props.run.bold = Some(b);
+        if let Some(b) = fr.bold {
+            run.bold = Some(b);
+            run.from.bold = fr.source;
         }
-        if let Some(i) = self.font_ref.italic {
-            props.run.italic = Some(i);
+        if let Some(i) = fr.italic {
+            run.italic = Some(i);
+            run.from.italic = fr.source;
         }
         for s in &self.shape {
             apply(s, &mut props);
@@ -336,13 +350,12 @@ pub(crate) fn body(
         text.font_scale = fit.num::<f64>("fontScale").unwrap_or(100_000.0) / 100_000.0;
         text.line_reduction = fit.num::<f64>("lnSpcReduction").unwrap_or(0.0) / 100_000.0;
     }
-    let mut counters: [Option<(String, u32)>; 9] = Default::default();
     for p in tx_body.all("p") {
         let ppr = p.child("pPr");
         let level = ppr.and_then(|p| p.num::<usize>("lvl")).unwrap_or(0).min(8);
         let mut props = styles.level(level, ctx);
         if let Some(ppr) = ppr {
-            props.apply(ppr, ctx);
+            props.apply(ppr, ctx, Source::Own);
         }
         let mut runs = Vec::new();
         let mut end = props.run.clone();
@@ -350,7 +363,7 @@ pub(crate) fn body(
             let mut rp = props.run.clone();
             let rpr = r.child("rPr");
             if let Some(rpr) = rpr {
-                rp.apply(rpr, ctx);
+                rp.apply(rpr, ctx, Source::Own);
             }
             let text = match r.name.as_str() {
                 "r" => r.child("t").map(|t| t.text()).unwrap_or_default(),
@@ -358,7 +371,7 @@ pub(crate) fn body(
                 "fld" if r.attr("type") == Some("slidenum") => ctx.slide_number.to_string(),
                 "fld" => r.child("t").map(|t| t.text()).unwrap_or_default(),
                 "endParaRPr" => {
-                    end.apply(r, ctx);
+                    end.apply(r, ctx, Source::Own);
                     continue;
                 }
                 _ => continue,
@@ -370,12 +383,12 @@ pub(crate) fn body(
             if link && !own_color {
                 rp.color = ctx.palette.scheme("hlink").or(rp.color);
                 rp.underline = Some(true);
+                rp.from.color = Source::Own;
+                rp.from.underline = Source::Own;
             }
             runs.push(run(text, &rp, ctx));
         }
-        let has_text = runs.iter().any(|r| !r.text.trim().is_empty());
-        let bullet = bullet(&props, &runs, level, has_text, &mut counters);
-        text.paragraphs.push(Paragraph {
+        let mut paragraph = Paragraph {
             level: level as u8,
             align: props.align.unwrap_or_default(),
             margin_left: props.margin_left.unwrap_or(0),
@@ -383,11 +396,14 @@ pub(crate) fn body(
             line_spacing: props.line_spacing.unwrap_or(Spacing::Lines(1.0)),
             space_before: props.space_before.unwrap_or(Spacing::Points(0.0)),
             space_after: props.space_after.unwrap_or(Spacing::Points(0.0)),
-            bullet,
+            bullet: bullet(&props),
             runs,
-            end_size: end.size.unwrap_or(DEFAULT_SIZE),
-        });
+            end: run(String::new(), &end, ctx),
+        };
+        paragraph.merge_runs();
+        text.paragraphs.push(paragraph);
     }
+    text.number_bullets();
     Some(text)
 }
 
@@ -437,57 +453,25 @@ fn run(text: String, p: &RunProps, ctx: &TextContext<'_>) -> Run {
         color: p.color.unwrap_or(Color::BLACK),
         baseline: p.baseline.unwrap_or(0.0),
         caps: p.caps.unwrap_or_default(),
+        sources: p.from,
     }
 }
 
-fn bullet(
-    props: &ParaProps,
-    runs: &[Run],
-    level: usize,
-    has_text: bool,
-    counters: &mut [Option<(String, u32)>; 9],
-) -> Option<Bullet> {
-    // Empty paragraphs show no bullet and don't break numbering.
-    if !has_text {
-        return None;
-    }
-    for c in counters.iter_mut().skip(level + 1) {
-        *c = None;
-    }
-    let first = runs.iter().find(|r| !r.text.is_empty() && r.text != "\n")?;
-    let text = match props.bullet.clone().unwrap_or(BulletKind::Off) {
-        BulletKind::Off => {
-            counters[level] = None;
-            return None;
-        }
-        BulletKind::Char(c) => {
-            counters[level] = None;
-            symbol(&c, props.bullet_font.clone().flatten().as_deref())
-        }
-        BulletKind::Number { scheme, start } => {
-            let n = match &counters[level] {
-                Some((s, n)) if *s == scheme => *n,
-                _ => start,
-            };
-            counters[level] = Some((scheme.clone(), n + 1));
-            number(&scheme, n)
-        }
-    };
-    let font = match props.bullet_font.clone().flatten() {
-        // Symbol fonts were mapped to Unicode above: draw them in the text's font.
-        Some(f) if !is_symbol_font(&f) => f,
-        _ => first.font.clone(),
-    };
-    let size = match props.bullet_size.unwrap_or(BulletSize::FollowText) {
-        BulletSize::FollowText => first.size,
-        BulletSize::Percent(p) => first.size * p,
-        BulletSize::Points(p) => p,
+/// The paragraph's bullet; numbers are counted once the body is read.
+fn bullet(props: &ParaProps) -> Option<Bullet> {
+    let font = props.bullet_font.clone().flatten();
+    let (text, autonumber) = match props.bullet.clone().unwrap_or(BulletKind::Off) {
+        BulletKind::Off => return None,
+        BulletKind::Char(c) => (symbol(&c, font.as_deref()), None),
+        BulletKind::Number { scheme, start } => (String::new(), Some(AutoNumber { scheme, start })),
     };
     Some(Bullet {
         text,
-        font,
-        size,
-        color: props.bullet_color.flatten().unwrap_or(first.color),
+        autonumber,
+        // Symbol fonts were mapped to Unicode above: draw them in the text's font.
+        font: font.filter(|f| !is_symbol_font(f)),
+        size: props.bullet_size.unwrap_or(BulletSize::FollowText),
+        color: props.bullet_color.flatten(),
     })
 }
 
@@ -537,80 +521,12 @@ fn symbol(c: &str, font: Option<&str>) -> String {
     mapped.to_string()
 }
 
-/// An autonumber's text: `arabicPeriod` 3 is `3.`, `romanLcParenR` 4 is `iv)`,
-/// `alphaUcParenBoth` 2 is `(B)`.
-pub(crate) fn number(scheme: &str, n: u32) -> String {
-    let (digits, rest) = if let Some(r) = scheme.strip_prefix("arabic") {
-        (n.to_string(), r)
-    } else if let Some(r) = scheme.strip_prefix("romanUc") {
-        (roman(n), r)
-    } else if let Some(r) = scheme.strip_prefix("romanLc") {
-        (roman(n).to_lowercase(), r)
-    } else if let Some(r) = scheme.strip_prefix("alphaUc") {
-        (alpha(n), r)
-    } else if let Some(r) = scheme.strip_prefix("alphaLc") {
-        (alpha(n).to_lowercase(), r)
-    } else {
-        (n.to_string(), "Period")
-    };
-    match rest {
-        "ParenR" => format!("{digits})"),
-        "ParenBoth" => format!("({digits})"),
-        "Plain" => digits,
-        "Minus" => format!("- {digits} -"),
-        _ => format!("{digits}."),
-    }
-}
-
-fn roman(mut n: u32) -> String {
-    const TABLE: [(u32, &str); 13] = [
-        (1000, "M"),
-        (900, "CM"),
-        (500, "D"),
-        (400, "CD"),
-        (100, "C"),
-        (90, "XC"),
-        (50, "L"),
-        (40, "XL"),
-        (10, "X"),
-        (9, "IX"),
-        (5, "V"),
-        (4, "IV"),
-        (1, "I"),
-    ];
-    let mut out = String::new();
-    for (v, s) in TABLE {
-        while n >= v {
-            out.push_str(s);
-            n -= v;
-        }
-    }
-    out
-}
-
-/// A, B, ..., Z, AA, BB, ... as PowerPoint counts letters.
-fn alpha(n: u32) -> String {
-    let n = n.max(1) - 1;
-    let letter = char::from(b'A' + (n % 26) as u8);
-    std::iter::repeat_n(letter, (n / 26 + 1) as usize).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::xml::parse;
 
-    #[test]
-    fn autonumbers() {
-        assert_eq!(number("arabicPeriod", 3), "3.");
-        assert_eq!(number("romanLcParenR", 4), "iv)");
-        assert_eq!(number("alphaUcParenBoth", 2), "(B)");
-        assert_eq!(number("alphaLcPeriod", 27), "aa.");
-        assert_eq!(number("romanUcPeriod", 1994), "MCMXCIV.");
-        assert_eq!(number("arabicPlain", 7), "7");
-    }
-
-    fn read(body: &str) -> TextBody {
+    fn read_with(body: &str, styles: &[(&str, Source)]) -> TextBody {
         let fonts = Fonts {
             major: "Major".into(),
             minor: "Minor".into(),
@@ -623,13 +539,67 @@ mod tests {
             slide_number: 7,
         };
         let el = parse(body.as_bytes()).unwrap();
+        let styles: Vec<(Element, Source)> = styles
+            .iter()
+            .map(|(s, source)| (parse(s.as_bytes()).unwrap(), *source))
+            .collect();
         let styles = Styles {
             base: Vec::new(),
             font_ref: FontRef::default(),
-            shape: Vec::new(),
+            shape: styles.iter().map(|(e, s)| (e, *s)).collect(),
             body: Vec::new(),
         };
         self::body(Some(&el), &styles, &ctx).unwrap()
+    }
+
+    fn read(body: &str) -> TextBody {
+        read_with(body, &[])
+    }
+
+    #[test]
+    fn sources_say_where_each_look_is_set() {
+        let master = r#"<a:lstStyle><a:lvl1pPr><a:defRPr sz="4400" b="1"><a:solidFill><a:srgbClr val="112233"/></a:solidFill></a:defRPr></a:lvl1pPr></a:lstStyle>"#;
+        let layout = r#"<a:lstStyle><a:lvl1pPr><a:defRPr sz="3200"/></a:lvl1pPr></a:lstStyle>"#;
+        let t = read_with(
+            r#"<p:txBody><a:bodyPr/>
+            <a:p><a:r><a:rPr lang="en-US"/><a:t>inherited</a:t></a:r><a:r><a:rPr i="1"/><a:t> own</a:t></a:r><a:endParaRPr b="0"/></a:p>
+            </p:txBody>"#,
+            &[(master, Source::Master), (layout, Source::Layout)],
+        );
+        let p = &t.paragraphs[0];
+        let (a, b) = (&p.runs[0], &p.runs[1]);
+        assert_eq!(
+            (a.size, a.bold, a.color.hex()),
+            (32.0, true, "112233".into())
+        );
+        assert_eq!(
+            (a.sources.size, a.sources.bold, a.sources.color),
+            (Source::Layout, Source::Master, Source::Master)
+        );
+        assert_eq!(
+            (a.sources.italic, a.sources.font),
+            (Source::Presentation, Source::Presentation)
+        );
+        assert_eq!((b.italic, b.sources.italic), (true, Source::Own));
+        assert_eq!(b.sources.size, Source::Layout);
+        // The paragraph mark keeps its own looks apart from its runs'.
+        assert_eq!((p.end.bold, p.end.sources.bold), (false, Source::Own));
+        assert_eq!((p.end.size, p.end.sources.size), (32.0, Source::Layout));
+    }
+
+    #[test]
+    fn runs_that_look_the_same_merge() {
+        let t = read(
+            r#"<p:txBody><a:bodyPr/>
+            <a:p><a:r><a:rPr lang="en-US"/><a:t>one </a:t></a:r><a:r><a:rPr lang="de-DE"/><a:t>run</a:t></a:r><a:r><a:t></a:t></a:r><a:br/><a:r><a:rPr b="1"/><a:t>bold</a:t></a:r></a:p>
+            </p:txBody>"#,
+        );
+        let runs: Vec<&str> = t.paragraphs[0]
+            .runs
+            .iter()
+            .map(|r| r.text.as_str())
+            .collect();
+        assert_eq!(runs, ["one run", "\n", "bold"]);
     }
 
     #[test]
@@ -648,7 +618,7 @@ mod tests {
         let marks: Vec<Option<String>> = t
             .paragraphs
             .iter()
-            .map(|p| p.bullet.as_ref().map(|b| b.text.clone()))
+            .map(|p| p.shown_bullet().map(|b| b.text.to_owned()))
             .collect();
         let want = [
             Some("1."),
@@ -673,12 +643,12 @@ mod tests {
             <a:p><a:pPr><a:buFont typeface="Symbol"/><a:buChar char="&#xF0B7;"/></a:pPr><a:r><a:t>dot</a:t></a:r></a:p>
             </p:txBody>"#,
         );
-        let b = t.paragraphs[0].bullet.as_ref().unwrap();
+        let b = t.paragraphs[0].shown_bullet().unwrap();
         assert_eq!(b.text, "\u{25aa}");
         assert_eq!(b.font, "Major");
         assert_eq!(b.size, 12.0);
         assert_eq!(b.color.hex(), "FF0000");
-        assert!(t.paragraphs[1].bullet.is_none());
+        assert!(t.paragraphs[1].shown_bullet().is_none());
         // Symbol's private-use code points (as LibreOffice writes them) map too.
         let marks: Vec<&str> = t.paragraphs[2..]
             .iter()

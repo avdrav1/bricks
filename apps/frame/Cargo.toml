@@ -16,6 +16,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 presentation-model.workspace = true
 pptx.workspace = true
+deck-edit.workspace = true
 # UI toolkit: GTK 4 for the whole suite (docs/adr/0002-gtk4-for-the-suite.md).
 gtk.workspace = true
 

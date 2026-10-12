@@ -1,8 +1,11 @@
 //! Windows: the start window, a window per deck (slide list, canvas, status bar), the
-//! file dialog, drops, and alerts (spec FR0).
+//! file dialog, drops, and alerts (spec FR0); the deck window's undo history and its keys
+//! (text editing itself is in [`crate::editing`]).
 
 use crate::deck::Deck;
+use crate::editing;
 use crate::slide_view::SlideView;
+use deck_edit::History;
 use gtk::prelude::*;
 use gtk::{gdk, gio, glib};
 use std::cell::{Cell, RefCell};
@@ -237,25 +240,31 @@ pub fn open(app: &gtk::Application, path: &Path, bench: Option<u32>) {
     });
 }
 
-/// A deck's window once it's read: the slide list, the canvas, and the status bar.
-struct DeckWindow {
+/// A deck's window once it's read: the slide list, the canvas, and the status bar, and
+/// the deck's undo history.
+pub(crate) struct DeckWindow {
     app: gtk::Application,
     window: glib::WeakRef<gtk::ApplicationWindow>,
-    deck: Rc<Deck>,
-    canvas: SlideView,
+    pub deck: Rc<Deck>,
+    pub canvas: SlideView,
+    /// The slide list's thumbnails, by slide.
+    pub thumbs: Vec<SlideView>,
     list: gtk::ListBox,
     scrolled: gtk::ScrolledWindow,
     status: gtk::Label,
+    pub history: RefCell<History>,
+    /// The canvas's input method, for typing.
+    pub im: gtk::IMMulticontext,
 }
 
 impl DeckWindow {
     fn count(&self) -> usize {
-        self.deck.presentation.slides.len()
+        self.deck.presentation().slides.len()
     }
 
     /// Show slide `index`: canvas, selected thumbnail, status, and the canvas's accessible
     /// description (the slide's text).
-    fn go(&self, index: usize) {
+    pub fn go(&self, index: usize) {
         let n = self.count();
         if n == 0 {
             return;
@@ -263,12 +272,7 @@ impl DeckWindow {
         let index = index.min(n - 1);
         self.canvas.set_index(index);
         self.status.set_text(&format!("Slide {} of {n}", index + 1));
-        let slide = &self.deck.presentation.slides[index];
-        let label = format!("Slide {}", index + 1);
-        self.canvas.update_property(&[
-            gtk::accessible::Property::Label(&label),
-            gtk::accessible::Property::Description(&slide.text()),
-        ]);
+        self.describe(index);
         if let Some(row) = self.list.row_at_index(index as i32) {
             if !row.is_selected() {
                 self.list.select_row(Some(&row));
@@ -285,7 +289,20 @@ impl DeckWindow {
         }
     }
 
-    fn step(&self, by: isize) {
+    /// The canvas's accessible name and description: slide `index` and its text, as it is
+    /// now.
+    pub fn describe(&self, index: usize) {
+        let Some(text) = self.deck.presentation().slides.get(index).map(|s| s.text()) else {
+            return;
+        };
+        let label = format!("Slide {}", index + 1);
+        self.canvas.update_property(&[
+            gtk::accessible::Property::Label(&label),
+            gtk::accessible::Property::Description(&text),
+        ]);
+    }
+
+    pub fn step(&self, by: isize) {
         let i = self.canvas.index() as isize + by;
         self.go(i.clamp(0, self.count().saturating_sub(1) as isize) as usize);
     }
@@ -296,8 +313,11 @@ impl DeckWindow {
 /// Backspace back; Home and End to the first and last. Hidden slides are skipped. Escape,
 /// or going past the last slide, ends it, back in the deck's window on the slide shown.
 fn slideshow(view: &Rc<DeckWindow>, start: usize) {
-    let slides = &view.deck.presentation.slides;
-    let shown: Rc<Vec<usize>> = Rc::new((0..slides.len()).filter(|&i| !slides[i].hidden).collect());
+    let shown: Rc<Vec<usize>> = {
+        let presentation = view.deck.presentation();
+        let slides = &presentation.slides;
+        Rc::new((0..slides.len()).filter(|&i| !slides[i].hidden).collect())
+    };
     if shown.is_empty() {
         return;
     }
@@ -332,7 +352,7 @@ fn slideshow(view: &Rc<DeckWindow>, start: usize) {
             canvas.set_index(index);
             canvas.update_property(&[
                 gtk::accessible::Property::Label(&format!("Slideshow slide {}", index + 1)),
-                gtk::accessible::Property::Description(&deck.presentation.slides[index].text()),
+                gtk::accessible::Property::Description(&deck.presentation().slides[index].text()),
             ]);
         }
     };
@@ -408,8 +428,8 @@ fn slideshow(view: &Rc<DeckWindow>, start: usize) {
     show.present();
 }
 
-fn thumbnail_row(deck: &Rc<Deck>, index: usize) -> gtk::ListBoxRow {
-    let slide = &deck.presentation.slides[index];
+fn thumbnail_row(deck: &Rc<Deck>, index: usize) -> (gtk::ListBoxRow, SlideView) {
+    let hidden = deck.presentation().slides[index].hidden;
     let content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     content.set_margin_top(6);
     content.set_margin_bottom(6);
@@ -420,7 +440,7 @@ fn thumbnail_row(deck: &Rc<Deck>, index: usize) -> gtk::ListBoxRow {
     number.set_width_chars(3);
     number.set_xalign(1.0);
     let thumb = SlideView::new(deck, index, THUMB_WIDTH);
-    let label = if slide.hidden {
+    let label = if hidden {
         format!("Slide {} (hidden)", index + 1)
     } else {
         format!("Slide {}", index + 1)
@@ -428,14 +448,14 @@ fn thumbnail_row(deck: &Rc<Deck>, index: usize) -> gtk::ListBoxRow {
     thumb.update_property(&[gtk::accessible::Property::Label(&label)]);
     content.append(&number);
     content.append(&thumb);
-    if slide.hidden {
+    if hidden {
         // Hidden slides show dimmed; the slideshow skips them.
         content.set_opacity(0.4);
         content.set_tooltip_text(Some("Hidden slide"));
     }
     let row = gtk::ListBoxRow::new();
     row.set_child(Some(&content));
-    row
+    (row, thumb)
 }
 
 fn show_deck(
@@ -449,8 +469,11 @@ fn show_deck(
     list.set_selection_mode(gtk::SelectionMode::Single);
     list.add_css_class("navigation-sidebar");
     list.update_property(&[gtk::accessible::Property::Label("Slides")]);
-    for i in 0..deck.presentation.slides.len() {
-        list.append(&thumbnail_row(&deck, i));
+    let mut thumbs = Vec::new();
+    for i in 0..deck.presentation().slides.len() {
+        let (row, thumb) = thumbnail_row(&deck, i);
+        list.append(&row);
+        thumbs.push(thumb);
     }
     let scrolled = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
@@ -480,10 +503,14 @@ fn show_deck(
         window: window.downgrade(),
         deck: deck.clone(),
         canvas: canvas.clone(),
+        thumbs,
         list: list.clone(),
         scrolled,
         status: status.clone(),
+        history: RefCell::new(History::new()),
+        im: gtk::IMMulticontext::new(),
     });
+    editing::attach(&view);
     if view.count() == 0 {
         status.set_text("No slides");
     }
@@ -503,10 +530,24 @@ fn show_deck(
     keys.connect_key_pressed({
         let view = view.clone();
         move |_, key, _, mods| {
-            if mods.intersects(gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::ALT_MASK) {
+            use gdk::{Key, ModifierType};
+            let ctrl = mods.contains(ModifierType::CONTROL_MASK);
+            let shift = mods.contains(ModifierType::SHIFT_MASK);
+            let alt = mods.contains(ModifierType::ALT_MASK);
+            // Ctrl+Z undoes, Ctrl+Shift+Z and Ctrl+Y redo: the deck's one history, before
+            // the canvas's input method sees the keys. Shifted, z arrives as Z.
+            if ctrl && !alt {
+                match key {
+                    Key::z | Key::Z if !shift => editing::undo(&view),
+                    Key::z | Key::Z | Key::y | Key::Y => editing::redo(&view),
+                    _ => return glib::Propagation::Proceed,
+                }
+                return glib::Propagation::Stop;
+            }
+            // While text is edited, the keys are the text's (crate::editing).
+            if view.canvas.editing().is_some() || ctrl || alt {
                 return glib::Propagation::Proceed;
             }
-            use gdk::Key;
             match key {
                 Key::Page_Down
                 | Key::KP_Page_Down
@@ -600,7 +641,8 @@ fn bench_draw(app: &gtk::Application, view: &Rc<DeckWindow>, frames: u32) {
             rec.borrow_mut().on = true;
         } else if n > 30 + frames {
             let r = rec.borrow();
-            let slide = &view.deck.presentation.slides[index];
+            let presentation = view.deck.presentation();
+            let slide = &presentation.slides[index];
             println!(
                 r#"{{"slide":{},"shapes":{},"canvas":[{},{}],"frames":{},"frame_cpu_ms":{},"snapshot_ms":{}}}"#,
                 index + 1,

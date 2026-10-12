@@ -31,9 +31,14 @@ Frame edits the same `.pptx` decks as PowerPoint with less to learn and fewer st
 
 **Measured:** the reference task, a 4-slide deck (title slide "Quarterly review" with a subtitle; "Highlights" with three bullets, one at the second level; "Revenue" with a picture from a file; "Next steps" with two bullets; saved as `.pptx`), takes fewer input actions in Frame than in PowerPoint. Input actions are clicks, drags, and key presses other than the content's own characters. Frame's count comes from its check script; PowerPoint's (Microsoft 365, fastest documented path) is counted by hand once and recorded in the story's Notes.
 
-## FR1: editor (not built yet)
+## FR1: editor (in progress)
 
 Editing slide text on the slide and in the outline view, moving and resizing shapes with snapping, formatting through the inspector, inserting text boxes, shapes, pictures, and tables, adding, deleting, duplicating, and reordering slides, new decks from the built-in blank deck, and save by patching the original package, all with undo. Speaker notes come later.
+
+Built so far:
+
+- **Slide text.** A click in a text box or placeholder puts the caret where it lands (Shift+click selects to it); the canvas outlines empty placeholders, dashed, so there's somewhere to click. Typing, Backspace, Delete, Enter (a new paragraph with the same level, alignment, and bullet; numbers renumber), Shift+Enter (a line break), the arrows, Home and End (with Ctrl, the whole text's), Shift with any of them to select, Ctrl+A, and Escape to stop. Typed text takes the look of the character before the caret, or of an empty paragraph's mark, so a placeholder keeps its layout's style. While text is edited the arrows move the caret; Page Up and Page Down stop editing and change slides.
+- **Undo.** Ctrl+Z undoes and Ctrl+Shift+Z or Ctrl+Y redoes, a word of typing at a time, going to the slide the step changed.
 
 ## Non-goals for now
 

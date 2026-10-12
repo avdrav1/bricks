@@ -219,6 +219,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7eed2c4702fa172d1ce21078faa7c5203e69f5394d48cc436d25928394a867a2"
 
 [[package]]
+name = "deck-edit"
+version = "0.1.0"
+dependencies = [
+ "pptx",
+ "presentation-model",
+]
+
+[[package]]
 name = "document-model"
 version = "0.1.0"
 dependencies = [
@@ -339,6 +347,7 @@ version = "0.2.1"
 name = "frame"
 version = "0.1.0"
 dependencies = [
+ "deck-edit",
  "gtk4",
  "pptx",
  "presentation-model",

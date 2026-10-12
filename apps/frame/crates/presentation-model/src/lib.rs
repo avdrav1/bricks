@@ -408,6 +408,38 @@ impl TextBody {
             .iter()
             .all(|p| p.runs.iter().all(|r| r.text.is_empty()))
     }
+
+    /// Number the numbered paragraphs, as PowerPoint counts: per level, from the
+    /// scheme's start; a paragraph at a level without a number, or with another scheme,
+    /// restarts it, as does any paragraph above it. Paragraphs without text don't count
+    /// and don't break the count.
+    pub fn number_bullets(&mut self) {
+        let mut counters: [Option<(String, u32)>; 9] = Default::default();
+        for p in &mut self.paragraphs {
+            if !p.has_text() {
+                continue;
+            }
+            let level = usize::from(p.level.min(8));
+            for c in counters.iter_mut().skip(level + 1) {
+                *c = None;
+            }
+            match p.bullet.as_mut() {
+                Some(Bullet {
+                    autonumber: Some(a),
+                    text,
+                    ..
+                }) => {
+                    let n = match &counters[level] {
+                        Some((s, n)) if *s == a.scheme => *n,
+                        _ => a.start,
+                    };
+                    counters[level] = Some((a.scheme.clone(), n + 1));
+                    *text = a.format(n);
+                }
+                _ => counters[level] = None,
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -481,11 +513,13 @@ pub struct Paragraph {
     pub line_spacing: Spacing,
     pub space_before: Spacing,
     pub space_after: Spacing,
-    /// The bullet or number shown before the text, when it has one.
+    /// The paragraph's bullet or number; it shows only while the paragraph has text
+    /// ([`Paragraph::shown_bullet`]).
     pub bullet: Option<Bullet>,
     pub runs: Vec<Run>,
-    /// The size, in points, of an empty paragraph's line (`endParaRPr`).
-    pub end_size: f64,
+    /// The look of the paragraph mark (`endParaRPr`): an empty paragraph's line, and text
+    /// typed into it. Its text is empty.
+    pub end: Run,
 }
 
 impl Paragraph {
@@ -493,17 +527,184 @@ impl Paragraph {
     pub fn text(&self) -> String {
         self.runs.iter().map(|r| r.text.as_str()).collect()
     }
+
+    /// Whether any run has text other than spaces and line breaks.
+    pub fn has_text(&self) -> bool {
+        self.runs.iter().any(|r| !r.text.trim().is_empty())
+    }
+
+    /// The run whose look the paragraph's line and bullet follow: the first with text,
+    /// else the paragraph mark.
+    pub fn first_run(&self) -> &Run {
+        self.runs
+            .iter()
+            .find(|r| !r.text.is_empty() && r.text != "\n")
+            .unwrap_or(&self.end)
+    }
+
+    /// The bullet as it shows: none while the paragraph has no text; font, size, and
+    /// colour that follow the text taken from its first run.
+    pub fn shown_bullet(&self) -> Option<BulletLook<'_>> {
+        let b = self.bullet.as_ref().filter(|_| self.has_text())?;
+        let first = self.first_run();
+        Some(BulletLook {
+            text: &b.text,
+            font: b.font.as_deref().unwrap_or(&first.font),
+            size: match b.size {
+                BulletSize::FollowText => first.size,
+                BulletSize::Percent(p) => first.size * p,
+                BulletSize::Points(p) => p,
+            },
+            color: b.color.unwrap_or(first.color),
+        })
+    }
+
+    /// Merge neighbouring runs that differ only in their text (line breaks stay runs of
+    /// their own) and drop empty runs, so one look over a stretch of text is one run.
+    pub fn merge_runs(&mut self) {
+        let mut merged: Vec<Run> = Vec::with_capacity(self.runs.len());
+        for run in self.runs.drain(..) {
+            if run.text.is_empty() {
+                continue;
+            }
+            match merged.last_mut() {
+                Some(last) if last.text != "\n" && run.text != "\n" && last.same_look(&run) => {
+                    last.text.push_str(&run.text)
+                }
+                _ => merged.push(run),
+            }
+        }
+        self.runs = merged;
+    }
 }
 
-/// A bullet character or number with its resolved look.
+/// A paragraph's bullet character or number.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Bullet {
-    /// What shows: `•`, `–`, `3.`, `iv)`, ...
+    /// What shows: `•`, `–`, `3.`, `iv)`, ... A numbered paragraph's is its number
+    /// ([`TextBody::number_bullets`]).
     pub text: String,
-    pub font: String,
+    /// How a numbered paragraph counts; `None` for a bullet character.
+    pub autonumber: Option<AutoNumber>,
+    /// The bullet's font; `None` for the text's.
+    pub font: Option<String>,
+    pub size: BulletSize,
+    /// `None` for the text's colour.
+    pub color: Option<Color>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BulletSize {
+    /// The size of the text's first run.
+    FollowText,
+    /// A fraction of the text's size.
+    Percent(f64),
+    Points(f64),
+}
+
+/// A bullet as it shows, with what it takes from the text resolved.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BulletLook<'a> {
+    pub text: &'a str,
+    pub font: &'a str,
     /// Points.
     pub size: f64,
     pub color: Color,
+}
+
+/// An automatic number's scheme (`buAutoNum type`: `arabicPeriod`, `romanLcParenR`, ...)
+/// and the number it starts at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutoNumber {
+    pub scheme: String,
+    pub start: u32,
+}
+
+impl AutoNumber {
+    /// Number `n` in this scheme: `arabicPeriod` 3 is `3.`, `romanLcParenR` 4 is `iv)`,
+    /// `alphaUcParenBoth` 2 is `(B)`.
+    pub fn format(&self, n: u32) -> String {
+        let scheme = self.scheme.as_str();
+        let (digits, rest) = if let Some(r) = scheme.strip_prefix("arabic") {
+            (n.to_string(), r)
+        } else if let Some(r) = scheme.strip_prefix("romanUc") {
+            (roman(n), r)
+        } else if let Some(r) = scheme.strip_prefix("romanLc") {
+            (roman(n).to_lowercase(), r)
+        } else if let Some(r) = scheme.strip_prefix("alphaUc") {
+            (alpha(n), r)
+        } else if let Some(r) = scheme.strip_prefix("alphaLc") {
+            (alpha(n).to_lowercase(), r)
+        } else {
+            (n.to_string(), "Period")
+        };
+        match rest {
+            "ParenR" => format!("{digits})"),
+            "ParenBoth" => format!("({digits})"),
+            "Plain" => digits,
+            "Minus" => format!("- {digits} -"),
+            _ => format!("{digits}."),
+        }
+    }
+}
+
+fn roman(mut n: u32) -> String {
+    const TABLE: [(u32, &str); 13] = [
+        (1000, "M"),
+        (900, "CM"),
+        (500, "D"),
+        (400, "CD"),
+        (100, "C"),
+        (90, "XC"),
+        (50, "L"),
+        (40, "XL"),
+        (10, "X"),
+        (9, "IX"),
+        (5, "V"),
+        (4, "IV"),
+        (1, "I"),
+    ];
+    let mut out = String::new();
+    for (v, s) in TABLE {
+        while n >= v {
+            out.push_str(s);
+            n -= v;
+        }
+    }
+    out
+}
+
+/// A, B, ..., Z, AA, BB, ... as PowerPoint counts letters.
+fn alpha(n: u32) -> String {
+    let n = n.max(1) - 1;
+    let letter = char::from(b'A' + (n % 26) as u8);
+    std::iter::repeat_n(letter, (n / 26 + 1) as usize).collect()
+}
+
+/// Where a resolved value is set (ADR 0006): on the shape itself, or inherited from its
+/// layout's or master's placeholder or text styles, or from the presentation (its
+/// default text style, a table style, PowerPoint's defaults).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Source {
+    Own,
+    Layout,
+    Master,
+    #[default]
+    Presentation,
+}
+
+/// Where each of a run's looks is set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RunSources {
+    pub font: Source,
+    pub size: Source,
+    pub bold: Source,
+    pub italic: Source,
+    pub underline: Source,
+    pub strike: Source,
+    pub color: Source,
+    pub baseline: Source,
+    pub caps: Source,
 }
 
 /// A run of text with one look. A line break is a run whose text is `\n`.
@@ -522,6 +723,33 @@ pub struct Run {
     /// Superscript (positive) or subscript (negative) offset, percent of the size.
     pub baseline: f64,
     pub caps: Caps,
+    /// Where each look is set: an edit keeps inherited looks inherited.
+    pub sources: RunSources,
+}
+
+impl Run {
+    /// Whether `other` looks the same and takes its looks from the same places.
+    pub fn same_look(&self, other: &Run) -> bool {
+        self.font == other.font
+            && self.size == other.size
+            && self.bold == other.bold
+            && self.italic == other.italic
+            && self.underline == other.underline
+            && self.strike == other.strike
+            && self.color == other.color
+            && self.baseline == other.baseline
+            && self.caps == other.caps
+            && self.sources == other.sources
+    }
+
+    /// This run's look with `text`.
+    pub fn with_text(&self, text: impl Into<String>) -> Run {
+        Run {
+            text: text.into(),
+            font: self.font.clone(),
+            ..*self
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -530,4 +758,26 @@ pub enum Caps {
     None,
     All,
     Small,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn autonumbers() {
+        let n = |scheme: &str, n| {
+            AutoNumber {
+                scheme: scheme.into(),
+                start: 1,
+            }
+            .format(n)
+        };
+        assert_eq!(n("arabicPeriod", 3), "3.");
+        assert_eq!(n("romanLcParenR", 4), "iv)");
+        assert_eq!(n("alphaUcParenBoth", 2), "(B)");
+        assert_eq!(n("alphaLcPeriod", 27), "aa.");
+        assert_eq!(n("romanUcPeriod", 1994), "MCMXCIV.");
+        assert_eq!(n("arabicPlain", 7), "7");
+    }
 }
