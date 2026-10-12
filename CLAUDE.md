@@ -92,6 +92,7 @@ python3 scripts/lo_formats.py            # re-record number format results from 
 python3 scripts/lo_xlsx.py fixture|dump FILE  # LibreOffice fixture workbook and dumps (XLSX-*)
 python3 scripts/lo_docx.py fixture|dump FILE  # Slate's LibreOffice fixture document and paragraph dumps (SLATE-3)
 scripts/check_slate.sh [BINARY]          # Slate GUI check in docker: open, drop, show, refuse, text widths, select and copy, editing, tables, input method, accessibility, saving .txt, .md, and .docx (SLATE-4, -10, -11, -6, -12, -13, -14, -15, -7, -8; scripts/ime_helpers.py is the input method)
+scripts/ship.sh slate build && scripts/ship.sh slate verify  # Slate's release tarball (dist/), started on Arch, Ubuntu 24.04, Fedora; scripts/check_install_slate.sh: its installer there, .docx and .md opening with it (SLATE-9)
 cargo run --release -p xlsx --example gen_corpus_xlsx  # corpus/rows_1m.xlsx (BENCH-2)
 cargo run --release -p xlsx --example gen_corpus_xlsx -- --styled   # corpus/styled_1m.xlsx (STYLE-3, BENCH-3)
 python3 scripts/lo_pptx.py fixture|dump|layouts FILE  # LibreOffice fixture deck, dumps, and layout names (FRAME-*)

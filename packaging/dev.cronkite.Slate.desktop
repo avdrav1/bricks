@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Slate
+GenericName=Word Processor
+Comment=Write and edit documents, Markdown, and text
+Exec=slate %F
+Icon=dev.cronkite.Slate
+Terminal=false
+Categories=Office;WordProcessor;
+Keywords=document;docx;markdown;text;writer;
+MimeType=application/vnd.openxmlformats-officedocument.wordprocessingml.document;text/markdown;text/plain;
