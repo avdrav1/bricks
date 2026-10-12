@@ -125,7 +125,12 @@ upload)
 site)
   need CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID "$PAGES_VAR"
   [ -f "$OUT/latest.json" ] || { echo "run build first"; exit 1; }
-  rm -rf "$OUT/site"; cp -r "sites/$APP" "$OUT/site"; cp "$OUT/latest.json" "$OUT/site/"
+  rm -rf "$OUT/site"; cp -r "sites/$APP" "$OUT/site"
+  # The page shows the release written into it, not a latest.json beside it: Pages fails
+  # to publish a .json file in the slate project ("Unknown internal error", 2026-10-12).
+  python3 -c 'import sys; p, rel = sys.argv[1], open(sys.argv[2]).read().strip()
+html = open(p).read(); assert "@RELEASE_JSON@" in html, p
+open(p, "w").write(html.replace("@RELEASE_JSON@", rel.replace("</", "<\\/")))' "$OUT/site/index.html" "$OUT/latest.json"
   # The installer reads latest.json from the bucket (PKG-1).
   need DOWNLOAD_BASE_URL
   sed -i "s|@DOWNLOAD_BASE_URL@|$(base)|" "$OUT/site/install.sh"

@@ -72,22 +72,25 @@
 <footer class="status" aria-live="polite">
   <span id="ver">Loading release</span><span id="size"></span><span id="sha"></span><span>x86_64 Linux</span>
 </footer>
+<!-- The release (latest.json): scripts/ship.sh site writes it in when it deploys the page. -->
+<script id="release" type="application/json">@RELEASE_JSON@</script>
 <script>
   // The install command names this page's own address.
   const script = location.origin + "/install.sh";
   document.getElementById("cmd").textContent = "curl -fsSL " + script + " | sh";
   document.getElementById("uninstall").textContent = "curl -fsSL " + script + " | sh -s -- --uninstall";
-  fetch("latest.json", { cache: "no-store" })
-    .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-    .then(rel => {
-      document.getElementById("dl").href = rel.url;
-      document.getElementById("dl").textContent = "Download v" + rel.version;
-      document.getElementById("ver").textContent = "v" + rel.version + " released " + rel.date;
-      document.getElementById("size").textContent = (rel.bytes / 1048576).toFixed(1) + " MB";
-      document.getElementById("sha").textContent = "sha256 " + rel.sha256;
-      document.getElementById("sha").title = rel.sha256;
-    })
-    .catch(() => { document.getElementById("ver").textContent = "No release published yet"; });
+  let rel = null;
+  try { rel = JSON.parse(document.getElementById("release").textContent); } catch (e) {}
+  if (rel && rel.version) {
+    document.getElementById("dl").href = rel.url;
+    document.getElementById("dl").textContent = "Download v" + rel.version;
+    document.getElementById("ver").textContent = "v" + rel.version + " released " + rel.date;
+    document.getElementById("size").textContent = (rel.bytes / 1048576).toFixed(1) + " MB";
+    document.getElementById("sha").textContent = "sha256 " + rel.sha256;
+    document.getElementById("sha").title = rel.sha256;
+  } else {
+    document.getElementById("ver").textContent = "No release published yet";
+  }
 </script>
 </body>
 </html>

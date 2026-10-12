@@ -87,10 +87,10 @@ scripts/ship.sh tag
 Then verify, and report each check:
 
 - `curl -fsSI <download base>/releases/vX.Y.Z/<name>.tar.gz` returns 200 (the base is `$DOWNLOAD_BASE_URL`, plus `/slate` for Slate).
-- `curl -fsS <pages URL from wrangler output>/latest.json` shows the new version.
+- `curl -fsS <pages URL from wrangler output>/ | grep -c '"version":"X.Y.Z"'` is 1: the deploy writes `latest.json` into the page (Pages fails to publish a `.json` file in the `slate` project).
 - `curl -fsS <pages URL>/install.sh | grep -c "<download base>"` is 1 (the deploy filled in the download URL).
 - Downloaded tarball matches the sha256.
-- Optionally, on this machine: `curl -fsSL <pages URL>/install.sh | sh` reports the new version.
+- Optionally, on this machine: `curl -fsSL <pages URL>/install.sh | sh` reports the new version (in a throwaway `HOME`, `XDG_CONFIG_HOME`, and `XDG_DATA_HOME` to leave this machine's defaults alone).
 
 If upload succeeds but the site deploy fails, the old page still points at the old version; rerun `site` alone after fixing. If a step fails mid-way, do not delete uploaded objects; report what landed.
 
