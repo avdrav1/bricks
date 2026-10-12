@@ -53,16 +53,28 @@ pub struct Original {
 impl Original {
     /// Copy the package at `path`.
     pub fn copy_of(path: &Path) -> std::io::Result<Original> {
+        let copy = Original::fresh()?;
+        std::fs::copy(path, &copy)?;
+        Ok(Original { copy })
+    }
+
+    /// A copy of the package `bytes` (the built-in blank document).
+    pub fn of_bytes(bytes: &[u8]) -> std::io::Result<Original> {
+        let copy = Original::fresh()?;
+        std::fs::write(&copy, bytes)?;
+        Ok(Original { copy })
+    }
+
+    /// A new copy's path, in a directory that exists.
+    fn fresh() -> std::io::Result<PathBuf> {
         static N: AtomicU64 = AtomicU64::new(0);
         let dir = Original::dir();
         std::fs::create_dir_all(&dir)?;
-        let copy = dir.join(format!(
+        Ok(dir.join(format!(
             "original-{}-{}.docx",
             std::process::id(),
             N.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::copy(path, &copy)?;
-        Ok(Original { copy })
+        )))
     }
 
     pub fn path(&self) -> &Path {
@@ -130,12 +142,16 @@ const NEW_FILE: TextInfo = TextInfo {
 /// A save asked for while another runs.
 type Waiting = Box<dyn FnOnce(&Rc<Saver>)>;
 
+/// The name of a new document until it is saved.
+pub const UNTITLED: &str = "Untitled";
+
 /// A window's document file: where it is, how it is written, and whether it is saved.
 pub struct Saver {
     window: glib::WeakRef<gtk::ApplicationWindow>,
     page: glib::WeakRef<Page>,
     status: glib::WeakRef<gtk::Label>,
-    path: RefCell<PathBuf>,
+    /// `None` for a new document not saved yet: Save asks where (Save As).
+    path: RefCell<Option<PathBuf>>,
     target: RefCell<Target>,
     /// The page's position ([`Page::position`]) when the file was last read or saved.
     saved: Cell<u64>,
@@ -147,13 +163,14 @@ pub struct Saver {
 }
 
 impl Saver {
-    /// The saver of `window`, whose page shows `path` read as `target`. Adds the window's
-    /// `save` and `save-as` actions and asks before a window with changes closes.
+    /// The saver of `window`, whose page shows `path` read as `target` (`None`: a new
+    /// document). Adds the window's `save` and `save-as` actions and asks before a window
+    /// with changes closes.
     pub fn attach(
         window: &gtk::ApplicationWindow,
         page: &Page,
         status: &gtk::Label,
-        path: PathBuf,
+        path: Option<PathBuf>,
         target: Target,
     ) {
         let saver = Rc::new(Saver {
@@ -192,8 +209,12 @@ impl Saver {
         });
     }
 
+    /// The file's name, or "Untitled" for a new document.
     fn name(&self) -> String {
-        suite_file::document_name(&self.path.borrow()).into_owned()
+        self.path.borrow().as_deref().map_or_else(
+            || UNTITLED.to_owned(),
+            |p| suite_file::document_name(p).into_owned(),
+        )
     }
 
     /// The document differs from its file.
@@ -236,7 +257,11 @@ impl Saver {
             return;
         }
         let target = self.target.borrow().clone();
-        let dest = self.path.borrow().clone();
+        let Some(dest) = self.path.borrow().clone() else {
+            // A new document: where it goes is asked first.
+            self.save_as(then);
+            return;
+        };
         self.save_to(dest, target, false, then);
     }
 
@@ -261,7 +286,10 @@ impl Saver {
             Target::Markdown(..) => &markdown,
             Target::Docx(_) => &word,
         };
-        let initial = self.name();
+        let initial = match &*self.path.borrow() {
+            Some(_) => self.name(),
+            None => format!("{UNTITLED}.docx"),
+        };
         let dialog = gtk::FileDialog::builder()
             .title("Save As")
             .modal(true)
@@ -269,7 +297,11 @@ impl Saver {
             .default_filter(default)
             .initial_name(initial)
             .build();
-        if let Some(dir) = current.parent() {
+        let folder = match &current {
+            Some(path) => path.parent().map(Path::to_owned),
+            None => glib::user_special_dir(glib::UserDirectory::Documents).filter(|d| d.is_dir()),
+        };
+        if let Some(dir) = folder {
             dialog.set_initial_folder(Some(&gio::File::for_path(dir)));
         }
         let saver = self.clone();
@@ -375,7 +407,7 @@ impl Saver {
 
     /// The document at `position` is now the file at `dest`, written as `target`.
     fn saved(&self, dest: PathBuf, target: Target, position: u64) {
-        let moved = *self.path.borrow() != dest;
+        let moved = self.path.borrow().as_deref() != Some(dest.as_path());
         if moved {
             if let Some(window) = self.window.upgrade() {
                 crate::moved(&window, &crate::canonical(&dest));
@@ -390,7 +422,7 @@ impl Saver {
             let rest = text.split_once(" · ").map_or("", |(_, rest)| rest);
             status.set_text(&format!("{} · {rest}", target.name()));
         }
-        self.path.replace(dest);
+        self.path.replace(Some(dest));
         self.target.replace(target);
         self.saved.set(position);
         self.show_title();

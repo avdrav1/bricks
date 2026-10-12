@@ -62,7 +62,7 @@ Slate's crates, in `apps/slate/crates/`:
 | Crate | Owns |
 | --- | --- |
 | `document-model` | Slate's document model (ADR 0003): blocks, runs, plain-text reader with encoding and line-ending detection, Markdown reader (`pulldown-cmark`); writers: plain text in the file's encoding and line endings, Markdown copying unedited blocks' bytes from the source |
-| `docx` | DOCX reader: `word/document.xml` with styles, numbering, hyperlinks, pictures, and tables into the document model; saving by patching the package read: unedited blocks' XML copied, edited and new ones written with the document's own styles and run looks, every other part copied |
+| `docx` | DOCX reader: `word/document.xml` with styles, numbering, hyperlinks, pictures, and tables into the document model; saving by patching the package read: unedited blocks' XML copied, edited and new ones written with the document's own styles and run looks, every other part copied; the built-in blank document (`data/blank.docx`) |
 | `document-edit` | edits as undoable commands on the document model (ADR 0007), in the document's blocks or a table cell's: text replacements holding the removed and inserted text, paragraph looks, list numbering, history that joins typing a word at a time |
 | `flow` | the pageless flow's layout state (ADR 0007), toolkit-free: per-block heights in a Fenwick index, estimates replaced by time-sliced measuring, scroll anchoring, tables and pictures, hit-testing, selection, plain and accessible text, splicing in edited blocks; shapes text through a `Shaper` trait |
 | `slate` (`apps/slate`) | the GTK 4 window: open, drop, alerts, menus, save and save as (atomic, off the UI thread, asking before closing with changes), and the page, which draws the flow (snapshot, Pango) and edits it: caret, input method, keys, undo, drag selection, copy, and accessible text |
@@ -91,13 +91,14 @@ python3 scripts/lo_functions.py          # re-record formula results from LibreO
 python3 scripts/lo_formats.py            # re-record number format results from LibreOffice (STYLE-2)
 python3 scripts/lo_xlsx.py fixture|dump FILE  # LibreOffice fixture workbook and dumps (XLSX-*)
 python3 scripts/lo_docx.py fixture|dump FILE  # Slate's LibreOffice fixture document and paragraph dumps (SLATE-3)
-scripts/check_slate.sh [BINARY]          # Slate GUI check in docker: open, drop, show, refuse, text widths, select and copy, editing, tables, input method, accessibility, saving .txt, .md, and .docx (SLATE-4, -10, -11, -6, -12, -13, -14, -15, -7, -8; scripts/ime_helpers.py is the input method)
+scripts/check_slate.sh [BINARY]          # Slate GUI check in docker: open, drop, show, refuse, text widths, select and copy, editing, tables, input method, accessibility, saving .txt, .md, and .docx, new documents (SLATE-4, -10, -11, -6, -12, -13, -14, -15, -7, -8, -18; scripts/ime_helpers.py is the input method)
 scripts/ship.sh slate build && scripts/ship.sh slate verify  # Slate's release tarball (dist/), started on Arch, Ubuntu 24.04, Fedora; scripts/check_install_slate.sh: its installer there, .docx and .md opening with it (SLATE-9)
 scripts/ship.sh frame build && scripts/ship.sh frame verify  # Frame's release tarball (dist/), opening and drawing a deck on Arch, Ubuntu 24.04, Fedora; scripts/check_install_frame.sh: its installer there, .pptx opening with it
 cargo run --release -p xlsx --example gen_corpus_xlsx  # corpus/rows_1m.xlsx (BENCH-2)
 cargo run --release -p xlsx --example gen_corpus_xlsx -- --styled   # corpus/styled_1m.xlsx (STYLE-3, BENCH-3)
 python3 scripts/lo_pptx.py fixture|dump|layouts FILE  # LibreOffice fixture deck, dumps, and layout names (FRAME-*)
 python3 scripts/blank_deck.py           # Frame's built-in blank deck: apps/frame/crates/pptx/data/blank.pptx (FRAME-14)
+python3 scripts/blank_docx.py           # Slate's built-in blank document: apps/slate/crates/docx/data/blank.docx (SLATE-18)
 scripts/check_frame.sh [BINARY]          # Frame in a container: decks, drawing, Ctrl+O, drop, alerts, slideshow, editing, slides, save, shapes, inspector, insert, outline, new deck, with undo; the reference task counted against PowerPoint, read back by LibreOffice; the installer and a .pptx double-click (FRAME-4 to FRAME-15)
 python3 -m unittest discover -s scripts  # script tests (corpus generator, backlog helper)
 cargo bench                              # prints the apps/brick/docs/BENCHMARKS.md table (needs corpus/)

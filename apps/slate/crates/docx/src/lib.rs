@@ -94,6 +94,13 @@ pub fn read_source(path: &Path) -> Result<(Document, DocxSource), DocxError> {
     Ok((doc, source))
 }
 
+/// Slate's built-in blank Word document (SLATE-18): one empty paragraph, and Normal, Title,
+/// Heading 1 to 6, Quote, and Hyperlink styles in Word's default look. Made by
+/// `scripts/blank_docx.py`.
+pub fn blank() -> &'static [u8] {
+    include_bytes!("../data/blank.docx")
+}
+
 /// The main part as read: its name, its text, and where its blocks came from.
 pub(crate) struct MainPart {
     pub name: String,
