@@ -152,6 +152,19 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-12 release Frame v0.1.0:** shipped (tag `frame-v0.1.0`).
+  - Release: tarball `dl.cronkite.cc/frame/releases/v0.1.0/frame-0.1.0-x86_64-linux.tar.gz` (1.0 MB, sha256 a55c40e37f48…), with `dl.cronkite.cc/frame/latest.json`. The page and installer are at frame.cronkite.cc, and cronkite.cc lists Frame as available.
+  - Pipeline (FRAME-9's follow-ups, now done):
+    - `scripts/ship.sh frame` publishes under `frame/` and tags `frame-vX.Y.Z`, with the version from `apps/frame/Cargo.toml`.
+    - `check_release.sh` runs Frame's `--bench-draw` on the fixture deck.
+    - `scripts/check_install_frame.sh` checks the installer on three distros. It proves the double-click by Frame's running process and the deck's package copy in `~/.cache/frame`.
+    - `sites/frame/index.html` is the download page.
+    - `CF_FRAME_PAGES_PROJECT=frame` is in `.env.ship.example`.
+  - Verify:
+    - RELEASE OK on Arch, Ubuntu 24.04, and Fedora: the fixture drawn, newest glibc symbol 2.35.
+    - INSTALL OK on the same three: bad checksum refused, GTK hint, `.pptx` default, `gio open` reads the deck, uninstall.
+    - Live checks: the tarball returns 200 and its sha256 matches; both pages show v0.1.0; `install.sh` names `dl.cronkite.cc/frame`; the live installer installed 0.1.0 into a throwaway home with the `.pptx` default.
+  - SUITE-4's unmerged `story/suite-4-app-pages` branch will also conflict with `sites/frame/` when merged.
 - **2026-10-12 release Slate v0.1.0:** shipped (tag `slate-v0.1.0`). Tarball `dl.cronkite.cc/slate/releases/v0.1.0/slate-0.1.0-x86_64-linux.tar.gz` (1.3 MB, sha256 a3ffc5618f49…), `dl.cronkite.cc/slate/latest.json`, page and installer at slate.cronkite.cc. Verify: RELEASE OK and INSTALL OK on Arch, Ubuntu 24.04, Fedora; live checks: the tarball's sha256 matches, the page shows v0.1.0, `install.sh` names `dl.cronkite.cc/slate`, and the live installer installed 0.1.0 into a throwaway home.
   - Cloudflare Pages fails every deploy to the `slate` project that holds a valid `.json` file ("Failed to publish your Function: Unknown internal error"; `latest.json`, `release.json`, and `{"probe":1}` alike), while `spreadsheet` takes the same files and the two projects' settings match. Decision (user): `ship.sh site` writes `latest.json` into the page (`<script id="release" type="application/json">`) for every app, and no `.json` goes to Pages. Bricks' live page keeps fetching `latest.json` until its next deploy.
   - The `slate` and `frame` Pages projects and their domains came from SUITE-4's `story/suite-4-app-pages` branch (unmerged; its worktree `/home/av/Projects/bricks-suite-4` has a broken `.git` link). That branch's `sites/slate/index.html` placeholder and `ship.sh page` command will conflict with this pipeline when merged.
