@@ -2,6 +2,26 @@
 
 Releases are added by the ship-it skill.
 
+## Slate v0.1.0 (2026-10-12)
+
+Slate's first release, milestones SL0 and SL1: a lightweight, pageless word processor that opens, edits, and saves Word documents (.docx), Markdown, and plain text. Saving a .docx patches the original file, so everything you didn't edit stays as it was; an edited Markdown file changes only the blocks you edited.
+
+- SLATE-1: Document model and plain-text reader
+- SLATE-2: Read Markdown into the document model
+- SLATE-3: Read DOCX styles, runs, lists, tables, links, and pictures
+- SLATE-4: Viewer window: open, drop, show formatted
+- SLATE-10: Pageless column with a text width setting
+- SLATE-5: Choose the editing engine: Slate's own Pango flow (ADR 0007)
+- SLATE-11: Show documents in the Pango flow
+- SLATE-6: Caret, typing, and formatting as undoable commands
+- SLATE-12: Edit inside table cells
+- SLATE-13: Input method composition
+- SLATE-14: Selection and clipboard across paragraphs and tables
+- SLATE-15: Screen reader access to the text, caret, looks, and edits
+- SLATE-7: Save .txt and .md atomically, rewriting only edited Markdown blocks
+- SLATE-8: Save .docx by patching the original package
+- SLATE-9: Desktop entry, icon, and installer
+
 ## v0.2.1 (2026-10-11)
 
 Fixes how real workbooks draw, and lists .xlsx and .xlsm in the desktop entry.
