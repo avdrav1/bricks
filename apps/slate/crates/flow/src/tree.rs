@@ -466,6 +466,26 @@ pub(crate) fn text_place(
     }
 }
 
+/// Mark `node`, and the nodes inside it down to `leaf`'s, as not measured; false if `leaf`
+/// isn't in it.
+pub(crate) fn unlay(node: &mut Node, leaf: LeafId) -> bool {
+    let found = match &mut node.kind {
+        Kind::Text(b) => b.leaf == leaf,
+        Kind::Picture { leaf: l, .. } => *l == leaf,
+        Kind::Table(table) => table
+            .rows
+            .iter_mut()
+            .flat_map(|r| &mut r.cells)
+            .flat_map(|c| &mut c.nodes)
+            .any(|n| unlay(n, leaf)),
+        _ => false,
+    };
+    if found {
+        node.laid = -1;
+    }
+    found
+}
+
 /// The first run's size relative to the normal size (11 pt, 22 half-points).
 fn scale(p: &document_model::Paragraph) -> f64 {
     p.runs

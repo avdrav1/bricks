@@ -126,6 +126,22 @@ struct State {
     plain: bool,
     /// Counts the edits shown, for the typing benchmark.
     revision: u64,
+    /// The input method's preedit at the caret: its text, looks, and cursor (bytes into it).
+    preedit: Option<(String, pango::AttrList, usize)>,
+}
+
+impl State {
+    /// Where the caret shows: inside the preedit while there is one.
+    fn shown_caret(&self) -> Option<Pos> {
+        let c = self.caret?;
+        Some(match &self.preedit {
+            Some((_, _, cursor)) => Pos {
+                offset: c.offset + cursor,
+                ..c
+            },
+            None => c,
+        })
+    }
 }
 
 mod imp {
@@ -242,8 +258,43 @@ mod imp {
                 let page = obj.downgrade();
                 move |_, text| {
                     if let Some(page) = page.upgrade() {
+                        page.imp().set_preedit(None);
                         page.imp().type_text(text);
                     }
+                }
+            });
+            im.connect_preedit_changed({
+                let page = obj.downgrade();
+                move |im| {
+                    if let Some(page) = page.upgrade() {
+                        let (text, attrs, cursor) = im.preedit_string();
+                        let cursor = text
+                            .char_indices()
+                            .nth(cursor.max(0) as usize)
+                            .map_or(text.len(), |(i, _)| i);
+                        page.imp().set_preedit(
+                            (!text.is_empty()).then(|| (text.to_string(), attrs, cursor)),
+                        );
+                    }
+                }
+            });
+            im.connect_retrieve_surrounding({
+                let page = obj.downgrade();
+                move |im| {
+                    let Some((text, cursor, anchor)) =
+                        page.upgrade().and_then(|p| p.imp().surrounding())
+                    else {
+                        return false;
+                    };
+                    im.set_surrounding_with_selection(&text, cursor as i32, anchor as i32);
+                    true
+                }
+            });
+            im.connect_delete_surrounding({
+                let page = obj.downgrade();
+                move |_, offset, chars| {
+                    page.upgrade()
+                        .is_some_and(|p| p.imp().delete_surrounding(offset, chars))
                 }
             });
             let _ = self.im.set(im);
@@ -320,7 +371,7 @@ mod imp {
                 let page = f64::from(height);
                 st.flow.layout_viewport(&mut st.shaper, page);
                 if self.reveal.take() {
-                    if let Some((_, y, h)) = st.caret.and_then(|c| caret::rect(st, c)) {
+                    if let Some((_, y, h)) = st.shown_caret().and_then(|c| caret::rect(st, c)) {
                         let top = st.flow.scroll();
                         if y < top {
                             st.flow.scroll_to(y - REVEAL_MARGIN);
@@ -334,7 +385,7 @@ mod imp {
                     self.completed.set(Some(Instant::now()));
                 }
                 let (left, scroll) = (column_left(width, column), st.flow.scroll());
-                if let Some((x, y, h)) = st.caret.and_then(|c| caret::rect(st, c)) {
+                if let Some((x, y, h)) = st.shown_caret().and_then(|c| caret::rect(st, c)) {
                     caret_box = Some(gdk::Rectangle::new(
                         left + x as i32,
                         (y - scroll) as i32,
@@ -383,7 +434,7 @@ mod imp {
                     draw(snapshot, shaper, p, left, top);
                 });
                 if obj.has_focus() {
-                    if let Some((x, y, ch)) = st.caret.and_then(|c| caret::rect(st, c)) {
+                    if let Some((x, y, ch)) = st.shown_caret().and_then(|c| caret::rect(st, c)) {
                         snapshot.append_color(
                             &rgba(INK),
                             &rect(left + x as f32, (y - top) as f32, 1.0, ch as f32),
@@ -582,6 +633,7 @@ mod imp {
                 };
                 page.grab_focus();
                 let imp = page.imp();
+                imp.reset_im();
                 if let Some(at) = imp.locate(x, y) {
                     if let Some(st) = imp.state.borrow_mut().as_mut() {
                         st.flow.select(at.position, at.position);
@@ -789,9 +841,92 @@ mod imp {
 
         // ---- editing ----
 
+        /// Drop the input method's composition (the caret moved under it).
+        fn reset_im(&self) {
+            if let Some(im) = self.im.get() {
+                im.reset();
+            }
+        }
+
+        /// Show the input method's preedit at the caret, or none.
+        pub(super) fn set_preedit(&self, preedit: Option<(String, pango::AttrList, usize)>) {
+            let complete = {
+                let mut state = self.state.borrow_mut();
+                let Some(st) = state.as_mut() else {
+                    return;
+                };
+                if st.preedit.is_none() && preedit.is_none() {
+                    return;
+                }
+                st.preedit = preedit;
+                show_preedit(st);
+                st.flow.is_complete()
+            };
+            if !complete {
+                self.completed.set(None);
+                self.start_layout();
+            }
+            self.reveal_caret();
+        }
+
+        /// What the input method reads around the caret: the caret's paragraph, the caret's
+        /// byte offset in it, and the selection's other end when it is in that paragraph.
+        fn surrounding(&self) -> Option<(String, usize, usize)> {
+            let state = self.state.borrow();
+            let st = state.as_ref()?;
+            let c = st.caret?;
+            let text = document_edit::text(st.flow.document(), c.at, c.block)?.into_owned();
+            let anchor = match caret::selection(st) {
+                Some((s, e)) if s.at == c.at && s.block == c.block && e.block == c.block => {
+                    if s == c {
+                        e.offset
+                    } else {
+                        s.offset
+                    }
+                }
+                _ => c.offset,
+            };
+            Some((text, c.offset, anchor))
+        }
+
+        /// Delete `chars` characters from `offset` characters after the caret (before it
+        /// when negative), within the caret's paragraph, as the input method asks.
+        fn delete_surrounding(&self, offset: i32, chars: i32) -> bool {
+            self.edit_with(false, |st| {
+                let c = st.caret?;
+                let doc = st.flow.document();
+                let text = document_edit::text(doc, c.at, c.block)?;
+                let starts: Vec<usize> = text
+                    .char_indices()
+                    .map(|(i, _)| i)
+                    .chain(std::iter::once(text.len()))
+                    .collect();
+                let here = starts.iter().position(|&b| b == c.offset)? as i64;
+                let last = starts.len() as i64 - 1;
+                let from = (here + i64::from(offset)).clamp(0, last) as usize;
+                let to = (from as i64 + i64::from(chars)).clamp(0, last) as usize;
+                (from < to).then_some(())?;
+                document_edit::replace(
+                    doc,
+                    Pos {
+                        offset: starts[from],
+                        ..c
+                    },
+                    Pos {
+                        offset: starts[to],
+                        ..c
+                    },
+                    "",
+                    &RunStyle::default(),
+                )
+            });
+            true
+        }
+
         /// Move the caret where `to` says, dropping the selection, and show it. Up and Down
         /// (`keep_goal`) keep the column they aim for; other moves forget it.
         fn move_caret(&self, keep_goal: bool, to: impl FnOnce(&mut State, Pos) -> Pos) {
+            self.reset_im();
             {
                 let mut state = self.state.borrow_mut();
                 let Some(st) = state.as_mut() else {
@@ -913,6 +1048,10 @@ mod imp {
                 st.goal = None;
                 st.typing = None;
                 st.revision += 1;
+                if st.preedit.is_some() {
+                    // The edit rebuilt the caret's leaf: show the preedit in it again.
+                    show_preedit(st);
+                }
                 if let Some(anchor) = change.anchor {
                     if let (Some(a), Some(c)) =
                         (caret::to_flow(st, anchor), caret::to_flow(st, change.caret))
@@ -1105,6 +1244,7 @@ impl Page {
             typing: None,
             plain,
             revision: 0,
+            preedit: None,
         };
         state.caret = caret::first(&state);
         imp.state.replace(Some(state));
@@ -1167,6 +1307,23 @@ impl Page {
     /// still estimated.
     pub fn completed_at(&self) -> Option<Instant> {
         self.imp().completed.get()
+    }
+}
+
+/// Give the shaper the preedit at the caret's leaf (or none), and have the flow measure
+/// that leaf again, its text now laid out with or without it.
+fn show_preedit(st: &mut State) {
+    let leaf = st.caret.and_then(|c| caret::to_flow(st, c)).map(|p| p.leaf);
+    match (leaf, &st.preedit) {
+        (Some(leaf), Some((text, attrs, _))) => {
+            let key = st.flow.layout_key(leaf);
+            let at = st.caret.map_or(0, |c| c.offset);
+            st.shaper.set_preedit(Some((key, at, text, attrs)));
+        }
+        _ => st.shaper.set_preedit(None),
+    }
+    if let Some(leaf) = leaf {
+        st.flow.remeasure(leaf);
     }
 }
 

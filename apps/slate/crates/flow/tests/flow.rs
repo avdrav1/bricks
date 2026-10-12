@@ -25,6 +25,8 @@ struct Fake {
     estimated_char: Option<f64>,
     /// Layouts the flow said are gone.
     forgotten: HashSet<LayoutKey>,
+    /// Lines a layout has beyond its text's, as an input method's preedit adds.
+    extra: std::collections::HashMap<LayoutKey, i32>,
 }
 
 /// Lines of `text` wrapped `width` px wide: (byte start, byte end) of each.
@@ -56,9 +58,10 @@ impl Shaper for Fake {
         }
     }
 
-    fn shape(&mut self, _key: LayoutKey, content: Content<'_>, width: i32) -> i32 {
+    fn shape(&mut self, key: LayoutKey, content: Content<'_>, width: i32) -> i32 {
         self.shaped += 1;
-        lines(&content.text(), width).len() as i32 * LINE
+        (lines(&content.text(), width).len() as i32 + self.extra.get(&key).copied().unwrap_or(0))
+            * LINE
     }
 
     fn hit(&mut self, _key: LayoutKey, content: Content<'_>, width: i32, x: f64, y: f64) -> Hit {
@@ -349,6 +352,36 @@ fn a_cells_growth_relays_out_only_its_table() {
     for (place, painted) in places(&mut flow, &mut fake) {
         assert_eq!(place, painted);
     }
+}
+
+#[test]
+fn a_leaf_measured_again_takes_its_new_height_in_place() {
+    let mut fake = Fake::default();
+    let mut blocks = many(10);
+    blocks.insert(
+        5,
+        table(vec![vec![cell(vec![para("a")]), cell(vec![para("b")])]]),
+    );
+    let mut flow = laid_out(blocks, 200, &mut fake);
+    let height = flow.content_height();
+    let y = |flow: &mut Flow, fake: &mut Fake, path: &[u32]| {
+        let leaf = flow.leaf_at(path).unwrap();
+        flow.text_place(leaf, fake).unwrap().y
+    };
+    let (before, after) = (y(&mut flow, &mut fake, &[4]), y(&mut flow, &mut fake, &[6]));
+
+    // The shaper lays the top-level paragraph and the cell's text out two lines taller.
+    for path in [&[2u32][..], &[5, 0, 1, 0]] {
+        let leaf = flow.leaf_at(path).unwrap();
+        fake.extra.insert(flow.layout_key(leaf), 2);
+        flow.remeasure(leaf);
+    }
+    assert!(!flow.is_complete());
+    flow.layout_slice(&mut fake, &mut || true);
+    assert!(flow.is_complete());
+    assert_eq!(flow.content_height(), height + f64::from(4 * LINE));
+    assert_eq!(y(&mut flow, &mut fake, &[4]), before + f64::from(2 * LINE));
+    assert_eq!(y(&mut flow, &mut fake, &[6]), after + f64::from(4 * LINE));
 }
 
 #[test]
