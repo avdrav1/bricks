@@ -340,6 +340,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "flow"
+version = "0.1.0"
+dependencies = [
+ "document-model",
+]
+
+[[package]]
 name = "formula"
 version = "0.2.1"
 
@@ -1075,6 +1082,7 @@ version = "0.1.0"
 dependencies = [
  "document-model",
  "docx",
+ "flow",
  "gtk4",
  "suite-core",
  "suite-file",

@@ -63,7 +63,8 @@ Slate's crates, in `apps/slate/crates/`:
 | --- | --- |
 | `document-model` | Slate's document model (ADR 0003): blocks, runs, plain-text reader with encoding and line-ending detection, Markdown reader (`pulldown-cmark`) |
 | `docx` | DOCX reader: `word/document.xml` with styles, numbering, hyperlinks, pictures, and tables into the document model |
-| `slate` (`apps/slate`) | the GTK 4 viewer window: open, drop, the page as a read-only text view, alerts |
+| `flow` | the pageless flow's layout state (ADR 0007), toolkit-free: per-block heights in a Fenwick index, estimates replaced by time-sliced measuring, scroll anchoring, tables and pictures, hit-testing, selection, plain and accessible text; shapes text through a `Shaper` trait |
+| `slate` (`apps/slate`) | the GTK 4 window: open, drop, alerts, and the page, which draws the flow (snapshot, Pango) with drag selection, copy, and accessible text |
 
 Frame's crates, in `apps/frame/crates/`:
 
@@ -89,7 +90,7 @@ python3 scripts/lo_functions.py          # re-record formula results from LibreO
 python3 scripts/lo_formats.py            # re-record number format results from LibreOffice (STYLE-2)
 python3 scripts/lo_xlsx.py fixture|dump FILE  # LibreOffice fixture workbook and dumps (XLSX-*)
 python3 scripts/lo_docx.py fixture|dump FILE  # Slate's LibreOffice fixture document and paragraph dumps (SLATE-3)
-scripts/check_slate.sh [BINARY]          # Slate viewer GUI check in docker: open, drop, show, refuse (SLATE-4)
+scripts/check_slate.sh [BINARY]          # Slate GUI check in docker: open, drop, show, refuse, text widths, select and copy (SLATE-4, SLATE-10, SLATE-11)
 cargo run --release -p xlsx --example gen_corpus_xlsx  # corpus/rows_1m.xlsx (BENCH-2)
 cargo run --release -p xlsx --example gen_corpus_xlsx -- --styled   # corpus/styled_1m.xlsx (STYLE-3, BENCH-3)
 python3 scripts/lo_pptx.py fixture|dump FILE  # LibreOffice fixture deck and dumps (FRAME-*)

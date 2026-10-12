@@ -17,6 +17,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 document-model.workspace = true
 docx.workspace = true
+flow.workspace = true
 # UI toolkit: GTK 4 for the whole suite (docs/adr/0002-gtk4-for-the-suite.md).
 gtk.workspace = true
 
