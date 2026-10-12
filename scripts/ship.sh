@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Release pipeline. Each step is separate so the ship-it skill can confirm
-# with the user before anything leaves the machine. APP is bricks (the default) or slate.
+# with the user before anything leaves the machine. APP is bricks (the default), slate, or
+# frame.
 #
 #   scripts/ship.sh [APP] preflight          checks only, changes nothing
 #   scripts/ship.sh [APP] bump patch|minor|major|X.Y.Z
@@ -9,15 +10,17 @@
 #   scripts/ship.sh [APP] upload [--dry-run] tarball, checksum, latest.json -> Cloudflare R2
 #   scripts/ship.sh [APP] site   [--dry-run] the app's download page (sites/APP) -> Cloudflare Pages
 #   scripts/ship.sh suite-site [--dry-run]   suite install page (sites/cronkite) -> Cloudflare Pages
-#   scripts/ship.sh [APP] tag                annotated git tag (local only): vX.Y.Z for Bricks, slate-vX.Y.Z for Slate
+#   scripts/ship.sh [APP] tag                annotated git tag (local only): vX.Y.Z for Bricks, slate-vX.Y.Z for
+#                                            Slate, frame-vX.Y.Z for Frame
 #
-# Bricks' release sits at the bucket's root (latest.json, releases/), Slate's under slate/.
+# Bricks' release sits at the bucket's root (latest.json, releases/), Slate's under slate/,
+# Frame's under frame/.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 [ -f .env.ship ] && set -a && . ./.env.ship && set +a
 APP=bricks
-case "${1:-}" in bricks|slate) APP=$1; shift ;; esac
+case "${1:-}" in bricks|slate|frame) APP=$1; shift ;; esac
 TARGET=x86_64-unknown-linux-gnu
 case $APP in
 bricks)
@@ -32,9 +35,15 @@ slate)
   PREFIX="slate/"; PAGES_VAR=CF_SLATE_PAGES_PROJECT; TAG_PREFIX=slate-v
   INSTALL_CHECK=scripts/check_install_slate.sh
   ;;
+frame)
+  ID=dev.cronkite.Frame  # APP_ID in apps/frame/src/main.rs
+  MANIFEST=apps/frame/Cargo.toml; SECTION=package
+  PREFIX="frame/"; PAGES_VAR=CF_FRAME_PAGES_PROJECT; TAG_PREFIX=frame-v
+  INSTALL_CHECK=scripts/check_install_frame.sh
+  ;;
 esac
 # Where the build puts latest.json and the deploy its copy of the site: dist/ for Bricks,
-# dist/slate/ for Slate.
+# dist/slate/ for Slate, dist/frame/ for Frame.
 OUT="dist${PREFIX:+/${PREFIX%/}}"
 version() { sed -n "/^\[$SECTION\]/,/^\[/{s/^version = \"\(.*\)\"/\1/p}" "$MANIFEST"; }
 V=$(version)

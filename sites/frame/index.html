@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Frame: a lightweight presentation app for Linux</title>
+<meta name="description" content="Open, edit, show, and save PowerPoint presentations on Linux, with one inspector and an outline instead of a ribbon.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --canvas: #e4e2df; --slide: #ffffff; --ink: #24201c; --muted: #6b625a;
+    --rule: #d8d2cc; --accent: #d9683a; --accent-ink: #b5532d; --guide: #d0309a;
+    --font: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --canvas: #141210; --slide: #1f1b18; --ink: #ede7e1; --muted: #a99d92;
+            --rule: #342d28; --accent: #e88458; --accent-ink: #f0a582; --guide: #f05fbd; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--canvas); color: var(--ink); font: 18px/1.6 var(--font); }
+  .slide { position: relative; max-width: 880px; margin: 48px auto 0; padding: 0 0 56px; background: var(--slide);
+           border: 1px solid var(--rule); box-shadow: 0 2px 6px rgb(0 0 0 / 0.10); }
+  .band { height: 14px; background: var(--accent); }
+  .body { padding: 52px 72px 0; }
+  h1 { position: relative; font-size: clamp(36px, 6vw, 58px); line-height: 1.05; font-weight: 700; margin: 0 0 20px;
+       padding: 6px 10px; margin-left: -10px; outline: 1.5px dashed var(--accent); outline-offset: 0; }
+  .lede { color: var(--muted); font-size: 20px; margin: 0 0 28px; }
+  .get { display: inline-block; padding: 10px 18px; background: var(--accent); color: #fff;
+         font-weight: 600; text-decoration: none; border-radius: 4px; }
+  .get:hover, .get:focus-visible { background: var(--accent-ink); }
+  a:focus-visible { outline: 2px solid var(--guide); outline-offset: 4px; }
+  ul.facts { list-style: none; padding: 0; margin: 40px 0 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; font-size: 16px; }
+  .facts li { border-top: 3px solid var(--accent); padding-top: 10px; }
+  .facts b { display: block; font-weight: 600; }
+  .facts span { color: var(--muted); }
+  h2 { font-size: 24px; margin: 48px 0 12px; }
+  pre { background: var(--canvas); border-left: 3px solid var(--accent); padding: 14px 16px; overflow-x: auto; font-size: 14px; }
+  .status { position: sticky; bottom: 0; margin-top: 48px; display: flex; border-top: 1px solid var(--rule); background: var(--slide); font-size: 13px; color: var(--muted); }
+  .status span { padding: 6px 16px; border-right: 1px solid var(--rule); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .status span:last-child { margin-left: auto; border-right: 0; border-left: 1px solid var(--rule); }
+  @media (max-width: 640px) {
+    .slide { margin-top: 0; border: 0; }
+    .body { padding: 36px 22px 0; }
+    ul.facts { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<main class="slide">
+  <div class="band" aria-hidden="true"></div>
+  <div class="body">
+    <h1>Slides, without the ribbon.</h1>
+    <p class="lede">Frame is a lightweight, native presentation app for Linux. It opens PowerPoint decks, lets you edit them on the slide or as an outline, shows them full screen, and saves them back without touching what you didn't change.</p>
+    <a class="get" id="dl" href="#install">Download for Linux</a>
+    <ul class="facts">
+      <li><b>PowerPoint files</b><span>.pptx decks, opened as they look, played with F5.</span></li>
+      <li><b>Fewer steps</b><span>A four-slide deck in 15 keys and clicks; PowerPoint's shortest documented way takes 21.</span></li>
+      <li><b>Only your edits</b><span>Everything you didn't change is saved as it was.</span></li>
+    </ul>
+    <section id="install">
+      <h2>Install</h2>
+      <p>For your user, no sudo: the app, its menu entry, and .pptx files opening with it. Start it from your app menu or with <code>frame</code>. Run the command again to update.</p>
+      <pre id="cmd">curl -fsSL https://this-site/install.sh | sh</pre>
+      <p>It needs GTK 4, which GNOME desktops have; otherwise the installer says how to get it. Or download the tarball above and check it against the published sha256. To remove it:</p>
+      <pre id="uninstall">curl -fsSL https://this-site/install.sh | sh -s -- --uninstall</pre>
+    </section>
+  </div>
+</main>
+<footer class="status" aria-live="polite">
+  <span id="ver">Loading release</span><span id="size"></span><span id="sha"></span><span>x86_64 Linux</span>
+</footer>
+<!-- The release (latest.json): scripts/ship.sh frame site writes it in when it deploys the page. -->
+<script id="release" type="application/json">@RELEASE_JSON@</script>
+<script>
+  // The install command names this page's own address.
+  const script = location.origin + "/install.sh";
+  document.getElementById("cmd").textContent = "curl -fsSL " + script + " | sh";
+  document.getElementById("uninstall").textContent = "curl -fsSL " + script + " | sh -s -- --uninstall";
+  let rel = null;
+  try { rel = JSON.parse(document.getElementById("release").textContent); } catch (e) {}
+  if (rel && rel.version) {
+    document.getElementById("dl").href = rel.url;
+    document.getElementById("dl").textContent = "Download v" + rel.version;
+    document.getElementById("ver").textContent = "v" + rel.version + " released " + rel.date;
+    document.getElementById("size").textContent = (rel.bytes / 1048576).toFixed(1) + " MB";
+    document.getElementById("sha").textContent = "sha256 " + rel.sha256;
+    document.getElementById("sha").title = rel.sha256;
+  } else {
+    document.getElementById("ver").textContent = "No release published yet";
+  }
+</script>
+</body>
+</html>

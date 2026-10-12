@@ -3,13 +3,15 @@
 #
 #   scripts/check_release.sh dist/bricks-X.Y.Z-x86_64-linux/bricks
 #   scripts/check_release.sh dist/slate-X.Y.Z-x86_64-linux/slate
+#   scripts/check_release.sh dist/frame-X.Y.Z-x86_64-linux/frame
 #
 # For each distro: a fresh container gets only what a user would install (GTK 4's runtime,
 # from the distro's own packages), then the binary opens a small file under GTK's Broadway
 # backend. Bricks opens a CSV and must report its first frame and quit (`--bench-open`);
-# Slate opens a Markdown file and must still be running 8 s later. That loads every
-# library it links against and opens a window. Also checks that no glibc symbol it needs is
-# newer than Ubuntu 24.04's 2.39. Needs docker.
+# Slate opens a Markdown file and must still be running 8 s later; Frame opens the fixture
+# deck, draws its densest slide, and must report the frames drawn and quit
+# (`--bench-draw`). That loads every library it links against and opens a window. Also
+# checks that no glibc symbol it needs is newer than Ubuntu 24.04's 2.39. Needs docker.
 set -euo pipefail
 bin=$(realpath "${1:?usage: check_release.sh BINARY}")
 app=$(basename "$bin")
@@ -27,10 +29,13 @@ case $app in
   slate) ext=md; content='# A heading\n\nSome *text*.\n'
     # Still running when the timeout stops it: exit 124.
     open="slate /tmp/t.md 2>&1; echo exit \$?"; opened='^exit 124$' ;;
+  frame) ext=pptx; deck="$(dirname "$0")/../apps/frame/crates/pptx/tests/data/fixture.pptx"
+    open="frame /tmp/t.pptx --bench-draw 5 2>&1"; opened='^{"slide":' ;;
   *) echo "unknown app $app"; exit 1 ;;
 esac
 file=$(mktemp --suffix=".$ext"); trap 'rm -f "$file"' EXIT
-printf "$content" > "$file"; chmod a+r "$file"
+if [ "$app" = frame ]; then cp "$deck" "$file"; else printf "$content" > "$file"; fi
+chmod a+r "$file"
 
 # distro, image, command installing GTK 4's runtime and its Broadway server
 checks=(
@@ -50,6 +55,7 @@ for c in "${checks[@]}"; do
   if [ $status = 0 ] && grep -q "$opened" <<<"$out"; then
     case $app in
       bricks) echo "ok   $name: $(grep '^FIRST_FRAME ' <<<"$out" | cut -c1-80)" ;;
+      frame) echo "ok   $name: $(grep '^{"slide":' <<<"$out" | cut -c1-100)" ;;
       *) echo "ok   $name: $app opened t.$ext and was still running after ${limit}s" ;;
     esac
   else

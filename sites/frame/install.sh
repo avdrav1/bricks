@@ -14,7 +14,7 @@
 # as Bricks' are (sites/bricks/install.sh).
 set -eu
 
-# Where latest.json is: filled in when the page is deployed.
+# Where latest.json is: filled in when the page is deployed (scripts/ship.sh frame site).
 BASE_URL="${FRAME_DOWNLOAD_URL:-@DOWNLOAD_BASE_URL@}"
 APP=frame
 ID=dev.cronkite.Frame

@@ -4,7 +4,7 @@ Cronkite: a Linux-native office suite in Rust: one Cargo workspace, three apps. 
 
 - **Bricks** (`apps/bricks`, command `bricks`): a fast, lightweight spreadsheet. V0.1 is the best large-CSV editor on Linux; Excel compatibility comes later. Product spec: `apps/bricks/docs/SPEC.md`. Work queue: `BACKLOG.md`.
 - **Slate** (`apps/slate`, command `slate`): pageless word processor for .txt, .md, and .docx: one endless column, never paginated, drawn by its own Pango flow. Spec: `docs/specs/slate.md`; design: `docs/adr/0003-slate-document-model.md`, `docs/adr/0005-slate-is-pageless.md`, `docs/adr/0007-slate-editing-engine.md`. SL0 builds a read-only viewer.
-- **Frame** (`apps/frame`, command `frame`; working name): presentation app for .pptx, easier to use than PowerPoint: direct editing with one inspector, plus an outline view. Spec: `docs/specs/frame.md`; design: `docs/adr/0004-frame-presentation-model.md`, `docs/adr/0006-frame-editor.md`. FR0 builds a viewer with a slideshow.
+- **Frame** (`apps/frame`, command `frame`): presentation app for .pptx, easier to use than PowerPoint: direct editing with one inspector, plus an outline view. Spec: `docs/specs/frame.md`; design: `docs/adr/0004-frame-presentation-model.md`, `docs/adr/0006-frame-editor.md`. FR0 builds a viewer with a slideshow.
 
 Everything below about stories, invariants, crates, benchmarks, and ADRs is Bricks' unless it says otherwise.
 
@@ -93,6 +93,7 @@ python3 scripts/lo_xlsx.py fixture|dump FILE  # LibreOffice fixture workbook and
 python3 scripts/lo_docx.py fixture|dump FILE  # Slate's LibreOffice fixture document and paragraph dumps (SLATE-3)
 scripts/check_slate.sh [BINARY]          # Slate GUI check in docker: open, drop, show, refuse, text widths, select and copy, editing, tables, input method, accessibility, saving .txt, .md, and .docx (SLATE-4, -10, -11, -6, -12, -13, -14, -15, -7, -8; scripts/ime_helpers.py is the input method)
 scripts/ship.sh slate build && scripts/ship.sh slate verify  # Slate's release tarball (dist/), started on Arch, Ubuntu 24.04, Fedora; scripts/check_install_slate.sh: its installer there, .docx and .md opening with it (SLATE-9)
+scripts/ship.sh frame build && scripts/ship.sh frame verify  # Frame's release tarball (dist/), opening and drawing a deck on Arch, Ubuntu 24.04, Fedora; scripts/check_install_frame.sh: its installer there, .pptx opening with it
 cargo run --release -p xlsx --example gen_corpus_xlsx  # corpus/rows_1m.xlsx (BENCH-2)
 cargo run --release -p xlsx --example gen_corpus_xlsx -- --styled   # corpus/styled_1m.xlsx (STYLE-3, BENCH-3)
 python3 scripts/lo_pptx.py fixture|dump|layouts FILE  # LibreOffice fixture deck, dumps, and layout names (FRAME-*)

@@ -1,4 +1,4 @@
-//! Frame: a fast, lightweight Linux-native presentation app. "Frame" is a working name.
+//! Frame: a fast, lightweight Linux-native presentation app.
 //!
 //! Usage: `frame [FILE.pptx] [--version] [--bench-draw FRAMES]`
 //!

@@ -1,6 +1,6 @@
 # Frame
 
-Fast, lightweight Linux-native presentation application, easier to use than PowerPoint (user decision). Command `frame`; "Frame" is a working name. Design: [ADR 0004](../adr/0004-frame-presentation-model.md) (model and reading), [ADR 0006](../adr/0006-frame-editor.md) (editor).
+Fast, lightweight Linux-native presentation application, easier to use than PowerPoint (user decision). Command `frame`. Design: [ADR 0004](../adr/0004-frame-presentation-model.md) (model and reading), [ADR 0006](../adr/0006-frame-editor.md) (editor).
 
 ## Format
 
@@ -31,11 +31,11 @@ Frame edits the same `.pptx` decks as PowerPoint with less to learn and fewer st
 
 **Measured:** the reference task, a 4-slide deck (title slide "Quarterly review" with a subtitle; "Highlights" with three bullets, one at the second level; "Revenue" with a picture from a file; "Next steps" with two bullets; saved as `.pptx`), takes fewer input actions in Frame than in PowerPoint. Input actions are clicks, drags, and key presses other than the content's own characters. Frame's count comes from its check script; PowerPoint's (Microsoft 365, fastest documented path) is derived step by step from Microsoft's documentation and recorded in the story's Notes. FRAME-15: Frame 15 on the canvas and 19 in the outline, PowerPoint 21.
 
-## FR1: editor (in progress)
+## FR1: editor
 
 Editing slide text on the slide and in the outline view, moving and resizing shapes with snapping, formatting through the inspector, inserting text boxes, shapes, pictures, and tables, adding, deleting, duplicating, and reordering slides, new decks from the built-in blank deck, and save by patching the original package, all with undo. Speaker notes come later.
 
-Built so far:
+Built:
 
 - **Slide text.** A click in a text box or placeholder puts the caret where it lands (Shift+click selects to it); the canvas outlines empty placeholders, dashed, so there's somewhere to click. Typing, Backspace, Delete, Enter (a new paragraph with the same level, alignment, and bullet; numbers renumber), Shift+Enter (a line break), the arrows, Home and End (with Ctrl, the whole text's), Shift with any of them to select, Ctrl+A, and Escape to stop. Typed text takes the look of the character before the caret, or of an empty paragraph's mark, so a placeholder keeps its layout's style. While text is edited the arrows move the caret; Page Up and Page Down stop editing and change slides. As in PowerPoint, Ctrl+Enter puts the caret at the end of the slide's next title, subtitle, or body placeholder (with nothing edited, the first), and after the last one adds a slide as New Slide does; Tab and Shift+Tab at the start of a paragraph, or over several, move the paragraphs a level down or up with that level's looks, and elsewhere do nothing.
 - **Slides.** New Slide (Ctrl+M, or the header bar's New Slide button) adds a slide after the current one on its layout, or on Title and Content after a title slide; the menu beside the button shows the deck's layouts as thumbnails of the slides they make, with their names, and picking one adds a slide on it. A new slide has its layout's placeholders, empty and outlined, with the caret in its title, ready to type. Ctrl+D duplicates the current slide; Delete or Backspace in the slide list deletes it; Ctrl+Up and Ctrl+Down, or dragging a thumbnail, move it. The slide list's context menu has New Slide, Duplicate Slide, and Delete Slide. The canvas's accessible name says the slide's layout ("Slide 2, Title and Content").
