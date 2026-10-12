@@ -1,6 +1,6 @@
 ---
 name: ship-it
-description: Cut a release of the Bricks spreadsheet app and deploy it to Cloudflare: preflight checks, version bump, release build, tarball upload to R2, download page to Cloudflare Pages, git tag. Use whenever the user says "ship it", "release", "deploy", "cut a build", "publish a version", "push to Cloudflare", or asks to put a new build online, even if they don't name Cloudflare.
+description: Cut a release of a Cronkite app (Bricks, the spreadsheet, by default; or Slate, the word processor) and deploy it to Cloudflare: preflight checks, version bump, release build, tarball upload to R2, download page to Cloudflare Pages, git tag. Use whenever the user says "ship it", "release", "deploy", "cut a build", "publish a version", "push to Cloudflare", or asks to put a new build online, even if they don't name Cloudflare.
 ---
 
 # ship-it
@@ -8,9 +8,11 @@ description: Cut a release of the Bricks spreadsheet app and deploy it to Cloudf
 The app is a native Linux binary, so Cloudflare hosts the release, not the app itself:
 
 - **R2** stores the tarball, its `.sha256`, and `latest.json` (version, URL, checksum).
-- **Pages** serves the download page in `sites/bricks/`, which reads `latest.json`.
+- **Pages** serves the app's download page (`sites/bricks/` at bricks.cronkite.cc, `sites/slate/` at slate.cronkite.cc), which reads `latest.json`.
 
 Every step runs through `scripts/ship.sh`. Anything that leaves the machine (upload, site deploy, push) needs an explicit yes from the user in chat first, every time.
+
+Which app: ask if the user didn't say. For Slate, put `slate` before every command (`scripts/ship.sh slate build`); without it, the commands act on Bricks. Slate's version is `apps/slate/Cargo.toml`'s (Bricks' is the workspace's), its release lives under `slate/` in the bucket, its Pages project is `CF_SLATE_PAGES_PROJECT` (created on the first `site` deploy if missing), and its tags are `slate-vX.Y.Z`; `vX.Y.Z` below means that tag. Its CHANGELOG heading is `## Slate vX.Y.Z (YYYY-MM-DD)`.
 
 ## 0. One-time setup
 
@@ -53,7 +55,7 @@ scripts/ship.sh build    # compiles in an Ubuntu 24.04 container (needs docker)
 scripts/ship.sh verify   # starts the binary on clean Arch, Ubuntu 24.04, and Fedora
 ```
 
-Check the output: tarball exists, size is plausible, `dist/<name>/bricks --version` prints the new version, and `verify` ends with `RELEASE OK`. Stop on any FAIL. Report size and sha256.
+Check the output: tarball exists, size is plausible, `dist/<name>/<app> --version` prints the new version, and `verify` ends with `RELEASE OK` and `INSTALL OK`. Stop on any FAIL. Report size and sha256.
 
 ## 4. Dry run, then confirm
 
@@ -84,9 +86,9 @@ scripts/ship.sh tag
 
 Then verify, and report each check:
 
-- `curl -fsSI $DOWNLOAD_BASE_URL/releases/vX.Y.Z/<name>.tar.gz` returns 200.
+- `curl -fsSI <download base>/releases/vX.Y.Z/<name>.tar.gz` returns 200 (the base is `$DOWNLOAD_BASE_URL`, plus `/slate` for Slate).
 - `curl -fsS <pages URL from wrangler output>/latest.json` shows the new version.
-- `curl -fsS <pages URL>/install.sh | grep -c "$DOWNLOAD_BASE_URL"` is 1 (the deploy filled in the download URL).
+- `curl -fsS <pages URL>/install.sh | grep -c "<download base>"` is 1 (the deploy filled in the download URL).
 - Downloaded tarball matches the sha256.
 - Optionally, on this machine: `curl -fsSL <pages URL>/install.sh | sh` reports the new version.
 
@@ -108,4 +110,4 @@ Not done: <push pending | none>
 
 The download page also serves `install.sh` (story PKG-1), which reads `latest.json`, so a site deploy is all a new version needs; nothing goes to a package registry.
 
-The suite page at cronkite.cc (`sites/cronkite/`) is not part of a release: it links to Bricks' installer and holds no version. Deploy it only when it changes, with the same yes first: `scripts/ship.sh suite-site --dry-run`, then `scripts/ship.sh suite-site` (Pages project `CF_SUITE_PAGES_PROJECT`). The cronkite.cc custom domain is attached to that project once, in the Cloudflare dashboard.
+The suite page at cronkite.cc (`sites/cronkite/`) is not part of a release: it links to the apps' installers and holds no version. Deploy it only when it changes, with the same yes first: `scripts/ship.sh suite-site --dry-run`, then `scripts/ship.sh suite-site` (Pages project `CF_SUITE_PAGES_PROJECT`). The cronkite.cc custom domain is attached to that project once, in the Cloudflare dashboard; so is slate.cronkite.cc to Slate's project.
