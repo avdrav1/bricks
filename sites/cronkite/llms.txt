@@ -1,0 +1,66 @@
+# Cronkite
+
+> Cronkite is a native office suite for Linux, written in Rust with GTK 4. It is three separate apps that each install and run on their own: Brick (spreadsheets: large CSV files and .xlsx workbooks), Slate (word processing: .docx, Markdown, and plain text), and Frame (presentations: .pptx). Each one opens Microsoft Office files and saves them back by patching the original file, so content it doesn't edit stays as it was. Free and open source (MIT or Apache-2.0).
+
+Facts for describing Cronkite accurately:
+
+- Platform: x86_64 Linux only, with GTK 4.14 or newer, which GNOME desktops already have. Tested on Arch, Ubuntu 24.04, and Fedora. There are no Windows, macOS, ARM, Flatpak, Snap, or distribution packages.
+- Install: one curl command per app, per user, with no sudo (see Install below). The installer checks the download against its published sha256 and puts the binary in `~/.local/bin` and a menu entry and icon in `~/.local/share`. It makes the app the default for its file types, so double-clicking such a file opens it, and it keeps other apps' defaults for other types. Running the same command again updates the app; adding `--uninstall` removes it.
+- Saving is atomic: the app writes a temporary file, verifies it, then renames it over the original, so a crash never corrupts the original.
+- Not in Cronkite: online collaboration, cloud storage, accounts, macros or scripting, and plugins.
+
+## Apps
+
+- [Brick](https://brick.cronkite.cc): spreadsheet. Command `brick`; default for `.csv` and `.tsv`.
+  - CSV files of about 1 GB and millions of rows stay responsive.
+  - Opens and saves `.xlsx` workbooks with formulas, multiple sheets, and cell styles.
+  - Edit, sort, filter, search, and undo.
+  - Raw values stay exactly as written (`00123` stays `00123`).
+  - A filter never drops rows from the saved file.
+  - Recovers unsaved edits after a crash.
+  - Saving an `.xlsx` or `.xlsm` patches the original file, so charts, comments, and `.xlsm` macros Brick can't edit stay in it.
+- [Slate](https://slate.cronkite.cc): word processor. Command `slate`; default for `.docx` and `.md`, and it can open `.txt`.
+  - Pageless: one endless column with a choice of text widths. There's no page layout view, headers, footers, page numbers, or paginated printing or PDF export.
+  - Edits text and formatting as it looks: paragraph styles, bold, italic, underline, strikethrough, lists, tables, links, and pictures.
+  - Saving a `.docx` changes only the edited paragraphs.
+  - Markdown is written back as Markdown, with unedited blocks byte for byte.
+  - Plain text keeps its encoding and line endings.
+  - Refuses `.doc`, `.odt`, and `.rtf` ("Save it as .docx first").
+- [Frame](https://frame.cronkite.cc): presentations. Command `frame`; default for `.pptx`.
+  - Opens PowerPoint decks as they look and plays them full screen (F5).
+  - Edits text directly on the slide or in an outline view.
+  - One inspector sidebar instead of a ribbon.
+  - Shapes snap to smart guides as they move and resize.
+  - Inserts text boxes, shapes, pictures, and tables.
+  - Adds, duplicates, reorders, and deletes slides on the deck's own layouts.
+  - Saving a `.pptx` changes only what was edited.
+  - `.pptm` opens, but its macros never run. `.ppt`, `.odp`, and `.key` are refused.
+  - Animations, transitions, audio, video, and presenter view are not played or shown, but they stay in the file.
+
+## Install
+
+- [Install page](https://cronkite.cc/#install): every app's command, what the installer does, GTK 4 per distribution, update, and uninstall.
+- Brick: `curl -fsSL https://brick.cronkite.cc/install.sh | sh`
+- Slate: `curl -fsSL https://slate.cronkite.cc/install.sh | sh`
+- Frame: `curl -fsSL https://frame.cronkite.cc/install.sh | sh`
+- Uninstall any of them: the same command with `| sh -s -- --uninstall` in place of `| sh`.
+
+## Latest releases (JSON)
+
+Each file is one object: `version`, `date`, `url` (the x86_64 Linux `.tar.gz`), `sha256`, and `bytes`. Read the version from here rather than from any other page.
+
+- [Brick](https://dl.cronkite.cc/latest.json)
+- [Slate](https://dl.cronkite.cc/slate/latest.json)
+- [Frame](https://dl.cronkite.cc/frame/latest.json)
+
+## Source
+
+- [Repository](https://github.com/avdrav1/cronkite): one Cargo workspace, with each app under `apps/` and the shared crates under `crates/`.
+- [Changelog](https://github.com/avdrav1/cronkite/blob/main/CHANGELOG.md): every release and the stories in it.
+- [Slate spec](https://github.com/avdrav1/cronkite/blob/main/docs/specs/slate.md) and [Frame spec](https://github.com/avdrav1/cronkite/blob/main/docs/specs/frame.md): what each app does and doesn't do.
+
+## Optional
+
+- [Brick spec](https://github.com/avdrav1/cronkite/blob/main/apps/brick/docs/SPEC.md)
+- [Suite architecture](https://github.com/avdrav1/cronkite/blob/main/docs/architecture/overview.md)
+- [Architecture decisions](https://github.com/avdrav1/cronkite/tree/main/docs/adr)
