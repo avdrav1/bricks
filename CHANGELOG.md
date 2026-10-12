@@ -2,6 +2,26 @@
 
 Releases are added by the ship-it skill.
 
+## Frame v0.1.0 (2026-10-12)
+
+Frame's first release, milestones FR0 and FR1: a lightweight presentation app that opens, shows, edits, and saves PowerPoint decks (.pptx). Edit on the slide or in an outline, format with one inspector instead of a ribbon, and play the deck full screen. Saving patches the original file, so everything you didn't edit stays as it was. The spec's four-slide reference deck takes 15 keys and clicks; PowerPoint's shortest documented way takes 21.
+
+- FRAME-1: Presentation model and PPTX package: slide order, size, shapes, placeholder inheritance
+- FRAME-2: PPTX text: runs, fonts, sizes, colours, bullets, levels, alignment, inherited styles
+- FRAME-3: PPTX pictures, fills, outlines, backgrounds, groups, and tables
+- FRAME-4: Viewer window: slide list and canvas
+- FRAME-5: Full-screen slideshow
+- FRAME-6: Edit slide text on the slide with undo
+- FRAME-7: Add, delete, duplicate, and reorder slides; layouts as thumbnails
+- FRAME-8: Save .pptx by patching the original package
+- FRAME-10: Select, move, resize, and nudge shapes with snapping and smart guides
+- FRAME-11: Inspector sidebar for the selection, no formatting dialogs
+- FRAME-12: Insert text boxes, shapes, pictures, and tables; text shrinks to fit
+- FRAME-13: Outline view of titles and bullets
+- FRAME-14: File → New from the built-in blank deck
+- FRAME-15: Build the reference deck in fewer keys and clicks than PowerPoint
+- FRAME-9: Desktop entry, icon, and installer
+
 ## Slate v0.1.0 (2026-10-12)
 
 Slate's first release, milestones SL0 and SL1: a lightweight, pageless word processor that opens, edits, and saves Word documents (.docx), Markdown, and plain text. Saving a .docx patches the original file, so everything you didn't edit stays as it was; an edited Markdown file changes only the blocks you edited.
