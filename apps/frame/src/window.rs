@@ -1,5 +1,5 @@
-//! Windows: the start window, a window per deck (slide list, canvas, inspector, status
-//! bar), the file dialog, drops, and alerts (spec FR0); the deck window's undo history and
+//! Windows: a window per deck (slide list, canvas, inspector, status bar), new decks, the
+//! file dialog, drops, and alerts (spec FR0); the deck window's undo history and
 //! its keys (text editing itself is in [`crate::editing`], the slide list in
 //! [`crate::slide_list`], the inspector in [`crate::inspector`], inserting in
 //! [`crate::insert`], text fitting its box in [`crate::fit`], the outline in
@@ -22,8 +22,6 @@ use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Instant;
-
-const START_WINDOW: &str = "start";
 
 thread_local! {
     /// Each open deck's window, by canonical path: opening a file again brings its
@@ -53,9 +51,14 @@ fn file_name(path: &Path) -> String {
     )
 }
 
-/// The header bar every window has: an Open button (Ctrl+O).
+/// The header bar every window has: New (Ctrl+N) and Open (Ctrl+O) buttons.
 fn header() -> gtk::HeaderBar {
     let bar = gtk::HeaderBar::new();
+    let new = gtk::Button::from_icon_name("document-new-symbolic");
+    new.set_action_name(Some("app.new"));
+    new.set_tooltip_text(Some("New (Ctrl+N)"));
+    new.update_property(&[gtk::accessible::Property::Label("New")]);
+    bar.pack_start(&new);
     let open = gtk::Button::from_icon_name("document-open-symbolic");
     open.set_action_name(Some("app.open"));
     open.set_tooltip_text(Some("Open… (Ctrl+O)"));
@@ -64,41 +67,56 @@ fn header() -> gtk::HeaderBar {
     bar
 }
 
-/// The window shown without a file: what to do to open one.
-pub fn start_window(app: &gtk::Application) {
-    let window = gtk::ApplicationWindow::builder()
-        .application(app)
-        .title("Frame")
-        .default_width(720)
-        .default_height(480)
-        .build();
-    window.set_widget_name(START_WINDOW);
-    window.set_titlebar(Some(&header()));
-    let page = gtk::Box::new(gtk::Orientation::Vertical, 12);
-    page.set_valign(gtk::Align::Center);
-    page.set_halign(gtk::Align::Center);
-    let title = gtk::Label::new(Some("Open a presentation"));
-    title.add_css_class("title-1");
-    let hint = gtk::Label::new(Some("Press Ctrl+O, or drop a .pptx file here."));
-    hint.add_css_class("dim-label");
-    let open = gtk::Button::with_label("Open…");
-    open.set_action_name(Some("app.open"));
-    open.set_halign(gtk::Align::Center);
-    open.add_css_class("suggested-action");
-    page.append(&title);
-    page.append(&hint);
-    page.append(&open);
-    window.set_child(Some(&page));
-    accept_file_drops(app, &window);
-    window.present();
+/// File → New (Ctrl+N), and `frame` without a file: a window with a new deck, Frame's
+/// built-in blank one, titled "Untitled" ("Untitled 2", ... beside other new decks),
+/// on its title slide with the canvas focused, ready to type. It's read off the UI
+/// thread; it saves through Save As.
+pub fn new_deck(app: &gtk::Application) {
+    let app = app.clone();
+    // Running until the window shows, though no window is open yet.
+    let hold = app.hold();
+    glib::spawn_future_local(async move {
+        let _hold = hold;
+        let error = match gio::spawn_blocking(Deck::blank).await {
+            Ok(Ok(deck)) => {
+                let window = gtk::ApplicationWindow::builder()
+                    .application(&app)
+                    .title(untitled(&app))
+                    .default_width(1280)
+                    .default_height(760)
+                    .build();
+                window.set_titlebar(Some(&header()));
+                accept_file_drops(&app, &window);
+                let view = show_deck(&app, &window, Rc::new(deck), None);
+                window.present();
+                view.canvas.grab_focus();
+                return;
+            }
+            Ok(Err(e)) => e.to_string(),
+            Err(_) => "Making it failed unexpectedly.".to_owned(),
+        };
+        eprintln!("frame: cannot make a new presentation: {error}");
+        let _ = gtk::AlertDialog::builder()
+            .message("Cannot make a new presentation")
+            .detail(&error)
+            .buttons(["Close"])
+            .modal(true)
+            .build()
+            .choose_future(app.active_window().as_ref())
+            .await;
+    });
 }
 
-fn close_start_window(app: &gtk::Application) {
-    for w in app.windows() {
-        if w.widget_name() == START_WINDOW {
-            w.close();
-        }
-    }
+/// "Untitled", or "Untitled N" with the first N no other window has.
+fn untitled(app: &gtk::Application) -> String {
+    let titles: Vec<_> = app.windows().iter().filter_map(|w| w.title()).collect();
+    (1..)
+        .map(|n| match n {
+            1 => "Untitled".to_owned(),
+            n => format!("Untitled {n}"),
+        })
+        .find(|t| !titles.iter().any(|w| w == t))
+        .unwrap_or_default()
 }
 
 /// "Presentations" (.pptx, .pptm) and "All files", the first as the default.
@@ -170,7 +188,7 @@ fn accept_file_drops(app: &gtk::Application, window: &gtk::ApplicationWindow) {
 }
 
 /// Open `files`, dropped on `window`, as Open does, each in its own window. They open
-/// after the drop is done: opening one may close the start window, the drop's target.
+/// after the drop is done.
 fn open_later(
     app: &gtk::Application,
     window: &glib::WeakRef<gtk::ApplicationWindow>,
@@ -236,7 +254,6 @@ pub fn open(app: &gtk::Application, path: &Path, bench: Option<u32>) {
         let error = match read {
             Ok(Ok(deck)) => {
                 show_deck(&app, &window, Rc::new(deck), bench);
-                close_start_window(&app);
                 return;
             }
             Ok(Err(e)) => e.to_string(),
@@ -629,7 +646,7 @@ fn show_deck(
     window: &gtk::ApplicationWindow,
     deck: Rc<Deck>,
     bench: Option<u32>,
-) {
+) -> Rc<DeckWindow> {
     let canvas = SlideView::new(&deck, 0, 0);
     let list = gtk::ListBox::new();
     list.set_selection_mode(gtk::SelectionMode::Single);
@@ -829,6 +846,7 @@ fn show_deck(
     if let Some(frames) = bench {
         bench_draw(app, &view, frames);
     }
+    view
 }
 
 /// FRAME-4's drawing benchmark: shows the deck's densest slide and redraws the canvas

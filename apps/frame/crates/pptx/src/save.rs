@@ -64,6 +64,20 @@ pub struct Original {
 impl Original {
     /// Copy the package at `path`.
     pub fn copy_of(path: &Path) -> io::Result<Original> {
+        let copy = Self::place()?;
+        std::fs::copy(path, &copy)?;
+        Ok(Original { copy })
+    }
+
+    /// A copy holding the package `bytes` (the built-in blank deck, [`crate::blank`]).
+    pub fn of_bytes(bytes: &[u8]) -> io::Result<Original> {
+        let copy = Self::place()?;
+        std::fs::write(&copy, bytes)?;
+        Ok(Original { copy })
+    }
+
+    /// A new path for a copy, in the cache directory.
+    fn place() -> io::Result<PathBuf> {
         static N: AtomicU64 = AtomicU64::new(0);
         let base = std::env::var_os("XDG_CACHE_HOME")
             .map(PathBuf::from)
@@ -71,13 +85,11 @@ impl Original {
             .unwrap_or_else(std::env::temp_dir);
         let dir = base.join("frame");
         std::fs::create_dir_all(&dir)?;
-        let copy = dir.join(format!(
+        Ok(dir.join(format!(
             "original-{}-{}.pptx",
             std::process::id(),
             N.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::copy(path, &copy)?;
-        Ok(Original { copy })
+        )))
     }
 
     /// Where the copy is.

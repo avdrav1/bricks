@@ -3,8 +3,9 @@
 //! Usage: `frame [FILE.pptx] [--version] [--bench-draw FRAMES]`
 //!
 //! FR0 is a viewer (docs/specs/frame.md, ADR 0004): each `.pptx` opens in its own window
-//! with a slide list and a canvas, and F5 starts a full-screen slideshow. Without a file it
-//! shows a start window; Ctrl+O picks a file, and files dropped on a window open. FR1
+//! with a slide list and a canvas, and F5 starts a full-screen slideshow. Without a file,
+//! and on Ctrl+N, it opens a new deck, Frame's built-in blank 16:9 one, ready to type;
+//! Ctrl+O picks a file, and files dropped on a window open. FR1
 //! edits (ADR 0006): slide text on the canvas, adding, duplicating, deleting, and moving
 //! slides, moving and resizing shapes with snapping, formatting in the inspector beside
 //! the canvas, inserting text boxes, shapes, pictures, and tables, text shrinking to fit
@@ -93,10 +94,14 @@ fn main() -> glib::ExitCode {
         .flags(gio::ApplicationFlags::NON_UNIQUE)
         .build();
     app.connect_startup(|app| {
+        let new = gio::ActionEntry::builder("new")
+            .activate(|app: &gtk::Application, _, _| window::new_deck(app))
+            .build();
         let open = gio::ActionEntry::builder("open")
             .activate(|app: &gtk::Application, _, _| window::choose_and_open(app))
             .build();
-        app.add_action_entries([open]);
+        app.add_action_entries([new, open]);
+        app.set_accels_for_action("app.new", &["<Control>n"]);
         app.set_accels_for_action("app.open", &["<Control>o"]);
         app.set_accels_for_action("win.slideshow", &["F5"]);
         app.set_accels_for_action("win.slideshow-here", &["<Shift>F5"]);
@@ -104,7 +109,7 @@ fn main() -> glib::ExitCode {
     let (file, bench) = (RefCell::new(args.file), args.bench);
     app.connect_activate(move |app| match file.take() {
         Some(path) => window::open(app, &path, bench),
-        None if app.windows().is_empty() => window::start_window(app),
+        None if app.windows().is_empty() => window::new_deck(app),
         None => {}
     });
     app.run_with_args::<&str>(&[])
