@@ -2,9 +2,13 @@
 //! opens fine has no problems (the nasty corpus included: odd but well-formed); a quote
 //! that never closes, text after a closing quote, and binary data are each placed exactly,
 //! across chunks and after quoted newlines; and cancelling stops the check.
+//!
+//! The nasty corpus comes from the real generator (`scripts/gen_corpus.py --max-mb 0`) into a
+//! temporary directory, so this runs in CI without `corpus/`.
 
 use data_model::{CsvTable, DelimiterChoice, ProblemKind, Problems};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::AtomicBool;
 
 struct Tmp(PathBuf);
@@ -13,6 +17,32 @@ impl Drop for Tmp {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
     }
+}
+
+struct Dir(PathBuf);
+
+impl Drop for Dir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// The nasty corpus, generated into a fresh temporary directory.
+fn nasty_corpus() -> Dir {
+    let out = std::env::temp_dir().join(format!("app8-nasty-{}", std::process::id()));
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../scripts/gen_corpus.py");
+    let run = Command::new("python3")
+        .arg(script)
+        .args(["--max-mb", "0", "--out"])
+        .arg(&out)
+        .output()
+        .expect("run python3 scripts/gen_corpus.py");
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    Dir(out)
 }
 
 fn tmp(name: &str, bytes: &[u8]) -> Tmp {
@@ -33,9 +63,9 @@ fn check(path: &Path) -> Problems {
 
 #[test]
 fn well_formed_files_have_no_problems() {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../corpus/nasty");
-    let mut files: Vec<_> = std::fs::read_dir(&dir)
-        .expect("corpus/nasty: run python3 scripts/gen_corpus.py")
+    let corpus = nasty_corpus();
+    let mut files: Vec<_> = std::fs::read_dir(corpus.0.join("nasty"))
+        .unwrap()
         .map(|e| e.unwrap().path())
         .collect();
     files.sort();
