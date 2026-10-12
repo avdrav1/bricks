@@ -17,6 +17,7 @@ workspace = true
 csv-engine.workspace = true
 data-model.workspace = true
 file-format.workspace = true
+suite-file.workspace = true
 
 [lib]
 # `cargo bench` runs only apps/bricks/benches/corpus.rs (BENCH-1).

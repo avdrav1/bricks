@@ -1,6 +1,6 @@
 [package]
 name = "pptx"
-description = "Frame's PPTX reader: package, slide order, inheritance through layouts, masters, and theme"
+description = "Frame's PPTX reader and patching writer: package, slide order, inheritance through layouts, masters, and theme"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
@@ -9,8 +9,13 @@ publish = false
 
 [dependencies]
 presentation-model.workspace = true
+suite-file.workspace = true
 quick-xml = "0.41"
 zip = { version = "8", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+# The save tests make their edits as the app does.
+deck-edit.workspace = true
 
 [lints]
 workspace = true

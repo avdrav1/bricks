@@ -328,6 +328,7 @@ dependencies = [
  "csv-engine",
  "data-model",
  "encoding_rs",
+ "suite-file",
 ]
 
 [[package]]
@@ -359,6 +360,7 @@ dependencies = [
  "pptx",
  "presentation-model",
  "suite-core",
+ "suite-file",
  "suite-platform",
  "suite-ui",
  "tracing",
@@ -721,6 +723,7 @@ dependencies = [
  "data-model",
  "file-format",
  "rayon",
+ "suite-file",
 ]
 
 [[package]]
@@ -869,8 +872,10 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 name = "pptx"
 version = "0.1.0"
 dependencies = [
+ "deck-edit",
  "presentation-model",
  "quick-xml",
+ "suite-file",
  "zip",
 ]
 
@@ -1306,10 +1311,10 @@ dependencies = [
  "calamine",
  "csv-engine",
  "data-model",
- "file-format",
  "formula",
  "quick-xml",
  "rust_xlsxwriter",
+ "suite-file",
  "zip",
 ]
 

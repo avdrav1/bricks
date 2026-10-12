@@ -13,6 +13,7 @@
 mod deck;
 mod editing;
 mod render;
+mod saving;
 mod slide_list;
 mod slide_view;
 mod window;

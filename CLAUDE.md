@@ -41,7 +41,7 @@ Everything below about stories, invariants, crates, benchmarks, and ADRs is Bric
 | `suite-core` | `AppKind` and other app-independent primitives |
 | `suite-ui` | UI conventions shared by the apps |
 | `suite-platform` | OS integration (Linux) |
-| `suite-file` | format-independent file infrastructure (document names) |
+| `suite-file` | format-independent file infrastructure (document names, atomic save) |
 
 Bricks' crates, in `apps/bricks/crates/`:
 
@@ -53,7 +53,7 @@ Bricks' crates, in `apps/bricks/crates/`:
 | `xlsx` | XLSX import into indexed sheet copies with styles; save by patching the original package |
 | `grid` | toolkit-free viewport, selection, navigation |
 | `commands` | `Command` trait, undo/redo |
-| `file-format` | atomic save |
+| `file-format` | CSV save (atomic through suite-file) |
 | `jobs` | background jobs: shared pool, cancel tokens, results to the UI loop (ADR 0005) |
 | `bricks` (`apps/bricks`) | windows, menus, dialogs, OS integration (toolkit set by DEC-1) |
 
@@ -70,10 +70,10 @@ Frame's crates, in `apps/frame/crates/`:
 
 | Crate | Owns |
 | --- | --- |
-| `presentation-model` | slides, shapes, frames, text, fills, outlines, pictures, tables, and backgrounds with every value resolved (ADR 0004), where each run look is set (own, layout, master; ADR 0006), and the deck's layouts with the new slide each makes; no dependencies |
-| `pptx` | PPTX reading: package, slide order, layouts and each one's new slide, placeholder inheritance through layout and master, group transforms, text styles, theme colours and fonts, fills and outlines, pictures, tables with table styles, SmartArt drawings, notes |
+| `presentation-model` | slides, shapes, frames, text, fills, outlines, pictures, tables, and backgrounds with every value resolved (ADR 0004), where each run look is set (own, layout, master; ADR 0006), the markup runs and paragraphs were read with and shapes' ids (for the save), and the deck's layouts with the new slide each makes; no dependencies |
+| `pptx` | PPTX reading: package, slide order, layouts and each one's new slide, placeholder inheritance through layout and master, group transforms, text styles, theme colours and fonts, fills and outlines, pictures, tables with table styles, SmartArt drawings, notes; saving by patching a copy of the package read (ADR 0006) |
 | `deck-edit` | edits as undoable commands on the presentation model (ADR 0006): text edits (typing, delete, Enter, line breaks), slide edits (new on a layout, duplicate, delete, move), undo history; toolkit-free |
-| `frame` (`apps/frame`) | windows, slide list and slide commands, canvas and its slide renderer (GTK 4 snapshot, Pango), text editing on the canvas, dialogs |
+| `frame` (`apps/frame`) | windows, slide list and slide commands, canvas and its slide renderer (GTK 4 snapshot, Pango), text editing on the canvas, save and save as, dialogs |
 
 ## Commands
 

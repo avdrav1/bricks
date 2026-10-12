@@ -18,9 +18,11 @@ pub(crate) struct Package {
     media: HashMap<String, Arc<[u8]>>,
 }
 
-/// A parsed XML part and its relationships.
+/// A parsed XML part, the bytes it was parsed from (its elements' spans index them), and
+/// its relationships.
 pub(crate) struct Part {
     pub root: Element,
+    pub source: Vec<u8>,
     pub rels: Rels,
 }
 
@@ -95,7 +97,11 @@ impl Package {
         let bytes = self.bytes(name)?;
         let root = xml::parse(&bytes).map_err(|e| Error::damaged(name, e))?;
         let rels = self.rels(name)?;
-        let part = Rc::new(Part { root, rels });
+        let part = Rc::new(Part {
+            root,
+            source: bytes,
+            rels,
+        });
         self.parts.insert(name.to_owned(), part.clone());
         Ok(part)
     }

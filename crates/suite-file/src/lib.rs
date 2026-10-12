@@ -1,8 +1,12 @@
 //! Format-independent file infrastructure shared by every app in the suite.
 //!
-//! Atomic writes, save and save-as, file metadata, recent files, temp files, and
+//! Atomic saving lives here ([`save_atomic`]). Save-as, file metadata, recent files, temp files, and
 //! autosave/recovery may move here once two apps need them. Format parsers (CSV, XLSX,
 //! DOCX, PPTX) stay in their app's crates.
+
+mod save;
+
+pub use save::{save_atomic, SaveError, WriteSeek, TEMP_SUFFIX};
 
 use std::borrow::Cow;
 use std::path::Path;

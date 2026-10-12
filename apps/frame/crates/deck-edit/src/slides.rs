@@ -93,6 +93,7 @@ impl SlideEdit {
                 *to
             }
         };
+        deck.number_slides();
         Change::Slides { show }
     }
 
@@ -114,6 +115,7 @@ impl SlideEdit {
                 *from
             }
         };
+        deck.number_slides();
         Change::Slides { show }
     }
 }

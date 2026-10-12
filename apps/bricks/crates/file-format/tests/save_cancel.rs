@@ -4,12 +4,13 @@
 //! `cargo test --release -p file-format --test save_cancel -- --ignored --nocapture`
 
 use data_model::{CellRef, CsvTable, DelimiterChoice, Edit, SaveProgress, TableSource};
-use file_format::{save_csv, SaveError, TEMP_SUFFIX};
+use file_format::save_csv;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use suite_file::{SaveError, TEMP_SUFFIX};
 
 fn open(path: &Path) -> CsvTable {
     let t = CsvTable::open(path, DelimiterChoice::Auto).unwrap();

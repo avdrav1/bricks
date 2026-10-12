@@ -1,10 +1,10 @@
 //! `save_atomic` failure paths: whatever goes wrong before the rename, the original stays as
 //! it was and no temp file is left behind.
 
-use file_format::{save_atomic, SaveError};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
+use suite_file::{save_atomic, SaveError};
 
 fn dir(name: &str) -> PathBuf {
     let d = std::env::temp_dir().join(format!("save1-atomic-{}-{name}", std::process::id()));

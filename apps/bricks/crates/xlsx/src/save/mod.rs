@@ -14,7 +14,6 @@ use csv_engine::Source;
 use data_model::{
     ColId, Computed, CsvTable, Origin, RowId, SaveProgress, SaveStats, SheetId, StylePool, Workbook,
 };
-use file_format::{SaveError, WriteSeek};
 use formula::{adjust, Change};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -24,6 +23,7 @@ use std::io::{self, BufReader, BufWriter, SeekFrom, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use suite_file::{SaveError, WriteSeek};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
@@ -163,7 +163,7 @@ pub fn save(
         .is_some_and(|e| e.eq_ignore_ascii_case("xlsm"));
     let written = RefCell::new(None);
     let book = RefCell::new(Some(book));
-    let saved = file_format::save_atomic(
+    let saved = suite_file::save_atomic(
         dest,
         cancel,
         |w| {

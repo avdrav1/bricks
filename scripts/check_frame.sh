@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # FRAME-4 acceptance: Frame's viewer window; FRAME-5: its slideshow; FRAME-6: text editing;
-# FRAME-7: adding, duplicating, deleting, and moving slides.
+# FRAME-7: adding, duplicating, deleting, and moving slides; FRAME-8: saving.
 #
 #   scripts/check_frame.sh [BINARY]   (default target/release/frame)
 #
@@ -46,6 +46,13 @@
 #      one back; Ctrl+D duplicates slide 3 and Ctrl+Up twice moves the copy to 2; a click
 #      on thumbnail 1 and Delete delete it, Ctrl+Z restores it; dragging thumbnail 1 to
 #      the lower half of thumbnail 3 moves the slide to 3, and Ctrl+Z moves it back.
+# FRAME-8 acceptance, the window's half (LibreOffice's reading of saved decks is
+# `cargo test -p pptx --test save -- --ignored`):
+#  11. on a copy of layouts.pptx, typing into slide 1's subtitle, Ctrl+M and typing the
+#      new slide's title, then Ctrl+S: the status says it saved; the file's slide 1 part
+#      has the typed text, its slide list 11 slides, and the new slide a part of its own;
+#      reopened, it shows them. Ctrl+Shift+S and a typed path save it as another file,
+#      the window takes that file's name, and the file reopens.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -78,19 +85,23 @@ gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import Atspi, GdkPixbuf
 
 def canvas():
-    # The canvas: the image whose description is the slide text (thumbnails have none).
+    # The canvas: the largest image (a new slide has no text, so no description).
     desktop = Atspi.get_desktop(0)
     stack = [desktop.get_child_at_index(i) for i in range(desktop.get_child_count())]
     stack = [a for a in stack if a is not None and a.get_name() == "frame"]
+    best = None
     while stack:
         n = stack.pop()
         if n is None:
             continue
-        if n.get_role() == Atspi.Role.IMAGE and n.get_description():
+        if n.get_role() == Atspi.Role.IMAGE:
             e = n.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
-            return e.x, e.y, e.width, e.height
+            if best is None or e.width * e.height > best[2] * best[3]:
+                best = (e.x, e.y, e.width, e.height)
         stack.extend(n.get_child_at_index(i) for i in range(n.get_child_count()))
-    sys.exit("no canvas")
+    if best is None:
+        sys.exit("no canvas")
+    return best
 
 def slide(path):
     # The slide in the screenshot: what differs from the canvas backdrop in its middle row
@@ -132,6 +143,12 @@ def ink(path, name, fx0, fy0, fx1, fy1):
     ys = range(round(top + float(fy0) * h), round(top + float(fy1) * h))
     print(f"ink {name}: {sum(1 for y in ys for x in xs if max(at(x, y)) < 200)}")
 
+def part(path, name, needle):
+    # How often NEEDLE occurs in part NAME of the package at PATH.
+    import zipfile
+    text = zipfile.ZipFile(path).read(name).decode()
+    print(f"part {name} {needle}: {text.count(needle)}")
+
 def where(name):
     # The centre of the first widget named NAME, to click or drag it.
     desktop = Atspi.get_desktop(0)
@@ -171,6 +188,8 @@ elif sys.argv[1] == "ink":
     ink(*sys.argv[2:8])
 elif sys.argv[1] == "where":
     where(sys.argv[2])
+elif sys.argv[1] == "part":
+    part(*sys.argv[2:5])
 else:
     main(sys.argv[1], sys.argv[2:])
 PY
@@ -275,6 +294,30 @@ session() {
   read x3 y3 < <(python3 /tmp/px.py where "Slide 3")
   python3 /scripts/dnd_helpers.py drag $x1 $y1 $x3 $((y3 + 30)); sleep 1; shot dragged; shown dragged
   keys -M ctrl z -m ctrl; sleep 0.5; shown undrag
+  pkill -x frame; sleep 0.5
+
+  echo "== 11 save"
+  cp /tmp/f/layouts.pptx /tmp/f/save.pptx
+  frame /tmp/f/save.pptx >>/tmp/app.log 2>&1 & sleep 3
+  shot save0
+  read x y < <(python3 /tmp/px.py point /shots/save0.png 0.828 0.6095)
+  python3 /scripts/dnd_helpers.py click $x $y; sleep 0.5
+  keys -k End " saved" -k Escape -M ctrl m -m ctrl; sleep 1; shot save1
+  read x y < <(python3 /tmp/px.py point /shots/save1.png 0.5 0.1234)
+  python3 /scripts/dnd_helpers.py click $x $y; sleep 0.5
+  keys "Agenda" -k Escape -M ctrl s -m ctrl; sleep 3; shown saved
+  python3 /tmp/px.py part /tmp/f/save.pptx ppt/slides/slide1.xml "subtitle saved"
+  python3 /tmp/px.py part /tmp/f/save.pptx ppt/presentation.xml "<p:sldId "
+  python3 /tmp/px.py part /tmp/f/save.pptx ppt/slides/slide11.xml ">Agenda<"
+  pkill -x frame; sleep 0.5
+  frame /tmp/f/save.pptx >>/tmp/app.log 2>&1 & sleep 3
+  shown reopened
+  keys -k Next; sleep 0.5; shown second
+  keys -M ctrl -M shift s -m shift -m ctrl; sleep 2
+  keys -M ctrl a -m ctrl "/tmp/f/saved-as.pptx" -k Return; sleep 3; shot saveas; shown saveas
+  pkill -x frame; sleep 0.5
+  frame /tmp/f/saved-as.pptx >>/tmp/app.log 2>&1 & sleep 3
+  shown reopened2
   pkill -x frame; sleep 0.5
 
   echo "== 5 drop"
@@ -390,6 +433,18 @@ check "10: Ctrl+Z brings it back" "10 slides" "^undelete: Slide 1, Title Slide$"
 check "10: dragging slide 1 below slide 3 moves it to 3" "10 slides" "^dragged: Slide 3, Title Slide$"
 check "10: ... the slide list shows it there" "10 slides" "^dragged: Slide 3 of 11$"
 check "10: Ctrl+Z moves it back" "10 slides" "^undrag: Slide 1, Title Slide$"
+# FRAME-8: saving by patching the package.
+check "11: Ctrl+S saves" "11 save" "^saved: Saved “save\.pptx”$"
+check "11: ... the typed subtitle into slide 1's part" "11 save" "^part ppt/slides/slide1.xml subtitle saved: 1$"
+check "11: ... the new slide into the slide list" "11 save" "^part ppt/presentation.xml <p:sldId : 11$"
+check "11: ... and into a part of its own" "11 save" "^part ppt/slides/slide11.xml >Agenda<: 1$"
+check "11: the saved deck reopens with 11 slides" "11 save" "^reopened: Slide 1 of 11$"
+check "11: ... the subtitle as typed" "11 save" "^reopened: subtitle saved$"
+check "11: ... the new slide second, on Title and Content" "11 save" "^second: Slide 2, Title and Content$"
+check "11: ... its title typed" "11 save" "^second: Agenda$"
+check "11: Save As saves under the name typed" "11 save" "^saveas: Saved “saved-as\.pptx”$"
+check "11: ... and the window is that file's" "11 save" "^saveas: saved-as\.pptx$"
+check "11: the saved-as deck reopens" "11 save" "^reopened2: Slide 1 of 11$"
 if [ $fail = 0 ]; then echo "FRAME OK"; else
   echo "FRAME CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

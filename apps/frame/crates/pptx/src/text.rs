@@ -16,14 +16,17 @@
 //! Each run records where each of its looks is set (`Run::sources`, ADR 0006): the shape
 //! itself (steps 3 to 5 on the shape), its layout's or master's placeholder (step 4), the
 //! master's text styles (step 2), or the presentation (step 1 and PowerPoint's defaults),
-//! so an edit keeps inherited looks inherited. Neighbouring runs that look the same merge.
+//! so an edit keeps inherited looks inherited. Runs and paragraphs also keep their markup
+//! as written (`Run::markup`, `Paragraph::markup`), for a save to write back. Neighbouring
+//! runs that look the same and are written the same merge.
 
 use crate::color::Palette;
 use crate::xml::Element;
 use presentation_model::{
-    Align, Anchor, AutoNumber, Bullet, BulletSize, Caps, Color, Insets, Paragraph, Run, RunSources,
-    Source, Spacing, TextBody, Vertical,
+    Align, Anchor, AutoNumber, Bullet, BulletSize, Caps, Color, Insets, Paragraph, Run, RunMarkup,
+    RunSources, Source, Spacing, TextBody, Vertical,
 };
+use std::sync::Arc;
 
 /// PowerPoint's text size when nothing sets one.
 const DEFAULT_SIZE: f64 = 18.0;
@@ -324,9 +327,28 @@ impl Styles<'_> {
     }
 }
 
-/// Read a `txBody` with its styles. `None` when there's no text body.
+/// An element as written in `source`, the bytes of the part it's in.
+fn raw(source: &[u8], e: &Element) -> Arc<str> {
+    let bytes = source.get(e.span.clone()).unwrap_or_default();
+    Arc::from(String::from_utf8_lossy(bytes))
+}
+
+/// A field's start tag as written: up to its first child, or its empty tag opened.
+fn start_tag(source: &[u8], e: &Element) -> Arc<str> {
+    let end = e.elements().next().map_or(e.span.end, |c| c.span.start);
+    let bytes = source.get(e.span.start..end).unwrap_or_default();
+    let tag = String::from_utf8_lossy(bytes);
+    match tag.trim_end().strip_suffix("/>") {
+        Some(open) => Arc::from(format!("{open}>")),
+        None => Arc::from(tag),
+    }
+}
+
+/// Read a `txBody` with its styles. `None` when there's no text body. `source` is the
+/// bytes of the part it's in: runs and paragraphs keep their markup as written.
 pub(crate) fn body(
     tx_body: Option<&Element>,
+    source: &[u8],
     styles: &Styles<'_>,
     ctx: &TextContext<'_>,
 ) -> Option<TextBody> {
@@ -359,6 +381,7 @@ pub(crate) fn body(
         }
         let mut runs = Vec::new();
         let mut end = props.run.clone();
+        let mut end_markup = Arc::<str>::from("");
         for r in p.elements() {
             let mut rp = props.run.clone();
             let rpr = r.child("rPr");
@@ -372,6 +395,7 @@ pub(crate) fn body(
                 "fld" => r.child("t").map(|t| t.text()).unwrap_or_default(),
                 "endParaRPr" => {
                     end.apply(r, ctx, Source::Own);
+                    end_markup = raw(source, r);
                     continue;
                 }
                 _ => continue,
@@ -386,7 +410,17 @@ pub(crate) fn body(
                 rp.from.color = Source::Own;
                 rp.from.underline = Source::Own;
             }
-            runs.push(run(text, &rp, ctx));
+            let mut run = run(text, &rp, ctx);
+            run.markup = RunMarkup {
+                field: if r.name == "fld" {
+                    start_tag(source, r)
+                } else {
+                    Arc::from("")
+                },
+                props: rpr.map_or_else(|| Arc::from(""), |e| raw(source, e)),
+            };
+            run.slide_number = r.name == "fld" && r.attr("type") == Some("slidenum");
+            runs.push(run);
         }
         let mut paragraph = Paragraph {
             level: level as u8,
@@ -398,7 +432,14 @@ pub(crate) fn body(
             space_after: props.space_after.unwrap_or(Spacing::Points(0.0)),
             bullet: bullet(&props),
             runs,
-            end: run(String::new(), &end, ctx),
+            end: Run {
+                markup: RunMarkup {
+                    field: Arc::from(""),
+                    props: end_markup,
+                },
+                ..run(String::new(), &end, ctx)
+            },
+            markup: ppr.map_or_else(|| Arc::from(""), |e| raw(source, e)),
         };
         paragraph.merge_runs();
         text.paragraphs.push(paragraph);
@@ -454,6 +495,8 @@ fn run(text: String, p: &RunProps, ctx: &TextContext<'_>) -> Run {
         baseline: p.baseline.unwrap_or(0.0),
         caps: p.caps.unwrap_or_default(),
         sources: p.from,
+        markup: RunMarkup::default(),
+        slide_number: false,
     }
 }
 
@@ -549,7 +592,7 @@ mod tests {
             shape: styles.iter().map(|(e, s)| (e, *s)).collect(),
             body: Vec::new(),
         };
-        self::body(Some(&el), &styles, &ctx).unwrap()
+        self::body(Some(&el), body.as_bytes(), &styles, &ctx).unwrap()
     }
 
     fn read(body: &str) -> TextBody {
@@ -588,10 +631,10 @@ mod tests {
     }
 
     #[test]
-    fn runs_that_look_the_same_merge() {
+    fn runs_that_look_and_are_written_the_same_merge() {
         let t = read(
             r#"<p:txBody><a:bodyPr/>
-            <a:p><a:r><a:rPr lang="en-US"/><a:t>one </a:t></a:r><a:r><a:rPr lang="de-DE"/><a:t>run</a:t></a:r><a:r><a:t></a:t></a:r><a:br/><a:r><a:rPr b="1"/><a:t>bold</a:t></a:r></a:p>
+            <a:p><a:r><a:rPr lang="en-US"/><a:t>one </a:t></a:r><a:r><a:rPr lang="en-US"/><a:t>run</a:t></a:r><a:r><a:rPr lang="de-DE"/><a:t> Lauf</a:t></a:r><a:r><a:t></a:t></a:r><a:br/><a:r><a:rPr b="1"/><a:t>bold</a:t></a:r></a:p>
             </p:txBody>"#,
         );
         let runs: Vec<&str> = t.paragraphs[0]
@@ -599,7 +642,7 @@ mod tests {
             .iter()
             .map(|r| r.text.as_str())
             .collect();
-        assert_eq!(runs, ["one run", "\n", "bold"]);
+        assert_eq!(runs, ["one run", " Lauf", "\n", "bold"]);
     }
 
     #[test]
@@ -676,5 +719,12 @@ mod tests {
             (a.baseline, a.caps, a.font.as_str()),
             (30.0, Caps::All, "Minor")
         );
+        // Markup as written, for a save: the run's properties, the field's start tag.
+        assert_eq!(
+            &*a.markup.props,
+            r#"<a:rPr b="1" i="1" u="sng" strike="sngStrike" baseline="30000" cap="all"/>"#
+        );
+        assert_eq!(&*a.markup.field, "");
+        assert_eq!(&*p.runs[2].markup.field, r#"<a:fld type="slidenum">"#);
     }
 }
