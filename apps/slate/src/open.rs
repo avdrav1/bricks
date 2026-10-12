@@ -2,7 +2,7 @@
 //! picks, what Slate refuses and why, and the pictures decoded for the document.
 
 use crate::view::{texture_key, Textures};
-use document_model::{Block, Document, ImageFormat, ImageSource};
+use document_model::{Block, Document, ImageFormat, ImageSource, MarkdownSource};
 use gtk::{gdk, glib};
 use std::fmt;
 use std::path::Path;
@@ -12,6 +12,8 @@ pub struct Opened {
     pub doc: Document,
     pub textures: Textures,
     pub words: usize,
+    /// A Markdown file's source, so a save rewrites only the blocks edited.
+    pub source: Option<MarkdownSource>,
 }
 
 /// Why a file can't be shown, said to the user.
@@ -69,14 +71,14 @@ fn kind(path: &Path) -> Result<Kind, OpenError> {
 /// Read the file at `path`, merge its runs for editing ([`document_edit::normalize`]), and
 /// decode its pictures.
 pub fn read(path: &Path) -> Result<Opened, OpenError> {
-    let mut doc = match kind(path)? {
-        Kind::Text => document_model::read_text(&std::fs::read(path)?),
+    let (mut doc, mut source) = match kind(path)? {
+        Kind::Text => (document_model::read_text(&std::fs::read(path)?), None),
         Kind::Markdown => {
-            let mut doc = document_model::read_markdown(&std::fs::read(path)?);
+            let (mut doc, source) = document_model::read_markdown_source(&std::fs::read(path)?);
             if let Some(dir) = path.parent() {
                 document_model::load_linked_images(&mut doc.blocks, dir);
             }
-            doc
+            (doc, Some(source))
         }
         Kind::Docx => {
             let mut head = [0u8; 8];
@@ -88,10 +90,15 @@ pub fn read(path: &Path) -> Result<Opened, OpenError> {
                         .into(),
                 ));
             }
-            docx::read(path).map_err(|e| OpenError(sentence(&e.to_string())))?
+            let doc = docx::read(path).map_err(|e| OpenError(sentence(&e.to_string())))?;
+            (doc, None)
         }
     };
     document_edit::normalize(&mut doc);
+    // The source describes the blocks as shown: pictures loaded, runs merged.
+    if let Some(source) = source.as_mut() {
+        source.set_blocks(doc.blocks.clone());
+    }
     let mut textures = Textures::new();
     decode_pictures(&doc.blocks, &mut textures);
     let words = doc.word_count();
@@ -99,6 +106,7 @@ pub fn read(path: &Path) -> Result<Opened, OpenError> {
         doc,
         textures,
         words,
+        source,
     })
 }
 

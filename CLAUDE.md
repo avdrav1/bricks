@@ -61,11 +61,11 @@ Slate's crates, in `apps/slate/crates/`:
 
 | Crate | Owns |
 | --- | --- |
-| `document-model` | Slate's document model (ADR 0003): blocks, runs, plain-text reader with encoding and line-ending detection, Markdown reader (`pulldown-cmark`) |
+| `document-model` | Slate's document model (ADR 0003): blocks, runs, plain-text reader with encoding and line-ending detection, Markdown reader (`pulldown-cmark`); writers: plain text in the file's encoding and line endings, Markdown copying unedited blocks' bytes from the source |
 | `docx` | DOCX reader: `word/document.xml` with styles, numbering, hyperlinks, pictures, and tables into the document model |
 | `document-edit` | edits as undoable commands on the document model (ADR 0007), in the document's blocks or a table cell's: text replacements holding the removed and inserted text, paragraph looks, list numbering, history that joins typing a word at a time |
 | `flow` | the pageless flow's layout state (ADR 0007), toolkit-free: per-block heights in a Fenwick index, estimates replaced by time-sliced measuring, scroll anchoring, tables and pictures, hit-testing, selection, plain and accessible text, splicing in edited blocks; shapes text through a `Shaper` trait |
-| `slate` (`apps/slate`) | the GTK 4 window: open, drop, alerts, menus, and the page, which draws the flow (snapshot, Pango) and edits it: caret, input method, keys, undo, drag selection, copy, and accessible text |
+| `slate` (`apps/slate`) | the GTK 4 window: open, drop, alerts, menus, save and save as (atomic, off the UI thread, asking before closing with changes), and the page, which draws the flow (snapshot, Pango) and edits it: caret, input method, keys, undo, drag selection, copy, and accessible text |
 
 Frame's crates, in `apps/frame/crates/`:
 

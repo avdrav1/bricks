@@ -5,13 +5,16 @@
 //! tables (whose cells hold blocks), images, page breaks, rules, and [`Raw`] source Slate
 //! can't model. A paragraph holds [`Run`]s of text with one look each. Readers convert a
 //! file into the model: plain text ([`read_text`]) and Markdown ([`read_markdown`]) here,
-//! DOCX in the `docx` crate.
+//! DOCX in the `docx` crate. Writers convert it back: plain text ([`write_text`]) and
+//! Markdown ([`write_markdown`]).
 
 mod markdown;
 mod text;
+mod write;
 
-pub use markdown::{load_linked_images, read_markdown};
+pub use markdown::{load_linked_images, read_markdown, read_markdown_source, MarkdownSource};
 pub use text::{decode, read_text, Encoding, LineEnding, TextInfo};
+pub use write::{encode, write_markdown, write_text, Unencodable};
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

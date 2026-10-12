@@ -355,11 +355,13 @@ impl From<BlocksEdit> for Edit {
     }
 }
 
-/// An edit as applied: the edit and the ordered-list labels it renumbered after it.
+/// An edit as applied: the edit, the ordered-list labels it renumbered after it, and the
+/// id of the document it leaves (see [`History::position`]).
 #[derive(Debug)]
 struct Step {
     edit: Edit,
     relabel: LooksEdit,
+    id: u64,
 }
 
 /// Undo and redo for one document: the steps applied, newest last, and the steps undone.
@@ -369,6 +371,11 @@ pub struct History {
     undone: Vec<Step>,
     /// The next edit starts a step of its own, whatever came before.
     sealed: bool,
+    /// The last id given out.
+    ids: u64,
+    /// The position with nothing left to undo: the document as opened (0), or as the
+    /// oldest step dropped past [`HISTORY_STEPS`] left it.
+    base: u64,
 }
 
 impl History {
@@ -394,10 +401,23 @@ impl History {
                 .done
                 .back_mut()
                 .is_some_and(|last| last.relabel.is_empty() && last.edit.absorb(&edit));
-        if !joined {
-            self.done.push_back(Step { edit, relabel });
+        if joined {
+            // The joined step leaves another document than it did.
+            self.ids += 1;
+            if let Some(last) = self.done.back_mut() {
+                last.id = self.ids;
+            }
+        } else {
+            self.ids += 1;
+            self.done.push_back(Step {
+                edit,
+                relabel,
+                id: self.ids,
+            });
             if self.done.len() > HISTORY_STEPS {
-                self.done.pop_front();
+                if let Some(oldest) = self.done.pop_front() {
+                    self.base = oldest.id;
+                }
             }
         }
         self.sealed = false;
@@ -441,6 +461,13 @@ impl History {
     /// End the current step: the next edit won't join it (the caret moved, ...).
     pub fn seal(&mut self) {
         self.sealed = true;
+    }
+
+    /// Which document the history is at: the same id means the same document, so a
+    /// window compares it with the position it last saved at. Undoing back to a position
+    /// gives its id again; any new edit, typing joined to a step included, gives a new one.
+    pub fn position(&self) -> u64 {
+        self.done.back().map_or(self.base, |s| s.id)
     }
 
     pub fn can_undo(&self) -> bool {

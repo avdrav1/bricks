@@ -180,6 +180,8 @@ mod imp {
         presses: Cell<Option<(Instant, f64, f64, u32)>>,
         /// A removal being announced to screen readers: where it was and what it removed.
         removal: RefCell<Option<(usize, String)>>,
+        /// Called after every edit, undo, and redo has been shown.
+        pub(super) edited: RefCell<Option<Box<dyn Fn()>>>,
     }
 
     #[glib::object_subclass]
@@ -792,6 +794,12 @@ mod imp {
             let shift = mods.contains(gdk::ModifierType::SHIFT_MASK);
             if ctrl {
                 let digit = key.to_unicode().and_then(|c| c.to_digit(10));
+                if matches!(key, K::s | K::S) {
+                    // The window's File → Save and Save As (`saving`).
+                    let action = if shift { "win.save-as" } else { "win.save" };
+                    let _ = self.obj().activate_action(action, None);
+                    return glib::Propagation::Stop;
+                }
                 let command = match key {
                     K::z | K::Z => Some(if shift { Command::Redo } else { Command::Undo }),
                     K::y | K::Y => Some(Command::Redo),
@@ -1161,6 +1169,9 @@ mod imp {
                 self.start_layout();
             }
             self.reveal_caret();
+            if let Some(edited) = self.edited.borrow().as_ref() {
+                edited();
+            }
         }
 
         /// Keep one page-break child per page break.
@@ -1464,6 +1475,28 @@ impl Page {
     /// How many edits the page has shown.
     pub fn revision(&self) -> u64 {
         self.imp().state.borrow().as_ref().map_or(0, |s| s.revision)
+    }
+
+    /// Which document the undo history is at ([`document_edit::History::position`]): the
+    /// same number means the same document.
+    pub fn position(&self) -> u64 {
+        self.imp()
+            .state
+            .borrow()
+            .as_ref()
+            .map_or(0, |s| s.history.position())
+    }
+
+    /// The document as it is now.
+    pub fn document(&self) -> document_model::Document {
+        let state = self.imp().state.borrow();
+        let st = state.as_ref().expect("a page has its document");
+        st.flow.document().clone()
+    }
+
+    /// Call `f` after every edit, undo, and redo is shown.
+    pub fn connect_edited(&self, f: impl Fn() + 'static) {
+        self.imp().edited.replace(Some(Box::new(f)));
     }
 
     /// How many top-level blocks the document has.
