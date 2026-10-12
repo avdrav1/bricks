@@ -720,6 +720,19 @@ impl Flow {
         }
     }
 
+    /// The accessible text's characters (offsets, see [`Flow::text`]) top-level blocks
+    /// `blocks` hold, each text leaf's `\n` included.
+    pub fn block_chars(&self, blocks: Range<usize>) -> Range<usize> {
+        let first = self
+            .leaves
+            .partition_point(|l| (l.path[0] as usize) < blocks.start);
+        let end = self
+            .leaves
+            .partition_point(|l| (l.path[0] as usize) < blocks.end);
+        let total = self.char_count();
+        (self.chars.prefix(first) as usize).min(total)..(self.chars.prefix(end) as usize).min(total)
+    }
+
     /// The numbers of the leaves in top-level block `block`, in document order.
     pub fn block_leaves(&self, block: usize) -> std::ops::Range<usize> {
         let first = self

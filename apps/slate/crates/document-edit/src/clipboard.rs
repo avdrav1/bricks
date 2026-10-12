@@ -248,25 +248,46 @@ pub struct BlocksEdit {
 }
 
 impl BlocksEdit {
-    fn splice(&self, doc: &mut Document, old: &[Block], new: &[Block], caret: Pos) -> Change {
-        let top = blocks_mut(doc, Container::Top).expect("the document's blocks");
-        top.splice(self.start..self.start + old.len(), new.iter().cloned());
+    /// What applying (`forward`) or undoing changes.
+    pub(crate) fn shape(&self, forward: bool) -> Change {
+        let (removed, inserted, caret) = if forward {
+            (&self.removed, &self.inserted, self.caret)
+        } else {
+            (&self.inserted, &self.removed, self.undo_caret)
+        };
         Change {
             at: Container::Top,
             start: self.start,
-            removed: old.len(),
-            inserted: new.len(),
+            removed: removed.len(),
+            inserted: inserted.len(),
             caret,
             anchor: None,
         }
     }
 
+    /// Block `i` of the document's blocks once applied, for `i` among the blocks it puts
+    /// in.
+    pub(crate) fn looks_after(&self, i: usize) -> Option<&Block> {
+        self.inserted.get(i.checked_sub(self.start)?)
+    }
+
+    fn splice(&self, doc: &mut Document, forward: bool) -> Change {
+        let (old, new) = if forward {
+            (&self.removed, &self.inserted)
+        } else {
+            (&self.inserted, &self.removed)
+        };
+        let top = blocks_mut(doc, Container::Top).expect("the document's blocks");
+        top.splice(self.start..self.start + old.len(), new.iter().cloned());
+        self.shape(forward)
+    }
+
     pub(crate) fn apply(&self, doc: &mut Document) -> Change {
-        self.splice(doc, &self.removed, &self.inserted, self.caret)
+        self.splice(doc, true)
     }
 
     pub(crate) fn revert(&self, doc: &mut Document) -> Change {
-        self.splice(doc, &self.inserted, &self.removed, self.undo_caret)
+        self.splice(doc, false)
     }
 }
 

@@ -28,6 +28,7 @@ use document_model::{Block, CodeBlock, Document, ListItem, Paragraph, Run};
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
+use std::ops::Range;
 
 /// Steps kept for undo; older ones are forgotten.
 pub const HISTORY_STEPS: usize = 1_000;
@@ -267,6 +268,57 @@ impl Edit {
         }
     }
 
+    /// What applying (`forward`) or undoing the edit alone changes, before renumbering.
+    fn shape(&self, forward: bool) -> Change {
+        match self {
+            Edit::Text(e) => e.shape(forward),
+            Edit::Looks(e) => e.shape(),
+            Edit::Blocks(e) => e.shape(forward),
+        }
+    }
+
+    /// Block `i` of the edit's container once applied to `old`, its blocks now, as far as
+    /// its looks go, for `i` among the blocks it puts in.
+    fn looks_after<'a>(&'a self, old: &'a [Block], i: usize) -> Option<&'a Block> {
+        match self {
+            Edit::Text(e) => e.looks_after(old, i),
+            Edit::Looks(e) => e.looks_after(old, i),
+            Edit::Blocks(e) => e.looks_after(i),
+        }
+    }
+
+    /// The blocks applying this edit to `doc` (as it is now) replaces: its container and
+    /// the range of block indices in it, exactly the `at` and `start..start + removed` of
+    /// the [`Change`] that [`History::apply`] returns for it, ordered-list renumbering
+    /// included. The document isn't touched: renumbering runs over the blocks as they
+    /// will be.
+    pub fn span(&self, doc: &Document) -> (Container, Range<usize>) {
+        let mut change = self.shape(true);
+        if self.restructures() {
+            let old = blocks(doc, change.at).unwrap_or_default();
+            let Change {
+                start,
+                removed,
+                inserted,
+                ..
+            } = change;
+            let get = |i: usize| {
+                if i < start {
+                    old.get(i)
+                } else if i < start + inserted {
+                    self.looks_after(old, i)
+                } else {
+                    old.get(i + removed - inserted)
+                }
+            };
+            let n = (old.len() + inserted).saturating_sub(removed);
+            looks::renumber(n, get, start..start + inserted, |i, _, _| {
+                change = change.widen(i, true);
+            });
+        }
+        (change.at, change.start..change.start + change.removed)
+    }
+
     /// Whether the edit may change which blocks form a list, so ordered labels need
     /// renumbering.
     fn restructures(&self) -> bool {
@@ -371,6 +423,19 @@ impl History {
         self.done.push_back(step);
         self.sealed = true;
         Some(change)
+    }
+
+    /// The blocks the next undo (`redo` false) or redo replaces in the document as it is
+    /// now, as [`Edit::span`] gives them; `None` when there is nothing to undo or redo.
+    pub fn next_span(&self, redo: bool) -> Option<(Container, Range<usize>)> {
+        let change = if redo {
+            let step = self.undone.last()?;
+            step.relabel.widen(step.edit.shape(true), true)
+        } else {
+            let step = self.done.back()?;
+            step.relabel.widen(step.edit.shape(false), false)
+        };
+        Some((change.at, change.start..change.start + change.removed))
     }
 
     /// End the current step: the next edit won't join it (the caret moved, ...).

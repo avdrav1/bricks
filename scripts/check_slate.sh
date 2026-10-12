@@ -71,7 +71,13 @@
 #      clipboard), and undo empties it again; bold text copied in another Slate process
 #      offers Slate's format and plain text, and pastes into target.md still bold (ink at
 #      least 1.15 times the plain line's); text copied by another app (wl-copy) pastes as
-#      paragraphs, and undo takes the paste back.
+#      paragraphs, and undo takes the paste back;
+#  19. accessibility through Atspi in a11y.md ("Plain **bold** *italic* text", "Second
+#      paragraph line"): the page's character count, the caret's offset after Ctrl+End,
+#      the character, word, line, and paragraph at an offset, the run attributes of bold
+#      (weight 700), italic (style italic), and plain text (weight 400); and the
+#      text-changed events a listener receives while "X" is typed, deleted, Enter is
+#      pressed, and the Enter undone.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -94,6 +100,48 @@ python -m pywayland.scanner -i /usr/share/wayland/wayland.xml \
   /usr/share/wlr-protocols/unstable/wlr-virtual-pointer-unstable-v1.xml -o /tmp/proto/wlr_proto >/dev/null
 python -m pywayland.scanner -i /usr/share/wayland/wayland.xml \
   /protocols/input-method-unstable-v2.xml -o /tmp/proto/im_proto >/dev/null 2>&1
+cat > /tmp/atspi.py <<"PY"
+import sys
+import gi
+gi.require_version("Atspi", "2.0")
+from gi.repository import Atspi
+
+def page(name):
+    d = Atspi.get_desktop(0)
+    def walk(n, depth=0):
+        if n is None or depth > 40:
+            return
+        yield n
+        for i in range(n.get_child_count()):
+            yield from walk(n.get_child_at_index(i), depth + 1)
+    for i in range(d.get_child_count()):
+        a = d.get_child_at_index(i)
+        if a is not None and a.get_name() == "slate":
+            for n in walk(a):
+                if n.get_role_name() == "text" and n.get_name() == name:
+                    return n
+
+if sys.argv[1] == "read":
+    t = page(sys.argv[2]).get_text_iface()
+    print(f"count: {Atspi.Text.get_character_count(t)}")
+    print(f"caret: {Atspi.Text.get_caret_offset(t)}")
+    G = Atspi.TextGranularity
+    for label, offset, g in (("char", 6, G.CHAR), ("word", 7, G.WORD), ("line", 30, G.LINE), ("paragraph", 3, G.PARAGRAPH)):
+        r = Atspi.Text.get_string_at_offset(t, offset, g)
+        print(f"{label}: {r.content!r} {r.start_offset}-{r.end_offset}")
+    for offset in (1, 7, 12):
+        attrs, start, end = Atspi.Text.get_attribute_run(t, offset, True)
+        weight, style = attrs.get("weight"), attrs.get("style")
+        print(f"attrs {offset}: {start}-{end} weight={weight} style={style}")
+elif sys.argv[1] == "listen":
+    def on_event(e):
+        print(f"event: {e.type} {e.detail1} {e.detail2} {e.any_data!r}", flush=True)
+    listener = Atspi.EventListener.new(on_event)
+    listener.register("object:text-changed:insert")
+    listener.register("object:text-changed:delete")
+    print("listening", flush=True)
+    Atspi.event_main()
+PY
 cat > /tmp/words.py <<"PY"
 import sys
 import gi
@@ -544,6 +592,14 @@ session() {
 plain two" & sleep 1
   keys -M ctrl v -m ctrl; sleep 2; a11y page target.md | sed "s/^/plain-pasted /"
   keys -M ctrl z -m ctrl; sleep 1; a11y page target.md | sed "s/^/plain-undone /"; quit
+  echo "== 19 accessibility"
+  printf "Plain **bold** *italic* text\n\nSecond paragraph line\n" > /tmp/a11y.md
+  slate /tmp/a11y.md >>/tmp/app.log 2>&1 & sleep 4
+  keys -M ctrl -k End -m ctrl; sleep 1
+  python3 /tmp/atspi.py read a11y.md 2>&1
+  python3 -u /tmp/atspi.py listen > /tmp/events.log 2>&1 & listener=$!; sleep 2
+  keys X -s 300 -k BackSpace -s 300 -k Return -s 300 -M ctrl z -m ctrl; sleep 2
+  kill $listener; cat /tmp/events.log; quit
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -656,6 +712,19 @@ at_least "18: it pastes still bold (percent ink)" "18 clipboard" "rich bold ink"
 check "18: text from another app pastes as paragraphs" "18 clipboard" \
   "^plain-pasted page: HHHHHHHH\|Z\|HHHHHHHHplain one\|plain two$"
 check "18: undo takes that paste back" "18 clipboard" "^plain-undone page: HHHHHHHH\|Z\|HHHHHHHH$"
+check "19: the page's text has its 44 characters" "19 accessibility" "^count: 44$"
+check "19: the caret's offset follows Ctrl+End" "19 accessibility" "^caret: 44$"
+check "19: the character at an offset" "19 accessibility" "^char: .b. 6-7$"
+check "19: the word at an offset" "19 accessibility" "^word: .bold ?. 6-1[01]$"
+check "19: the line at an offset" "19 accessibility" "^line: .Second paragraph line. 23-44$"
+check "19: the paragraph at an offset" "19 accessibility" "^paragraph: .Plain bold italic text.n. 0-23$"
+check "19: bold text's weight" "19 accessibility" "^attrs 7: 6-10 weight=700 "
+check "19: italic text's style" "19 accessibility" "^attrs 12: 11-17 weight=400 style=italic$"
+check "19: plain text's looks" "19 accessibility" "^attrs 1: 0-6 weight=400 style=normal$"
+check "19: typing announces the inserted character" "19 accessibility" "^event: object:text-changed:insert 44 1 .X.$"
+check "19: Backspace announces the deleted character" "19 accessibility" "^event: object:text-changed:delete 44 1 .X.$"
+check "19: Enter announces a new line" "19 accessibility" "^event: object:text-changed:insert 44 1 ..n.$"
+check "19: undoing it announces its removal" "19 accessibility" "^event: object:text-changed:delete 44 1 ..n.$"
 if [ $fail = 0 ]; then echo "SLATE OK"; else
   echo "SLATE CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

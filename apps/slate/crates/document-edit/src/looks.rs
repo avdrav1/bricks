@@ -63,31 +63,52 @@ impl LooksEdit {
         }
     }
 
-    fn change(&self, doc: &Document) -> Change {
+    /// What applying or undoing changes, the caret aside: the blocks from the first one it
+    /// restyles to the last.
+    pub(crate) fn shape(&self) -> Change {
         let first = self.blocks.iter().map(|b| b.0).min().unwrap_or(0);
         let last = self.blocks.iter().map(|b| b.0).max().unwrap_or(0);
         let n = last - first + 1;
-        let (caret, anchor) = match self.caret {
-            Some(caret) => (caret, None),
-            None => {
-                let len = blocks(doc, self.at)
-                    .and_then(|b| b.get(last))
-                    .and_then(block_len);
-                let start = Pos {
-                    at: self.at,
-                    block: first,
-                    offset: 0,
-                };
-                (start.moved(last, len.unwrap_or(0)), Some(start))
-            }
+        let start = Pos {
+            at: self.at,
+            block: first,
+            offset: 0,
         };
         Change {
             at: self.at,
             start: first,
             removed: n,
             inserted: n,
+            caret: start,
+            anchor: None,
+        }
+    }
+
+    fn change(&self, doc: &Document) -> Change {
+        let shape = self.shape();
+        let (caret, anchor) = match self.caret {
+            Some(caret) => (caret, None),
+            None => {
+                let last = shape.start + shape.removed - 1;
+                let len = blocks(doc, self.at)
+                    .and_then(|b| b.get(last))
+                    .and_then(block_len);
+                (shape.caret.moved(last, len.unwrap_or(0)), Some(shape.caret))
+            }
+        };
+        Change {
             caret,
             anchor,
+            ..shape
+        }
+    }
+
+    /// The looks of block `i` of the edit's container once applied to `old`, its blocks
+    /// now.
+    pub(crate) fn looks_after<'a>(&'a self, old: &'a [Block], i: usize) -> Option<&'a Block> {
+        match self.blocks.iter().rfind(|b| b.0 == i) {
+            Some((_, _, after)) => Some(after),
+            None => old.get(i),
         }
     }
 
@@ -261,8 +282,27 @@ fn numbered(label: &str, number: u64) -> String {
 /// labelled like it.
 pub(crate) fn relabel(doc: &Document, at: Container, range: Range<usize>) -> LooksEdit {
     let blocks = blocks(doc, at).unwrap_or_default();
-    let n = blocks.len();
-    let is_item = |i: usize| matches!(blocks.get(i), Some(Block::ListItem(_)));
+    let mut out = Vec::new();
+    renumber(
+        blocks.len(),
+        |i| blocks.get(i),
+        range,
+        |i, block, after| {
+            out.push((i, shell(block), after));
+        },
+    );
+    LooksEdit::new(at, out, None)
+}
+
+/// [`relabel`] over `n` blocks seen through `get`: calls `each` with the index, the
+/// block, and its new looks for every item it renumbers, in order.
+pub(crate) fn renumber<'a>(
+    n: usize,
+    get: impl Fn(usize) -> Option<&'a Block>,
+    range: Range<usize>,
+    mut each: impl FnMut(usize, &'a Block, Block),
+) {
+    let is_item = |i: usize| matches!(get(i), Some(Block::ListItem(_)));
     let mut lo = range.start.min(n);
     while lo > 0 && is_item(lo - 1) {
         lo -= 1;
@@ -273,8 +313,10 @@ pub(crate) fn relabel(doc: &Document, at: Container, range: Range<usize>) -> Loo
     }
     // Per level: the next number and the first item's label.
     let mut runs: Vec<Option<(u64, &str)>> = Vec::new();
-    let mut out = Vec::new();
-    for (i, block) in blocks.iter().enumerate().take(hi).skip(lo) {
+    for i in lo..hi {
+        let Some(block) = get(i) else {
+            break;
+        };
         let Block::ListItem(item) = block else {
             runs.clear();
             continue;
@@ -297,12 +339,11 @@ pub(crate) fn relabel(doc: &Document, at: Container, range: Range<usize>) -> Loo
                         level: item.level,
                         paragraph: bare(&item.paragraph),
                     });
-                    out.push((i, shell(block), after));
+                    each(i, block, after);
                 }
                 runs[level] = Some((next + 1, first));
             }
             None => runs[level] = Some((number + 1, label)),
         }
     }
-    LooksEdit::new(at, out, None)
 }

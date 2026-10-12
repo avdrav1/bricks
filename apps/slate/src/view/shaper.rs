@@ -77,6 +77,11 @@ impl PangoShaper {
         }
     }
 
+    /// The page's font: the family and size text has before its looks.
+    pub fn font(&self) -> pango::FontDescription {
+        self.context.font_description().unwrap_or_default()
+    }
+
     /// The decoded picture of `image`, if it has one.
     pub fn texture(&self, image: &Image) -> Option<&gtk::gdk::Texture> {
         match &image.source {

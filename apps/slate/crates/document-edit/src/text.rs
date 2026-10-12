@@ -223,14 +223,33 @@ impl TextEdit {
         }
     }
 
-    fn change(&self, removed: usize, inserted: usize, caret: Pos) -> Change {
+    /// What applying (`forward`) or undoing changes, the caret aside: the blocks from
+    /// `at` on that the removed text covers become those the inserted text covers.
+    pub(crate) fn shape(&self, forward: bool) -> Change {
+        let (removed, inserted) = (self.removed.blocks.len(), self.inserted.blocks.len());
+        let (removed, inserted) = if forward {
+            (removed, inserted)
+        } else {
+            (inserted, removed)
+        };
         Change {
             at: self.at.at,
             start: self.at.block,
             removed,
             inserted,
-            caret,
+            caret: self.at,
             anchor: self.select.then_some(self.at),
+        }
+    }
+
+    /// The looks of block `i` of the edit's container once applied to `old`, its blocks
+    /// now, for `i` among the blocks it puts in: the first keeps its looks.
+    pub(crate) fn looks_after<'a>(&'a self, old: &'a [Block], i: usize) -> Option<&'a Block> {
+        let start = self.at.block;
+        if i == start {
+            old.get(start)
+        } else {
+            self.inserted.blocks.get(i.checked_sub(start)?)
         }
     }
 
@@ -243,14 +262,20 @@ impl TextEdit {
         let blocks = self.container(doc);
         remove(blocks, self.at, self.removed.end(self.at));
         let caret = paste(blocks, self.at, &self.inserted);
-        self.change(self.removed.blocks.len(), self.inserted.blocks.len(), caret)
+        Change {
+            caret,
+            ..self.shape(true)
+        }
     }
 
     pub(crate) fn revert(&self, doc: &mut Document) -> Change {
         let blocks = self.container(doc);
         remove(blocks, self.at, self.inserted.end(self.at));
         let caret = paste(blocks, self.at, &self.removed);
-        self.change(self.inserted.blocks.len(), self.removed.blocks.len(), caret)
+        Change {
+            caret,
+            ..self.shape(false)
+        }
     }
 
     /// Whether blocks come or go.

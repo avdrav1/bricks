@@ -178,6 +178,8 @@ mod imp {
         pub(super) reveal: Cell<bool>,
         /// The last press: when, where, and how many presses in a row it made.
         presses: Cell<Option<(Instant, f64, f64, u32)>>,
+        /// A removal being announced to screen readers: where it was and what it removed.
+        removal: RefCell<Option<(usize, String)>>,
     }
 
     #[glib::object_subclass]
@@ -461,6 +463,12 @@ mod imp {
 
     impl AccessibleTextImpl for Page {
         fn contents(&self, start: u32, end: u32) -> Option<glib::Bytes> {
+            // While a removal is announced, its range reads as the text it removed.
+            if let Some((at, text)) = self.removal.borrow().as_ref() {
+                if *at == start as usize && *at + text.chars().count() == end as usize {
+                    return Some(glib::Bytes::from(text.as_bytes()));
+                }
+            }
             let state = self.state.borrow();
             let text = state.as_ref()?.flow.text(start as usize, end as usize);
             Some(glib::Bytes::from_owned(text.into_bytes()))
@@ -505,14 +513,32 @@ mod imp {
         }
 
         fn default_attributes(&self) -> Vec<(glib::GString, glib::GString)> {
-            Vec::new()
+            let state = self.state.borrow();
+            let Some(st) = state.as_ref() else {
+                return Vec::new();
+            };
+            a11y::default_attributes(&st.shaper)
+                .into_iter()
+                .map(|(name, value)| (name.into(), value.into()))
+                .collect()
         }
 
         fn attributes(
             &self,
-            _offset: u32,
+            offset: u32,
         ) -> Vec<(gtk::AccessibleTextRange, glib::GString, glib::GString)> {
-            Vec::new()
+            let mut state = self.state.borrow_mut();
+            let Some(State { flow, shaper, .. }) = state.as_mut() else {
+                return Vec::new();
+            };
+            let Some((start, end, looks)) = a11y::attributes(flow, shaper, offset as usize) else {
+                return Vec::new();
+            };
+            let range = gtk::AccessibleTextRange::new(start, end - start);
+            looks
+                .into_iter()
+                .map(|(name, value)| (range, name.into(), value.into()))
+                .collect()
         }
     }
 
@@ -998,7 +1024,7 @@ mod imp {
         /// `keep_caret`: a paragraph command given at the caret, not a selection, leaves
         /// the caret where it was rather than selecting what it changed.
         fn edit_with(&self, keep_caret: bool, make: impl FnOnce(&mut State) -> Option<Edit>) {
-            let change = {
+            let (change, text) = {
                 let mut state = self.state.borrow_mut();
                 let Some(st) = state.as_mut() else {
                     return;
@@ -1017,25 +1043,28 @@ mod imp {
                     history,
                     ..
                 } = st;
+                let before = a11y::Before::take(flow, edit.span(flow.document()));
                 let change = flow.edit(shaper, |doc| {
                     let change = history.apply(doc, edit);
                     (change, splice(change))
                 });
-                match kept {
+                let change = match kept {
                     Some(caret) => Change {
                         caret,
                         anchor: None,
                         ..change
                     },
                     None => change,
-                }
+                };
+                (change, before.after(flow))
             };
+            self.announce(text);
             self.changed(change);
         }
 
         /// Undo, or redo, a step.
         fn step(&self, redo: bool) {
-            let change = {
+            let result = {
                 let mut state = self.state.borrow_mut();
                 let Some(State {
                     flow,
@@ -1046,13 +1075,10 @@ mod imp {
                 else {
                     return;
                 };
-                if !(if redo {
-                    history.can_redo()
-                } else {
-                    history.can_undo()
-                }) {
+                let Some(span) = history.next_span(redo) else {
                     return;
-                }
+                };
+                let before = a11y::Before::take(flow, span);
                 flow.edit(shaper, |doc| {
                     let change = if redo {
                         history.redo(doc)
@@ -1069,9 +1095,34 @@ mod imp {
                     );
                     (change, s)
                 })
+                .map(|change| (change, before.after(flow)))
             };
-            if let Some(change) = change {
+            if let Some((change, text)) = result {
+                self.announce(text);
                 self.changed(change);
+            }
+        }
+
+        /// Tell screen readers what an edit removed and inserted, as GTK's text-changed
+        /// events: a removal is announced with the text it removed.
+        fn announce(&self, text: a11y::TextChange) {
+            let obj = self.obj();
+            if let Some((at, removed)) = text.removed {
+                let end = at + removed.chars().count();
+                self.removal.replace(Some((at, removed)));
+                obj.update_contents(
+                    gtk::AccessibleTextContentChange::Remove,
+                    at as u32,
+                    end as u32,
+                );
+                self.removal.take();
+            }
+            if let Some(inserted) = text.inserted {
+                obj.update_contents(
+                    gtk::AccessibleTextContentChange::Insert,
+                    inserted.start as u32,
+                    inserted.end as u32,
+                );
             }
         }
 
