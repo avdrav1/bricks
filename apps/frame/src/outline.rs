@@ -149,6 +149,11 @@ impl OutlineView {
             .is_some_and(|f| f == self.text)
     }
 
+    /// Give the outline the keys, its caret where it was.
+    pub fn focus(&self) {
+        self.text.grab_focus();
+    }
+
     /// Show `deck` in the buffer: only the lines that changed are replaced, so the view
     /// keeps its place.
     fn render(&self, deck: &Presentation) {
@@ -643,11 +648,13 @@ fn key_pressed(view: &DeckWindow, key: gdk::Key, mods: gdk::ModifierType) -> gli
     let shift = mods.contains(gdk::ModifierType::SHIFT_MASK);
     let ctrl = mods.contains(gdk::ModifierType::CONTROL_MASK);
     let alt = mods.contains(gdk::ModifierType::ALT_MASK);
-    if ctrl || alt {
+    let enter = matches!(key, Key::Return | Key::KP_Enter | Key::ISO_Enter);
+    if alt || (ctrl && (shift || !enter)) {
         return glib::Propagation::Proceed;
     }
     let key = match key {
-        Key::Return | Key::KP_Enter | Key::ISO_Enter => OutlineKey::Enter,
+        _ if ctrl => OutlineKey::NewSlide,
+        _ if enter => OutlineKey::Enter,
         Key::ISO_Left_Tab => OutlineKey::ShiftTab,
         Key::Tab | Key::KP_Tab if shift => OutlineKey::ShiftTab,
         Key::Tab | Key::KP_Tab => OutlineKey::Tab,

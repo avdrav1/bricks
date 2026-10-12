@@ -158,6 +158,33 @@ fn typing_an_outline_makes_its_slides() {
 }
 
 #[test]
+fn ctrl_enter_starts_an_empty_slide_after_the_carets() {
+    let mut s = Session::new(read("layouts.pptx"));
+    let before = s.deck.clone();
+    let n = s.deck.slides.len();
+    // In the middle of a bullet: the new slide comes after its slide; no text moves.
+    s.at_end_of("Content");
+    s.caret.offset = 3;
+    assert!(s.press(OutlineKey::NewSlide));
+    assert_eq!(s.deck.slides.len(), n + 1);
+    assert_eq!(layout_of(&s.deck, 2), "Title and Content");
+    let o = shown(&s.outline());
+    let at = o.iter().position(|l| l == "2: Title").unwrap();
+    assert_eq!(o[at + 1..at + 3], ["  - Content", "    - Level 2"]);
+    assert_eq!(o[s.caret.line], "3: ", "the caret in the new, empty title");
+    s.type_text("Next steps");
+    assert!(shown(&s.outline()).contains(&"3: Next steps".to_owned()));
+    // From a title slide's subtitle: Title and Content, not another title slide.
+    s.at_end_of("subtitle");
+    assert!(s.press(OutlineKey::NewSlide));
+    assert_eq!(layout_of(&s.deck, 1), "Title and Content");
+    s.undo();
+    s.undo();
+    s.undo();
+    assert_eq!(s.deck, before, "each a step of its own");
+}
+
+#[test]
 fn shift_tab_on_a_bullet_takes_the_bullets_after_it_along() {
     let mut s = Session::new(read("layouts.pptx"));
     // Slide 2's body: Content, Level 2, Level 3, ... Level 9.

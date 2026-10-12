@@ -117,7 +117,7 @@ fn place(view: &DeckWindow, image: Image, texture: gdk::Texture, into: Option<us
     view.deck.add_texture(&image, texture);
     let edit = ShapeEdit::picture(&view.deck.presentation(), slide, image, pixels, into);
     insert(view, edit);
-    view.canvas.grab_focus();
+    to_page(view);
 }
 
 /// Read and decode the picture at `path`. Blocking: run it off the UI thread.
@@ -339,7 +339,7 @@ fn pick(
         }
         if let Some(view) = view.upgrade() {
             run(&view);
-            to_canvas(&view);
+            to_page_later(&view);
         }
     });
     b
@@ -381,13 +381,22 @@ fn menu(view: &Rc<DeckWindow>) -> gtk::Popover {
     popover
 }
 
-/// Give the keys back to the canvas once the menu has closed (a closing popover gives
-/// the focus to its button first).
-fn to_canvas(view: &Rc<DeckWindow>) {
+/// Give the keys back to the page shown, the canvas or the outline, once the menu has
+/// closed (a closing popover gives the focus to its button first).
+fn to_page_later(view: &Rc<DeckWindow>) {
     let view: Weak<DeckWindow> = Rc::downgrade(view);
     glib::idle_add_local_once(move || {
         if let Some(view) = view.upgrade() {
-            view.canvas.grab_focus();
+            to_page(&view);
         }
     });
+}
+
+/// The keys to the outline when it's shown, else to the canvas.
+fn to_page(view: &DeckWindow) {
+    if view.outline.is_shown() {
+        view.outline.focus();
+    } else {
+        view.canvas.grab_focus();
+    }
 }

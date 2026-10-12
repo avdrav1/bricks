@@ -66,6 +66,9 @@ pub enum OutlineKey {
     Backspace,
     /// At a line's end: the next bullet joins this one.
     Delete,
+    /// Ctrl+Enter, anywhere: a new, empty slide after the caret's, on Title and Content,
+    /// the caret in its title; no text moves.
+    NewSlide,
 }
 
 /// The slide's title placeholder, by index.
@@ -359,7 +362,7 @@ fn content_layout(deck: &Presentation, after: usize) -> Option<usize> {
         .or_else(|| next_layout(deck, Some(after)))
 }
 
-fn paragraphs(deck: &Presentation, s: ShapeRef) -> Option<&Vec<Paragraph>> {
+pub(crate) fn paragraphs(deck: &Presentation, s: ShapeRef) -> Option<&Vec<Paragraph>> {
     Some(
         &deck
             .slides
@@ -372,7 +375,8 @@ fn paragraphs(deck: &Presentation, s: ShapeRef) -> Option<&Vec<Paragraph>> {
     )
 }
 
-fn levels(deck: &Presentation, s: ShapeRef) -> Vec<Paragraph> {
+/// The looks of `s`'s text per level: its own level looks, else its paragraphs'.
+pub(crate) fn levels(deck: &Presentation, s: ShapeRef) -> Vec<Paragraph> {
     deck.slides
         .get(s.slide)
         .and_then(|sl| sl.shapes.get(s.shape))
@@ -467,8 +471,17 @@ pub fn key(
             )?;
             Some((edit.into(), at))
         }
+        (OutlineKey::NewSlide, _) => next_slide(deck, line.slide),
         _ => None,
     }
+}
+
+/// Ctrl+Enter: an empty slide after slide `slide`, on Title and Content.
+fn next_slide(deck: &Presentation, slide: usize) -> Option<(Edit, OutlinePos)> {
+    let layout = content_layout(deck, slide)?;
+    let mut b = Builder::new(deck);
+    b.push(SlideEdit::on_layout(deck, Some(slide), layout))?;
+    b.done(|_, o| Some(OutlinePos::new(o.title_line(slide + 1)?, 0)))
 }
 
 /// Enter in a title at `offset`: a new slide after (before, at the start of a title with

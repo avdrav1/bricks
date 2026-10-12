@@ -69,7 +69,7 @@ fn header() -> gtk::HeaderBar {
 
 /// File → New (Ctrl+N), and `frame` without a file: a window with a new deck, Frame's
 /// built-in blank one, titled "Untitled" ("Untitled 2", ... beside other new decks),
-/// on its title slide with the canvas focused, ready to type. It's read off the UI
+/// on its title slide with the caret in its title, ready to type. It's read off the UI
 /// thread; it saves through Save As.
 pub fn new_deck(app: &gtk::Application) {
     let app = app.clone();
@@ -90,6 +90,7 @@ pub fn new_deck(app: &gtk::Application) {
                 let view = show_deck(&app, &window, Rc::new(deck), None);
                 window.present();
                 view.canvas.grab_focus();
+                editing::edit_title(&view);
                 return;
             }
             Ok(Err(e)) => e.to_string(),

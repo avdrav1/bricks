@@ -6,9 +6,18 @@
 //! (Ctrl for the whole text's), Shift with any of them to select, Ctrl+A to select all,
 //! and Escape to stop. Page Up and Page Down stop and change slides.
 //!
+//! The keyboard flow (FRAME-15), as PowerPoint's: a new deck and a slide New Slide adds
+//! start with the caret in the title ([`edit_title`]). Ctrl+Enter puts the caret at the
+//! end of the slide's next text placeholder ([`deck_edit::next_placeholder`]; with
+//! nothing edited, the first), and after the last adds a slide as New Slide does. Tab and
+//! Shift+Tab at the start of a paragraph, or over several, move the paragraphs a level
+//! down or up ([`deck_edit::relevel`]); otherwise they do nothing, and while text is
+//! edited they never take the focus off the canvas.
+//!
 //! Every change is a `deck-edit` command in the window's one undo history: Ctrl+Z undoes,
 //! Ctrl+Shift+Z and Ctrl+Y redo, a word of typing at a time.
 
+use crate::slide_list;
 use crate::slide_view::Editing;
 use crate::window::DeckWindow;
 use deck_edit::{ShapeRef, TextEdit, TextPos};
@@ -75,6 +84,75 @@ pub(crate) fn show(view: &DeckWindow, editing: Option<Editing>) {
     view.canvas.set_editing(editing);
     if let Some(area) = view.canvas.caret_area() {
         view.im.set_cursor_location(&area);
+    }
+}
+
+/// Edit shape `shape` of the slide shown as a click in it would: the canvas focused (and
+/// again once the event is handled: a popover that closes gives the focus to its button
+/// first) and the caret at the end of its text.
+pub(crate) fn start(view: &DeckWindow, shape: usize) {
+    view.canvas.grab_focus();
+    view.im.reset();
+    view.seal();
+    show(view, Some(Editing::at(shape, text_end(view, shape))));
+    let canvas = view.canvas.clone();
+    glib::idle_add_local_once(move || {
+        if canvas.editing().is_some_and(|e| e.shape == shape) {
+            canvas.grab_focus();
+        }
+    });
+}
+
+/// A new deck's and a new slide's first stop: the caret in the title placeholder of the
+/// slide shown, when it has one, unless the outline is shown.
+pub(crate) fn edit_title(view: &DeckWindow) {
+    if view.outline.is_shown() {
+        return;
+    }
+    let title = view
+        .deck
+        .presentation()
+        .slides
+        .get(view.canvas.index())
+        .and_then(deck_edit::title_of);
+    if let Some(title) = title {
+        start(view, title);
+    }
+}
+
+/// Ctrl+Enter: the caret at the end of the slide's next text placeholder after the shape
+/// edited (none edited: the first), or, after the last, a new slide as New Slide adds.
+fn next_placeholder(view: &DeckWindow) {
+    let after = view.canvas.editing().map(|e| e.shape);
+    let next = view
+        .deck
+        .presentation()
+        .slides
+        .get(view.canvas.index())
+        .and_then(|s| deck_edit::next_placeholder(s, after));
+    match next {
+        Some(shape) => start(view, shape),
+        None => {
+            view.seal();
+            slide_list::new_slide(view);
+        }
+    }
+}
+
+/// Tab (`down`) or Shift+Tab while `e` is edited: its paragraphs a level down or up, as
+/// one step, the selection kept.
+fn relevel(view: &DeckWindow, e: Editing, down: bool) {
+    let shape = ShapeRef {
+        slide: view.canvas.index(),
+        shape: e.shape,
+    };
+    let (from, to) = (e.anchor, e.caret);
+    let edit = deck_edit::relevel(&view.deck.presentation(), shape, from, to, down);
+    if let Some(edit) = edit {
+        view.seal();
+        view.apply(edit);
+        view.seal();
+        show(view, Some(e));
     }
 }
 
@@ -154,14 +232,20 @@ fn has_text(view: &DeckWindow, shape: usize) -> bool {
         .is_some_and(|s| s.text.is_some() && s.id.is_some())
 }
 
+/// The canvas's keys: Ctrl+Enter whether or not text is edited, the rest only while it is.
 fn key_pressed(view: &DeckWindow, key: gdk::Key, mods: gdk::ModifierType) -> glib::Propagation {
     use gdk::Key;
-    let Some(e) = view.canvas.editing() else {
-        return glib::Propagation::Proceed;
-    };
     let shift = mods.contains(gdk::ModifierType::SHIFT_MASK);
     let ctrl = mods.contains(gdk::ModifierType::CONTROL_MASK);
     let alt = mods.contains(gdk::ModifierType::ALT_MASK);
+    let enter = matches!(key, Key::Return | Key::KP_Enter | Key::ISO_Enter);
+    if enter && ctrl && !alt {
+        next_placeholder(view);
+        return glib::Propagation::Stop;
+    }
+    let Some(e) = view.canvas.editing() else {
+        return glib::Propagation::Proceed;
+    };
     match key {
         Key::Escape => {
             view.seal();
@@ -180,6 +264,10 @@ fn key_pressed(view: &DeckWindow, key: gdk::Key, mods: gdk::ModifierType) -> gli
                     TextEdit::delete(deck, s, deck_edit::before(body, from)?, from)
                 }
             });
+        }
+        // Tab and Shift+Tab are the text's: a level down or up, else nothing.
+        Key::Tab | Key::KP_Tab | Key::ISO_Left_Tab if !ctrl && !alt => {
+            relevel(view, e, !shift && key != Key::ISO_Left_Tab);
         }
         Key::Return | Key::KP_Enter | Key::ISO_Enter => edit(view, |deck, s, from, to| {
             if shift {
