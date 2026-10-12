@@ -1,11 +1,12 @@
-//! Windows: the start window, a window per deck (slide list, canvas, status bar), the
-//! file dialog, drops, and alerts (spec FR0); the deck window's undo history and its keys
-//! (text editing itself is in [`crate::editing`], the slide list in
-//! [`crate::slide_list`]).
+//! Windows: the start window, a window per deck (slide list, canvas, inspector, status
+//! bar), the file dialog, drops, and alerts (spec FR0); the deck window's undo history and
+//! its keys (text editing itself is in [`crate::editing`], the slide list in
+//! [`crate::slide_list`], the inspector in [`crate::inspector`]).
 
 use crate::arrange;
 use crate::deck::Deck;
 use crate::editing;
+use crate::inspector::{self, Inspector};
 use crate::saving;
 use crate::slide_list::{self, THUMB_WIDTH};
 use crate::slide_view::{Editing, SlideView};
@@ -243,8 +244,8 @@ pub fn open(app: &gtk::Application, path: &Path, bench: Option<u32>) {
     });
 }
 
-/// A deck's window once it's read: the slide list, the canvas, and the status bar, and
-/// the deck's undo history.
+/// A deck's window once it's read: the slide list, the canvas, the inspector, and the
+/// status bar, and the deck's undo history.
 pub(crate) struct DeckWindow {
     app: gtk::Application,
     window: glib::WeakRef<gtk::ApplicationWindow>,
@@ -258,6 +259,7 @@ pub(crate) struct DeckWindow {
     history: RefCell<History>,
     /// The canvas's input method, for typing.
     pub im: gtk::IMMulticontext,
+    pub inspector: Inspector,
 }
 
 impl DeckWindow {
@@ -389,7 +391,9 @@ impl DeckWindow {
     /// Show what `change` changed. A text change: its slide, redrawn with its thumbnail
     /// and description, and, when `caret`, the caret where it leaves the text. A slide
     /// list change: the list rebuilt and the slide it shows. A shape's box: its slide
-    /// and thumbnail redrawn, the shape selected.
+    /// and thumbnail redrawn, the shape selected. A shape's looks: the same, its text
+    /// still edited as it was. A slide as a whole: it and its thumbnail redrawn, nothing
+    /// selected. The inspector follows.
     fn changed(&self, change: Change, caret: bool) {
         match change {
             Change::Text { shape, caret: at } => {
@@ -417,6 +421,34 @@ impl DeckWindow {
                 editing::show(self, None);
                 self.canvas.select(Some(shape.shape));
             }
+            Change::Look { shape } => {
+                if self.canvas.index() != shape.slide {
+                    self.go(shape.slide);
+                    self.canvas.select(Some(shape.shape));
+                }
+                self.redraw(shape.slide);
+            }
+            Change::Slide { slide } => {
+                if self.canvas.index() != slide {
+                    self.go(slide);
+                }
+                editing::show(self, None);
+                self.canvas.select(None);
+                self.describe(slide);
+                self.redraw(slide);
+            }
+        }
+        self.inspector.refresh();
+    }
+
+    /// Redraw slide `slide` on the canvas and in the slide list.
+    fn redraw(&self, slide: usize) {
+        if let Some(thumb) = self.thumbs.borrow().get(slide) {
+            thumb.queue_draw();
+        }
+        self.canvas.queue_draw();
+        if let Some(e) = self.canvas.editing() {
+            editing::show(self, Some(e));
         }
     }
 }
@@ -561,9 +593,13 @@ fn show_deck(
     let side = gtk::Box::new(gtk::Orientation::Vertical, 0);
     scrolled.set_vexpand(true);
     side.append(&scrolled);
+    // The canvas, and the inspector to its right.
+    let main = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    main.append(&canvas);
+    main.append(&gtk::Separator::new(gtk::Orientation::Vertical));
     let paned = gtk::Paned::new(gtk::Orientation::Horizontal);
     paned.set_start_child(Some(&side));
-    paned.set_end_child(Some(&canvas));
+    paned.set_end_child(Some(&main));
     paned.set_shrink_start_child(false);
     paned.set_resize_start_child(false);
     paned.set_vexpand(true);
@@ -579,7 +615,7 @@ fn show_deck(
     page.append(&status);
     window.set_child(Some(&page));
 
-    let view = Rc::new(DeckWindow {
+    let view = Rc::new_cyclic(|weak| DeckWindow {
         app: app.clone(),
         window: window.downgrade(),
         deck: deck.clone(),
@@ -590,10 +626,13 @@ fn show_deck(
         status: status.clone(),
         history: RefCell::new(History::new()),
         im: gtk::IMMulticontext::new(),
+        inspector: Inspector::new(&deck, weak.clone()),
     });
+    main.append(view.inspector.widget());
     slide_list::rebuild(&view);
     editing::attach(&view);
     arrange::attach(&view);
+    inspector::attach(&view);
     list.connect_row_selected({
         let view = Rc::downgrade(&view);
         move |_, row| {
@@ -633,8 +672,9 @@ fn show_deck(
                 }
                 return glib::Propagation::Stop;
             }
-            // While text is edited, the keys are the text's (crate::editing).
-            if text || ctrl || alt {
+            // While text is edited, the keys are the text's (crate::editing); in the
+            // inspector, its controls'.
+            if text || ctrl || alt || view.inspector.has_focus() {
                 return glib::Propagation::Proceed;
             }
             // A selected shape: the arrows nudge it a pixel (Shift: ten), Escape lets go;

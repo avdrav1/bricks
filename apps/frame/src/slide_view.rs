@@ -56,6 +56,9 @@ pub struct Preview {
 const ACCENT: gdk::RGBA = gdk::RGBA::new(0.21, 0.52, 0.89, 1.0);
 /// Smart guides' colour: magenta, apart from the selection's blue.
 const GUIDE: gdk::RGBA = gdk::RGBA::new(0.91, 0.19, 0.55, 1.0);
+/// The signal a view emits when the slide shown, the selection, or the text selection
+/// changes.
+const SELECTION_CHANGED: &str = "selection-changed";
 
 /// Where the slide sits in the widget: its top-left corner, the scale correction that
 /// makes it fill whole pixels, and the pixels per EMU it draws at.
@@ -104,7 +107,15 @@ mod imp {
         type ParentType = gtk::Widget;
     }
 
-    impl ObjectImpl for SlideView {}
+    impl ObjectImpl for SlideView {
+        fn signals() -> &'static [glib::subclass::Signal] {
+            static SIGNALS: std::sync::LazyLock<Vec<glib::subclass::Signal>> =
+                std::sync::LazyLock::new(|| {
+                    vec![glib::subclass::Signal::builder(SELECTION_CHANGED).build()]
+                });
+            &SIGNALS
+        }
+    }
 
     impl WidgetImpl for SlideView {
         fn measure(&self, orientation: gtk::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
@@ -251,8 +262,21 @@ impl SlideView {
             imp.editing.set(None);
             imp.selected.set(None);
             imp.preview.replace(None);
+            self.selection_changed();
         }
         self.queue_draw();
+    }
+
+    /// Call `f` whenever the slide shown, the selection, or the text selection changes.
+    pub fn connect_selection_changed(&self, f: impl Fn() + 'static) -> glib::SignalHandlerId {
+        self.connect_local(SELECTION_CHANGED, false, move |_| {
+            f();
+            None
+        })
+    }
+
+    fn selection_changed(&self) {
+        self.emit_by_name::<()>(SELECTION_CHANGED, &[]);
     }
 
     pub fn set_backdrop(&self, color: gdk::RGBA) {
@@ -281,6 +305,7 @@ impl SlideView {
             imp.selected.set(Some(e.shape));
         }
         self.queue_draw();
+        self.selection_changed();
     }
 
     /// The selected shape: the one whose text is edited, or one selected by a click.
@@ -295,6 +320,7 @@ impl SlideView {
         imp.editing.set(None);
         imp.selected.set(shape);
         self.queue_draw();
+        self.selection_changed();
     }
 
     /// Show a shape being dragged where it would land (`None`: no drag).

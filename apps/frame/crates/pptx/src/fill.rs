@@ -6,7 +6,9 @@
 use crate::color::Palette;
 use crate::package::{Package, Rels};
 use crate::xml::Element;
-use presentation_model::{Background, Color, Crop, Dash, Fill, Image, ImageFormat, Outline};
+use presentation_model::{
+    Background, Color, Crop, Dash, Fill, Image, ImageFormat, Outline, Source,
+};
 use std::cell::RefCell;
 
 /// What resolving fills on one part needs: colours, the theme's format scheme, and the
@@ -100,18 +102,25 @@ impl Looks<'_> {
         theme.fill(style, ph, &Fill::None)
     }
 
-    /// A shape's fill: its own `spPr`, then its placeholders' (nearest first), then its
-    /// style's `fillRef`; none otherwise.
-    pub fn shape_fill(&self, sp_prs: &[&Element], style: Option<&Element>, group: &Fill) -> Fill {
+    /// A shape's fill and where it's set: its own `spPr`, then its placeholders' (nearest
+    /// first; each `spPr` with where it's from), then its style's `fillRef`; none
+    /// otherwise.
+    pub fn shape_fill(
+        &self,
+        sp_prs: &[(&Element, Source)],
+        style: Option<&Element>,
+        group: &Fill,
+    ) -> (Fill, Source) {
         sp_prs
             .iter()
-            .find_map(|s| self.fill_in(s, None, group))
+            .find_map(|(s, from)| Some((self.fill_in(s, None, group)?, *from)))
             .or_else(|| {
                 style
                     .and_then(|s| s.child("fillRef"))
                     .and_then(|r| self.style_fill(r))
+                    .map(|f| (f, Source::Presentation))
             })
-            .unwrap_or(Fill::None)
+            .unwrap_or((Fill::None, Source::Presentation))
     }
 
     fn line_layer(&self, ln: &Element, ph: Option<Color>) -> LineLayer {
@@ -136,8 +145,12 @@ impl Looks<'_> {
 
     /// A shape's outline from its style's `lnRef`, then its placeholders' `<a:ln>`
     /// (farthest first), then its own: each sets what it names. No colour anywhere, or
-    /// `noFill`, is no outline.
-    pub fn outline(&self, sp_prs: &[&Element], style: Option<&Element>) -> Option<Outline> {
+    /// `noFill`, is no outline. Where it's set is the nearest `<a:ln>`'s.
+    pub fn outline(
+        &self,
+        sp_prs: &[(&Element, Source)],
+        style: Option<&Element>,
+    ) -> (Option<Outline>, Source) {
         let mut layers = Vec::new();
         if let Some(r) = style.and_then(|s| s.child("lnRef")) {
             let idx: usize = r.num("idx").unwrap_or(0);
@@ -152,12 +165,14 @@ impl Looks<'_> {
                 }
             }
         }
-        for sp_pr in sp_prs.iter().rev() {
+        let mut from = Source::Presentation;
+        for (sp_pr, source) in sp_prs.iter().rev() {
             if let Some(ln) = sp_pr.child("ln") {
                 layers.push(self.line_layer(ln, None));
+                from = *source;
             }
         }
-        merge(&layers)
+        (merge(&layers), from)
     }
 
     /// A table border's `<a:ln>` (or a style's `lnRef`).

@@ -1,16 +1,23 @@
 //! Frame's edits (ADR 0006): every change to a deck is a command that stores the operation
 //! and what undoes it, never a snapshot of the deck, and names what it changes (a shape's
-//! text, the slide list), so a save can patch only those. [`History`] keeps the steps for
-//! undo and redo.
+//! text, its box or looks, a slide, the slide list), so a save can patch only those.
+//! [`History`] keeps the steps for undo and redo.
 //!
 //! Toolkit-free: no GTK, no I/O.
 
 mod frame;
+mod layout;
 mod slides;
+mod style;
 mod text;
 
 pub use frame::{movable, snap, FrameEdit, Grab, Guide, Snapped};
+pub use layout::LayoutEdit;
 pub use slides::{next_layout, SlideEdit};
+pub use style::{
+    styleable, BackgroundEdit, LookEdit, ParagraphLook, ShapeLook, ShapeLookEdit, TextLook,
+    BULLET_MARGIN,
+};
 pub use text::{after, before, look, text_end, TextEdit, TextPos};
 
 use presentation_model::Presentation;
@@ -35,14 +42,21 @@ pub enum Change {
     Slides { show: usize },
     /// A shape's box: it moved or changed size.
     Shape { shape: ShapeRef },
+    /// A shape's looks (its text's, fill, outline); its text and box are as they were.
+    Look { shape: ShapeRef },
+    /// A slide as a whole: its background, its layout and so its placeholders.
+    Slide { slide: usize },
 }
 
 impl Change {
     /// The slide to show.
     pub fn slide(&self) -> usize {
         match self {
-            Change::Text { shape, .. } | Change::Shape { shape } => shape.slide,
+            Change::Text { shape, .. } | Change::Shape { shape } | Change::Look { shape } => {
+                shape.slide
+            }
             Change::Slides { show } => *show,
+            Change::Slide { slide } => *slide,
         }
     }
 
@@ -61,6 +75,10 @@ pub enum Edit {
     Text(TextEdit),
     Slides(SlideEdit),
     Frame(FrameEdit),
+    Look(LookEdit),
+    ShapeLook(ShapeLookEdit),
+    Background(BackgroundEdit),
+    Layout(LayoutEdit),
 }
 
 impl Edit {
@@ -69,6 +87,10 @@ impl Edit {
             Edit::Text(e) => e.apply(deck),
             Edit::Slides(e) => e.apply(deck),
             Edit::Frame(e) => e.apply(deck),
+            Edit::Look(e) => e.apply(deck),
+            Edit::ShapeLook(e) => e.apply(deck),
+            Edit::Background(e) => e.apply(deck),
+            Edit::Layout(e) => e.apply(deck),
         }
     }
 
@@ -77,6 +99,10 @@ impl Edit {
             Edit::Text(e) => e.revert(deck),
             Edit::Slides(e) => e.revert(deck),
             Edit::Frame(e) => e.revert(deck),
+            Edit::Look(e) => e.revert(deck),
+            Edit::ShapeLook(e) => e.revert(deck),
+            Edit::Background(e) => e.revert(deck),
+            Edit::Layout(e) => e.revert(deck),
         }
     }
 
@@ -89,23 +115,25 @@ impl Edit {
     }
 }
 
-impl From<TextEdit> for Edit {
-    fn from(e: TextEdit) -> Edit {
-        Edit::Text(e)
-    }
+macro_rules! edit_from {
+    ($($t:ident => $v:ident),*) => {$(
+        impl From<$t> for Edit {
+            fn from(e: $t) -> Edit {
+                Edit::$v(e)
+            }
+        }
+    )*};
 }
 
-impl From<SlideEdit> for Edit {
-    fn from(e: SlideEdit) -> Edit {
-        Edit::Slides(e)
-    }
-}
-
-impl From<FrameEdit> for Edit {
-    fn from(e: FrameEdit) -> Edit {
-        Edit::Frame(e)
-    }
-}
+edit_from!(
+    TextEdit => Text,
+    SlideEdit => Slides,
+    FrameEdit => Frame,
+    LookEdit => Look,
+    ShapeLookEdit => ShapeLook,
+    BackgroundEdit => Background,
+    LayoutEdit => Layout
+);
 
 /// Undo and redo for one deck: the steps applied, newest last, and the steps undone.
 #[derive(Debug, Default)]

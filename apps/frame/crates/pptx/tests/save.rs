@@ -1,13 +1,20 @@
 //! FRAME-8 acceptance: saving patches the package the deck was read from. Text edits, a
 //! new slide, a duplicate (with its notes), a deleted slide, and a moved slide save and
 //! read back as the deck is; parts nothing touched are copied byte for byte; a saved deck
-//! saves again. LibreOffice's reading of the saved deck: the ignored test at the end.
+//! saves again. LibreOffice's reading of the saved deck: the ignored tests at the end.
+//!
+//! FRAME-11: formatting (text looks, alignment, bullets, fills, outlines, backgrounds)
+//! and layout changes save and read back as the edited deck, the rest byte for byte.
 
 mod common;
 
-use deck_edit::{FrameEdit, History, ShapeRef, SlideEdit, TextEdit};
+use deck_edit::{
+    BackgroundEdit, FrameEdit, History, LayoutEdit, LookEdit, ParagraphLook, ShapeLook,
+    ShapeLookEdit, ShapeRef, SlideEdit, TextEdit, TextLook, TextPos,
+};
 use presentation_model::{
-    Frame, Layer, Paragraph, PlaceholderKind, Presentation, ShapeKind, Slide,
+    Align, Background, Color, Dash, Fill, Frame, Layer, Outline, Paragraph, PlaceholderKind,
+    Presentation, RunSources, ShapeKind, Slide, Source,
 };
 use std::collections::BTreeMap;
 use std::io::Read;
@@ -132,6 +139,22 @@ fn shape_field(lines: &[&str], kind: &str, n: usize) -> i64 {
     line.split('\t').nth(n).unwrap().parse().unwrap()
 }
 
+/// `s` with the looks an edit set read as set on the run itself, as they read back.
+fn own(s: RunSources) -> RunSources {
+    let own = |x: Source| if x == Source::Edit { Source::Own } else { x };
+    RunSources {
+        font: own(s.font),
+        size: own(s.size),
+        bold: own(s.bold),
+        italic: own(s.italic),
+        underline: own(s.underline),
+        strike: own(s.strike),
+        color: own(s.color),
+        baseline: own(s.baseline),
+        caps: own(s.caps),
+    }
+}
+
 /// A paragraph as it reads: its looks, and its runs' text and looks (not the markup a
 /// save writes them with).
 fn reading(p: &Paragraph) -> String {
@@ -149,7 +172,7 @@ fn reading(p: &Paragraph) -> String {
                 r.underline,
                 r.color.hex(),
                 r.caps,
-                r.sources
+                own(r.sources)
             )
         })
         .collect();
@@ -165,17 +188,45 @@ fn reading(p: &Paragraph) -> String {
     )
 }
 
-/// The deck as it reads: per slide, its layout, notes, and each own shape's id,
-/// placeholder, and paragraphs.
+/// A fill as it reads, pictures by their size.
+fn fill_reading(f: &Fill) -> String {
+    match f {
+        Fill::None => "none".into(),
+        Fill::Solid(c) => format!("solid {} {}", c.hex(), c.alpha),
+        Fill::Picture(img) => format!("picture {}", img.bytes.len()),
+        Fill::Unsupported { label, approx } => format!("{label} {}", approx.hex()),
+    }
+}
+
+fn background_reading(b: &Background) -> String {
+    match b {
+        Background::Solid(c) => format!("solid {}", c.hex()),
+        Background::Picture(img) => format!("picture {}", img.bytes.len()),
+        Background::Other { label, approx } => format!("{label} {}", approx.hex()),
+    }
+}
+
+/// The deck as it reads: per slide, its layout, background, notes, and each own shape's
+/// id, placeholder and slot, fill, outline, and paragraphs.
 fn readings(deck: &Presentation) -> Vec<String> {
     deck.slides
         .iter()
         .map(|s| {
-            let mut out = format!("layout {:?}, notes {:?}\n", s.layout, s.notes);
+            let mut out = format!(
+                "layout {:?}, background {}, notes {:?}\n",
+                s.layout,
+                background_reading(&s.background),
+                s.notes
+            );
             for sh in s.shapes.iter().filter(|sh| sh.layer == Layer::Slide) {
                 out.push_str(&format!(
-                    "shape {:?} {:?} {:?}\n",
-                    sh.id, sh.placeholder, sh.frame
+                    "shape {:?} {:?} {:?} {:?} fill {} outline {:?}\n",
+                    sh.id,
+                    sh.placeholder,
+                    sh.slot,
+                    sh.frame,
+                    fill_reading(&sh.fill),
+                    sh.outline
                 ));
                 for p in sh.text.iter().flat_map(|t| &t.paragraphs) {
                     out.push_str(&format!("  {}\n", reading(p)));
@@ -387,13 +438,14 @@ fn an_unedited_deck_saves_as_it_was() {
     reads_as(&pptx::read(&dest).unwrap(), &read);
 }
 
-/// `scripts/lo_pptx.py dump FILE`: LibreOffice's reading of a deck.
-fn lo_dump(file: &Path) -> String {
+/// `scripts/lo_pptx.py dump FILE`: LibreOffice's reading of a deck, through a LibreOffice
+/// listening on `port` (one per test, so tests run side by side).
+fn lo_dump(file: &Path, port: u16) -> String {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
     let out = std::process::Command::new("python3")
         .arg(root.join("scripts/lo_pptx.py"))
         .args(["dump", &file.to_string_lossy()])
-        .env("LO_PORT", "2171")
+        .env("LO_PORT", port.to_string())
         .output()
         .expect("python3");
     assert!(
@@ -425,7 +477,7 @@ fn libreoffice_reads_the_saved_deck_as_the_original_plus_the_edits() {
     let dest = temp("libreoffice", "saved.pptx");
     pptx::save(&dest, &source, &read, &deck, &AtomicBool::new(false)).unwrap();
     let back = pptx::read(&dest).unwrap();
-    let (before, after) = (lo_dump(&source), lo_dump(&dest));
+    let (before, after) = (lo_dump(&source, 2171), lo_dump(&dest, 2171));
     let (old, new) = (dump_slides(&before), dump_slides(&after));
     assert_eq!(new.len(), deck.slides.len());
     let original = |part: &str| {
@@ -505,5 +557,373 @@ fn libreoffice_reads_the_saved_deck_as_the_original_plus_the_edits() {
                 assert_eq!(same(&new[i]), same(ten), "{at}");
             }
         }
+    }
+}
+
+const RED: Color = Color::rgb(0xC0, 0x00, 0x00);
+const GREEN: Color = Color::rgb(0x00, 0xB0, 0x50);
+const CREAM: Color = Color::rgb(0xFF, 0xF2, 0xCC);
+const BLUE: Color = Color::rgb(0x44, 0x72, 0xC4);
+
+fn layout_named(deck: &Presentation, name: &str) -> usize {
+    deck.layouts
+        .iter()
+        .position(|l| l.name == name)
+        .unwrap_or_else(|| panic!("no layout {name}"))
+}
+
+fn placeholder_ref(deck: &Presentation, slide: usize, kind: PlaceholderKind) -> ShapeRef {
+    ShapeRef {
+        slide,
+        shape: placeholder(&deck.slides[slide], kind),
+    }
+}
+
+/// layouts.pptx formatted: "sub" of slide 1's subtitle bold, red, 40 pt, and Liberation
+/// Serif; slide 2's first body paragraph right-aligned, its bullet off. Slide 1
+/// duplicated, the copy (Title Slide) on Title and Content; Section Header emptied of its
+/// text and on Title Only (its title moved, its empty text placeholder gone); the Title
+/// Only slide on Two Content (two placeholders added); a new Title Slide at the end, its
+/// title typed, on Title Only.
+fn formatted_layouts() -> (Presentation, Presentation) {
+    let mut deck = pptx::read(&common::data("layouts.pptx")).unwrap();
+    let read = deck.clone();
+    let mut h = History::new();
+    let sub = placeholder_ref(&deck, 0, PlaceholderKind::Subtitle);
+    let looks = [
+        TextLook::Bold(true),
+        TextLook::Color(RED),
+        TextLook::Size(40.0),
+        TextLook::Font("Liberation Serif".into()),
+    ];
+    for look in &looks {
+        let edit = LookEdit::text(&deck, sub, TextPos::new(0, 0), TextPos::new(0, 3), look);
+        h.apply(&mut deck, edit.unwrap());
+    }
+    let body = placeholder_ref(&deck, 1, PlaceholderKind::Body);
+    for look in [
+        ParagraphLook::Align(Align::Right),
+        ParagraphLook::Bullets(false),
+    ] {
+        let at = TextPos::new(0, 0);
+        let edit = LookEdit::paragraphs(&deck, body, at, at, look);
+        h.apply(&mut deck, edit.unwrap());
+    }
+    let dup = SlideEdit::duplicate(&deck, 0).unwrap();
+    h.apply(&mut deck, dup);
+    let step = LayoutEdit::new(&deck, 1, layout_named(&deck, "Title and Content")).unwrap();
+    h.apply(&mut deck, step);
+    let text = placeholder_ref(&deck, 3, PlaceholderKind::Body);
+    let end = deck_edit::text_end(deck.slides[3].shapes[text.shape].text.as_ref().unwrap());
+    let delete = TextEdit::delete(&deck, text, TextPos::new(0, 0), end).unwrap();
+    h.apply(&mut deck, delete);
+    let title_only = layout_named(&deck, "Title Only");
+    let step = LayoutEdit::new(&deck, 3, title_only).unwrap();
+    h.apply(&mut deck, step);
+    let step = LayoutEdit::new(&deck, 6, layout_named(&deck, "Two Content")).unwrap();
+    h.apply(&mut deck, step);
+    let last = deck.slides.len() - 1;
+    let add = SlideEdit::on_layout(&deck, Some(last), layout_named(&deck, "Title Slide")).unwrap();
+    h.apply(&mut deck, add);
+    let title = placeholder(&deck.slides[last + 1], PlaceholderKind::CentredTitle);
+    type_at_end(&mut deck, &mut h, last + 1, title, "Closing");
+    let step = LayoutEdit::new(&deck, last + 1, title_only).unwrap();
+    h.apply(&mut deck, step);
+    (read, deck)
+}
+
+/// fixture.pptx formatted: slide 3's blue rectangle red with a 3 pt dashed green
+/// outline, its text box's bullets on; slide 2's background cream.
+fn formatted_fixture() -> (Presentation, Presentation) {
+    let mut deck = pptx::read(&common::data("fixture.pptx")).unwrap();
+    let read = deck.clone();
+    let mut h = History::new();
+    let shapes = &deck.slides[2].shapes;
+    let rect = shapes
+        .iter()
+        .position(|s| s.layer == Layer::Slide && s.fill == Fill::Solid(BLUE))
+        .unwrap();
+    let text_box = shapes
+        .iter()
+        .position(|s| s.plain_text().starts_with("Text box"))
+        .unwrap();
+    let rect = ShapeRef {
+        slide: 2,
+        shape: rect,
+    };
+    let fill = ShapeLookEdit::new(
+        &deck,
+        rect,
+        ShapeLook::Fill(Fill::Solid(Color::rgb(255, 0, 0))),
+    );
+    h.apply(&mut deck, fill.unwrap());
+    let outline = Outline {
+        width: 3 * 12_700,
+        color: GREEN,
+        dash: Dash::Dash,
+    };
+    let line = ShapeLookEdit::new(&deck, rect, ShapeLook::Outline(Some(outline)));
+    h.apply(&mut deck, line.unwrap());
+    let text_box = ShapeRef {
+        slide: 2,
+        shape: text_box,
+    };
+    let at = TextPos::new(0, 0);
+    let bullets = LookEdit::paragraphs(&deck, text_box, at, at, ParagraphLook::Bullets(true));
+    h.apply(&mut deck, bullets.unwrap());
+    let bg = BackgroundEdit::new(&deck, 1, Background::Solid(CREAM)).unwrap();
+    h.apply(&mut deck, bg);
+    (read, deck)
+}
+
+/// Every part of `source` but `changed` is in `dest` byte for byte.
+fn untouched_but(source: &Path, dest: &Path, changed: &[String]) {
+    let (before, after) = (parts(source), parts(dest));
+    for (name, bytes) in &before {
+        if !changed.contains(name) {
+            assert_eq!(after.get(name), Some(bytes), "{name} is as it was");
+        }
+    }
+}
+
+/// The parts a save changes: the package's slide list and types, and the parts (and,
+/// with `rels`, the relationships) of slides `slides` of `read`.
+fn changed_parts(read: &Presentation, slides: &[usize], rels: &[usize]) -> Vec<String> {
+    let part = |i: usize| read.slides[i].part.clone().unwrap();
+    let mut out: Vec<String> = [
+        "[Content_Types].xml",
+        "ppt/presentation.xml",
+        "ppt/_rels/presentation.xml.rels",
+    ]
+    .map(String::from)
+    .into();
+    out.extend(slides.iter().map(|&i| part(i)));
+    out.extend(rels.iter().map(|&i| {
+        let p = part(i);
+        let (dir, file) = p.rsplit_once('/').unwrap();
+        format!("{dir}/_rels/{file}.rels")
+    }));
+    out
+}
+
+#[test]
+fn formatting_and_layout_changes_save_and_read_back() {
+    let (read, deck) = formatted_layouts();
+    let source = common::data("layouts.pptx");
+    let dest = temp("formatting", "saved.pptx");
+    pptx::save(&dest, &source, &read, &deck, &AtomicBool::new(false)).unwrap();
+    let back = pptx::read(&dest).unwrap();
+    reads_as(&back, &deck);
+
+    // The formatted run, and the paragraph.
+    let sub = placeholder(&back.slides[0], PlaceholderKind::Subtitle);
+    let runs = &back.slides[0].shapes[sub].text.as_ref().unwrap().paragraphs[0].runs;
+    let r = &runs[0];
+    assert_eq!(
+        (r.text.as_str(), r.bold, r.color, r.size, r.font.as_str()),
+        ("sub", true, RED, 40.0, "Liberation Serif")
+    );
+    assert_eq!(runs[1].text, "title");
+    assert!(!runs[1].bold);
+    let body = placeholder(&back.slides[2], PlaceholderKind::Body);
+    let p = &back.slides[2].shapes[body]
+        .text
+        .as_ref()
+        .unwrap()
+        .paragraphs;
+    assert_eq!((p[0].align, p[0].bullet.is_none()), (Align::Right, true));
+    assert_eq!((p[1].align, p[1].bullet.is_some()), (Align::Left, true));
+
+    // The layouts, by name, and the placeholders on them.
+    let layout = |i: usize| back.layouts[back.slides[i].layout.unwrap()].name.as_str();
+    let kinds = |i: usize| -> Vec<Option<PlaceholderKind>> {
+        back.slides[i].own_shapes().map(|s| s.placeholder).collect()
+    };
+    use PlaceholderKind::{Body, Title};
+    assert_eq!(layout(1), "Title and Content");
+    assert_eq!(kinds(1), [Some(Title), Some(Body)]);
+    assert_eq!(back.slides[1].text(), "Centered Title\nsubtitle");
+    assert_eq!(layout(3), "Title Only");
+    assert_eq!(kinds(3), [Some(Title)]);
+    assert_eq!(back.slides[3].text(), "Section Title");
+    assert_eq!(layout(6), "Two Content");
+    assert_eq!(kinds(6), [Some(Body), Some(Body), Some(Title)]);
+    assert_eq!(back.slides[6].text(), "Title Only");
+    let last = back.slides.len() - 1;
+    assert_eq!(layout(last), "Title Only");
+    assert_eq!(kinds(last), [Some(Title)]);
+    assert_eq!(back.slides[last].text(), "Closing");
+    assert_eq!(back.slides.len(), 12);
+
+    // Every other part is as it was; slide 10, moved one on, has its slide number
+    // field written.
+    untouched_but(
+        &source,
+        &dest,
+        &changed_parts(&read, &[0, 1, 2, 5, 9], &[2, 5]),
+    );
+}
+
+#[test]
+fn shape_looks_and_backgrounds_save_and_read_back() {
+    let (read, deck) = formatted_fixture();
+    let source = common::data("fixture.pptx");
+    let dest = temp("looks", "saved.pptx");
+    pptx::save(&dest, &source, &read, &deck, &AtomicBool::new(false)).unwrap();
+    let back = pptx::read(&dest).unwrap();
+    reads_as(&back, &deck);
+    let rect = back.slides[2]
+        .shapes
+        .iter()
+        .find(|s| s.fill == Fill::Solid(Color::rgb(255, 0, 0)))
+        .unwrap();
+    assert_eq!(
+        rect.outline,
+        Some(Outline {
+            width: 38_100,
+            color: GREEN,
+            dash: Dash::Dash
+        })
+    );
+    let text_box = back.slides[2]
+        .shapes
+        .iter()
+        .find(|s| s.plain_text().starts_with("Text box"))
+        .unwrap();
+    let p = &text_box.text.as_ref().unwrap().paragraphs[0];
+    assert_eq!(p.bullet.as_ref().map(|b| b.text.as_str()), Some("\u{2022}"));
+    assert_eq!(
+        (p.margin_left, p.indent),
+        (deck_edit::BULLET_MARGIN, -deck_edit::BULLET_MARGIN)
+    );
+    assert_eq!(back.slides[1].background, Background::Solid(CREAM));
+    assert_eq!(back.slides[1].background_source, Source::Own);
+    untouched_but(&source, &dest, &changed_parts(&read, &[1, 2], &[]));
+}
+
+/// A copy of test deck `name` for test `test`: LibreOffice locks a deck it opens, so tests
+/// running side by side dump their own copies.
+fn private_copy(test: &str, name: &str) -> PathBuf {
+    let copy = temp(test, name);
+    std::fs::copy(common::data(name), &copy).unwrap();
+    copy
+}
+
+#[test]
+#[ignore = "needs LibreOffice: cargo test -p pptx --test save -- --ignored"]
+fn libreoffice_reads_the_formatting_and_layout_changes() {
+    // layouts.pptx: text looks, a paragraph, and layout changes.
+    let (read, deck) = formatted_layouts();
+    let source = private_copy("libreoffice-formatting", "layouts.pptx");
+    let dest = temp("libreoffice-formatting", "saved.pptx");
+    pptx::save(&dest, &source, &read, &deck, &AtomicBool::new(false)).unwrap();
+    let (before, after) = (lo_dump(&source, 2172), lo_dump(&dest, 2172));
+    let (old, new) = (dump_slides(&before), dump_slides(&after));
+    assert_eq!(new.len(), deck.slides.len());
+    let text_free = |lines: &[&str]| -> Vec<String> {
+        lines
+            .iter()
+            .filter(|l| !l.starts_with("para\t") && !l.starts_with("run\t"))
+            .map(|l| l.to_string())
+            .collect()
+    };
+    let shapes = |lines: &[&str]| -> Vec<String> {
+        lines
+            .iter()
+            .filter(|l| l.starts_with("shape\t"))
+            .map(|l| l.split('\t').nth(2).unwrap().to_owned())
+            .collect()
+    };
+    // Slide 1: "sub" formatted, the rest of the subtitle as it was.
+    assert_eq!(text_free(&new[0]), text_free(&old[0]));
+    let sub = "run\t40\t1\t0\t0\t0\tC00000\tLiberation Serif\tsub";
+    assert!(new[0].contains(&sub), "{:?}", new[0]);
+    assert!(new[0].contains(&"run\t32\t0\t0\t0\t0\t8B8B8B\tCalibri\ttitle"));
+    // Slide 2 (now 3): its first paragraph right-aligned.
+    assert_eq!(text_free(&new[2]), text_free(&old[1]));
+    assert!(new[2].contains(&"para\t0\tright\tContent"), "{:?}", new[2]);
+    let others = |lines: &[&str]| -> Vec<String> {
+        lines
+            .iter()
+            .filter(|l| !l.starts_with("para\t0\t"))
+            .map(|l| l.to_string())
+            .collect()
+    };
+    assert_eq!(others(&new[2]), others(&old[1]));
+    // The copy of slide 1 on Title and Content: a title and a body with its text.
+    assert_eq!(shapes(&new[1]), ["TitleTextShape", "OutlinerShape"]);
+    assert!(
+        new[1].contains(&"para\t0\tcenter\tCentered Title"),
+        "{:?}",
+        new[1]
+    );
+    assert!(new[1].contains(&"para\t0\tleft\tsubtitle"), "{:?}", new[1]);
+    assert!(new[1].contains(&sub));
+    assert!(new[1].contains(&"run\t32\t0\t0\t0\t0\t000000\tCalibri\ttitle"));
+    // Section Header on Title Only: its title alone, as Title Only's.
+    assert_eq!(shapes(&new[3]), ["TitleTextShape"]);
+    assert!(
+        new[3].contains(&"para\t0\tcenter\tSection Title"),
+        "{:?}",
+        new[3]
+    );
+    assert!(new[3].contains(&"run\t44\t0\t0\t0\t0\t000000\tCalibri\tSection Title"));
+    // Title Only on Two Content: two empty content placeholders, then its title.
+    assert_eq!(
+        shapes(&new[6]),
+        ["OutlinerShape", "OutlinerShape", "TitleTextShape"]
+    );
+    assert!(
+        new[6].contains(&"para\t0\tcenter\tTitle Only"),
+        "{:?}",
+        new[6]
+    );
+    // The new slide on Title Only: its title.
+    let last = new.len() - 1;
+    assert_eq!(shapes(&new[last]), ["TitleTextShape"]);
+    assert!(
+        new[last].contains(&"para\t0\tcenter\tClosing"),
+        "{:?}",
+        new[last]
+    );
+    // Every other slide as LibreOffice read it before.
+    for (i, j) in [(4, 3), (5, 4), (7, 6), (8, 7), (9, 8), (10, 9)] {
+        assert_eq!(new[i], old[j], "saved slide {}", i + 1);
+    }
+
+    // fixture.pptx: a fill, an outline, bullets, and a background.
+    let (read, deck) = formatted_fixture();
+    let source = private_copy("libreoffice-looks", "fixture.pptx");
+    let dest = temp("libreoffice-looks", "saved.pptx");
+    pptx::save(&dest, &source, &read, &deck, &AtomicBool::new(false)).unwrap();
+    let (before, after) = (lo_dump(&source, 2172), lo_dump(&dest, 2172));
+    let (old, new) = (dump_slides(&before), dump_slides(&after));
+    assert_eq!(new.len(), old.len());
+    // Slide 2: only its background.
+    assert_eq!(new[1][0], "background\tsolid FFF2CC 100");
+    assert_eq!(new[1][1..], old[1][1..]);
+    // Slide 3: the rectangle's fill and line, the rest as it was.
+    let rect = old[2]
+        .iter()
+        .position(|l| l.starts_with("fill\tsolid 4472C4"))
+        .unwrap();
+    assert_eq!(new[2][rect], "fill\tsolid FF0000 100");
+    let line: Vec<&str> = new[2][rect + 1].split([' ', '\t']).collect();
+    assert_eq!(
+        line[..3],
+        ["line", "dash", "00B050"],
+        "{}",
+        new[2][rect + 1]
+    );
+    let width: i64 = line[3].parse().unwrap();
+    assert!((width - 38_100).abs() <= 360, "{width}");
+    for (n, (a, b)) in new[2].iter().zip(&old[2]).enumerate() {
+        if n != rect && n != rect + 1 {
+            assert_eq!(a, b);
+        }
+    }
+    assert_eq!(new[2].len(), old[2].len());
+    for i in [0, 3, 4] {
+        assert_eq!(new[i], old[i], "slide {}", i + 1);
     }
 }

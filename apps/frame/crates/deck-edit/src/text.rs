@@ -94,6 +94,7 @@ fn props(p: &Paragraph) -> Paragraph {
         runs: Vec::new(),
         end: p.end.clone(),
         markup: p.markup.clone(),
+        sources: p.sources,
     }
 }
 

@@ -11,7 +11,7 @@ use crate::xml::Element;
 use crate::Error;
 use presentation_model::{
     Background, Fill, Frame, Image, Layer, Layout as ModelLayout, Picture, PlaceholderKind,
-    Presentation, Shape, ShapeKind, Size, Slide, Source, TextBody,
+    PlaceholderSlot, Presentation, Shape, ShapeKind, ShapeSources, Size, Slide, Source, TextBody,
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -288,15 +288,17 @@ impl Reader {
         };
         // The background: the slide's own, else its layout's, else its master's.
         let mut background = Background::default();
-        let mut sources: Vec<&Part> = vec![part];
+        let mut background_source = Source::Presentation;
+        let mut sources: Vec<(&Part, Source)> = vec![(part, Source::Own)];
         if let Some(l) = layout {
-            sources.push(&l.part);
-            sources.push(&l.master.part);
+            sources.push((&l.part, Source::Layout));
+            sources.push((&l.master.part, Source::Master));
         }
-        for p in sources {
+        for (p, from) in sources {
             if let Some(bg) = p.root.path(&["cSld", "bg"]) {
                 if let Some(b) = scope(Layer::Slide, p, None).looks().background(bg) {
                     background = b;
+                    background_source = from;
                 }
                 break;
             }
@@ -320,6 +322,7 @@ impl Reader {
         };
         Ok(Slide {
             background,
+            background_source,
             shapes,
             hidden: root.flag("show") == Some(false),
             notes,
@@ -719,9 +722,12 @@ fn shape(scope: &Scope<'_>, e: &Element, groups: &[Group]) -> Option<Shape> {
     let frame = groups.iter().rev().fold(frame, |f, g| g.apply(f));
     let looks = scope.looks();
     let group_fill = groups.last().map(|g| g.fill.clone()).unwrap_or_default();
-    let sp_prs: Vec<&Element> = std::iter::once(e)
-        .chain(parents.iter().copied())
-        .filter_map(|s| s.child("spPr"))
+    // Shape properties, nearest first: the shape's own, then its layout's and master's
+    // placeholders'.
+    let parent_sources = [Source::Layout, Source::Master];
+    let sp_prs: Vec<(&Element, Source)> = std::iter::once((e, Source::Own))
+        .chain(parents.iter().copied().zip(parent_sources))
+        .filter_map(|(s, from)| Some((s.child("spPr")?, from)))
         .collect();
     let style = e.child("style");
     let kind = match e.name.as_str() {
@@ -735,13 +741,18 @@ fn shape(scope: &Scope<'_>, e: &Element, groups: &[Group]) -> Option<Shape> {
             ShapeKind::Geometry { preset, adjust }
         }
     };
-    let (fill, outline) = match e.name.as_str() {
+    let (fill, outline, sources) = match e.name.as_str() {
         // A graphic frame's look is its content's.
-        "graphicFrame" => (Fill::None, None),
-        _ => (
-            looks.shape_fill(&sp_prs, style, &group_fill),
-            looks.outline(&sp_prs, style),
-        ),
+        "graphicFrame" => (Fill::None, None, ShapeSources::default()),
+        _ => {
+            let (fill, fill_from) = looks.shape_fill(&sp_prs, style, &group_fill);
+            let (outline, outline_from) = looks.outline(&sp_prs, style);
+            let sources = ShapeSources {
+                fill: fill_from,
+                outline: outline_from,
+            };
+            (fill, outline, sources)
+        }
     };
     let text = shape_text(scope, e, ph, &parents);
     let c_nv = nv.and_then(|n| n.child("cNvPr"));
@@ -757,7 +768,12 @@ fn shape(scope: &Scope<'_>, e: &Element, groups: &[Group]) -> Option<Shape> {
         kind,
         fill,
         outline,
+        sources,
         placeholder: ph.map(|p| placeholder_kind(p.attr("type").unwrap_or("obj"))),
+        slot: ph.map(|p| PlaceholderSlot {
+            kind: p.attr("type").unwrap_or("obj").into(),
+            idx: p.num("idx"),
+        }),
         layer: scope.layer,
         text,
         // A SmartArt drawing part's text box (`dsp:txXfrm`).

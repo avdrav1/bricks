@@ -71,10 +71,10 @@ Frame's crates, in `apps/frame/crates/`:
 
 | Crate | Owns |
 | --- | --- |
-| `presentation-model` | slides, shapes, frames, text, fills, outlines, pictures, tables, and backgrounds with every value resolved (ADR 0004), where each run look is set (own, layout, master; ADR 0006), the markup runs and paragraphs were read with, shapes' ids and whether they're grouped (for the save), and the deck's layouts with the new slide each makes; no dependencies |
-| `pptx` | PPTX reading: package, slide order, layouts and each one's new slide, placeholder inheritance through layout and master, group transforms, text styles, theme colours and fonts, fills and outlines, pictures, tables with table styles, SmartArt drawings, notes; saving by patching a copy of the package read, text and shape boxes (ADR 0006) |
-| `deck-edit` | edits as undoable commands on the presentation model (ADR 0006): text edits (typing, delete, Enter, line breaks), slide edits (new on a layout, duplicate, delete, move), shape box edits (move, resize) and snapping with smart guides, undo history; toolkit-free |
-| `frame` (`apps/frame`) | windows, slide list and slide commands, canvas and its slide renderer (GTK 4 snapshot, Pango), text editing on the canvas, selecting, dragging, resizing, and nudging shapes, save and save as, dialogs |
+| `presentation-model` | slides, shapes, frames, text, fills, outlines, pictures, tables, and backgrounds with every value resolved (ADR 0004), where each look is set (own, layout, master, presentation, or an edit; ADR 0006) for runs, paragraphs, shapes, and backgrounds, each body's looks per level, the markup runs and paragraphs were read with, shapes' ids, placeholder slots, and whether they're grouped (for the save), and the deck's layouts with the new slide each makes; no dependencies |
+| `pptx` | PPTX reading: package, slide order, layouts and each one's new slide, placeholder inheritance through layout and master, group transforms, text styles, theme colours and fonts, fills and outlines, pictures, tables with table styles, SmartArt drawings, notes; saving by patching a copy of the package read: text and its looks, shape boxes, fills and outlines, backgrounds, layout changes (ADR 0006) |
+| `deck-edit` | edits as undoable commands on the presentation model (ADR 0006): text edits (typing, delete, Enter, line breaks), slide edits (new on a layout, duplicate, delete, move), shape box edits (move, resize) and snapping with smart guides, formatting (text and paragraph looks, fill, outline, background), layout changes, undo history; toolkit-free |
+| `frame` (`apps/frame`) | windows, slide list and slide commands, canvas and its slide renderer (GTK 4 snapshot, Pango), text editing on the canvas, selecting, dragging, resizing, and nudging shapes, the inspector sidebar, save and save as, dialogs |
 
 ## Commands
 

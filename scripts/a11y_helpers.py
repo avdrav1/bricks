@@ -3,7 +3,7 @@
 
     a11y_helpers.py text          every name, description, and text in the app's windows,
                                   one per line
-    a11y_helpers.py press LABEL   activate the button labelled LABEL
+    a11y_helpers.py press LABEL   activate the button or toggle button labelled LABEL
     a11y_helpers.py state LABEL   "on" or "off": whether the toggle button labelled LABEL
                                   is pressed (STYLE-6's format bar)
 
@@ -19,6 +19,7 @@ gi.require_version("Atspi", "2.0")
 from gi.repository import Atspi  # noqa: E402
 
 APP = "bricks"
+PRESSABLE = (Atspi.Role.BUTTON, Atspi.Role.TOGGLE_BUTTON)
 
 
 def app():
@@ -64,7 +65,7 @@ def main():
     if len(sys.argv) == 3 and sys.argv[1] == "press":
         label = sys.argv[2]
         for node in walk(app()):
-            if node.get_role() == Atspi.Role.BUTTON and node.get_name() == label:
+            if node.get_role() in PRESSABLE and node.get_name() == label:
                 action = node.get_action_iface()
                 if action is None:
                     sys.exit(f"button {label!r} has no action")

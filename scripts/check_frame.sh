@@ -59,6 +59,14 @@
 #      the slide's: mid-drag a guide runs down the slide's middle, and it lands centred;
 #      Ctrl+Z puts it back. With Alt held it lands where dropped. Shift+Right and Right
 #      nudge it 11 px; Ctrl+Z undoes the last nudge.
+# FRAME-11 acceptance, the window's half (the edits: `cargo test -p deck-edit --test style`):
+#  13. on a copy of layouts.pptx, the inspector shows slide 1's layout; a click in the
+#      subtitle and Ctrl+A show its text rows, the inherited ones captioned; Bold, Size 40,
+#      colour Red C00000, and Align right apply at once (more ink, red pixels, ink in the
+#      right half); Ctrl+Z undoes the alignment, Ctrl+Y redoes it. Slide 2 moves to Title
+#      Only through the Layout list and takes a light blue background. Ctrl+S writes them
+#      into the slide parts. On the fixture, slide 3's blue rectangle takes a red fill, and
+#      Ctrl+Z gives back the blue.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -174,20 +182,23 @@ def count(path, name, want, fx0, fy0, fx1, fy1):
     print(f"count {name}: {n}")
 
 def where(name):
-    # The centre of the first widget named NAME, to click or drag it.
+    # The centre of the first widget named NAME, else of the first described as NAME (a
+    # drop-down is named by the item it shows), to click or drag it.
     desktop = Atspi.get_desktop(0)
-    stack = [desktop.get_child_at_index(i) for i in range(desktop.get_child_count())]
-    stack = [a for a in stack if a is not None and a.get_name() == "frame"]
-    while stack:
-        n = stack.pop(0)
-        if n is None:
-            continue
-        if n.get_name() == name and n.get_component_iface() is not None:
-            e = n.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
-            if e.width > 0:
-                print(e.x + e.width // 2, e.y + e.height // 2)
-                return
-        stack.extend(n.get_child_at_index(i) for i in range(n.get_child_count()))
+    apps = [desktop.get_child_at_index(i) for i in range(desktop.get_child_count())]
+    apps = [a for a in apps if a is not None and a.get_name() == "frame"]
+    for field in (lambda n: n.get_name(), lambda n: n.get_description()):
+        stack = list(apps)
+        while stack:
+            n = stack.pop(0)
+            if n is None:
+                continue
+            if field(n) == name and n.get_component_iface() is not None:
+                e = n.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+                if e.width > 0:
+                    print(e.x + e.width // 2, e.y + e.height // 2)
+                    return
+            stack.extend(n.get_child_at_index(i) for i in range(n.get_child_count()))
     sys.exit(f"nothing named {name}")
 
 def screen(path, points):
@@ -374,6 +385,65 @@ session() {
   b=$(python3 /tmp/px.py blue /shots/arrange6.png unnudged | cut -d" " -f3); echo "unnudged: $((b - b0))"
   pkill -x frame; sleep 0.5
 
+  echo "== 13 inspector"
+  cp /tmp/f/layouts.pptx /tmp/f/look.pptx
+  frame /tmp/f/look.pptx >>/tmp/app.log 2>&1 & sleep 3
+  shot look0; shown slide
+  read x y < <(python3 /tmp/px.py point /shots/look0.png 0.828 0.6095)
+  python3 /scripts/dnd_helpers.py click $x $y; sleep 0.5
+  keys -M ctrl a -m ctrl; sleep 0.5; shot look1; shown text
+  python3 /tmp/px.py ink /shots/look1.png before 0.05 0.53 0.95 0.85
+  python3 /tmp/a11y.py press Bold; sleep 0.5
+  echo "bold: $(python3 /tmp/a11y.py state Bold)"
+  read x y < <(python3 /tmp/px.py where "Font size")
+  python3 /scripts/dnd_helpers.py click $x $y; sleep 0.3
+  keys -M ctrl a -m ctrl "40" -k Return; sleep 0.5
+  read x y < <(python3 /tmp/px.py where "Text colour")
+  python3 /scripts/dnd_helpers.py click $x $y; sleep 0.5
+  python3 /tmp/a11y.py press "Red C00000"; sleep 0.5
+  python3 /tmp/a11y.py press "Align right"; sleep 0.5; shot look2; shown styled
+  python3 /tmp/px.py ink /shots/look2.png after 0.05 0.53 0.95 0.85
+  python3 /tmp/px.py ink /shots/look2.png right-left 0.05 0.53 0.5 0.85
+  python3 /tmp/px.py ink /shots/look2.png right-right 0.5 0.53 0.95 0.85
+  keys -M ctrl z -m ctrl; sleep 0.5; shot look3
+  echo "right after undo: $(python3 /tmp/a11y.py state "Align right")"
+  python3 /tmp/px.py ink /shots/look3.png undone-left 0.05 0.53 0.5 0.85
+  python3 /tmp/px.py ink /shots/look3.png undone-right 0.5 0.53 0.95 0.85
+  keys -M ctrl y -m ctrl; sleep 0.5
+  echo "right after redo: $(python3 /tmp/a11y.py state "Align right")"
+  # Stopped editing, the text shows without the selection over it.
+  keys -k Escape; sleep 0.5; shot look-red
+  python3 /tmp/px.py count /shots/look-red.png red C00000 0.05 0.53 0.95 0.85
+  read x y < <(python3 /tmp/px.py where "Slide 2")
+  python3 /scripts/dnd_helpers.py click $x $y; sleep 0.5; shown slide2
+  read x y < <(python3 /tmp/px.py where "Slide layout")
+  python3 /scripts/dnd_helpers.py click $x $y; sleep 1; shot look-layouts
+  read x y < <(python3 /tmp/px.py where "Title Only")
+  python3 /scripts/dnd_helpers.py click $x $y; sleep 1; shown relayout
+  read x y < <(python3 /tmp/px.py where "Background colour")
+  python3 /scripts/dnd_helpers.py click $x $y; sleep 0.5
+  python3 /tmp/a11y.py press "Light blue 00B0F0"; sleep 0.5; shot look4
+  python3 /tmp/px.py /shots/look4.png background:0.03:0.97:00B0F0
+  keys -M ctrl s -m ctrl; sleep 3; shown saved
+  python3 /tmp/px.py part /tmp/f/look.pptx ppt/slides/slide1.xml "b=\"1\""
+  python3 /tmp/px.py part /tmp/f/look.pptx ppt/slides/slide1.xml "sz=\"4000\""
+  python3 /tmp/px.py part /tmp/f/look.pptx ppt/slides/slide1.xml "C00000"
+  python3 /tmp/px.py part /tmp/f/look.pptx ppt/slides/slide1.xml "algn=\"r\""
+  python3 /tmp/px.py part /tmp/f/look.pptx ppt/slides/_rels/slide2.xml.rels "slideLayout6.xml"
+  python3 /tmp/px.py part /tmp/f/look.pptx ppt/slides/slide2.xml "00B0F0"
+  pkill -x frame; sleep 0.5
+  frame /tmp/f/fixture.pptx >>/tmp/app.log 2>&1 & sleep 3
+  keys -k Next -k Next; sleep 1; shot fill0
+  read x y < <(python3 /tmp/px.py point /shots/fill0.png 0.125 0.30)
+  python3 /scripts/dnd_helpers.py click $x $y; sleep 0.5; shown rectangle
+  read x y < <(python3 /tmp/px.py where "Fill colour")
+  python3 /scripts/dnd_helpers.py click $x $y; sleep 0.5
+  python3 /tmp/a11y.py press "Red C00000"; sleep 0.5; shot fill1
+  python3 /tmp/px.py /shots/fill1.png filled:0.125:0.3492:C00000
+  keys -M ctrl z -m ctrl; sleep 0.5; shot fill2
+  python3 /tmp/px.py /shots/fill2.png unfilled:0.125:0.3492:4472C4
+  pkill -x frame; sleep 0.5
+
   echo "== 5 drop"
   frame >>/tmp/app.log 2>&1 & sleep 2
   python3 /scripts/dnd_helpers.py source /tmp/f/layouts.pptx >/dev/null 2>&1 & src=$!; sleep 2
@@ -508,6 +578,33 @@ check "12: Ctrl+Z puts it back" "12 arrange" "^undone: yes "
 check "12: with Alt held it lands where dropped" "12 arrange" "^blue free: [2-5]$"
 check "12: Shift+Right and Right nudge it 11 px" "12 arrange" "^nudged: (10|11|12)$"
 check "12: Ctrl+Z undoes the last nudge" "12 arrange" "^unnudged: (9|10|11)$"
+# FRAME-11: the inspector.
+check "13: nothing selected, the inspector shows the slide's layout" "13 inspector" "^slide: Slide layout$"
+check "13: ... Title Slide" "13 inspector" "^slide: Title Slide$"
+check "13: ... and where the background comes from" "13 inspector" "^slide: From the (layout|master|presentation)$"
+check "13: text selected shows the text rows" "13 inspector" "^text: Font family$"
+check "13: ... the inherited ones captioned" "13 inspector" "^text: From the (layout|master|presentation)$"
+check "13: Bold turns bold on" "13 inspector" "^bold: on$"
+v13() { section "13 inspector" | sed -n "s/^$1: //p" | head -1; }
+b=$(v13 "ink before"); a=$(v13 "ink after"); r=$(v13 "count red")
+if [ -n "$a" ] && [ -n "$b" ] && [ "$a" -gt $((b + 300)) ]; then echo "ok   13: bold at 40 points draws more ink ($b -> $a dark pixels)"; else echo "FAIL 13: bold at 40 points draws more ink (${b:-?} -> ${a:-?} dark pixels)"; fail=1; fi
+if [ -n "$r" ] && [ "$r" -ge 300 ]; then echo "ok   13: ... in red C00000 ($r pixels)"; else echo "FAIL 13: the text draws in red C00000 (${r:-?} pixels, want >= 300)"; fail=1; fi
+l=$(v13 "ink right-left"); r=$(v13 "ink right-right")
+if [ -n "$l" ] && [ -n "$r" ] && [ "$r" -gt $((4 * l)) ]; then echo "ok   13: Align right moves the text right ($l left, $r right)"; else echo "FAIL 13: Align right moves the text right (${l:-?} left, ${r:-?} right)"; fail=1; fi
+check "13: Ctrl+Z undoes the alignment" "13 inspector" "^right after undo: off$"
+l=$(v13 "ink undone-left"); r=$(v13 "ink undone-right")
+if [ -n "$l" ] && [ -n "$r" ] && [ "$l" -gt 100 ] && [ "$r" -gt 100 ]; then echo "ok   13: ... the text centred again ($l left, $r right)"; else echo "FAIL 13: Ctrl+Z centres the text again (${l:-?} left, ${r:-?} right)"; fail=1; fi
+check "13: Ctrl+Y redoes it" "13 inspector" "^right after redo: on$"
+check "13: Layout moves slide 2 to Title Only" "13 inspector" "^relayout: Slide 2, Title Only$"
+check "13: Background colours the slide light blue" "13 inspector" "^match background: yes"
+check "13: Ctrl+S saves" "13 inspector" "^saved: Saved “look\.pptx”$"
+for n in 'b="1"' 'sz="4000"' 'C00000' 'algn="r"'; do
+  check "13: ... $n into slide 1's part" "13 inspector" "^part ppt/slides/slide1.xml $n: [1-9]"
+done
+check "13: ... the Title Only layout into slide 2's relationships" "13 inspector" "^part ppt/slides/_rels/slide2.xml.rels slideLayout6.xml: [1-9]"
+check "13: ... the background into slide 2's part" "13 inspector" "^part ppt/slides/slide2.xml 00B0F0: [1-9]"
+check "13: Fill colours the fixture's rectangle red" "13 inspector" "^match filled: yes"
+check "13: ... and Ctrl+Z gives back the blue" "13 inspector" "^match unfilled: yes"
 if [ $fail = 0 ]; then echo "FRAME OK"; else
   echo "FRAME CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1
