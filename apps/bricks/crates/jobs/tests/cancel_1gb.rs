@@ -13,12 +13,13 @@ use data_model::{
     CellRef, CsvTable, DelimiterChoice, Edit, Filter, FilterError, Query, SaveProgress,
     SearchError, SearchProgress, SortError, SortOrder, TableSource, Test,
 };
-use file_format::{save_csv, SaveError, TEMP_SUFFIX};
+use file_format::save_csv;
 use jobs::{Job, Stopped};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use suite_file::{SaveError, TEMP_SUFFIX};
 
 const TARGET: Duration = Duration::from_millis(200);
 

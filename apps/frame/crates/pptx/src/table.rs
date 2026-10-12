@@ -282,9 +282,10 @@ fn cell(
             .collect(),
         body: Vec::new(),
     };
-    let mut text = text::body(tx_body, &styles, ctx).unwrap_or_else(|| {
+    // Cell text isn't edited (yet), so its markup isn't kept: no source.
+    let mut text = text::body(tx_body, &[], &styles, ctx).unwrap_or_else(|| {
         let empty = xml::parse(b"<txBody/>").expect("empty body");
-        text::body(Some(&empty), &styles, ctx).expect("a body")
+        text::body(Some(&empty), &[], &styles, ctx).expect("a body")
     });
     // Cell margins and anchoring come from `tcPr`, with PowerPoint's defaults.
     let m = |name, default| pr.and_then(|p| p.num(name)).unwrap_or(default);

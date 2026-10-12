@@ -1,13 +1,14 @@
 //! An open deck: the presentation as `pptx` read it and as edits change it, with its
-//! pictures decoded into GDK textures. Reading and decoding happen in [`Deck::load`], off
-//! the UI thread (ADR 0004).
+//! pictures decoded into GDK textures, and what saving it patches: a copy of the package
+//! it was read from. Copying, reading, and decoding happen in [`Deck::load`], off the UI
+//! thread (ADR 0004).
 
 use gtk::{gdk, glib};
 use presentation_model::{Background, Fill, Image, Presentation, ShapeKind};
 use std::cell::{Ref, RefCell, RefMut};
 use std::collections::HashMap;
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// Why a file doesn't open.
@@ -41,6 +42,12 @@ impl std::error::Error for OpenError {
 
 pub struct Deck {
     presentation: RefCell<Presentation>,
+    /// The presentation as read, and a private copy of the package it was read from:
+    /// every save patches that copy with what changed since (ADR 0006).
+    read: Arc<Presentation>,
+    original: Arc<pptx::Original>,
+    /// The file the deck saves to: the one it was opened from, until Save As.
+    path: RefCell<PathBuf>,
     /// Decoded pictures by the address of their bytes (slides share an `Arc` per part).
     textures: HashMap<usize, gdk::Texture>,
 }
@@ -56,7 +63,8 @@ impl Deck {
         if let Some(why) = pptx::refusal(kind) {
             return Err(OpenError::Refused(why));
         }
-        let presentation = pptx::read(path).map_err(OpenError::Read)?;
+        let original = pptx::Original::copy_of(path).map_err(OpenError::Io)?;
+        let presentation = pptx::read(original.path()).map_err(OpenError::Read)?;
         let mut images = Vec::new();
         // Layouts' new slides too: a slide added on a layout no slide uses shows its
         // pictures.
@@ -94,7 +102,10 @@ impl Deck {
             }
         }
         Ok(Deck {
+            read: Arc::new(presentation.clone()),
             presentation: RefCell::new(presentation),
+            original: Arc::new(original),
+            path: RefCell::new(path.to_owned()),
             textures,
         })
     }
@@ -107,6 +118,21 @@ impl Deck {
     /// The presentation, to change through `deck-edit`.
     pub fn presentation_mut(&self) -> RefMut<'_, Presentation> {
         self.presentation.borrow_mut()
+    }
+
+    /// The file the deck saves to.
+    pub fn path(&self) -> PathBuf {
+        self.path.borrow().clone()
+    }
+
+    pub fn set_path(&self, path: PathBuf) {
+        self.path.replace(path);
+    }
+
+    /// What a save needs besides the deck as it is now: the deck as read, and the package
+    /// it was read from.
+    pub fn origin(&self) -> (Arc<Presentation>, Arc<pptx::Original>) {
+        (self.read.clone(), self.original.clone())
     }
 
     /// The decoded picture, when it decodes.

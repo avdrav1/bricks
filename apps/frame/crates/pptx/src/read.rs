@@ -66,6 +66,9 @@ struct Scope<'a> {
     layer: Layer,
     /// The part the shapes are in (its relationships name pictures and diagrams).
     part: &'a Part,
+    /// The shapes are the slide part's own (not a SmartArt drawing's): their ids are the
+    /// slide's, which a save finds them by.
+    own: bool,
     pkg: &'a RefCell<Package>,
     /// The layout slide placeholders inherit from (`None` on layouts and masters).
     layout: Option<&'a Layout>,
@@ -92,6 +95,7 @@ impl<'a> Scope<'a> {
         Scope {
             layer: self.layer,
             part,
+            own: false,
             pkg: self.pkg,
             layout: self.layout,
             master: self.master,
@@ -212,9 +216,10 @@ impl Reader {
                 let Ok(layout) = self.layout(&path) else {
                     continue;
                 };
+                let source = blank_slide(&layout.part.root).into_bytes();
                 let blank = Part {
-                    root: crate::xml::parse(blank_slide(&layout).as_bytes())
-                        .expect("a blank slide parses"),
+                    root: crate::xml::parse(&source).expect("a blank slide parses"),
+                    source,
                     rels: Default::default(),
                 };
                 let Ok(slide) = self.slide(&blank, Some(&layout), 0) else {
@@ -273,6 +278,7 @@ impl Reader {
         let scope = |layer, part, layout| Scope {
             layer,
             part,
+            own: layer == Layer::Slide,
             pkg: &self.pkg,
             layout,
             master: master.as_deref(),
@@ -394,18 +400,22 @@ fn placeholders(tree: &Element) -> Vec<Placeholder> {
     out
 }
 
-/// The slide XML PowerPoint writes for a new slide on `layout`: an empty placeholder for
-/// each of the layout's but the date, footer, and slide number, matching it by type and
-/// `idx`, with no frame or text style of its own.
-fn blank_slide(layout: &Layout) -> String {
-    let escape = |s: &str| {
-        s.replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('"', "&quot;")
-    };
-    let mut xml = String::from("<p:sld><p:cSld><p:spTree>");
-    let shown = layout
-        .placeholders
+/// The slide part PowerPoint writes for a new slide on the layout whose root element is
+/// `layout`: an empty placeholder for each of the layout's but the date, footer, and
+/// slide number, matching it by type and `idx`, with no frame or text style of its own.
+/// The reader reads layouts' new slides from it; a save writes it for slides added.
+pub(crate) fn blank_slide(layout: &Element) -> String {
+    let mut xml = String::from(concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        "\n",
+        r#"<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" "#,
+        r#"xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" "#,
+        r#"xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">"#,
+        r#"<p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/>"#,
+        r#"<p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>"#,
+    ));
+    let placeholders = placeholders(sp_tree(layout));
+    let shown = placeholders
         .iter()
         .filter(|p| !matches!(p.kind.as_str(), "dt" | "ftr" | "sldNum" | "hdr"));
     for (n, ph) in shown.enumerate() {
@@ -415,16 +425,25 @@ fn blank_slide(layout: &Layout) -> String {
             .unwrap_or_default();
         let kind = match ph.kind.as_str() {
             "obj" => String::new(),
-            k => format!(" type=\"{}\"", escape(k)),
+            k => format!(" type=\"{}\"", crate::xml::escape(k)),
         };
         let idx = ph.idx.map(|i| format!(" idx=\"{i}\"")).unwrap_or_default();
         xml.push_str(&format!(
-            "<p:sp><p:nvSpPr><p:cNvPr id=\"{}\" name=\"{}\"/><p:cNvSpPr/><p:nvPr><p:ph{kind}{idx}/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/><a:p/></p:txBody></p:sp>",
+            concat!(
+                r#"<p:sp><p:nvSpPr><p:cNvPr id="{}" name="{}"/><p:cNvSpPr>"#,
+                r#"<a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr><p:ph{}{}/></p:nvPr></p:nvSpPr>"#,
+                r#"<p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/><a:p/></p:txBody></p:sp>"#,
+            ),
             n + 2,
-            escape(name)
+            crate::xml::escape(name),
+            kind,
+            idx,
         ));
     }
-    xml.push_str("</p:spTree></p:cSld></p:sld>");
+    xml.push_str(concat!(
+        "</p:spTree></p:cSld>",
+        "<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>"
+    ));
     xml
 }
 
@@ -745,6 +764,7 @@ fn shape(scope: &Scope<'_>, e: &Element, groups: &[Group]) -> Option<Shape> {
         text_frame: e
             .child("txXfrm")
             .map(|x| groups.iter().rev().fold(frame_of(x), |f, g| g.apply(f))),
+        id: c_nv.and_then(|c| c.num("id")).filter(|_| scope.own),
     })
 }
 
@@ -866,7 +886,7 @@ fn shape_text(
             .collect(),
         body: inherited.filter_map(|(b, _)| b.child("bodyPr")).collect(),
     };
-    text::body(Some(tx_body), &styles, scope.text)
+    text::body(Some(tx_body), &scope.part.source, &styles, scope.text)
 }
 
 /// The font and colour a shape style's `<a:fontRef idx="minor|major">` gives its text.

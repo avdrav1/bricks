@@ -93,6 +93,7 @@ fn props(p: &Paragraph) -> Paragraph {
         bullet: p.bullet.clone(),
         runs: Vec::new(),
         end: p.end.clone(),
+        markup: p.markup.clone(),
     }
 }
 

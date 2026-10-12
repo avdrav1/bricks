@@ -23,6 +23,33 @@ pub struct Presentation {
     pub layouts: Vec<Layout>,
 }
 
+impl Presentation {
+    /// Set every slide-number field ([`Run::slide_number`]) to its slide's number, as
+    /// slides are added, deleted, and moved.
+    pub fn number_slides(&mut self) {
+        for (i, slide) in self.slides.iter_mut().enumerate() {
+            let number = (i + 1).to_string();
+            for shape in &mut slide.shapes {
+                let cells = match &mut shape.kind {
+                    ShapeKind::Table(t) => t.rows.iter_mut().flat_map(|r| &mut r.cells).collect(),
+                    _ => Vec::new(),
+                };
+                let bodies = shape
+                    .text
+                    .iter_mut()
+                    .chain(cells.into_iter().map(|c| &mut c.text));
+                for run in bodies
+                    .flat_map(|b| &mut b.paragraphs)
+                    .flat_map(|p| &mut p.runs)
+                    .filter(|r| r.slide_number)
+                {
+                    run.text.clone_from(&number);
+                }
+            }
+        }
+    }
+}
+
 /// A slide layout (Title Slide, Title and Content, ...).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layout {
@@ -209,6 +236,10 @@ pub struct Shape {
     /// Where the text lays out when that isn't the shape's own box: a SmartArt drawing
     /// part's `txXfrm` (the top of a circle, ...), group transforms applied.
     pub text_frame: Option<Frame>,
+    /// The shape's id in its slide part (`cNvPr id`), for the slide's own shapes: how a
+    /// save finds the shape to write its edits into. `None` for shapes a save can't
+    /// write (from layouts, masters, and SmartArt drawings).
+    pub id: Option<u32>,
 }
 
 impl Shape {
@@ -547,6 +578,9 @@ pub struct Paragraph {
     /// The look of the paragraph mark (`endParaRPr`): an empty paragraph's line, and text
     /// typed into it. Its text is empty.
     pub end: Run,
+    /// The paragraph's properties element (`<a:pPr …>…</a:pPr>`) as read, for a save to
+    /// write back; empty when it has none. Opaque to everything but the file format.
+    pub markup: Arc<str>,
 }
 
 impl Paragraph {
@@ -587,7 +621,8 @@ impl Paragraph {
     }
 
     /// Merge neighbouring runs that differ only in their text (line breaks stay runs of
-    /// their own) and drop empty runs, so one look over a stretch of text is one run.
+    /// their own) and drop empty runs, so one look over a stretch of text is one run. Runs
+    /// the file writes differently (`Run::markup`) stay apart.
     pub fn merge_runs(&mut self) {
         let mut merged: Vec<Run> = Vec::with_capacity(self.runs.len());
         for run in self.runs.drain(..) {
@@ -595,7 +630,12 @@ impl Paragraph {
                 continue;
             }
             match merged.last_mut() {
-                Some(last) if last.text != "\n" && run.text != "\n" && last.same_look(&run) => {
+                Some(last)
+                    if last.text != "\n"
+                        && run.text != "\n"
+                        && last.same_look(&run)
+                        && last.markup == run.markup =>
+                {
                     last.text.push_str(&run.text)
                 }
                 _ => merged.push(run),
@@ -752,6 +792,21 @@ pub struct Run {
     pub caps: Caps,
     /// Where each look is set: an edit keeps inherited looks inherited.
     pub sources: RunSources,
+    /// How the file writes the run, beyond its look, for a save to write it back.
+    pub markup: RunMarkup,
+    /// A slide-number field: its text is its slide's number.
+    pub slide_number: bool,
+}
+
+/// What the file says of a run beyond the model: opaque to everything but the file
+/// format, compared only to tell runs apart.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RunMarkup {
+    /// A field's start tag (`<a:fld id="…" type="slidenum">`); empty for text and breaks.
+    pub field: Arc<str>,
+    /// The run's properties element as read (`<a:rPr …>…</a:rPr>`, or a paragraph
+    /// mark's `<a:endParaRPr …/>`); empty when it has none.
+    pub props: Arc<str>,
 }
 
 impl Run {
@@ -769,11 +824,16 @@ impl Run {
             && self.sources == other.sources
     }
 
-    /// This run's look with `text`.
+    /// This run's look with `text`: plain text, not a field, whatever this run is.
     pub fn with_text(&self, text: impl Into<String>) -> Run {
         Run {
             text: text.into(),
             font: self.font.clone(),
+            markup: RunMarkup {
+                field: Arc::from(""),
+                props: self.markup.props.clone(),
+            },
+            slide_number: false,
             ..*self
         }
     }

@@ -1,21 +1,22 @@
-//! Frame's PPTX reader (ADR 0004): reads a `.pptx` package into a
-//! [`presentation_model::Presentation`] with every inherited value resolved.
-//!
-//! Slide order comes from `presentation.xml` (`sldIdLst` through its relationships);
-//! placeholders take their frame from the slide's layout, then its master (matched by
-//! `idx`, then `type`); group transforms are applied, so each shape's frame is where it
-//! shows on the slide.
+//! Frame's PPTX reader and writer. Reading (ADR 0004) resolves a `.pptx` package into a
+//! [`presentation_model::Presentation`] with every inherited value resolved: slide order
+//! comes from `presentation.xml` (`sldIdLst` through its relationships); placeholders
+//! take their frame from the slide's layout, then its master (matched by `idx`, then
+//! `type`); group transforms are applied, so each shape's frame is where it shows on the
+//! slide. Saving ([`save`], ADR 0006) patches the package the deck was read from.
 
 mod color;
 mod detect;
 mod fill;
 mod package;
 mod read;
+mod save;
 mod table;
 mod text;
 mod xml;
 
 pub use detect::{kind, refusal, Kind};
+pub use save::{save, Original};
 
 use presentation_model::Presentation;
 use std::fmt;

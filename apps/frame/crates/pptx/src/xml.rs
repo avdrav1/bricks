@@ -16,6 +16,9 @@ pub(crate) struct Element {
     pub name: String,
     attrs: Vec<Attr>,
     pub children: Vec<Node>,
+    /// Where the element is in the part's bytes: from its start tag's `<` to its end
+    /// tag's `>`, so a save can copy or replace it as written.
+    pub span: std::ops::Range<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -93,20 +96,42 @@ impl Element {
     }
 }
 
+/// `s` escaped for XML text and attribute values.
+pub(crate) fn escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 /// Parse a part into its root element.
 pub(crate) fn parse(bytes: &[u8]) -> Result<Element, String> {
     let mut reader = Reader::from_reader(bytes);
     let mut stack: Vec<Element> = Vec::new();
     let mut root = None;
     loop {
+        let start = reader.buffer_position() as usize;
         match reader.read_event() {
-            Ok(Event::Start(e)) => stack.push(element(&e)?),
+            Ok(Event::Start(e)) => {
+                let mut el = element(&e)?;
+                el.span.start = start;
+                stack.push(el);
+            }
             Ok(Event::Empty(e)) => {
-                let el = element(&e)?;
+                let mut el = element(&e)?;
+                el.span = start..reader.buffer_position() as usize;
                 close(&mut stack, &mut root, el);
             }
             Ok(Event::End(_)) => {
-                let el = stack.pop().ok_or("an end tag without its start")?;
+                let mut el = stack.pop().ok_or("an end tag without its start")?;
+                el.span.end = reader.buffer_position() as usize;
                 close(&mut stack, &mut root, el);
             }
             Ok(Event::Text(t)) => {
@@ -169,6 +194,7 @@ fn element(e: &BytesStart<'_>) -> Result<Element, String> {
         name,
         attrs,
         children: Vec::new(),
+        span: 0..0,
     })
 }
 
@@ -206,5 +232,17 @@ mod tests {
         let root = parse(br#"<p:sldId xmlns:p="x" xmlns:r="y" id="256" r:id="rId2"/>"#).unwrap();
         assert_eq!(root.attr("id"), Some("256"));
         assert_eq!(root.rel_attr("id"), Some("rId2"));
+    }
+
+    #[test]
+    fn spans_cover_each_element_as_written() {
+        let xml = "<?xml version=\"1.0\"?>\n<a:p><a:pPr lvl=\"1\"/><a:r>\r\n<a:t>x &amp; y</a:t></a:r></a:p>";
+        let root = parse(xml.as_bytes()).unwrap();
+        let at = |e: &Element| &xml[e.span.clone()];
+        assert_eq!(at(&root), &xml[xml.find("<a:p>").unwrap()..]);
+        assert_eq!(at(root.child("pPr").unwrap()), "<a:pPr lvl=\"1\"/>");
+        let r = root.child("r").unwrap();
+        assert_eq!(at(r), "<a:r>\r\n<a:t>x &amp; y</a:t></a:r>");
+        assert_eq!(at(r.child("t").unwrap()), "<a:t>x &amp; y</a:t>");
     }
 }

@@ -1402,7 +1402,7 @@ enum SaveState {
 }
 
 /// What a save job returns: its stats and how long it took, or why it failed.
-type SaveResult = Result<(SaveStats, Duration), file_format::SaveError>;
+type SaveResult = Result<(SaveStats, Duration), suite_file::SaveError>;
 
 /// Ctrl+S: write the table to its own file on the job pool (save is atomic, SAVE-1); with
 /// a `target`, to another file, delimiter, or encoding (Save As, SAVE-2). Editing is paused
@@ -1517,10 +1517,10 @@ fn save_workbook(
     sizes: &std::collections::HashMap<data_model::SheetId, xlsx::SheetSizes>,
     progress: &SaveProgress,
     cancel: &jobs::CancelToken,
-) -> Result<SaveStats, file_format::SaveError> {
+) -> Result<SaveStats, suite_file::SaveError> {
     let calculated = std::sync::atomic::AtomicU64::new(0);
     let book = xlsx::SaveBook::from_workbook(book, package, sizes, cancel.shared(), &calculated)
-        .ok_or(file_format::SaveError::Cancelled)?;
+        .ok_or(suite_file::SaveError::Cancelled)?;
     xlsx::save(path, book, progress, cancel.flag())
 }
 
@@ -1539,7 +1539,7 @@ fn finish_save(
         _ => return false,
     };
     let result = match result {
-        Ok(Err(file_format::SaveError::Cancelled)) | Err(jobs::Stopped::Cancelled) => {
+        Ok(Err(suite_file::SaveError::Cancelled)) | Err(jobs::Stopped::Cancelled) => {
             grid.set_saving(false);
             *save.borrow_mut() = SaveState::Cancelled;
             return false;

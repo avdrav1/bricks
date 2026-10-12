@@ -54,7 +54,7 @@ fn child_saver() {
     ));
     let job = table.save_job().unwrap();
     let cancel = AtomicBool::new(false);
-    file_format::save_atomic(
+    suite_file::save_atomic(
         &path,
         &cancel,
         |w| {
@@ -91,7 +91,7 @@ fn temp_files(dir: &Path) -> Vec<(PathBuf, u64)> {
             let e = e.ok()?;
             let name = e.file_name().into_string().ok()?;
             let len = e.metadata().ok()?.len();
-            name.ends_with(file_format::TEMP_SUFFIX)
+            name.ends_with(suite_file::TEMP_SUFFIX)
                 .then(|| (e.path(), len))
         })
         .collect()

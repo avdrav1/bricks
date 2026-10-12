@@ -828,7 +828,8 @@ impl PlacedText {
 }
 
 /// The topmost of the slide's own shapes at the slide point (`x`, `y`), in pixels at
-/// `scale`, when it has text: the shape to edit there.
+/// `scale`, when it has text a save can write (it has an id; a SmartArt drawing's shapes
+/// don't): the shape to edit there.
 pub fn text_shape_at(slide: &Slide, scale: f32, x: f32, y: f32) -> Option<usize> {
     let (i, shape) = slide
         .shapes
@@ -839,7 +840,7 @@ pub fn text_shape_at(slide: &Slide, scale: f32, x: f32, y: f32) -> Option<usize>
         .find(|(_, s)| {
             in_box(&s.frame, scale, x, y) || s.text_frame.is_some_and(|f| in_box(&f, scale, x, y))
         })?;
-    shape.text.is_some().then_some(i)
+    (shape.text.is_some() && shape.id.is_some()).then_some(i)
 }
 
 fn dashed_box(snap: &gtk::Snapshot, f: &Frame, scale: f32, color: &gdk::RGBA) {

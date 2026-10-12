@@ -10,7 +10,7 @@ rust-version.workspace = true
 calamine = "0.36"
 csv-engine.workspace = true
 data-model.workspace = true
-file-format.workspace = true
+suite-file.workspace = true
 formula.workspace = true
 quick-xml = "0.41"
 zip = { version = "8", default-features = false, features = ["deflate"] }

@@ -5,6 +5,7 @@
 
 use crate::deck::Deck;
 use crate::editing;
+use crate::saving;
 use crate::slide_list::{self, THUMB_WIDTH};
 use crate::slide_view::{Editing, SlideView};
 use deck_edit::{Change, Edit, History};
@@ -94,7 +95,7 @@ fn close_start_window(app: &gtk::Application) {
 }
 
 /// "Presentations" (.pptx, .pptm) and "All files", the first as the default.
-fn file_filters() -> (gio::ListStore, gtk::FileFilter) {
+pub(crate) fn file_filters() -> (gio::ListStore, gtk::FileFilter) {
     let pptx = gtk::FileFilter::new();
     pptx.set_name(Some("Presentations"));
     pptx.add_mime_type("application/vnd.openxmlformats-officedocument.presentationml.presentation");
@@ -175,7 +176,7 @@ fn accept_file_drops(app: &gtk::Application, window: &gtk::ApplicationWindow) {
     window.add_controller(target);
 }
 
-fn alert(parent: Option<&gtk::Window>, message: &str, detail: &str) {
+pub(crate) fn alert(parent: Option<&gtk::Window>, message: &str, detail: &str) {
     gtk::AlertDialog::builder()
         .message(message)
         .detail(detail)
@@ -315,6 +316,35 @@ impl DeckWindow {
     pub fn step(&self, by: isize) {
         let i = self.canvas.index() as isize + by;
         self.go(i.clamp(0, self.count().saturating_sub(1) as isize) as usize);
+    }
+
+    pub fn window(&self) -> Option<gtk::ApplicationWindow> {
+        self.window.upgrade()
+    }
+
+    /// Say `text` in the status bar until the slide changes.
+    pub fn set_status(&self, text: &str) {
+        self.status.set_text(text);
+    }
+
+    /// The status bar's usual "Slide N of M".
+    pub fn show_slide_status(&self) {
+        self.go(self.canvas.index());
+    }
+
+    /// The deck was saved as `path`: it saves there from now on, and the window is that
+    /// file's (its title, and opening the file again brings it forward).
+    pub fn moved_to(&self, path: &Path) {
+        self.deck.set_path(path.to_owned());
+        let Some(window) = self.window() else {
+            return;
+        };
+        window.set_title(Some(&file_name(path)));
+        let to = canonical(path);
+        OPEN.with_borrow_mut(|open| {
+            open.retain(|(p, w)| *p != to && w.upgrade().is_some_and(|w| w != window));
+            open.push((to, window.downgrade()));
+        });
     }
 
     /// Apply `edit` to the deck as a step of its undo history, and show what it changed.
@@ -581,6 +611,8 @@ fn show_deck(
                     Key::z | Key::Z if !shift => view.undo(),
                     Key::z | Key::Z | Key::y | Key::Y => view.redo(),
                     Key::m | Key::M if !shift => slide_list::new_slide(&view),
+                    Key::s | Key::S if !shift => saving::save(&view),
+                    Key::s | Key::S => saving::save_as(&view),
                     Key::d | Key::D if !shift && !text => slide_list::duplicate(&view),
                     Key::Up | Key::KP_Up if !shift && !text => slide_list::move_by(&view, -1),
                     Key::Down | Key::KP_Down if !shift && !text => slide_list::move_by(&view, 1),
@@ -630,9 +662,20 @@ fn show_deck(
             move |_: &gtk::ApplicationWindow, _, _| slideshow(&view, view.canvas.index())
         })
         .build();
-    window.add_action_entries([from_start, from_here]);
+    let save = gio::ActionEntry::builder("save")
+        .activate({
+            let view = view.clone();
+            move |_: &gtk::ApplicationWindow, _, _| saving::save(&view)
+        })
+        .build();
+    window.add_action_entries([from_start, from_here, save]);
     if let Some(bar) = window.titlebar().and_downcast::<gtk::HeaderBar>() {
         slide_list::attach(&view, window, &bar, &side);
+        let save = gtk::Button::from_icon_name("document-save-symbolic");
+        save.set_action_name(Some("win.save"));
+        save.set_tooltip_text(Some("Save (Ctrl+S)"));
+        save.update_property(&[gtk::accessible::Property::Label("Save")]);
+        bar.pack_start(&save);
         let play = gtk::Button::from_icon_name("media-playback-start-symbolic");
         play.set_action_name(Some("win.slideshow"));
         play.set_tooltip_text(Some("Slideshow (F5)"));
