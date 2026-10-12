@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cronkite: a fast, native office suite for Linux</title>
-<meta name="description" content="Cronkite is a fast, native office suite for Linux: Bricks for spreadsheets, Slate for documents, Frame for presentations. Install each with one command.">
+<meta name="description" content="Cronkite is a fast, native office suite for Linux: Brick for spreadsheets, Slate for documents, Frame for presentations. Install each with one command.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=League+Spartan:wght@400;500;700;800&display=swap" rel="stylesheet">
@@ -85,10 +85,10 @@
     <div class="apps">
       <article class="app">
         <span class="badge ready">Available now</span>
-        <h3>Bricks</h3>
+        <h3>Brick</h3>
         <span class="kind">Spreadsheet</span>
         <p>Opens gigabyte CSV files in a blink and edits <code>.xlsx</code> workbooks with formulas, multiple sheets, and cell styles. Saves never corrupt your file, and <code>00123</code> stays <code>00123</code>.</p>
-        <a class="more" href="#install-bricks">Install Bricks &darr;</a>
+        <a class="more" href="#install-brick">Install Brick &darr;</a>
       </article>
       <article class="app">
         <span class="badge ready">Available now</span>
@@ -111,12 +111,12 @@
     <h2 id="install-h">Install</h2>
     <p class="sub">One command per app, for your user only. No sudo, no package manager. Paste it into a terminal; then start the app from your app menu.</p>
 
-    <h3 id="install-bricks">Bricks</h3>
+    <h3 id="install-brick">Brick</h3>
     <div class="cmd primary">
-      <pre id="install-bricks-cmd">curl -fsSL https://bricks.cronkite.cc/install.sh | sh</pre>
-      <button type="button" data-copy="install-bricks-cmd">Copy</button>
+      <pre id="install-brick-cmd">curl -fsSL https://brick.cronkite.cc/install.sh | sh</pre>
+      <button type="button" data-copy="install-brick-cmd">Copy</button>
     </div>
-    <p class="note">The command is <code>bricks</code>. CSV and TSV files open with it. Download page: <a href="https://bricks.cronkite.cc">bricks.cronkite.cc</a>.</p>
+    <p class="note">The command is <code>brick</code>. CSV and TSV files open with it. Download page: <a href="https://brick.cronkite.cc">brick.cronkite.cc</a>.</p>
 
     <h3 id="install-slate">Slate</h3>
     <div class="cmd primary">
@@ -135,7 +135,7 @@
     <h3>What an installer does</h3>
     <ol class="steps">
       <li>Downloads the app's latest release and checks it against its published sha256. If the checksum doesn't match, nothing is installed.</li>
-      <li>Puts the app (<code>bricks</code>, <code>slate</code>, <code>frame</code>) in <code>~/.local/bin</code>, and its menu entry and icon in <code>~/.local/share</code>.</li>
+      <li>Puts the app (<code>brick</code>, <code>slate</code>, <code>frame</code>) in <code>~/.local/bin</code>, and its menu entry and icon in <code>~/.local/share</code>.</li>
       <li>Makes it the default app for its files (above), so double-clicking one opens it. Other apps' defaults for other files are kept.</li>
     </ol>
 
@@ -156,8 +156,8 @@
 
     <h3>Uninstall</h3>
     <div class="cmd">
-      <pre id="uninstall-bricks-cmd">curl -fsSL https://bricks.cronkite.cc/install.sh | sh -s -- --uninstall</pre>
-      <button type="button" data-copy="uninstall-bricks-cmd">Copy</button>
+      <pre id="uninstall-brick-cmd">curl -fsSL https://brick.cronkite.cc/install.sh | sh -s -- --uninstall</pre>
+      <button type="button" data-copy="uninstall-brick-cmd">Copy</button>
     </div>
     <div class="cmd">
       <pre id="uninstall-slate-cmd">curl -fsSL https://slate.cronkite.cc/install.sh | sh -s -- --uninstall</pre>
@@ -170,7 +170,7 @@
     <p class="note">Removes the app, its menu entry, and its file defaults. Your files are untouched.</p>
 
     <h3>Prefer a tarball?</h3>
-    <p>Each app's download page has its latest release as a <code>.tar.gz</code>, with its version, size, and sha256: <a href="https://bricks.cronkite.cc">Bricks</a>, <a href="https://slate.cronkite.cc">Slate</a>, <a href="https://frame.cronkite.cc">Frame</a>.</p>
+    <p>Each app's download page has its latest release as a <code>.tar.gz</code>, with its version, size, and sha256: <a href="https://brick.cronkite.cc">Brick</a>, <a href="https://slate.cronkite.cc">Slate</a>, <a href="https://frame.cronkite.cc">Frame</a>.</p>
   </section>
 
   <section aria-labelledby="source-h">
@@ -178,7 +178,7 @@
     <p>Cronkite is open source (MIT or Apache-2.0) and built in the open: <a href="https://github.com/avdrav1/cronkite">github.com/avdrav1/cronkite</a>.</p>
   </section>
 </main>
-<footer>Cronkite &middot; a native office suite for Linux &middot; <a href="https://bricks.cronkite.cc">bricks.cronkite.cc</a> &middot; <a href="https://slate.cronkite.cc">slate.cronkite.cc</a> &middot; <a href="https://frame.cronkite.cc">frame.cronkite.cc</a></footer>
+<footer>Cronkite &middot; a native office suite for Linux &middot; <a href="https://brick.cronkite.cc">brick.cronkite.cc</a> &middot; <a href="https://slate.cronkite.cc">slate.cronkite.cc</a> &middot; <a href="https://frame.cronkite.cc">frame.cronkite.cc</a></footer>
 <script>
   for (const button of document.querySelectorAll("button[data-copy]")) {
     button.addEventListener("click", async () => {

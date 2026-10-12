@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Brick
+GenericName=Spreadsheet
+Comment=Open and edit large CSV files fast
+Exec=brick %f
+Icon=dev.cronkite.Brick
+Terminal=false
+Categories=Office;Spreadsheet;
+MimeType=text/csv;text/tab-separated-values;application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;application/vnd.ms-excel.sheet.macroEnabled.12;

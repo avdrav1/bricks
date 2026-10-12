@@ -4,8 +4,8 @@
 Drives a headless Calc (UNO + the built-in UITest service) through every scenario below on
 a 200-row x 6-column sheet full of data, and records where the cell cursor and the
 selection end up. Writes:
-  apps/bricks/crates/grid/tests/data/lo_navigation.tsv   replayed by `cargo test -p grid --test lo_parity`
-  apps/bricks/docs/navigation-checklist.md               the side-by-side checklist
+  apps/brick/crates/grid/tests/data/lo_navigation.tsv   replayed by `cargo test -p grid --test lo_parity`
+  apps/brick/docs/navigation-checklist.md               the side-by-side checklist
 
 Usage: python3 scripts/lo_navigation.py   (needs LibreOffice with Python UNO)
 Default Calc settings are used: Enter moves the selection down.
@@ -164,7 +164,7 @@ def main():
         finally:
             proc.terminate()
 
-    data = ROOT / "apps/bricks/crates/grid/tests/data/lo_navigation.tsv"
+    data = ROOT / "apps/brick/crates/grid/tests/data/lo_navigation.tsv"
     data.parent.mkdir(parents=True, exist_ok=True)
     with data.open("w") as f:
         f.write(f"# Recorded from LibreOffice {version} by scripts/lo_navigation.py on a {ROWS}x{COLS} sheet.\n")
@@ -172,7 +172,7 @@ def main():
         for sid, _, start, keys, cur, rng in rows:
             f.write(f"{sid}\t{start}\t{keys}\t{cur}\t{rng}\n")
 
-    doc_path = ROOT / "apps/bricks/docs/navigation-checklist.md"
+    doc_path = ROOT / "apps/brick/docs/navigation-checklist.md"
     with doc_path.open("w") as f:
         f.write("# Keyboard navigation and selection checklist (GRID-3, GRID-4)\n\n")
         f.write(f"Each row is LibreOffice Calc {version}'s behavior, recorded by `scripts/lo_navigation.py` "
@@ -190,7 +190,7 @@ def main():
                 "and moving past the last row or column of data (Calc has empty cells there; this grid shows "
                 "only the file's rows and columns). Mouse selection (click, Shift+click, drag, header "
                 "clicks; GRID-4) cannot be driven through LibreOffice's UI-test API; it follows the same "
-                "model and is covered by unit tests in `apps/bricks/crates/grid/src/nav.rs`.\n")
+                "model and is covered by unit tests in `apps/brick/crates/grid/src/nav.rs`.\n")
     print(f"wrote {data.relative_to(ROOT)} and {doc_path.relative_to(ROOT)}")
 
 

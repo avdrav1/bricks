@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # PKG-3 acceptance: the release binary starts on clean Arch, Ubuntu 24.04, and Fedora.
 #
-#   scripts/check_release.sh dist/bricks-X.Y.Z-x86_64-linux/bricks
+#   scripts/check_release.sh dist/brick-X.Y.Z-x86_64-linux/brick
 #   scripts/check_release.sh dist/slate-X.Y.Z-x86_64-linux/slate
 #   scripts/check_release.sh dist/frame-X.Y.Z-x86_64-linux/frame
 #
 # For each distro: a fresh container gets only what a user would install (GTK 4's runtime,
 # from the distro's own packages), then the binary opens a small file under GTK's Broadway
-# backend. Bricks opens a CSV and must report its first frame and quit (`--bench-open`);
+# backend. Brick opens a CSV and must report its first frame and quit (`--bench-open`);
 # Slate opens a Markdown file and must still be running 8 s later; Frame opens the fixture
 # deck, draws its densest slide, and must report the frames drawn and quit
 # (`--bench-draw`). That loads every library it links against and opens a window. Also
@@ -24,8 +24,8 @@ fi
 echo "ok   glibc: newest symbol GLIBC_$newest (floor $GLIBC_FLOOR)"
 
 case $app in
-  bricks) ext=csv; content='id,name\n1,a\n2,b\n'
-    open="bricks /tmp/t.csv --bench-open 2>&1"; opened='^OPENED ' ;;
+  brick) ext=csv; content='id,name\n1,a\n2,b\n'
+    open="brick /tmp/t.csv --bench-open 2>&1"; opened='^OPENED ' ;;
   slate) ext=md; content='# A heading\n\nSome *text*.\n'
     # Still running when the timeout stops it: exit 124.
     open="slate /tmp/t.md 2>&1; echo exit \$?"; opened='^exit 124$' ;;
@@ -54,7 +54,7 @@ for c in "${checks[@]}"; do
   " 2>&1) && status=0 || status=$?
   if [ $status = 0 ] && grep -q "$opened" <<<"$out"; then
     case $app in
-      bricks) echo "ok   $name: $(grep '^FIRST_FRAME ' <<<"$out" | cut -c1-80)" ;;
+      brick) echo "ok   $name: $(grep '^FIRST_FRAME ' <<<"$out" | cut -c1-80)" ;;
       frame) echo "ok   $name: $(grep '^{"slide":' <<<"$out" | cut -c1-100)" ;;
       *) echo "ok   $name: $app opened t.$ext and was still running after ${limit}s" ;;
     esac

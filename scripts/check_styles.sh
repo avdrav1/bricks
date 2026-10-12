@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # STYLE-3 acceptance: the grid draws cells in their styles; STYLE-4: merged cells.
 #
-#   scripts/check_styles.sh [BINARY]   (default target/release/bricks)
+#   scripts/check_styles.sh [BINARY]   (default target/release/brick)
 #
 # In an Arch container under headless sway. Screenshots are compared pixel by pixel
 # (python-gobject's GdkPixbuf); the cursor cell's text is read through the accessibility
@@ -27,13 +27,13 @@
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-bin=$(realpath "${1:-target/release/bricks}")
-[ -x "$bin" ] || { echo "no binary at $bin (cargo build --release -p bricks)"; exit 1; }
-fixture=$(realpath apps/bricks/crates/xlsx/tests/data/fixture.xlsx)
+bin=$(realpath "${1:-target/release/brick}")
+[ -x "$bin" ] || { echo "no binary at $bin (cargo build --release -p brick)"; exit 1; }
+fixture=$(realpath apps/brick/crates/xlsx/tests/data/fixture.xlsx)
 
 shots=()
 if [ -n "${SHOTS:-}" ]; then mkdir -p "$SHOTS"; shots=(-v "$(realpath "$SHOTS"):/shots"); fi
-out=$(docker run --rm --cap-add SYS_NICE -v "$bin:/usr/local/bin/bricks:ro" \
+out=$(docker run --rm --cap-add SYS_NICE -v "$bin:/usr/local/bin/brick:ro" \
   -v "$fixture:/fixture.xlsx:ro" -v "$PWD/scripts/a11y_helpers.py:/a11y.py:ro" "${shots[@]}" \
   archlinux:latest bash -c '
 set -uo pipefail
@@ -114,7 +114,7 @@ elif cmd == "overflow":
 elif cmd == "centre":
     # The dark glyph pixels of the title in row 1, just above the yellow row 2 (A..H), as
     # a share of A..H in thousandths; and the middle third of A..D as the same shares,
-    # from the column widths of the Styles sheet in Excel units (as Bricks sizes them).
+    # from the column widths of the Styles sheet in Excel units (as Brick sizes them).
     import re
     import zipfile
     xml = zipfile.ZipFile("/tmp/f.xlsx").read("xl/worksheets/sheet4.xml").decode()
@@ -169,8 +169,8 @@ session() {
   shown() { python3 /a11y.py text | sed "s/^/${1:-shown}: /"; }
   # Every variant opens as t.csv, so the title and tab stay the same.
   open_shot() {
-    cp /tmp/$1.csv /tmp/t.csv; bricks /tmp/t.csv >>/tmp/app.log 2>&1 & sleep 4
-    shot $1; pkill -x bricks; sleep 1
+    cp /tmp/$1.csv /tmp/t.csv; brick /tmp/t.csv >>/tmp/app.log 2>&1 & sleep 4
+    shot $1; pkill -x brick; sleep 1
   }
 
   echo "== 1 align"
@@ -180,7 +180,7 @@ session() {
   for f in o0 o1; do open_shot $f; done
   python3 /tmp/px.py overflow
 
-  bricks /tmp/f.xlsx >>/tmp/app.log 2>&1 & sleep 6
+  brick /tmp/f.xlsx >>/tmp/app.log 2>&1 & sleep 6
   echo "== 4 formats"
   for cell in B8 B9 B10 B13; do
     keys -M ctrl g -m ctrl -s 300 "Styles!$cell" -s 300 -k Return; sleep 0.5; shown
@@ -188,10 +188,10 @@ session() {
   echo "== 3 colours"
   keys -M ctrl g -m ctrl -s 300 "Styles!J30" -s 300 -k Return; sleep 1; shot styles
   python3 /tmp/px.py /shots/styles.png FFFF00 C4FEBB 127A02 E9706D 305496 C00000 0070C0 FFFFFF
-  pkill -x bricks
+  pkill -x brick
   # 5: merged cells, on a fresh copy of the fixture.
   cp /fixture.xlsx /tmp/f.xlsx
-  bricks /tmp/f.xlsx >>/tmp/app.log 2>&1 & sleep 6
+  brick /tmp/f.xlsx >>/tmp/app.log 2>&1 & sleep 6
   echo "== 5 merges"
   go() { keys -M ctrl g -m ctrl -s 300 "$1" -s 300 -k Return; sleep 0.5; }
   go Styles!A1; keys -k Right; sleep 0.5; shown right
@@ -200,17 +200,17 @@ session() {
   python3 /tmp/px.py centre
   go Styles!A1; keys -M ctrl -k KP_Add -m ctrl; sleep 2
   go Styles!A2; keys -k Right; sleep 0.5; shown inserted
-  pkill -x bricks; sleep 1
+  pkill -x brick; sleep 1
   echo "== 6 across"
   for f in across0 across1; do
-    cp /tmp/$f.xlsx /tmp/a.xlsx; bricks /tmp/a.xlsx >>/tmp/app.log 2>&1 & sleep 5
-    shot $f; pkill -x bricks; sleep 1
+    cp /tmp/$f.xlsx /tmp/a.xlsx; brick /tmp/a.xlsx >>/tmp/app.log 2>&1 & sleep 5
+    shot $f; pkill -x brick; sleep 1
   done
   python3 /tmp/px.py across
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
-echo "== app log"; grep "^bricks:" /tmp/app.log | head -20
+echo "== app log"; grep "^brick:" /tmp/app.log | head -20
 ' 2>&1) || true
 [ -n "${VERBOSE:-}" ] && sed 's/^/  /' <<<"$out"
 section() { awk -v s="== $1" '/^== /{on=($0 ~ "^" s)} on' <<<"$out"; }

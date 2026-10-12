@@ -1,17 +1,17 @@
 # Cronkite
 
-A Linux-native office suite written in Rust: Bricks, Slate, and Frame. One repository, one Cargo workspace, three independently runnable applications. Install instructions: <https://cronkite.cc>.
+A Linux-native office suite written in Rust: Brick, Slate, and Frame. One repository, one Cargo workspace, three independently runnable applications. Install instructions: <https://cronkite.cc>.
 
 ## Applications
 
-### Bricks
+### Brick
 
-A fast CSV editor evolving toward a general spreadsheet application (`apps/bricks`, command `bricks`).
+A fast CSV editor evolving toward a general spreadsheet application (`apps/brick`, command `brick`).
 
 - Initial product promise: open large CSV files faster and more smoothly than LibreOffice.
 - Long-term goal: become a serious Linux-native spreadsheet alternative.
 
-Bricks is the most advanced of the three: it ships today (GTK 4), opens ~1 GB CSV files and `.xlsx` workbooks, and has formulas and cell styles. Install, usage, and its own layout: [`apps/bricks/README.md`](apps/bricks/README.md).
+Brick is the most advanced of the three: it ships today (GTK 4), opens ~1 GB CSV files and `.xlsx` workbooks, and has formulas and cell styles. Install, usage, and its own layout: [`apps/brick/README.md`](apps/brick/README.md).
 
 ### Slate
 
@@ -24,7 +24,7 @@ A lightweight Linux-native presentation application (`apps/frame`, command `fram
 ## Layout
 
 ```
-apps/bricks/          Bricks: the app, its own crates (apps/bricks/crates/), and its docs
+apps/brick/           Brick: the app, its own crates (apps/brick/crates/), and its docs
 apps/slate/           Slate
 apps/frame/           Frame
 crates/suite-core     app-independent primitives (AppKind)
@@ -34,9 +34,9 @@ crates/suite-file     format-independent file infrastructure
 docs/architecture/    how the suite is put together
 docs/adr/             suite-wide architecture decisions
 docs/specs/           one product spec per app
-BACKLOG.md            Bricks' work queue, read by scripts/backlog.py
-scripts/, packaging/  tooling and packaging (desktop entries and icons for Bricks, Slate, and Frame)
-sites/bricks/         Bricks' download page and installer (bricks.cronkite.cc)
+BACKLOG.md            Brick's work queue, read by scripts/backlog.py
+scripts/, packaging/  tooling and packaging (desktop entries and icons for Brick, Slate, and Frame)
+sites/brick/          Brick's download page and installer (brick.cronkite.cc)
 sites/slate/          Slate's download page and installer (slate.cronkite.cc)
 sites/frame/          Frame's download page and installer (frame.cronkite.cc)
 sites/cronkite/       the suite's install page (cronkite.cc)
@@ -58,7 +58,7 @@ cargo fmt --all
 Run one application:
 
 ```sh
-cargo run -p bricks
+cargo run -p brick
 cargo run -p slate
 cargo run -p frame
 ```

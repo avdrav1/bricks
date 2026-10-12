@@ -1,12 +1,12 @@
 # CLAUDE.md
 
-Cronkite: a Linux-native office suite in Rust: one Cargo workspace, three apps. Repo: `github.com/avdrav1/cronkite`; web pages: `sites/<name>/` (cronkite.cc, bricks.cronkite.cc, slate.cronkite.cc, frame.cronkite.cc). Suite architecture: `docs/architecture/overview.md`; suite ADRs: `docs/adr/`.
+Cronkite: a Linux-native office suite in Rust: one Cargo workspace, three apps. Repo: `github.com/avdrav1/cronkite`; web pages: `sites/<name>/` (cronkite.cc, brick.cronkite.cc, slate.cronkite.cc, frame.cronkite.cc). Suite architecture: `docs/architecture/overview.md`; suite ADRs: `docs/adr/`.
 
-- **Bricks** (`apps/bricks`, command `bricks`): a fast, lightweight spreadsheet. V0.1 is the best large-CSV editor on Linux; Excel compatibility comes later. Product spec: `apps/bricks/docs/SPEC.md`. Work queue: `BACKLOG.md`.
+- **Brick** (`apps/brick`, command `brick`): a fast, lightweight spreadsheet. V0.1 is the best large-CSV editor on Linux; Excel compatibility comes later. Product spec: `apps/brick/docs/SPEC.md`. Work queue: `BACKLOG.md`.
 - **Slate** (`apps/slate`, command `slate`): pageless word processor for .txt, .md, and .docx: one endless column, never paginated, drawn by its own Pango flow. Spec: `docs/specs/slate.md`; design: `docs/adr/0003-slate-document-model.md`, `docs/adr/0005-slate-is-pageless.md`, `docs/adr/0007-slate-editing-engine.md`. SL0 builds a read-only viewer.
 - **Frame** (`apps/frame`, command `frame`): presentation app for .pptx, easier to use than PowerPoint: direct editing with one inspector, plus an outline view. Spec: `docs/specs/frame.md`; design: `docs/adr/0004-frame-presentation-model.md`, `docs/adr/0006-frame-editor.md`. FR0 builds a viewer with a slideshow.
 
-Everything below about stories, invariants, crates, benchmarks, and ADRs is Bricks' unless it says otherwise.
+Everything below about stories, invariants, crates, benchmarks, and ADRs is Brick's unless it says otherwise.
 
 ## How we work
 
@@ -24,7 +24,7 @@ Everything below about stories, invariants, crates, benchmarks, and ADRs is Bric
 5. **Every mutation is an undoable command** that stores the operation, not a snapshot.
 6. **Saving is atomic:** temp file in the same directory, verify, fsync, rename. A crash never corrupts the original.
 7. **Filters never drop rows on save.** Sorting changes row order; filtering changes only the view.
-8. **Non-goals stay out:** charts, pivots, macros, scripting, plugins, collaboration. Formulas, multiple sheets, XLSX (ADRs 0006-0008), and cell styles (ADRs 0009-0010) are in scope from M5. Bricks keeps the charts, pivots, and macros it can't edit when it saves.
+8. **Non-goals stay out:** charts, pivots, macros, scripting, plugins, collaboration. Formulas, multiple sheets, XLSX (ADRs 0006-0008), and cell styles (ADRs 0009-0010) are in scope from M5. Brick keeps the charts, pivots, and macros it can't edit when it saves.
 
 ## Suite rules
 
@@ -43,7 +43,7 @@ Everything below about stories, invariants, crates, benchmarks, and ADRs is Bric
 | `suite-platform` | OS integration (Linux) |
 | `suite-file` | format-independent file infrastructure (document names, atomic save) |
 
-Bricks' crates, in `apps/bricks/crates/`:
+Brick's crates, in `apps/brick/crates/`:
 
 | Crate | Owns |
 | --- | --- |
@@ -55,7 +55,7 @@ Bricks' crates, in `apps/bricks/crates/`:
 | `commands` | `Command` trait, undo/redo |
 | `file-format` | CSV save (atomic through suite-file) |
 | `jobs` | background jobs: shared pool, cancel tokens, results to the UI loop (ADR 0005) |
-| `bricks` (`apps/bricks`) | windows, menus, dialogs, OS integration (toolkit set by DEC-1) |
+| `brick` (`apps/brick`) | windows, menus, dialogs, OS integration (toolkit set by DEC-1) |
 
 Slate's crates, in `apps/slate/crates/`:
 
@@ -82,7 +82,7 @@ Frame's crates, in `apps/frame/crates/`:
 cargo fmt --all
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace
-cargo run -p bricks                      # or -p slate, -p frame
+cargo run -p brick                       # or -p slate, -p frame
 cargo test --release --workspace -- --ignored  # perf acceptance tests (timing asserted in release only)
 python3 scripts/gen_corpus.py            # builds corpus/ (gitignored)
 python3 scripts/fetch_delimiter_sample.py  # 50 real-world files into corpus/realworld/ (ENG-4 test)
@@ -100,14 +100,14 @@ python3 scripts/lo_pptx.py fixture|dump|layouts FILE  # LibreOffice fixture deck
 python3 scripts/blank_deck.py           # Frame's built-in blank deck: apps/frame/crates/pptx/data/blank.pptx (FRAME-14)
 scripts/check_frame.sh [BINARY]          # Frame in a container: decks, drawing, Ctrl+O, drop, alerts, slideshow, editing, slides, save, shapes, inspector, insert, outline, new deck, with undo; the reference task counted against PowerPoint, read back by LibreOffice; the installer and a .pptx double-click (FRAME-4 to FRAME-15)
 python3 -m unittest discover -s scripts  # script tests (corpus generator, backlog helper)
-cargo bench                              # prints the apps/bricks/docs/BENCHMARKS.md table (needs corpus/)
-python3 scripts/backlog.py next [bricks|slate|frame]|status   # backlog helper; one milestone chain per app
+cargo bench                              # prints the apps/brick/docs/BENCHMARKS.md table (needs corpus/)
+python3 scripts/backlog.py next [brick|slate|frame]|status   # backlog helper; one milestone chain per app
 ```
 
 ## Performance
 
-Targets live in `apps/bricks/docs/BENCHMARKS.md` and assume the reference box listed there. Report measured numbers in every perf-related commit. A change that regresses a benchmark more than 10% needs a note in BACKLOG.md.
+Targets live in `apps/brick/docs/BENCHMARKS.md` and assume the reference box listed there. Report measured numbers in every perf-related commit. A change that regresses a benchmark more than 10% needs a note in BACKLOG.md.
 
 ## Decisions
 
-Bricks' architecture decisions go in `apps/bricks/docs/decisions/NNNN-title.md` using `0000-template.md`; suite-wide ones in `docs/adr/`. Read the relevant ADR before touching that area. Spikes live in `spikes/<story-id>/` and are throwaway.
+Brick's architecture decisions go in `apps/brick/docs/decisions/NNNN-title.md` using `0000-template.md`; suite-wide ones in `docs/adr/`. Read the relevant ADR before touching that area. Spikes live in `spikes/<story-id>/` and are throwaway.

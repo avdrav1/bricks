@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     # Applications
-    "apps/bricks",
+    "apps/brick",
     "apps/slate",
     "apps/frame",
     # Shared suite infrastructure
@@ -10,15 +10,15 @@ members = [
     "crates/suite-ui",
     "crates/suite-platform",
     "crates/suite-file",
-    # Bricks-only crates
-    "apps/bricks/crates/csv-engine",
-    "apps/bricks/crates/formula",
-    "apps/bricks/crates/data-model",
-    "apps/bricks/crates/grid",
-    "apps/bricks/crates/commands",
-    "apps/bricks/crates/file-format",
-    "apps/bricks/crates/jobs",
-    "apps/bricks/crates/xlsx",
+    # Brick-only crates
+    "apps/brick/crates/csv-engine",
+    "apps/brick/crates/formula",
+    "apps/brick/crates/data-model",
+    "apps/brick/crates/grid",
+    "apps/brick/crates/commands",
+    "apps/brick/crates/file-format",
+    "apps/brick/crates/jobs",
+    "apps/brick/crates/xlsx",
     # Slate-only crates
     "apps/slate/crates/document-model",
     "apps/slate/crates/docx",
@@ -30,7 +30,7 @@ members = [
     "apps/frame/crates/deck-edit",
 ]
 
-# `version` is Bricks' release version (scripts/ship.sh bumps it); Bricks and its crates
+# `version` is Brick's release version (scripts/ship.sh bumps it); Brick and its crates
 # inherit it. Slate, Frame, and the suite-* crates set their own.
 [workspace.package]
 version = "0.2.1"
@@ -45,15 +45,15 @@ suite-core = { path = "crates/suite-core" }
 suite-ui = { path = "crates/suite-ui" }
 suite-platform = { path = "crates/suite-platform" }
 suite-file = { path = "crates/suite-file" }
-# Bricks crates
-csv-engine = { path = "apps/bricks/crates/csv-engine" }
-data-model = { path = "apps/bricks/crates/data-model" }
-formula = { path = "apps/bricks/crates/formula" }
-grid = { path = "apps/bricks/crates/grid" }
-commands = { path = "apps/bricks/crates/commands" }
-file-format = { path = "apps/bricks/crates/file-format" }
-jobs = { path = "apps/bricks/crates/jobs" }
-xlsx = { path = "apps/bricks/crates/xlsx" }
+# Brick crates
+csv-engine = { path = "apps/brick/crates/csv-engine" }
+data-model = { path = "apps/brick/crates/data-model" }
+formula = { path = "apps/brick/crates/formula" }
+grid = { path = "apps/brick/crates/grid" }
+commands = { path = "apps/brick/crates/commands" }
+file-format = { path = "apps/brick/crates/file-format" }
+jobs = { path = "apps/brick/crates/jobs" }
+xlsx = { path = "apps/brick/crates/xlsx" }
 # Slate crates
 document-model = { path = "apps/slate/crates/document-model" }
 docx = { path = "apps/slate/crates/docx" }

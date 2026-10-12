@@ -46,7 +46,7 @@ def source(path):
         win.set_child(area)
         win.present()
 
-    app = Gtk.Application(application_id="dev.bricks.DragSource", flags=Gio.ApplicationFlags.NON_UNIQUE)
+    app = Gtk.Application(application_id="dev.brick.DragSource", flags=Gio.ApplicationFlags.NON_UNIQUE)
     app.connect("activate", activate)
     app.run([])
 

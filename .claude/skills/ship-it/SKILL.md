@@ -1,6 +1,6 @@
 ---
 name: ship-it
-description: Cut a release of a Cronkite app (Bricks, the spreadsheet, by default; or Slate, the word processor) and deploy it to Cloudflare: preflight checks, version bump, release build, tarball upload to R2, download page to Cloudflare Pages, git tag. Use whenever the user says "ship it", "release", "deploy", "cut a build", "publish a version", "push to Cloudflare", or asks to put a new build online, even if they don't name Cloudflare.
+description: Cut a release of a Cronkite app (Brick, the spreadsheet, by default; or Slate, the word processor) and deploy it to Cloudflare: preflight checks, version bump, release build, tarball upload to R2, download page to Cloudflare Pages, git tag. Use whenever the user says "ship it", "release", "deploy", "cut a build", "publish a version", "push to Cloudflare", or asks to put a new build online, even if they don't name Cloudflare.
 ---
 
 # ship-it
@@ -8,11 +8,11 @@ description: Cut a release of a Cronkite app (Bricks, the spreadsheet, by defaul
 The app is a native Linux binary, so Cloudflare hosts the release, not the app itself:
 
 - **R2** stores the tarball, its `.sha256`, and `latest.json` (version, URL, checksum).
-- **Pages** serves the app's download page (`sites/bricks/` at bricks.cronkite.cc, `sites/slate/` at slate.cronkite.cc), which reads `latest.json`.
+- **Pages** serves the app's download page (`sites/brick/` at brick.cronkite.cc, `sites/slate/` at slate.cronkite.cc), which reads `latest.json`.
 
 Every step runs through `scripts/ship.sh`. Anything that leaves the machine (upload, site deploy, push) needs an explicit yes from the user in chat first, every time.
 
-Which app: ask if the user didn't say. For Slate, put `slate` before every command (`scripts/ship.sh slate build`); without it, the commands act on Bricks. Slate's version is `apps/slate/Cargo.toml`'s (Bricks' is the workspace's), its release lives under `slate/` in the bucket, its Pages project is `CF_SLATE_PAGES_PROJECT` (created on the first `site` deploy if missing), and its tags are `slate-vX.Y.Z`; `vX.Y.Z` below means that tag. Its CHANGELOG heading is `## Slate vX.Y.Z (YYYY-MM-DD)`.
+Which app: ask if the user didn't say. For Slate, put `slate` before every command (`scripts/ship.sh slate build`); without it, the commands act on Brick. Slate's version is `apps/slate/Cargo.toml`'s (Brick's is the workspace's), its release lives under `slate/` in the bucket, its Pages project is `CF_SLATE_PAGES_PROJECT` (created on the first `site` deploy if missing), and its tags are `slate-vX.Y.Z`; `vX.Y.Z` below means that tag. Its CHANGELOG heading is `## Slate vX.Y.Z (YYYY-MM-DD)`.
 
 ## 0. One-time setup
 
@@ -68,7 +68,7 @@ Show the user what will happen in this shape and wait for a clear yes:
 
 ```
 Ready to ship vX.Y.Z
-- Upload bricks-X.Y.Z-x86_64-linux.tar.gz (N MB) + checksum + latest.json to R2 bucket <bucket>
+- Upload brick-X.Y.Z-x86_64-linux.tar.gz (N MB) + checksum + latest.json to R2 bucket <bucket>
 - Deploy download page to Pages project <project>
 - Tag vX.Y.Z locally
 Proceed?

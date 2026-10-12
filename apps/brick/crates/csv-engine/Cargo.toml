@@ -1,0 +1,22 @@
+[package]
+name = "csv-engine"
+description = "Parsing, delimiter detection, encoding, row indexing, and CSV writing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+encoding_rs = "0.8.35"
+libc = "0.2.190"
+memchr = "2.8.3"
+memmap2 = "0.9.11"
+parking_lot = "0.12.5"
+
+
+[lints]
+workspace = true
+
+[lib]
+# `cargo bench` runs only apps/brick/benches/corpus.rs (BENCH-1).
+bench = false

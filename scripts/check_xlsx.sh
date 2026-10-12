@@ -3,12 +3,12 @@
 # as .xlsx by patching the file (its chart and comments stay), and a crash with edits on
 # two sheets restores both.
 #
-#   scripts/check_xlsx.sh [BINARY]   (default target/release/bricks)
+#   scripts/check_xlsx.sh [BINARY]   (default target/release/brick)
 #
 # In an Arch container under headless sway; what the app shows is read through the
 # accessibility tree (scripts/a11y_helpers.py): the tab buttons, and the grid's
 # description of the cursor cell (`A1: 4`). /tmp/f.xlsx is a copy of the LibreOffice
-# fixture (apps/bricks/crates/xlsx/tests/data/fixture.xlsx):
+# fixture (apps/brick/crates/xlsx/tests/data/fixture.xlsx):
 #   1. the tabs Data, Q1 Sales, and Summary show;
 #   2. Ctrl+Page Down shows Q1 Sales: its A1 is `=Data!B2*2`;
 #   3. 42 typed in Q1 Sales!A1, Ctrl+S: no question, the saved sheet2.xml holds <v>42</v>,
@@ -16,21 +16,21 @@
 #   4. an edit on two sheets, 6.5 s for the journal, kill -9, relaunch, Restore: both
 #      edits are back;
 #   7. (FML-9) Summary!A3, =BAHTTEXT(1), shows the file's result, and the formula bar
-#      says Bricks doesn't compute BAHTTEXT yet.
+#      says Brick doesn't compute BAHTTEXT yet.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-bin=$(realpath "${1:-target/release/bricks}")
-[ -x "$bin" ] || { echo "no binary at $bin (cargo build --release -p bricks)"; exit 1; }
-fixture=$(realpath apps/bricks/crates/xlsx/tests/data/fixture.xlsx)
+bin=$(realpath "${1:-target/release/brick}")
+[ -x "$bin" ] || { echo "no binary at $bin (cargo build --release -p brick)"; exit 1; }
+fixture=$(realpath apps/brick/crates/xlsx/tests/data/fixture.xlsx)
 # Data!B2, doubled, is what Q1 Sales!A1 shows.
-b2=$(awk -F'\t' '/^== /{s=$0} s=="== Data" && $1=="B2"{print $3}' apps/bricks/crates/xlsx/tests/data/fixture-libreoffice.txt)
+b2=$(awk -F'\t' '/^== /{s=$0} s=="== Data" && $1=="B2"{print $3}' apps/brick/crates/xlsx/tests/data/fixture-libreoffice.txt)
 want_a1=$(python3 -c "v=float('$b2')*2; print(int(v) if v==int(v) else v)")
 
 shots=()
 if [ -n "${SHOTS:-}" ]; then mkdir -p "$SHOTS"; shots=(-v "$(realpath "$SHOTS"):/shots"); fi
 # Arch's sway binary carries cap_sys_nice: exec fails without it in the container's set.
-out=$(docker run --rm --cap-add SYS_NICE -v "$bin:/usr/local/bin/bricks:ro" \
+out=$(docker run --rm --cap-add SYS_NICE -v "$bin:/usr/local/bin/brick:ro" \
   -v "$fixture:/fixture.xlsx:ro" -v "$PWD/scripts/a11y_helpers.py:/a11y.py:ro" "${shots[@]}" \
   archlinux:latest bash -c '
 set -uo pipefail
@@ -49,7 +49,7 @@ session() {
   keys() { wtype -s 400 "$@" -s 400; }
   shown() { python3 /a11y.py text | sed "s/^/${1:-shown}: /"; }
 
-  bricks /tmp/f.xlsx >>/tmp/app.log 2>&1 & sleep 6
+  brick /tmp/f.xlsx >>/tmp/app.log 2>&1 & sleep 6
   echo "== 1 tabs"
   shot 1-tabs; shown
 
@@ -67,19 +67,19 @@ session() {
   keys -M ctrl -k Page_Up -m ctrl; keys first; keys -k Return; keys -k Up
   keys -M ctrl -k Page_Down -m ctrl; keys second; keys -k Return; keys -k Up
   sleep 6.5
-  pkill -9 -x bricks; sleep 1
-  bricks /tmp/f.xlsx >>/tmp/app.log 2>&1 & sleep 6
+  pkill -9 -x brick; sleep 1
+  brick /tmp/f.xlsx >>/tmp/app.log 2>&1 & sleep 6
   shot 4-asked; shown asked
   keys -k Return; sleep 2; shot 4-restored; shown restored
   keys -M ctrl -k Page_Up -m ctrl; shown other
 
   echo "== 7 cached"
   keys -M ctrl g -m ctrl -s 300 "Summary!A3" -s 300 -k Return; sleep 1; shot 7-cached; shown
-  pkill -x bricks
+  pkill -x brick
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
-echo "== app log"; grep "^bricks:" /tmp/app.log | head -20
+echo "== app log"; grep "^brick:" /tmp/app.log | head -20
 ' 2>&1) || true
 [ -n "${VERBOSE:-}" ] && sed 's/^/  /' <<<"$out"
 section() { awk -v s="== $1" '/^== /{on=($0 ~ "^" s)} on' <<<"$out"; }
@@ -98,8 +98,8 @@ check "3: so are the comments" "3 saved" "^kept: xl/comments1.xml$"
 check "4: a restore is offered after kill -9" "4 restored" "^asked: Restore unsaved edits\?$"
 check "4: the edit on the active sheet is back" "4 restored" "^restored: A1: second$"
 check "4: and the one on the other sheet" "4 restored" "^other: A1: first$"
-check "7: a function Bricks lacks shows the file's result" "7 cached" "^shown: A3: หนึ่งบาทถ้วน$"
-check "7: and the formula bar says so" "7 cached" "^shown: Result from the file: Bricks doesn.t compute BAHTTEXT yet$"
+check "7: a function Brick lacks shows the file's result" "7 cached" "^shown: A3: หนึ่งบาทถ้วน$"
+check "7: and the formula bar says so" "7 cached" "^shown: Result from the file: Brick doesn.t compute BAHTTEXT yet$"
 if [ $fail = 0 ]; then echo "XLSX OK"; else
   echo "XLSX CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

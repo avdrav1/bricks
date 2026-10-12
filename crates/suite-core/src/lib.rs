@@ -9,7 +9,7 @@ use std::fmt;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AppKind {
     /// Spreadsheet; today a fast CSV editor.
-    Bricks,
+    Brick,
     /// Word processor.
     Slate,
     /// Presentation app (working name).
@@ -18,12 +18,12 @@ pub enum AppKind {
 
 impl AppKind {
     /// Every application, in a stable order.
-    pub const ALL: [AppKind; 3] = [AppKind::Bricks, AppKind::Slate, AppKind::Frame];
+    pub const ALL: [AppKind; 3] = [AppKind::Brick, AppKind::Slate, AppKind::Frame];
 
     /// The name shown to people: window titles, menus, messages.
     pub fn display_name(self) -> &'static str {
         match self {
-            AppKind::Bricks => "Bricks",
+            AppKind::Brick => "Brick",
             AppKind::Slate => "Slate",
             AppKind::Frame => "Frame",
         }
@@ -43,7 +43,7 @@ mod tests {
     #[test]
     fn application_names_are_correct() {
         let names: Vec<_> = AppKind::ALL.iter().map(|a| a.display_name()).collect();
-        assert_eq!(names, ["Bricks", "Slate", "Frame"]);
+        assert_eq!(names, ["Brick", "Slate", "Frame"]);
         assert_eq!(AppKind::Frame.to_string(), "Frame");
     }
 }

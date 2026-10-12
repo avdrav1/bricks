@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # STYLE-6 acceptance: editing formatting.
 #
-#   scripts/check_format.sh [BINARY]   (default target/release/bricks)
+#   scripts/check_format.sh [BINARY]   (default target/release/brick)
 #
 # In an Arch container under headless sway, with real key presses (wtype); the format
 # bar's Bold toggle is read through the accessibility tree (scripts/a11y_helpers.py), the
@@ -19,13 +19,13 @@
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-bin=$(realpath "${1:-target/release/bricks}")
-[ -x "$bin" ] || { echo "no binary at $bin (cargo build --release -p bricks)"; exit 1; }
-fixture=$(realpath apps/bricks/crates/xlsx/tests/data/fixture.xlsx)
+bin=$(realpath "${1:-target/release/brick}")
+[ -x "$bin" ] || { echo "no binary at $bin (cargo build --release -p brick)"; exit 1; }
+fixture=$(realpath apps/brick/crates/xlsx/tests/data/fixture.xlsx)
 
 shots=()
 if [ -n "${SHOTS:-}" ]; then mkdir -p "$SHOTS"; shots=(-v "$(realpath "$SHOTS"):/shots"); fi
-out=$(docker run --rm --cap-add SYS_NICE -v "$bin:/usr/local/bin/bricks:ro" \
+out=$(docker run --rm --cap-add SYS_NICE -v "$bin:/usr/local/bin/brick:ro" \
   -v "$fixture:/fixture.xlsx:ro" -v "$PWD/scripts/a11y_helpers.py:/a11y.py:ro" "${shots[@]}" \
   archlinux:latest bash -c '
 set -uo pipefail
@@ -71,7 +71,7 @@ session() {
   bold() { echo "$1: $(python3 /a11y.py state Bold 2>&1)"; }
   shot() { grim /shots/$1.png 2>/dev/null || true; }
 
-  bricks /tmp/f.xlsx >>/tmp/app.log 2>&1 & sleep 6
+  brick /tmp/f.xlsx >>/tmp/app.log 2>&1 & sleep 6
   echo "== 2 undo and redo"
   go Data!A2; bold before
   keys -M ctrl b -m ctrl; sleep 1; bold after-ctrl-b; shot bold
@@ -91,28 +91,28 @@ session() {
   printf "elsewhere" | wl-copy; sleep 1
   keys -M ctrl v -m ctrl; sleep 1; bold d6-pasted
   echo "d6: $(python3 /a11y.py text | grep "^D6: ")"
-  pkill -x bricks; sleep 1
+  pkill -x brick; sleep 1
 
   echo "== 3 csv"
-  bricks /tmp/t.csv >>/tmp/app.log 2>&1 & sleep 3
+  brick /tmp/t.csv >>/tmp/app.log 2>&1 & sleep 3
   keys -M ctrl b -m ctrl; sleep 1; bold csv-bold
   keys -M ctrl s -m ctrl; sleep 2; shot save-as
   python3 /a11y.py text | grep -i "csv file" | sed "s/^/note: /"
   echo "csv unchanged: $(tr "\n" " " < /tmp/t.csv)"
-  pkill -x bricks; sleep 1
+  pkill -x brick; sleep 1
 
   echo "== 4 recovery"
-  bricks /tmp/r.csv >>/tmp/app.log 2>&1 & sleep 3
+  brick /tmp/r.csv >>/tmp/app.log 2>&1 & sleep 3
   keys -M ctrl b -m ctrl; sleep 1; bold before-crash
-  sleep 6.5; pkill -9 -x bricks; sleep 1
-  bricks /tmp/r.csv >>/tmp/app.log 2>&1 & sleep 4
+  sleep 6.5; pkill -9 -x brick; sleep 1
+  brick /tmp/r.csv >>/tmp/app.log 2>&1 & sleep 4
   keys -k Return; sleep 3
   bold restored
-  pkill -x bricks
+  pkill -x brick
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
-echo "== app log"; grep "^bricks:" /tmp/app.log | head -20
+echo "== app log"; grep "^brick:" /tmp/app.log | head -20
 ' 2>&1) || true
 [ -n "${VERBOSE:-}" ] && sed 's/^/  /' <<<"$out"
 section() { awk -v s="== $1" '/^== /{on=($0 ~ "^" s)} on' <<<"$out"; }

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Record how LibreOffice Calc shows values under Excel number format codes (STYLE-2).
 
-Reads apps/bricks/crates/formula/tests/data/formats.tsv (columns: code, value, excel, why) and writes
-apps/bricks/crates/formula/tests/data/formats-libreoffice.tsv (columns: code, value, text, color,
+Reads apps/brick/crates/formula/tests/data/formats.tsv (columns: code, value, excel, why) and writes
+apps/brick/crates/formula/tests/data/formats-libreoffice.tsv (columns: code, value, text, color,
 excel, why).
 
 - `value` is a number (set with setValue), an ISO date or date-time (setValue of its serial,
@@ -13,8 +13,8 @@ excel, why).
 - `color` is the colour LibreOffice's formatter picks for the value (queryColorForNumber /
   queryColorForString) as six hex digits, or empty for none.
 - Characters below U+0020 in `text` are written as `\\u{XX}`, and a backslash as `\\\\`.
-- `excel` (optional) is the text Excel shows where Bricks deliberately follows Excel instead
-  of LibreOffice, and `why` says why; the test checks Bricks against it and that
+- `excel` (optional) is the text Excel shows where Brick deliberately follows Excel instead
+  of LibreOffice, and `why` says why; the test checks Brick against it and that
   LibreOffice's recorded text really differs.
 
 Usage: python3 scripts/lo_formats.py               (re-record the fixture)
@@ -35,7 +35,7 @@ from com.sun.star.lang import Locale
 
 PORT = int(os.environ.get("LO_PORT", "2100"))
 ROOT = Path(__file__).resolve().parent.parent
-DATA = ROOT / "apps/bricks/crates/formula/tests/data"
+DATA = ROOT / "apps/brick/crates/formula/tests/data"
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?)?$")
 NO_COLOR = 0x123456  # a sentinel default no format code names
 

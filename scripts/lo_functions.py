@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """Record formula results from LibreOffice Calc (FML-2, FML-5..8).
 
-Reads apps/bricks/crates/formula/tests/data/cases.tsv (columns: group, formula, inputs, excel, why) and
-writes apps/bricks/crates/formula/tests/data/cases-libreoffice.tsv (columns: group, formula, inputs,
+Reads apps/brick/crates/formula/tests/data/cases.tsv (columns: group, formula, inputs, excel, why) and
+writes apps/brick/crates/formula/tests/data/cases-libreoffice.tsv (columns: group, formula, inputs,
 kind, result, excel, why).
 
-- `formula` is written as Bricks reads it (with `,` between arguments); this script turns
+- `formula` is written as Brick reads it (with `,` between arguments); this script turns
   it into LibreOffice's API grammar (`;` between arguments, `{1;2|3;4}` arrays).
 - `inputs` fills cells of a fresh sheet before the formula goes into G1: `A1=2;B1=abc`,
-  with `\\;` for a literal semicolon. Each value is entered the way Bricks reads a raw
+  with `\\;` for a literal semicolon. Each value is entered the way Brick reads a raw
   cell: the plain number grammar as a number, TRUE/FALSE as booleans, ISO dates as
   dates, `#N/A`-style errors as that error, anything else as text.
-- `excel` (optional) is `kind:result` where Bricks deliberately follows Excel instead of
-  LibreOffice, and `why` says why; the test checks Bricks against it and that
+- `excel` (optional) is `kind:result` where Brick deliberately follows Excel instead of
+  LibreOffice, and `why` says why; the test checks Brick against it and that
   LibreOffice's recorded result really differs.
 - `kind` is value, text, bool, or error; `result` is repr(float) for values (dates as
   serial numbers), the text for text and errors, TRUE/FALSE for bools.
@@ -33,7 +33,7 @@ import uno
 
 PORT = int(os.environ.get("LO_PORT", "2099"))  # set it to run several at once
 ROOT = Path(__file__).resolve().parent.parent
-DATA = ROOT / "apps/bricks/crates/formula/tests/data"
+DATA = ROOT / "apps/brick/crates/formula/tests/data"
 NUMBER = re.compile(r"^[+-]?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$")
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?)?$")
 ERRORS = {
@@ -47,7 +47,7 @@ ERRORS = {
 
 
 def api_grammar(formula):
-    """Bricks' `SUM(1,2)` / `{1,2;3,4}` as LibreOffice's `SUM(1;2)` / `{1;2|3;4}`."""
+    """Brick's `SUM(1,2)` / `{1,2;3,4}` as LibreOffice's `SUM(1;2)` / `{1;2|3;4}`."""
     out, i, depth = [], 0, 0
     while i < len(formula):
         c = formula[i]
