@@ -35,9 +35,10 @@ docs/architecture/    how the suite is put together
 docs/adr/             suite-wide architecture decisions
 docs/specs/           one product spec per app
 BACKLOG.md            Bricks' work queue, read by scripts/backlog.py
-scripts/, packaging/  tooling and packaging (desktop entries and icons for Bricks and Slate)
+scripts/, packaging/  tooling and packaging (desktop entries and icons for Bricks, Slate, and Frame)
 sites/bricks/         Bricks' download page and installer (bricks.cronkite.cc)
 sites/slate/          Slate's download page and installer (slate.cronkite.cc)
+sites/frame/          Frame's download page and installer (frame.cronkite.cc)
 sites/cronkite/       the suite's install page (cronkite.cc)
 ```
 

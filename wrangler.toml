@@ -1,5 +1,6 @@
 # Cloudflare Pages project for Bricks' download site. scripts/ship.sh deploys sites/bricks/
-# from dist/site. The suite page (sites/cronkite/) is its own project: scripts/ship.sh suite-site.
+# from dist/site. Slate's and Frame's pages are their own projects (scripts/ship.sh slate|frame
+# site), and so is the suite page, sites/cronkite/ (scripts/ship.sh suite-site).
 name = "spreadsheet"
 pages_build_output_dir = "dist/site"
 compatibility_date = "2026-10-01"
