@@ -112,6 +112,9 @@ fn main() -> glib::ExitCode {
         let open = gio::ActionEntry::builder("open")
             .activate(|app: &gtk::Application, _, _| choose_and_open(app))
             .build();
+        let new = gio::ActionEntry::builder("new")
+            .activate(|app: &gtk::Application, _, _| open_window(app, None, None))
+            .build();
         let close = gio::ActionEntry::builder("close")
             .activate(|app: &gtk::Application, _, _| {
                 if let Some(w) = app.active_window() {
@@ -140,7 +143,8 @@ fn main() -> glib::ExitCode {
                 }
             })
             .build();
-        app.add_action_entries([open, close, quit, text_width]);
+        app.add_action_entries([new, open, close, quit, text_width]);
+        app.set_accels_for_action("app.new", &["<Control>n"]);
         app.set_accels_for_action("app.open", &["<Control>o"]);
         app.set_accels_for_action("app.close", &["<Control>w"]);
         app.set_accels_for_action("app.quit", &["<Control>q"]);
@@ -154,7 +158,7 @@ fn main() -> glib::ExitCode {
     app.connect_activate(move |app| match files.take() {
         Some(files) if !files.is_empty() => {
             for f in files {
-                open_window(app, &f, bench);
+                open_window(app, Some(&f), bench);
             }
         }
         _ if app.windows().is_empty() => start_window(app),
@@ -177,13 +181,15 @@ fn window_for(path: &Path) -> Option<gtk::ApplicationWindow> {
     })
 }
 
-/// `window` shows the file at `path` now (Save As).
+/// `window` shows the file at `path` now (Save As, or a new document's first save).
 fn moved(window: &gtk::ApplicationWindow, path: &Path) {
     OPEN.with_borrow_mut(|open| {
-        for (p, w) in open.iter_mut() {
-            if w.upgrade().as_ref() == Some(window) {
-                *p = path.to_owned();
-            }
+        match open
+            .iter_mut()
+            .find(|(_, w)| w.upgrade().as_ref() == Some(window))
+        {
+            Some((p, _)) => *p = path.to_owned(),
+            None => open.push((path.to_owned(), window.downgrade())),
         }
     });
 }
@@ -196,6 +202,7 @@ fn header(title: &str) -> gtk::HeaderBar {
     open.update_property(&[gtk::accessible::Property::Label("Open")]);
     header.pack_start(&open);
     let file = gio::Menu::new();
+    file.append_item(&item("New", "app.new", "<Control>n"));
     file.append(Some("Open…"), Some("app.open"));
     file.append_item(&item("Save", "win.save", "<Control>s"));
     file.append_item(&item("Save As…", "win.save-as", "<Control><Shift>s"));
@@ -326,13 +333,19 @@ fn start_window(app: &gtk::Application) {
     let heading = gtk::Label::new(Some("Open a document"));
     heading.add_css_class("title-2");
     let hint = gtk::Label::new(Some(
-        "Slate shows .txt, .md, and .docx files. Drop one here or choose Open.",
+        "Slate shows .txt, .md, and .docx files. Drop one here, choose Open, or start a new \
+         one.",
     ));
     hint.add_css_class("dim-label");
     let open = gtk::Button::with_label("Open…");
     open.set_action_name(Some("app.open"));
-    open.set_halign(gtk::Align::Center);
     open.add_css_class("suggested-action");
+    let new = gtk::Button::with_label("New Document");
+    new.set_action_name(Some("app.new"));
+    let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    buttons.set_halign(gtk::Align::Center);
+    buttons.append(&open);
+    buttons.append(&new);
     let content = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .spacing(12)
@@ -341,7 +354,7 @@ fn start_window(app: &gtk::Application) {
         .build();
     content.append(&heading);
     content.append(&hint);
-    content.append(&open);
+    content.append(&buttons);
     window.set_child(Some(&content));
     accept_drops(app, &window);
     window.present();
@@ -398,7 +411,7 @@ fn choose_and_open(app: &gtk::Application) {
 
 fn open_file(app: &gtk::Application, file: &gio::File, parent: Option<&gtk::Window>) {
     match file.path() {
-        Some(path) => open_window(app, &path, None),
+        Some(path) => open_window(app, Some(&path), None),
         None => alert(
             parent,
             &format!("Cannot open {}", file.uri()),
@@ -444,14 +457,18 @@ fn alert(parent: Option<&gtk::Window>, message: &str, detail: &str) {
 }
 
 /// Show `path` in a window: its own if it is open, else a new one that says "Opening…"
-/// while the file is read in the background. `bench`: run that benchmark on it.
-fn open_window(app: &gtk::Application, path: &Path, bench: Option<bench::Mode>) {
-    let path = canonical(path);
-    if let Some(window) = window_for(&path) {
+/// while the file is read in the background; with no path, a new window with a new
+/// document, titled Untitled (SLATE-18). `bench`: run that benchmark on it.
+fn open_window(app: &gtk::Application, path: Option<&Path>, bench: Option<bench::Mode>) {
+    let path = path.map(canonical);
+    if let Some(window) = path.as_deref().and_then(window_for) {
         window.present();
         return;
     }
-    let name = suite_file::document_name(&path).into_owned();
+    let name = path.as_deref().map_or_else(
+        || saving::UNTITLED.to_owned(),
+        |p| suite_file::document_name(p).into_owned(),
+    );
     let (width, height) = if bench.is_some() {
         bench::WINDOW
     } else {
@@ -491,25 +508,30 @@ fn open_window(app: &gtk::Application, path: &Path, bench: Option<bench::Mode>) 
     content.append(&status);
     window.set_child(Some(&content));
     accept_drops(app, &window);
-    OPEN.with_borrow_mut(|open| open.push((path.clone(), window.downgrade())));
+    if let Some(path) = &path {
+        OPEN.with_borrow_mut(|open| open.push((path.clone(), window.downgrade())));
+    }
     window.present();
 
     let reading = gio::spawn_blocking({
         let path = path.clone();
-        move || open::read(&path)
+        move || match path {
+            Some(path) => open::read(&path),
+            None => open::blank(),
+        }
     });
     let app = app.clone();
     glib::spawn_future_local(async move {
         let reason = match reading.await {
             Ok(Ok(opened)) => {
-                show(&app, &stack, &status, &path, opened, bench);
+                show(&app, &stack, &status, path.as_deref(), &name, opened, bench);
                 close_start_window(&app);
                 return;
             }
             Ok(Err(e)) => e.to_string(),
             Err(_) => "Reading it failed unexpectedly.".to_owned(),
         };
-        tracing::warn!("cannot open {}: {reason}", path.display());
+        tracing::warn!("cannot open {name}: {reason}");
         if bench.is_some() {
             std::process::exit(1);
         }
@@ -593,16 +615,17 @@ fn text_width(app: &gtk::Application) -> TextWidth {
         .unwrap_or_default()
 }
 
-/// Replace "Opening…" with the document of `path`. `bench`: run that benchmark on it.
+/// Replace "Opening…" with the document of `path` (`None`: a new document), shown as
+/// `name`. `bench`: run that benchmark on it.
 fn show(
     app: &gtk::Application,
     stack: &gtk::Stack,
     status: &gtk::Label,
-    path: &Path,
+    path: Option<&Path>,
+    name: &str,
     opened: open::Opened,
     bench: Option<bench::Mode>,
 ) {
-    let name = suite_file::document_name(path);
     let words = opened.words;
     status.set_text(&format!(
         "{} · {} word{}",
@@ -617,7 +640,7 @@ fn show(
     };
     let page = view::Page::new(opened.doc, opened.textures, setting);
     PAGES.with_borrow_mut(|pages| pages.push(page.downgrade()));
-    page.update_property(&[gtk::accessible::Property::Label(&name)]);
+    page.update_property(&[gtk::accessible::Property::Label(name)]);
     let scrolled = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .child(&page)
@@ -626,7 +649,13 @@ fn show(
     stack.set_visible_child_name("document");
     if let Some(window) = stack.root().and_downcast::<gtk::ApplicationWindow>() {
         add_page_actions(&window, &page);
-        saving::Saver::attach(&window, &page, status, path.to_owned(), opened.target);
+        saving::Saver::attach(
+            &window,
+            &page,
+            status,
+            path.map(Path::to_owned),
+            opened.target,
+        );
     }
     page.grab_focus();
     if let Some(mode) = bench {

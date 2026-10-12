@@ -90,6 +90,12 @@
 #      and Ctrl+S keeps every zip part but word/document.xml byte for byte, in the same
 #      order, and its document.xml holds "The end. Edited"; reopened, the page shows it; a
 #      relaunch after a kill leaves one package copy in the cache, the running one's.
+#  22. a new document: `slate` alone shows the start window; Ctrl+N opens an Untitled
+#      window in its place; a heading and a line typed mark it "• Untitled"; Ctrl+S asks
+#      where, in the Documents folder, suggesting Untitled.docx; saved as plans.docx it is
+#      a Word document with the heading in Heading 1 and the line, titled plans.docx;
+#      Ctrl+N in a document window opens another Untitled window; reopened, plans.docx
+#      shows the line.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -459,10 +465,11 @@ session() {
       echo "$1 $t.md: $(python3 /tmp/col.py /shots/$1-$t.png)"
     done
   }
-  # F10 in col-a, Text Width, the Nth width (1 Narrow, 2 Medium, 3 Wide, 4 Full).
+  # F10 in col-a, Text Width (past New, Open, Save, Save As, Close Window), the Nth width
+  # (1 Narrow, 2 Medium, 3 Wide, 4 Full).
   text_width() {
     swaymsg "[title=col-a] focus" >/dev/null; sleep 1
-    keys -k F10; keys -k Down; keys -k Down; keys -k Down; keys -k Down; keys -k Return
+    keys -k F10; for i in 1 2 3 4 5; do keys -k Down; done; keys -k Return
     for i in $(seq $1); do keys -k Down; done
     keys -k Return; sleep 1
   }
@@ -685,6 +692,23 @@ plain two" & sleep 1
   slate /tmp/save/f.docx >>/tmp/app.log 2>&1 & sleep 4
   a11y page f.docx | grep -c "The end. Edited$" | sed "s/^/reopened with the edit: /"
   echo "package copies: $(ls ${XDG_CACHE_HOME:-$HOME/.cache}/slate | grep -c "^original-")"; quit
+  echo "== 22 new document"
+  mkdir -p /tmp/docs; echo "XDG_DOCUMENTS_DIR=\"/tmp/docs\"" > $XDG_CONFIG_HOME/user-dirs.dirs
+  slate >>/tmp/app.log 2>&1 & sleep 3
+  titles | sed "s/^/start-/"
+  keys -M ctrl n -m ctrl; sleep 3; titles | sed "s/^/new-/"
+  keys -M ctrl 1 -m ctrl; keys Plans; keys -k Return; keys "First line"; sleep 1
+  titles | sed "s/^/typed-/"
+  keys -M ctrl s -m ctrl; sleep 3; shot new-save-as
+  keys -M ctrl a -m ctrl; keys plans.docx; keys -k Return; sleep 1; saved
+  titles | sed "s/^/new-saved-/"
+  echo "docs: $(ls /tmp/docs | tr "\n" " ")"
+  python3 -c "import zipfile; x = zipfile.ZipFile(\"/tmp/docs/plans.docx\").read(\"word/document.xml\").decode()
+print(\"heading 1:\", \"w:val=\\\"Heading1\\\"\" in x and \"Plans\" in x)
+print(\"line:\", \"First line\" in x)"
+  keys -M ctrl n -m ctrl; sleep 3; titles | sed "s/^/another-/"; quit
+  slate /tmp/docs/plans.docx >>/tmp/app.log 2>&1 & sleep 4
+  a11y page plans.docx | grep -c "First line$" | sed "s/^/reopened plans: /"; quit
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -834,6 +858,15 @@ check "21: only word/document.xml changes" "21 docx save" "^changed parts: word/
 check "21: document.xml holds the edit" "21 docx save" "^document.xml has the edit: 1$"
 check "21: reopened, the page shows the edit" "21 docx save" "^reopened with the edit: 1$"
 check "21: copies left by killed processes are swept" "21 docx save" "^package copies: 1$"
+check "22: slate alone shows the start window" "22 new document" "^start-titles: Slate,$"
+check "22: Ctrl+N opens an Untitled document in its place" "22 new document" "^new-titles: Untitled,$"
+check "22: typing marks it" "22 new document" "^typed-titles: • Untitled,$"
+check "22: Ctrl+S asks where and saves it there" "22 new document" "^new-saved-titles: plans.docx,$"
+check "22: in the Documents folder" "22 new document" "^docs: plans.docx $"
+check "22: a Word document with the heading" "22 new document" "^heading 1: True$"
+check "22: and the line" "22 new document" "^line: True$"
+check "22: Ctrl+N in a document opens another" "22 new document" "^another-titles: Untitled,plans.docx,$"
+check "22: reopened, it shows the line" "22 new document" "^reopened plans: 1$"
 if [ $fail = 0 ]; then echo "SLATE OK"; else
   echo "SLATE CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

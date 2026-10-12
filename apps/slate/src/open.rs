@@ -83,7 +83,7 @@ fn kind(path: &Path) -> Result<Kind, OpenError> {
 /// decode its pictures. A Word document is read from a private copy of its package, which
 /// its saves patch.
 pub fn read(path: &Path) -> Result<Opened, OpenError> {
-    let (mut doc, mut source) = match kind(path)? {
+    let (doc, source) = match kind(path)? {
         Kind::Text => (
             document_model::read_text(&std::fs::read(path)?),
             Source::None,
@@ -111,6 +111,21 @@ pub fn read(path: &Path) -> Result<Opened, OpenError> {
             (doc, Source::Docx(source, original))
         }
     };
+    Ok(ready(doc, source))
+}
+
+/// A new document (SLATE-18): Slate's built-in blank Word document, read from a private
+/// copy as a Word document is, so its first save patches that package.
+pub fn blank() -> Result<Opened, OpenError> {
+    let original = Original::of_bytes(docx::blank())?;
+    let (doc, source) =
+        docx::read_source(original.path()).map_err(|e| OpenError(sentence(&e.to_string())))?;
+    Ok(ready(doc, Source::Docx(source, original)))
+}
+
+/// A document read, ready to show: runs merged for editing, the source describing the
+/// blocks as shown, its pictures decoded.
+fn ready(mut doc: Document, mut source: Source) -> Opened {
     document_edit::normalize(&mut doc);
     // The source describes the blocks as shown: pictures loaded, runs merged.
     match &mut source {
@@ -130,12 +145,12 @@ pub fn read(path: &Path) -> Result<Opened, OpenError> {
     let mut textures = Textures::new();
     decode_pictures(&doc.blocks, &mut textures);
     let words = doc.word_count();
-    Ok(Opened {
+    Opened {
         doc,
         textures,
         words,
         target,
-    })
+    }
 }
 
 /// Decode every embedded PNG, JPEG, and GIF once; a picture that doesn't decode shows as
