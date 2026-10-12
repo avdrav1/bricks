@@ -240,6 +240,9 @@ pub struct Shape {
     /// save finds the shape to write its edits into. `None` for shapes a save can't
     /// write (from layouts, masters, and SmartArt drawings).
     pub id: Option<u32>,
+    /// Inside a group: its frame has the group's transform applied, and it moves with the
+    /// group, not on its own.
+    pub grouped: bool,
 }
 
 impl Shape {

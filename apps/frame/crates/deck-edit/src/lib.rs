@@ -5,9 +5,11 @@
 //!
 //! Toolkit-free: no GTK, no I/O.
 
+mod frame;
 mod slides;
 mod text;
 
+pub use frame::{movable, snap, FrameEdit, Grab, Guide, Snapped};
 pub use slides::{next_layout, SlideEdit};
 pub use text::{after, before, look, text_end, TextEdit, TextPos};
 
@@ -31,13 +33,15 @@ pub enum Change {
     Text { shape: ShapeRef, caret: TextPos },
     /// The slide list (slides added, removed, or moved), and the slide to show.
     Slides { show: usize },
+    /// A shape's box: it moved or changed size.
+    Shape { shape: ShapeRef },
 }
 
 impl Change {
     /// The slide to show.
     pub fn slide(&self) -> usize {
         match self {
-            Change::Text { shape, .. } => shape.slide,
+            Change::Text { shape, .. } | Change::Shape { shape } => shape.slide,
             Change::Slides { show } => *show,
         }
     }
@@ -46,7 +50,7 @@ impl Change {
     pub fn caret(&self) -> Option<TextPos> {
         match self {
             Change::Text { caret, .. } => Some(*caret),
-            Change::Slides { .. } => None,
+            _ => None,
         }
     }
 }
@@ -56,6 +60,7 @@ impl Change {
 pub enum Edit {
     Text(TextEdit),
     Slides(SlideEdit),
+    Frame(FrameEdit),
 }
 
 impl Edit {
@@ -63,6 +68,7 @@ impl Edit {
         match self {
             Edit::Text(e) => e.apply(deck),
             Edit::Slides(e) => e.apply(deck),
+            Edit::Frame(e) => e.apply(deck),
         }
     }
 
@@ -70,6 +76,7 @@ impl Edit {
         match self {
             Edit::Text(e) => e.revert(deck),
             Edit::Slides(e) => e.revert(deck),
+            Edit::Frame(e) => e.revert(deck),
         }
     }
 
@@ -91,6 +98,12 @@ impl From<TextEdit> for Edit {
 impl From<SlideEdit> for Edit {
     fn from(e: SlideEdit) -> Edit {
         Edit::Slides(e)
+    }
+}
+
+impl From<FrameEdit> for Edit {
+    fn from(e: FrameEdit) -> Edit {
+        Edit::Frame(e)
     }
 }
 
