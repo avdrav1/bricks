@@ -17,7 +17,7 @@
 use crate::package::resolve;
 use crate::read::blank_slide;
 use crate::xml::{self, escape, Element};
-use presentation_model::{Layer, Paragraph, Presentation, Slide, TextBody};
+use presentation_model::{Frame, Layer, Paragraph, Presentation, Shape, Slide, TextBody};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
@@ -99,8 +99,9 @@ pub fn save(
     )
 }
 
-/// The shapes a save wrote text into, by slide: their ids.
-type Written = Vec<Vec<u32>>;
+/// What a save wrote, by slide: the ids of the shapes whose text, and whose boxes, it
+/// wrote.
+type Written = Vec<(Vec<u32>, Vec<u32>)>;
 
 fn verify(tmp: &Path, deck: &Presentation, written: Option<&Written>) -> Result<(), String> {
     let back = crate::read(tmp).map_err(|e| e.to_string())?;
@@ -113,20 +114,26 @@ fn verify(tmp: &Path, deck: &Presentation, written: Option<&Written>) -> Result<
     }
     let written = written.ok_or("nothing was written")?;
     let slides = deck.slides.iter().zip(&back.slides).zip(written);
-    for (n, ((now, again), ids)) in slides.enumerate() {
-        for id in ids {
-            let text = |s: &Slide| {
-                s.shapes
-                    .iter()
-                    .find(|sh| sh.id == Some(*id))
-                    .map(|sh| sh.plain_text())
-            };
-            if text(now) != text(again) {
-                return Err(format!(
-                    "slide {}'s shape {id} reads back differently",
-                    n + 1
-                ));
-            }
+    for (n, ((now, again), (texts, frames))) in slides.enumerate() {
+        let shape = |s: &'_ Slide, id: u32| s.shapes.iter().find(|sh| sh.id == Some(id)).cloned();
+        let differs = |id: &u32, same: &dyn Fn(&Shape, &Shape) -> bool| match (
+            shape(now, *id),
+            shape(again, *id),
+        ) {
+            (Some(a), Some(b)) => !same(&a, &b),
+            _ => true,
+        };
+        let text_differs = texts
+            .iter()
+            .find(|id| differs(id, &|a, b| a.plain_text() == b.plain_text()));
+        let frame_differs = frames
+            .iter()
+            .find(|id| differs(id, &|a, b| a.frame == b.frame));
+        if let Some(id) = text_differs.or(frame_differs) {
+            return Err(format!(
+                "slide {}'s shape {id} reads back differently",
+                n + 1
+            ));
         }
     }
     Ok(())
@@ -368,25 +375,49 @@ fn find_shape(tree: &Element, id: u32) -> Option<&Element> {
     None
 }
 
-/// The shapes of `now` whose text differs from `base`'s, matched by id: ids and bodies.
-fn edits<'a>(base: &Slide, now: &'a Slide) -> Vec<(u32, &'a TextBody)> {
-    now.shapes
-        .iter()
-        .filter(|s| s.layer == Layer::Slide)
-        .filter_map(|s| {
-            let (id, body) = (s.id?, s.text.as_ref()?);
-            let old = base
-                .shapes
-                .iter()
-                .find(|b| b.id == Some(id))
-                .and_then(|b| b.text.as_ref());
-            (old.map(|o| &o.paragraphs) != Some(&body.paragraphs)).then_some((id, body))
-        })
-        .collect()
+/// What changed on a slide, by shape id: text bodies and boxes.
+struct Edits<'a> {
+    text: Vec<(u32, &'a TextBody)>,
+    frames: Vec<(u32, Frame)>,
+}
+
+impl Edits<'_> {
+    fn is_empty(&self) -> bool {
+        self.text.is_empty() && self.frames.is_empty()
+    }
+
+    fn ids(&self) -> (Vec<u32>, Vec<u32>) {
+        (
+            self.text.iter().map(|(id, _)| *id).collect(),
+            self.frames.iter().map(|(id, _)| *id).collect(),
+        )
+    }
+}
+
+/// The shapes of `now` whose text or box differs from `base`'s, matched by id. Only the
+/// slide's own shapes outside groups have boxes a save writes.
+fn edits<'a>(base: &Slide, now: &'a Slide) -> Edits<'a> {
+    let mut out = Edits {
+        text: Vec::new(),
+        frames: Vec::new(),
+    };
+    for s in now.shapes.iter().filter(|s| s.layer == Layer::Slide) {
+        let Some(id) = s.id else { continue };
+        let old = base.shapes.iter().find(|b| b.id == Some(id));
+        if let Some(body) = &s.text {
+            if old.and_then(|o| o.text.as_ref()).map(|o| &o.paragraphs) != Some(&body.paragraphs) {
+                out.text.push((id, body));
+            }
+        }
+        if !s.grouped && old.map(|o| o.frame) != Some(s.frame) {
+            out.frames.push((id, s.frame));
+        }
+    }
+    out
 }
 
 /// Slide part `xml` (named `name`) with the `edits` written into it.
-fn patch_slide(xml: &str, name: &str, edits: &[(u32, &TextBody)]) -> io::Result<String> {
+fn patch_slide(xml: &str, name: &str, edits: &Edits<'_>) -> io::Result<String> {
     if edits.is_empty() {
         return Ok(xml.to_owned());
     }
@@ -395,7 +426,7 @@ fn patch_slide(xml: &str, name: &str, edits: &[(u32, &TextBody)]) -> io::Result<
         .path(&["cSld", "spTree"])
         .ok_or_else(|| damaged(format!("{name} has no shapes")))?;
     let mut spans = Vec::new();
-    for (id, body) in edits {
+    for (id, body) in &edits.text {
         let tx = find_shape(tree, *id)
             .and_then(|s| s.child("txBody"))
             .ok_or_else(|| damaged(format!("{name} has no text shape {id}")))?;
@@ -409,7 +440,60 @@ fn patch_slide(xml: &str, name: &str, edits: &[(u32, &TextBody)]) -> io::Result<
         };
         spans.push((range, paragraphs(body, a)));
     }
+    for (id, frame) in &edits.frames {
+        let shape =
+            find_shape(tree, *id).ok_or_else(|| damaged(format!("{name} has no shape {id}")))?;
+        spans.extend(frame_spans(xml, shape, frame)?);
+    }
     Ok(splice(xml, spans))
+}
+
+/// Where `shape`'s box is written (`<a:off>` and `<a:ext>` in its `xfrm`), rewritten for
+/// `frame`; a shape without an `xfrm` of its own (a placeholder that took its layout's)
+/// gets one, first in its `spPr`. Rotation and flips stay as written.
+fn frame_spans(
+    xml: &str,
+    shape: &Element,
+    frame: &Frame,
+) -> io::Result<Vec<(Range<usize>, String)>> {
+    let (props, xfrm) = if shape.name == "graphicFrame" {
+        (None, shape.child("xfrm"))
+    } else {
+        let props = shape
+            .child("spPr")
+            .ok_or_else(|| damaged("a shape without shape properties"))?;
+        (Some(props), props.child("xfrm"))
+    };
+    let off = |a: &str| format!(r#"<{a}off x="{}" y="{}"/>"#, frame.x, frame.y);
+    let ext = |a: &str| format!(r#"<{a}ext cx="{}" cy="{}"/>"#, frame.cx, frame.cy);
+    if let Some(x) = xfrm {
+        let a = x.child("off").map_or("a:", |o| prefix(xml, o));
+        return match (x.child("off"), x.child("ext")) {
+            (Some(o), Some(e)) => Ok(vec![(o.span.clone(), off(a)), (e.span.clone(), ext(a))]),
+            _ => {
+                let p = prefix(xml, x);
+                let open = &xml[x.span.start..x.span.end];
+                let attrs_end = open.find('>').unwrap_or(open.len());
+                let tag = open[..attrs_end].trim_end_matches('/');
+                Ok(vec![(
+                    x.span.clone(),
+                    format!("{tag}>{}{}</{p}xfrm>", off(a), ext(a)),
+                )])
+            }
+        };
+    }
+    let props = props.ok_or_else(|| damaged("a graphic frame without its frame"))?;
+    let p = prefix(xml, props);
+    let new = format!("<a:xfrm>{}{}</a:xfrm>", off("a:"), ext("a:"));
+    let raw = &xml[props.span.clone()];
+    if raw.ends_with("/>") {
+        return Ok(vec![(
+            props.span.clone(),
+            format!("<{p}spPr>{new}</{p}spPr>"),
+        )]);
+    }
+    let at = props.span.start + raw.find('>').ok_or_else(|| damaged("a broken tag"))? + 1;
+    Ok(vec![(at..at, new)])
 }
 
 /// What becomes of each of the deck's slides.
@@ -581,7 +665,7 @@ fn write(
                     let patched = patch_slide(&xml, part, &ed)?;
                     changes.parts.insert(part.clone(), Some(patched));
                 }
-                written.push(ed.iter().map(|(id, _)| *id).collect());
+                written.push(ed.ids());
             }
             Plan::Copy { from, part, base } => {
                 let ed = edits(base, slide);
@@ -590,7 +674,7 @@ fn write(
                 let rels = read_text(&mut src, &rels_name(from))?.unwrap_or_default();
                 let rels = copy_rels(&mut src, &rels, from, part, &mut names, &mut changes)?;
                 changes.add(&rels_name(part), rels, None);
-                written.push(ed.iter().map(|(id, _)| *id).collect());
+                written.push(ed.ids());
             }
             Plan::New { layout, part } => {
                 let layout = &deck.layouts[*layout];
@@ -610,7 +694,7 @@ fn write(
                     relationship("rId1", "slideLayout", dir(part), &layout.part)
                 );
                 changes.add(&rels_name(part), rels, None);
-                written.push(ed.iter().map(|(id, _)| *id).collect());
+                written.push(ed.ids());
             }
         }
     }

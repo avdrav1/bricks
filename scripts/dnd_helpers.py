@@ -2,11 +2,13 @@
 
   dnd_helpers.py source FILE           a GTK 4 window, titled "dragsrc", whose whole area
                                        drags FILE as text/uri-list, as file managers do
-  dnd_helpers.py drag X1 Y1 X2 Y2      under a wlroots compositor: press at (X1, Y1), move
-                                       to (X2, Y2) in steps, release; through the
-                                       wlr-virtual-pointer protocol, so no real input
-                                       device is needed. Needs the generated `wlr_proto`
-                                       package (pywayland scanner) on the path.
+  dnd_helpers.py drag X1 Y1 X2 Y2 [HOLD]
+                                       under a wlroots compositor: press at (X1, Y1), move
+                                       to (X2, Y2) in steps, wait HOLD seconds (0.5),
+                                       release; through the wlr-virtual-pointer protocol,
+                                       so no real input device is needed. Needs the
+                                       generated `wlr_proto` package (pywayland scanner) on
+                                       the path.
   dnd_helpers.py click X Y             the same pointer: a quick click at (X, Y), as a
                                        hand makes one (GTK takes a press held past the
                                        double-click time as a long press)
@@ -91,7 +93,7 @@ def pointer(width=1280, height=720):
     return move, button, done
 
 
-def drag(x1, y1, x2, y2):
+def drag(x1, y1, x2, y2, hold=0.5):
     move, button, done = pointer()
     move(x1, y1)
     time.sleep(0.5)
@@ -99,7 +101,7 @@ def drag(x1, y1, x2, y2):
     steps = 40
     for i in range(1, steps + 1):
         move(x1 + (x2 - x1) * i / steps, y1 + (y2 - y1) * i / steps)
-    time.sleep(0.5)
+    time.sleep(hold)
     button(False)
     time.sleep(0.5)
     done()
@@ -118,7 +120,7 @@ if __name__ == "__main__":
     if sys.argv[1] == "source":
         source(sys.argv[2])
     elif sys.argv[1] == "drag":
-        drag(*map(float, sys.argv[2:6]))
+        drag(*map(float, sys.argv[2:7]))
     elif sys.argv[1] == "click":
         click(*map(float, sys.argv[2:4]))
     else:

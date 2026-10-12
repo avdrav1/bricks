@@ -5,8 +5,10 @@
 
 mod common;
 
-use deck_edit::{History, ShapeRef, SlideEdit, TextEdit};
-use presentation_model::{Layer, Paragraph, PlaceholderKind, Presentation, Slide};
+use deck_edit::{FrameEdit, History, ShapeRef, SlideEdit, TextEdit};
+use presentation_model::{
+    Frame, Layer, Paragraph, PlaceholderKind, Presentation, ShapeKind, Slide,
+};
 use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -54,9 +56,10 @@ fn type_at_end(deck: &mut Presentation, h: &mut History, slide: usize, shape: us
     }
 }
 
-/// layouts.pptx edited: typing in slide 1's subtitle (a paragraph added); a new slide after
-/// it, its title and body typed; slide 10 (with notes) duplicated and the copy's title
-/// typed into; Two Content deleted; the picture slide moved to third.
+/// layouts.pptx edited: typing in slide 1's subtitle (a paragraph added); slide 1's title
+/// (its box its layout's) moved right by 1 M; a new slide after it, its title and body
+/// typed; slide 10 (with notes) duplicated and the copy's title typed into; Two Content
+/// deleted; the picture slide moved to third and its picture made 1 M narrower.
 fn edited() -> (Presentation, Presentation) {
     let mut deck = pptx::read(&common::data("layouts.pptx")).unwrap();
     let read = deck.clone();
@@ -95,7 +98,38 @@ fn edited() -> (Presentation, Presentation) {
         .unwrap();
     let step = SlideEdit::move_to(&deck, picture, 2).unwrap();
     h.apply(&mut deck, step);
+    let title = placeholder(&deck.slides[0], PlaceholderKind::CentredTitle);
+    let f = deck.slides[0].shapes[title].frame;
+    let s = ShapeRef {
+        slide: 0,
+        shape: title,
+    };
+    let step = FrameEdit::new(&deck, s, Frame { x: f.x + M, ..f }).unwrap();
+    h.apply(&mut deck, step);
+    let pic = deck.slides[2]
+        .shapes
+        .iter()
+        .position(|s| s.layer == Layer::Slide && matches!(s.kind, ShapeKind::Picture(_)))
+        .unwrap();
+    let f = deck.slides[2].shapes[pic].frame;
+    let s = ShapeRef {
+        slide: 2,
+        shape: pic,
+    };
+    let step = FrameEdit::new(&deck, s, Frame { cx: f.cx - M, ..f }).unwrap();
+    h.apply(&mut deck, step);
     (read, deck)
+}
+
+const M: i64 = 1_000_000;
+
+/// Field `n` (tab-separated) of the first `shape` line of kind `kind` in a dump slide.
+fn shape_field(lines: &[&str], kind: &str, n: usize) -> i64 {
+    let line = lines
+        .iter()
+        .find(|l| l.starts_with("shape\t") && l.contains(kind))
+        .unwrap_or_else(|| panic!("no {kind} in {lines:?}"));
+    line.split('\t').nth(n).unwrap().parse().unwrap()
 }
 
 /// A paragraph as it reads: its looks, and its runs' text and looks (not the markup a
@@ -139,7 +173,10 @@ fn readings(deck: &Presentation) -> Vec<String> {
         .map(|s| {
             let mut out = format!("layout {:?}, notes {:?}\n", s.layout, s.notes);
             for sh in s.shapes.iter().filter(|sh| sh.layer == Layer::Slide) {
-                out.push_str(&format!("shape {:?} {:?}\n", sh.id, sh.placeholder));
+                out.push_str(&format!(
+                    "shape {:?} {:?} {:?}\n",
+                    sh.id, sh.placeholder, sh.frame
+                ));
                 for p in sh.text.iter().flat_map(|t| &t.paragraphs) {
                     out.push_str(&format!("  {}\n", reading(p)));
                 }
@@ -193,6 +230,7 @@ fn edits_save_and_everything_else_is_copied() {
         "ppt/presentation.xml",
         "ppt/_rels/presentation.xml.rels",
         "ppt/slides/slide1.xml",
+        "ppt/slides/slide9.xml",
     ];
     let gone = ["ppt/slides/slide4.xml", "ppt/slides/_rels/slide4.xml.rels"];
     for (name, bytes) in &before {
@@ -399,16 +437,18 @@ fn libreoffice_reads_the_saved_deck_as_the_original_plus_the_edits() {
         let part = slide.part.as_deref().unwrap();
         let at = format!("saved slide {} ({part})", i + 1);
         match (i, original(part)) {
-            // Slide 1: the subtitle is the edit; everything else as it was.
+            // Slide 1: the subtitle is typed into and the title moved; everything else as
+            // it was.
             (0, Some(j)) => {
-                let subtitle = |lines: &[&str]| -> Vec<String> {
+                let others = |lines: &[&str]| -> Vec<String> {
                     lines
                         .iter()
                         .filter(|l| !l.starts_with("para\t") && !l.starts_with("run\t"))
+                        .filter(|l| !l.contains("TitleTextShape"))
                         .map(|l| l.to_string())
                         .collect()
                 };
-                assert_eq!(subtitle(&new[i]), subtitle(&old[j]), "{at}");
+                assert_eq!(others(&new[i]), others(&old[j]), "{at}");
                 assert!(
                     new[i].contains(&"para\t0\tcenter\tsubtitle here"),
                     "{at}: {:?}",
@@ -416,6 +456,27 @@ fn libreoffice_reads_the_saved_deck_as_the_original_plus_the_edits() {
                 );
                 assert!(new[i].contains(&"para\t0\tcenter\tsecond line"), "{at}");
                 assert!(new[i].contains(&"run\t32\t0\t0\t0\t0\t8B8B8B\tCalibri\tsecond line"));
+                let x = |lines: &[&str]| shape_field(lines, "TitleTextShape", 3);
+                assert!(
+                    (x(&new[i]) - x(&old[j]) - M).abs() <= 720,
+                    "{at}: moved 1 M right"
+                );
+            }
+            // The picture slide: its picture 1 M narrower.
+            (2, Some(j)) => {
+                let others = |lines: &[&str]| -> Vec<String> {
+                    lines
+                        .iter()
+                        .filter(|l| !l.contains("GraphicObjectShape"))
+                        .map(|l| l.to_string())
+                        .collect()
+                };
+                assert_eq!(others(&new[i]), others(&old[j]), "{at}");
+                let w = |lines: &[&str]| shape_field(lines, "GraphicObjectShape", 5);
+                assert!(
+                    (w(&old[j]) - w(&new[i]) - M).abs() <= 720,
+                    "{at}: 1 M narrower"
+                );
             }
             // Every other slide read from the file: as LibreOffice read it before.
             (_, Some(j)) => assert_eq!(new[i], old[j], "{at}"),

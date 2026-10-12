@@ -5,11 +5,12 @@
 //! FR0 is a viewer (docs/specs/frame.md, ADR 0004): each `.pptx` opens in its own window
 //! with a slide list and a canvas, and F5 starts a full-screen slideshow. Without a file it
 //! shows a start window; Ctrl+O picks a file, and files dropped on a window open. FR1
-//! edits (ADR 0006): slide text on the canvas, and adding, duplicating, deleting, and
-//! moving slides, with undo.
+//! edits (ADR 0006): slide text on the canvas, adding, duplicating, deleting, and moving
+//! slides, and moving and resizing shapes with snapping, with undo.
 //! `--bench-draw` redraws the deck's densest slide for FRAMES frames and prints how long
 //! each took (FRAME-4's acceptance test).
 
+mod arrange;
 mod deck;
 mod editing;
 mod render;

@@ -902,6 +902,112 @@ pub fn draw_editing(
     snap.restore();
 }
 
+/// The topmost of the slide's own shapes whose box is at the slide point (`x`, `y`), in
+/// pixels at `scale`, give or take `slop` pixels (so a line can be hit).
+pub fn shape_at(slide: &Slide, scale: f32, x: f32, y: f32, slop: f32) -> Option<usize> {
+    slide
+        .shapes
+        .iter()
+        .enumerate()
+        .rev()
+        .filter(|(_, s)| s.layer == Layer::Slide)
+        .find(|(_, s)| local_point(&s.frame, scale, x, y).is_some_and(|p| p.within(slop)))
+        .map(|(i, _)| i)
+}
+
+/// A slide point in a box's own frame (origin at its top-left corner, turned with it),
+/// and the box's size, all in pixels.
+#[derive(Debug, Clone, Copy)]
+pub struct LocalPoint {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+impl LocalPoint {
+    /// Inside the box grown by `slop` on every side.
+    pub fn within(&self, slop: f32) -> bool {
+        (-slop..=self.w + slop).contains(&self.x) && (-slop..=self.h + slop).contains(&self.y)
+    }
+
+    /// The selection handle within `slop` of the point: which edges it holds (left,
+    /// right, top, bottom).
+    pub fn handle(&self, slop: f32) -> Option<(bool, bool, bool, bool)> {
+        HANDLES.iter().find_map(|&(fx, fy)| {
+            let near = (self.x - fx * self.w).abs() <= slop && (self.y - fy * self.h).abs() <= slop;
+            near.then_some((fx == 0.0, fx == 1.0, fy == 0.0, fy == 1.0))
+        })
+    }
+}
+
+/// The slide point (`x`, `y`) in pixels at `scale` in `f`'s own frame.
+pub fn local_point(f: &Frame, scale: f32, x: f32, y: f32) -> Option<LocalPoint> {
+    let (t, w, h) = frame_transform(f, scale);
+    let p = t
+        .invert()
+        .ok()?
+        .transform_point(&graphene::Point::new(x, y));
+    Some(LocalPoint {
+        x: p.x(),
+        y: p.y(),
+        w,
+        h,
+    })
+}
+
+/// The selection's handles, as fractions of its box: corners and the middles of edges.
+const HANDLES: [(f32, f32); 8] = [
+    (0.0, 0.0),
+    (0.5, 0.0),
+    (1.0, 0.0),
+    (0.0, 0.5),
+    (1.0, 0.5),
+    (0.0, 1.0),
+    (0.5, 1.0),
+    (1.0, 1.0),
+];
+
+/// A selected shape: its box outlined, with handles to resize it by. `k` is the extra
+/// scale the slide is drawn with (the outline stays one screen pixel wide).
+pub fn draw_selection(snap: &gtk::Snapshot, f: &Frame, scale: f32, k: f32, color: &gdk::RGBA) {
+    let px = 1.0 / k;
+    in_frame(snap, f, scale, |w, h| {
+        snap.append_stroke(&geometry("rect", None, w, h), &gsk::Stroke::new(px), color);
+        let size = 7.0 * px;
+        let white = gdk::RGBA::WHITE;
+        for (fx, fy) in HANDLES {
+            let r = rect(fx * w - size / 2.0, fy * h - size / 2.0, size, size);
+            snap.append_color(color, &r);
+            let inner = rect(r.x() + px, r.y() + px, size - 2.0 * px, size - 2.0 * px);
+            snap.append_color(&white, &inner);
+        }
+    });
+}
+
+/// Smart guides: lines one screen pixel wide, on whole pixels so they draw solid (`k` as
+/// in [`draw_selection`]; the slide's origin is on a whole pixel).
+pub fn draw_guides(
+    snap: &gtk::Snapshot,
+    guides: &[deck_edit::Guide],
+    scale: f32,
+    k: f32,
+    color: &gdk::RGBA,
+) {
+    let px = 1.0 / k;
+    let pixel = |emu: i64| (emu as f32 * scale * k).floor() / k;
+    for g in guides {
+        let (x0, y0) = (pixel(g.from.0), pixel(g.from.1));
+        let (x1, y1) = (pixel(g.to.0), pixel(g.to.1));
+        let r = if g.from.0 == g.to.0 {
+            rect(x0, y0.min(y1), px, (y1 - y0).abs())
+        } else {
+            rect(x0.min(x1), y0, (x1 - x0).abs(), px)
+        };
+        snap.append_color(color, &r);
+    }
+}
+
 /// A table at the origin: rows grow to fit their text, as PowerPoint draws them; fills,
 /// then text, then borders over both.
 fn draw_table(snap: &gtk::Snapshot, ctx: &pango::Context, table: &Table, scale: f32) {

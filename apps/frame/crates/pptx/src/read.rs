@@ -765,6 +765,7 @@ fn shape(scope: &Scope<'_>, e: &Element, groups: &[Group]) -> Option<Shape> {
             .child("txXfrm")
             .map(|x| groups.iter().rev().fold(frame_of(x), |f, g| g.apply(f))),
         id: c_nv.and_then(|c| c.num("id")).filter(|_| scope.own),
+        grouped: !groups.is_empty(),
     })
 }
 

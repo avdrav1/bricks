@@ -3,6 +3,7 @@
 //! (text editing itself is in [`crate::editing`], the slide list in
 //! [`crate::slide_list`]).
 
+use crate::arrange;
 use crate::deck::Deck;
 use crate::editing;
 use crate::saving;
@@ -387,7 +388,8 @@ impl DeckWindow {
 
     /// Show what `change` changed. A text change: its slide, redrawn with its thumbnail
     /// and description, and, when `caret`, the caret where it leaves the text. A slide
-    /// list change: the list rebuilt and the slide it shows.
+    /// list change: the list rebuilt and the slide it shows. A shape's box: its slide
+    /// and thumbnail redrawn, the shape selected.
     fn changed(&self, change: Change, caret: bool) {
         match change {
             Change::Text { shape, caret: at } => {
@@ -404,6 +406,16 @@ impl DeckWindow {
                 editing::show(self, None);
                 slide_list::rebuild(self);
                 self.go(show);
+            }
+            Change::Shape { shape } => {
+                if self.canvas.index() != shape.slide {
+                    self.go(shape.slide);
+                }
+                if let Some(thumb) = self.thumbs.borrow().get(shape.slide) {
+                    thumb.queue_draw();
+                }
+                editing::show(self, None);
+                self.canvas.select(Some(shape.shape));
             }
         }
     }
@@ -581,6 +593,7 @@ fn show_deck(
     });
     slide_list::rebuild(&view);
     editing::attach(&view);
+    arrange::attach(&view);
     list.connect_row_selected({
         let view = Rc::downgrade(&view);
         move |_, row| {
@@ -623,6 +636,26 @@ fn show_deck(
             // While text is edited, the keys are the text's (crate::editing).
             if text || ctrl || alt {
                 return glib::Propagation::Proceed;
+            }
+            // A selected shape: the arrows nudge it a pixel (Shift: ten), Escape lets go;
+            // other keys are the slide's.
+            if view.canvas.selected().is_some() && !slide_list::has_focus(&view) {
+                let by = if shift { 10.0 } else { 1.0 };
+                let nudge = match key {
+                    Key::Left | Key::KP_Left => Some((-by, 0.0)),
+                    Key::Right | Key::KP_Right => Some((by, 0.0)),
+                    Key::Up | Key::KP_Up => Some((0.0, -by)),
+                    Key::Down | Key::KP_Down => Some((0.0, by)),
+                    _ => None,
+                };
+                if let Some((dx, dy)) = nudge {
+                    arrange::nudge(&view, dx, dy);
+                    return glib::Propagation::Stop;
+                }
+                if key == Key::Escape {
+                    view.canvas.select(None);
+                    return glib::Propagation::Stop;
+                }
             }
             match key {
                 Key::Page_Down

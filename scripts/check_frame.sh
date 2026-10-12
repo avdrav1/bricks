@@ -53,6 +53,12 @@
 #      has the typed text, its slide list 11 slides, and the new slide a part of its own;
 #      reopened, it shows them. Ctrl+Shift+S and a typed path save it as another file,
 #      the window takes that file's name, and the file reopens.
+# FRAME-10 acceptance, the window's half (snapping itself: `cargo test -p deck-edit --test
+# frames`):
+#  12. on the fixture's slide 3, dragging the blue rectangle so its centre is 3 px right of
+#      the slide's: mid-drag a guide runs down the slide's middle, and it lands centred;
+#      Ctrl+Z puts it back. With Alt held it lands where dropped. Shift+Right and Right
+#      nudge it 11 px; Ctrl+Z undoes the last nudge.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -149,6 +155,24 @@ def part(path, name, needle):
     text = zipfile.ZipFile(path).read(name).decode()
     print(f"part {name} {needle}: {text.count(needle)}")
 
+def blue(path, name, fy="0.30"):
+    # Where the fixture slide 3 blue rectangle is: its centre, in screen pixels from the
+    # slide centre, along a row through it at FY of the slide.
+    at, left, top, w, h = slide(path)
+    y = round(top + float(fy) * h)
+    want = (0x44, 0x72, 0xC4)
+    xs = [x for x in range(left, left + w) if all(abs(a - b) <= 12 for a, b in zip(at(x, y), want))]
+    print(f"blue {name}: " + (str(round((xs[0] + xs[-1]) / 2 - (left + w / 2))) if xs else "none"))
+
+def count(path, name, want, fx0, fy0, fx1, fy1):
+    # Pixels of colour WANT in a box given in fractions of the slide.
+    at, left, top, w, h = slide(path)
+    wc = tuple(int(want[i:i + 2], 16) for i in (0, 2, 4))
+    xs = range(round(left + float(fx0) * w), round(left + float(fx1) * w))
+    ys = range(round(top + float(fy0) * h), round(top + float(fy1) * h))
+    n = sum(1 for y in ys for x in xs if all(abs(a - b) <= 40 for a, b in zip(at(x, y), wc)))
+    print(f"count {name}: {n}")
+
 def where(name):
     # The centre of the first widget named NAME, to click or drag it.
     desktop = Atspi.get_desktop(0)
@@ -190,6 +214,10 @@ elif sys.argv[1] == "where":
     where(sys.argv[2])
 elif sys.argv[1] == "part":
     part(*sys.argv[2:5])
+elif sys.argv[1] == "blue":
+    blue(*sys.argv[2:5])
+elif sys.argv[1] == "count":
+    count(*sys.argv[2:9])
 else:
     main(sys.argv[1], sys.argv[2:])
 PY
@@ -320,6 +348,32 @@ session() {
   shown reopened2
   pkill -x frame; sleep 0.5
 
+  echo "== 12 arrange"
+  frame /tmp/f/fixture.pptx >>/tmp/app.log 2>&1 & sleep 3
+  keys -k Next -k Next; sleep 1; shot arrange0
+  b0=$(python3 /tmp/px.py blue /shots/arrange0.png before | cut -d" " -f3); echo "blue before: $b0"
+  python3 /tmp/px.py count /shots/arrange0.png noguide E8308C 0.49 0 0.51 1
+  # Down into the free space under the shapes (row 0.93 crosses only it), its centre 3 px
+  # right of the slide centre.
+  read x y < <(python3 /tmp/px.py point /shots/arrange0.png 0.125 0.30)
+  read x2 y2 < <(python3 /tmp/px.py point /shots/arrange0.png 0.503 0.81)
+  python3 /scripts/dnd_helpers.py drag $x $y $x2 $y2 3 & d=$!; sleep 2.2; shot arrange1; wait $d; sleep 0.5
+  shot arrange2
+  python3 /tmp/px.py count /shots/arrange1.png guide E8308C 0.49 0 0.51 1
+  python3 /tmp/px.py blue /shots/arrange2.png centred 0.93
+  keys -M ctrl z -m ctrl; sleep 0.5; shot arrange3
+  b=$(python3 /tmp/px.py blue /shots/arrange3.png undone | cut -d" " -f3)
+  echo "undone: $([ "$b" = "$b0" ] && echo yes || echo no) ($b)"
+  wtype -M alt -s 5000 -m alt & k=$!; sleep 0.3
+  python3 /scripts/dnd_helpers.py drag $x $y $x2 $y2; wait $k; sleep 0.5; shot arrange4
+  python3 /tmp/px.py blue /shots/arrange4.png free 0.93
+  keys -M ctrl z -m ctrl; sleep 0.5
+  keys -M shift -k Right -m shift -k Right; sleep 0.5; shot arrange5
+  b=$(python3 /tmp/px.py blue /shots/arrange5.png nudged | cut -d" " -f3); echo "nudged: $((b - b0))"
+  keys -M ctrl z -m ctrl; sleep 0.5; shot arrange6
+  b=$(python3 /tmp/px.py blue /shots/arrange6.png unnudged | cut -d" " -f3); echo "unnudged: $((b - b0))"
+  pkill -x frame; sleep 0.5
+
   echo "== 5 drop"
   frame >>/tmp/app.log 2>&1 & sleep 2
   python3 /scripts/dnd_helpers.py source /tmp/f/layouts.pptx >/dev/null 2>&1 & src=$!; sleep 2
@@ -445,6 +499,15 @@ check "11: ... its title typed" "11 save" "^second: Agenda$"
 check "11: Save As saves under the name typed" "11 save" "^saveas: Saved “saved-as\.pptx”$"
 check "11: ... and the window is that file's" "11 save" "^saveas: saved-as\.pptx$"
 check "11: the saved-as deck reopens" "11 save" "^reopened2: Slide 1 of 11$"
+# FRAME-10: moving shapes with snapping and guides.
+check "12: before a drag, no guide" "12 arrange" "^count noguide: 0$"
+check "12: mid-drag near the centre, a guide runs down the middle" "12 arrange" "^count guide: ([3-9][0-9]{2}|[0-9]{4,})$"
+check "12: ... and the shape lands centred" "12 arrange" "^blue centred: (-1|0|1)$"
+absent "12: ... (it moved)" "12 arrange" "^blue before: (-1|0|1)$"
+check "12: Ctrl+Z puts it back" "12 arrange" "^undone: yes "
+check "12: with Alt held it lands where dropped" "12 arrange" "^blue free: [2-5]$"
+check "12: Shift+Right and Right nudge it 11 px" "12 arrange" "^nudged: (10|11|12)$"
+check "12: Ctrl+Z undoes the last nudge" "12 arrange" "^unnudged: (9|10|11)$"
 if [ $fail = 0 ]; then echo "FRAME OK"; else
   echo "FRAME CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

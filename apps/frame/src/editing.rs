@@ -1,8 +1,10 @@
 //! Editing slide text on the canvas (FRAME-6, ADR 0006). A click in a text box or a
-//! placeholder puts the caret there (Shift+click selects to it); then typing, Backspace,
-//! Delete, Enter (a new paragraph with the same looks), Shift+Enter (a line break), the
-//! arrows, Home and End (Ctrl for the whole text's), Shift with any of them to select,
-//! Ctrl+A to select all, and Escape to stop. Page Up and Page Down stop and change slides.
+//! placeholder puts the caret there (Shift+click selects to it); a click on a shape
+//! without text selects it ([`crate::arrange`] moves it), and typing into a selected
+//! shape with a text body starts at its end. Then typing, Backspace, Delete, Enter (a new
+//! paragraph with the same looks), Shift+Enter (a line break), the arrows, Home and End
+//! (Ctrl for the whole text's), Shift with any of them to select, Ctrl+A to select all,
+//! and Escape to stop. Page Up and Page Down stop and change slides.
 //!
 //! Every change is a `deck-edit` command in the window's one undo history: Ctrl+Z undoes,
 //! Ctrl+Shift+Z and Ctrl+Y redo, a word of typing at a time.
@@ -50,8 +52,11 @@ pub fn attach(view: &Rc<DeckWindow>) {
         move |_| im.focus_out()
     });
     canvas.add_controller(focus);
+    // On release: a press that becomes a drag (crate::arrange) claims it, and no caret
+    // moves.
     let click = gtk::GestureClick::new();
-    click.connect_pressed({
+    click.set_button(gdk::BUTTON_PRIMARY);
+    click.connect_released({
         let view = Rc::downgrade(view);
         move |gesture, _, x, y| {
             if let Some(view) = view.upgrade() {
@@ -73,6 +78,8 @@ pub(crate) fn show(view: &DeckWindow, editing: Option<Editing>) {
     }
 }
 
+/// A click at (`x`, `y`): the caret into text there, a shape without text selected, or,
+/// on the slide's empty space, nothing selected.
 fn clicked(view: &DeckWindow, x: f64, y: f64, shift: bool) {
     view.canvas.grab_focus();
     view.im.reset();
@@ -87,6 +94,16 @@ fn clicked(view: &DeckWindow, x: f64, y: f64, shift: bool) {
         (None, _) => None,
     };
     show(view, editing);
+    if editing.is_none() {
+        let shape = view.canvas.shape_at(x, y, 0.0).filter(|&i| {
+            let deck = view.deck.presentation();
+            deck.slides
+                .get(view.canvas.index())
+                .and_then(|s| s.shapes.get(i))
+                .is_some_and(deck_edit::movable)
+        });
+        view.canvas.select(shape);
+    }
 }
 
 /// Apply the edit `make` builds for the selection of the text being edited.
@@ -109,14 +126,32 @@ fn edit(
     }
 }
 
-/// Text from the input method or a key: one line, no control characters.
+/// Text from the input method or a key: one line, no control characters. A shape
+/// selected but not edited takes it at the end of its text.
 fn type_text(view: &DeckWindow, text: &str) {
     let text: String = text.chars().filter(|c| !c.is_control()).collect();
-    if !text.is_empty() {
-        edit(view, |deck, s, from, to| {
-            TextEdit::typing(deck, s, from, to, &text)
-        });
+    if text.is_empty() {
+        return;
     }
+    if view.canvas.editing().is_none() {
+        let Some(shape) = view.canvas.selected().filter(|&s| has_text(view, s)) else {
+            return;
+        };
+        view.seal();
+        show(view, Some(Editing::at(shape, text_end(view, shape))));
+    }
+    edit(view, |deck, s, from, to| {
+        TextEdit::typing(deck, s, from, to, &text)
+    });
+}
+
+/// Whether shape `shape` of the slide shown has a text body a save can write.
+fn has_text(view: &DeckWindow, shape: usize) -> bool {
+    let deck = view.deck.presentation();
+    deck.slides
+        .get(view.canvas.index())
+        .and_then(|s| s.shapes.get(shape))
+        .is_some_and(|s| s.text.is_some() && s.id.is_some())
 }
 
 fn key_pressed(view: &DeckWindow, key: gdk::Key, mods: gdk::ModifierType) -> glib::Propagation {

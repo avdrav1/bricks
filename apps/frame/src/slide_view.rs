@@ -4,11 +4,12 @@
 //! selection, and the caret ([`Editing`]), and outlines empty placeholders.
 
 use crate::deck::Deck;
-use crate::render::{self, PlacedText};
-use deck_edit::TextPos;
+use crate::render::{self, LocalPoint, PlacedText};
+use deck_edit::{Guide, TextPos};
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{gdk, glib, graphene, pango};
+use presentation_model::Frame;
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -41,6 +42,21 @@ impl Editing {
     }
 }
 
+/// A shape being dragged on the canvas: the box it would land in and the smart guides
+/// that box lines up with.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Preview {
+    /// Index into the slide's shapes.
+    pub shape: usize,
+    pub frame: Frame,
+    pub guides: Vec<Guide>,
+}
+
+/// The selection and editing colour.
+const ACCENT: gdk::RGBA = gdk::RGBA::new(0.21, 0.52, 0.89, 1.0);
+/// Smart guides' colour: magenta, apart from the selection's blue.
+const GUIDE: gdk::RGBA = gdk::RGBA::new(0.91, 0.19, 0.55, 1.0);
+
 /// Where the slide sits in the widget: its top-left corner, the scale correction that
 /// makes it fill whole pixels, and the pixels per EMU it draws at.
 #[derive(Debug, Clone, Copy)]
@@ -71,6 +87,10 @@ mod imp {
         /// placeholders outlined (the New Slide menu).
         pub layout: Cell<bool>,
         pub editing: Cell<Option<Editing>>,
+        /// The shape selected (the one being edited when text is), by index.
+        pub selected: Cell<Option<usize>>,
+        /// A shape being dragged: where it would land, and the guides why.
+        pub preview: RefCell<Option<Preview>>,
         pub pango: RefCell<Option<pango::Context>>,
         /// How long the last snapshot took to build, in milliseconds (the drawing
         /// benchmark reads it).
@@ -135,6 +155,18 @@ mod imp {
             let Some(at) = obj.placement() else {
                 return;
             };
+            // A dragged shape draws where it would land.
+            let preview = self.preview.borrow();
+            let dragged;
+            let slide = match preview.as_ref() {
+                Some(p) if p.shape < slide.shapes.len() => {
+                    let mut s = slide.clone();
+                    s.shapes[p.shape].frame = p.frame;
+                    dragged = s;
+                    &dragged
+                }
+                _ => slide,
+            };
             let ctx = obj.pango();
             snapshot.save();
             snapshot.translate(&graphene::Point::new(at.x, at.y));
@@ -146,11 +178,17 @@ mod imp {
             }
             if let Some(e) = self.editing.get() {
                 if let Some(shape) = slide.shapes.get(e.shape) {
-                    let accent = gdk::RGBA::new(0.21, 0.52, 0.89, 1.0);
                     render::draw_editing(
-                        snapshot, &ctx, shape, at.scale, e.anchor, e.caret, &accent,
+                        snapshot, &ctx, shape, at.scale, e.anchor, e.caret, &ACCENT,
                     );
                 }
+            }
+            let selected = self.editing.get().map(|e| e.shape).or(self.selected.get());
+            if let Some(shape) = selected.and_then(|i| slide.shapes.get(i)) {
+                render::draw_selection(snapshot, &shape.frame, at.scale, at.kx, &ACCENT);
+            }
+            if let Some(p) = preview.as_ref() {
+                render::draw_guides(snapshot, &p.guides, at.scale, at.kx, &GUIDE);
             }
             snapshot.scale(1.0 / at.kx, 1.0 / at.ky);
             if self.backdrop.get().is_none() {
@@ -206,11 +244,13 @@ impl SlideView {
         self.imp().index.get()
     }
 
-    /// Show slide `index`; editing ends when it's another slide.
+    /// Show slide `index`; editing and the selection end when it's another slide.
     pub fn set_index(&self, index: usize) {
         let imp = self.imp();
         if imp.index.replace(index) != index {
             imp.editing.set(None);
+            imp.selected.set(None);
+            imp.preview.replace(None);
         }
         self.queue_draw();
     }
@@ -230,8 +270,36 @@ impl SlideView {
         self.imp().editing.get()
     }
 
+    /// Edit text (`Some`), which selects its shape, or stop (`None`), which leaves the
+    /// shape selected.
     pub fn set_editing(&self, editing: Option<Editing>) {
-        self.imp().editing.set(editing);
+        let imp = self.imp();
+        if let Some(e) = imp.editing.replace(editing) {
+            imp.selected.set(Some(e.shape));
+        }
+        if let Some(e) = editing {
+            imp.selected.set(Some(e.shape));
+        }
+        self.queue_draw();
+    }
+
+    /// The selected shape: the one whose text is edited, or one selected by a click.
+    pub fn selected(&self) -> Option<usize> {
+        let imp = self.imp();
+        imp.editing.get().map(|e| e.shape).or(imp.selected.get())
+    }
+
+    /// Select shape `shape` (`None`: nothing), editing no text.
+    pub fn select(&self, shape: Option<usize>) {
+        let imp = self.imp();
+        imp.editing.set(None);
+        imp.selected.set(shape);
+        self.queue_draw();
+    }
+
+    /// Show a shape being dragged where it would land (`None`: no drag).
+    pub fn set_preview(&self, preview: Option<Preview>) {
+        self.imp().preview.replace(preview);
         self.queue_draw();
     }
 
@@ -343,5 +411,42 @@ impl SlideView {
             (wx(x1) - wx(x0)).max(1),
             (wy(y1) - wy(y0)).max(1),
         ))
+    }
+
+    /// How many EMU one screen pixel is on the slide.
+    pub fn emu_per_pixel(&self) -> Option<f64> {
+        let at = self.placement()?;
+        Some(1.0 / (at.scale as f64 * at.kx as f64))
+    }
+
+    /// The topmost of the slide's own shapes at the widget point (`x`, `y`), give or take
+    /// `slop` pixels.
+    pub fn shape_at(&self, x: f64, y: f64, slop: f32) -> Option<usize> {
+        let (sx, sy, scale) = self.to_slide(x, y)?;
+        let deck = self.imp().deck.borrow().clone()?;
+        let presentation = deck.presentation();
+        let slide = presentation.slides.get(self.index())?;
+        render::shape_at(slide, scale, sx, sy, slop)
+    }
+
+    /// The widget point (`x`, `y`) in shape `shape`'s own box, in pixels.
+    pub fn local_point(&self, shape: usize, x: f64, y: f64) -> Option<LocalPoint> {
+        let (sx, sy, scale) = self.to_slide(x, y)?;
+        let deck = self.imp().deck.borrow().clone()?;
+        let presentation = deck.presentation();
+        let frame = presentation
+            .slides
+            .get(self.index())?
+            .shapes
+            .get(shape)?
+            .frame;
+        render::local_point(&frame, scale, sx, sy)
+    }
+
+    /// End a drag's preview, giving where it would have landed.
+    pub fn take_preview(&self) -> Option<Preview> {
+        let p = self.imp().preview.take();
+        self.queue_draw();
+        p
     }
 }
