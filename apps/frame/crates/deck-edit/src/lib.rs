@@ -8,6 +8,7 @@
 mod frame;
 mod insert;
 mod layout;
+mod outline;
 mod slides;
 mod style;
 mod text;
@@ -18,6 +19,10 @@ pub use insert::{
     EMU_PER_PIXEL, FITS, SHAPES,
 };
 pub use layout::LayoutEdit;
+pub use outline::{
+    body_of, erase, key, outline, title_of, typing, BodyEdit, Line, LineKind, Outline, OutlineKey,
+    OutlinePos,
+};
 pub use slides::{next_layout, SlideEdit};
 pub use style::{
     styleable, BackgroundEdit, LookEdit, ParagraphLook, ShapeLook, ShapeLookEdit, TextLook,
@@ -72,6 +77,22 @@ impl Change {
             _ => None,
         }
     }
+
+    /// What a step of several edits changed, from each edit's change in order: the first
+    /// edit's, but the slide list when any edit changed it.
+    fn of_steps(changes: &[Change]) -> Change {
+        let first = changes
+            .first()
+            .copied()
+            .unwrap_or(Change::Slides { show: 0 });
+        if changes.iter().any(|c| matches!(c, Change::Slides { .. })) {
+            Change::Slides {
+                show: first.slide(),
+            }
+        } else {
+            first
+        }
+    }
 }
 
 /// One undoable change to a deck.
@@ -86,6 +107,8 @@ pub enum Edit {
     Layout(LayoutEdit),
     Shapes(ShapeEdit),
     Fit(FitEdit),
+    /// A shape's paragraphs replaced (outline edits).
+    Body(BodyEdit),
     /// Edits made as one step, in order (typing and the shrink it caused).
     Steps(Vec<Edit>),
 }
@@ -102,12 +125,11 @@ impl Edit {
             Edit::Layout(e) => e.apply(deck),
             Edit::Shapes(e) => e.apply(deck),
             Edit::Fit(e) => e.apply(deck),
-            // The first edit says what the step changed.
-            Edit::Steps(steps) => steps
-                .iter()
-                .map(|e| e.apply(deck))
-                .reduce(|first, _| first)
-                .unwrap_or(Change::Slides { show: 0 }),
+            Edit::Body(e) => e.apply(deck),
+            Edit::Steps(steps) => {
+                let changes: Vec<Change> = steps.iter().map(|e| e.apply(deck)).collect();
+                Change::of_steps(&changes)
+            }
         }
     }
 
@@ -122,12 +144,12 @@ impl Edit {
             Edit::Layout(e) => e.revert(deck),
             Edit::Shapes(e) => e.revert(deck),
             Edit::Fit(e) => e.revert(deck),
-            Edit::Steps(steps) => steps
-                .iter()
-                .rev()
-                .map(|e| e.revert(deck))
-                .last()
-                .unwrap_or(Change::Slides { show: 0 }),
+            Edit::Body(e) => e.revert(deck),
+            Edit::Steps(steps) => {
+                let mut changes: Vec<Change> = steps.iter().rev().map(|e| e.revert(deck)).collect();
+                changes.reverse();
+                Change::of_steps(&changes)
+            }
         }
     }
 
@@ -176,7 +198,8 @@ edit_from!(
     BackgroundEdit => Background,
     LayoutEdit => Layout,
     ShapeEdit => Shapes,
-    FitEdit => Fit
+    FitEdit => Fit,
+    BodyEdit => Body
 );
 
 /// Undo and redo for one deck: the steps applied, newest last, and the steps undone.

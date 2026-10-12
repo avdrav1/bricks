@@ -66,9 +66,15 @@ fn moved_run(r: &Run, base: &Run) -> Run {
 
 /// A paragraph moved into a placeholder whose paragraphs look like `levels` (by level).
 fn moved_paragraph(p: &Paragraph, levels: &[Paragraph]) -> Option<Paragraph> {
-    let base = levels.get(p.level as usize).or(levels.last())?;
+    rebased(p, p.level, levels)
+}
+
+/// `p` at `level` in a body whose paragraphs look like `levels`: that level's looks but
+/// those set on the paragraph and its runs, its text, and its markup.
+pub(crate) fn rebased(p: &Paragraph, level: u8, levels: &[Paragraph]) -> Option<Paragraph> {
+    let base = levels.get(level as usize).or(levels.last())?;
     let mut q = base.clone();
-    q.level = p.level;
+    q.level = level;
     if p.sources.align.is_own() {
         (q.align, q.sources.align) = (p.align, p.sources.align);
     }

@@ -2,7 +2,8 @@
 //! bar), the file dialog, drops, and alerts (spec FR0); the deck window's undo history and
 //! its keys (text editing itself is in [`crate::editing`], the slide list in
 //! [`crate::slide_list`], the inspector in [`crate::inspector`], inserting in
-//! [`crate::insert`], text fitting its box in [`crate::fit`]).
+//! [`crate::insert`], text fitting its box in [`crate::fit`], the outline in
+//! [`crate::outline`]).
 
 use crate::arrange;
 use crate::deck::Deck;
@@ -10,6 +11,7 @@ use crate::editing;
 use crate::fit;
 use crate::insert;
 use crate::inspector::{self, Inspector};
+use crate::outline::{self, OutlineView};
 use crate::saving;
 use crate::slide_list::{self, THUMB_WIDTH};
 use crate::slide_view::{Editing, SlideView};
@@ -272,6 +274,8 @@ pub(crate) struct DeckWindow {
     /// The canvas's input method, for typing.
     pub im: gtk::IMMulticontext,
     pub inspector: Inspector,
+    /// The outline, shown in place of the canvas and the inspector.
+    pub outline: OutlineView,
 }
 
 impl DeckWindow {
@@ -305,6 +309,7 @@ impl DeckWindow {
                 }
             }
         }
+        outline::follow(self, index);
     }
 
     /// The canvas's accessible name and description: slide `index` with its layout's
@@ -438,6 +443,8 @@ impl DeckWindow {
     /// still edited as it was. A slide as a whole: it and its thumbnail redrawn, nothing
     /// selected. The inspector follows.
     fn changed(&self, change: Change, caret: bool) {
+        // While the outline is shown, the canvas edits nothing.
+        let caret = caret && !self.outline.is_shown();
         match change {
             Change::Text { shape, caret: at } => {
                 if self.canvas.index() != shape.slide {
@@ -482,6 +489,7 @@ impl DeckWindow {
             }
         }
         self.inspector.refresh();
+        outline::changed(self, change);
     }
 
     /// Redraw slide `slide` on the canvas and in the slide list.
@@ -642,7 +650,9 @@ fn show_deck(
     main.append(&gtk::Separator::new(gtk::Orientation::Vertical));
     let paned = gtk::Paned::new(gtk::Orientation::Horizontal);
     paned.set_start_child(Some(&side));
-    paned.set_end_child(Some(&main));
+    // The canvas and the inspector, or the outline in their place (crate::outline).
+    let outline = OutlineView::new(&main);
+    paned.set_end_child(Some(outline.widget()));
     paned.set_shrink_start_child(false);
     paned.set_resize_start_child(false);
     paned.set_vexpand(true);
@@ -670,12 +680,14 @@ fn show_deck(
         history: RefCell::new(History::new()),
         im: gtk::IMMulticontext::new(),
         inspector: Inspector::new(&deck, weak.clone()),
+        outline,
     });
     main.append(view.inspector.widget());
     slide_list::rebuild(&view);
     editing::attach(&view);
     arrange::attach(&view);
     inspector::attach(&view);
+    outline::attach(&view);
     list.connect_row_selected({
         let view = Rc::downgrade(&view);
         move |_, row| {
@@ -696,12 +708,14 @@ fn show_deck(
             let ctrl = mods.contains(ModifierType::CONTROL_MASK);
             let shift = mods.contains(ModifierType::SHIFT_MASK);
             let alt = mods.contains(ModifierType::ALT_MASK);
-            let text = view.canvas.editing().is_some();
+            let outline = view.outline.has_focus();
+            let text = view.canvas.editing().is_some() || outline;
             // Ctrl+Z undoes, Ctrl+Shift+Z and Ctrl+Y redo: the deck's one history, before
             // the canvas's input method sees the keys. Shifted, z arrives as Z. Ctrl+M
             // adds a slide even while text is edited; Ctrl+D, Ctrl+Up, and Ctrl+Down
-            // are the slide's only when no text is. Ctrl+V pastes a picture
-            // (crate::insert), outside the inspector.
+            // are the slide's only when no text is (on the canvas or in the outline).
+            // Ctrl+V pastes a picture (crate::insert), outside the inspector and the
+            // outline. Ctrl+Shift+O shows the outline or the canvas.
             if ctrl && !alt {
                 match key {
                     Key::z | Key::Z if !shift => view.undo(),
@@ -709,10 +723,11 @@ fn show_deck(
                     Key::m | Key::M if !shift => slide_list::new_slide(&view),
                     Key::s | Key::S if !shift => saving::save(&view),
                     Key::s | Key::S => saving::save_as(&view),
+                    Key::o | Key::O if shift => view.outline.toggle(),
                     Key::d | Key::D if !shift && !text => slide_list::duplicate(&view),
                     Key::Up | Key::KP_Up if !shift && !text => slide_list::move_by(&view, -1),
                     Key::Down | Key::KP_Down if !shift && !text => slide_list::move_by(&view, 1),
-                    Key::v | Key::V if !shift && !view.inspector.has_focus() => {
+                    Key::v | Key::V if !shift && !view.inspector.has_focus() && !outline => {
                         if !insert::paste(&view) {
                             return glib::Propagation::Proceed;
                         }
@@ -721,8 +736,8 @@ fn show_deck(
                 }
                 return glib::Propagation::Stop;
             }
-            // While text is edited, the keys are the text's (crate::editing); in the
-            // inspector, its controls'.
+            // While text is edited, the keys are the text's (crate::editing, or
+            // crate::outline); in the inspector, its controls'.
             if text || ctrl || alt || view.inspector.has_focus() {
                 return glib::Propagation::Proceed;
             }
@@ -808,6 +823,7 @@ fn show_deck(
         play.set_tooltip_text(Some("Slideshow (F5)"));
         play.update_property(&[gtk::accessible::Property::Label("Slideshow")]);
         bar.pack_end(&play);
+        bar.pack_end(view.outline.button());
     }
     view.go(0);
     if let Some(frames) = bench {
