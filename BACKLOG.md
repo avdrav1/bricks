@@ -137,7 +137,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | FRAME-6 | FR1 | P0 | done | FRAME-4 | Edit slide text on the slide with undo (deck-edit commands, ADR 0006) | Typing in a text box or placeholder changes it, an inherited placeholder keeps its layout's style, and undo and redo restore each step |
 | FRAME-7 | FR1 | P0 | done | FRAME-6 | Add, delete, duplicate, and reorder slides; layouts as thumbnails | Ctrl+M adds a slide with the current slide's layout, or Title and Content after a title slide; the New Slide menu shows the deck's layouts as thumbnails; each step undoes; the slide list follows |
 | FRAME-8 | FR1 | P0 | done | FRAME-6 | Save .pptx by patching the original package | LibreOffice reopens an edited deck with the edits and every other part unchanged |
-| FRAME-9 | FR1 | P1 | todo | FRAME-4 | Desktop entry, icon, and installer | Double-clicking a .pptx opens Frame after install |
+| FRAME-9 | FR1 | P1 | done | FRAME-4 | Desktop entry, icon, and installer | Double-clicking a .pptx opens Frame after install |
 | FRAME-10 | FR1 | P0 | done | FRAME-6 | Select, move, resize, and nudge shapes with snapping and smart guides | deck-edit unit tests snap to slide edges and centre, layout placeholders, other shapes' edges and centres, and equal spacing within 6 screen px; the GUI check drags a shape near the slide centre and it lands centred with a guide drawn; Alt turns snapping off; arrows nudge; each step undoes |
 | FRAME-11 | FR1 | P0 | done | FRAME-10 | Inspector sidebar for the selection, no formatting dialogs | The inspector shows the slide, text, shape, picture, or table rows for the selection with inherited values; changing font, size, bold, colour, alignment, bullets, fill, outline, layout, and background applies at once and undoes; a saved deck shows the changes in LibreOffice's dump |
 | FRAME-12 | FR1 | P0 | done | FRAME-10 | Insert text boxes, shapes, pictures, and tables; text shrinks to fit | A dropped, pasted, or inserted picture fills the first empty picture or content placeholder, else lands centred and scaled to fit; overflowing placeholder text shrinks and saves as normAutofit; each insert undoes |
@@ -149,6 +149,17 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-12 FRAME-9:** Frame installs per user, the way Bricks does. The user decided to ship it as "Frame".
+  - App ID: `dev.bricks.Frame` → `dev.cronkite.Frame`, Slate's scheme.
+  - Packaging: `packaging/dev.cronkite.Frame.desktop` (Office;Presentation; .pptx and .pptm) and an icon, `packaging/dev.cronkite.Frame.svg`.
+  - Installer: `sites/frame/install.sh` is Bricks' installer without the Spreadsheet migration (`FRAME_DOWNLOAD_URL`, or `@DOWNLOAD_BASE_URL@` filled in at deploy). It reads the same latest.json and tarball layout and sets the .pptx default.
+  - Follow-ups for Frame's first release, under the ship-it skill:
+    - `scripts/ship.sh`, `check_release.sh`, and `check_install.sh` are Bricks-only: one APP, latest.json at the bucket's root, and `--bench-open` on a CSV. Frame needs a download prefix or bucket, a `sites/frame` page, a Pages project, and an install check on Ubuntu 24.04 and Fedora.
+    - `sites/cronkite` links only to Bricks.
+  - Acceptance: `scripts/check_frame.sh` 19 (Arch, headless sway). This binary, packaged with the entry and icon as a release served on localhost, is installed with `sites/frame/install.sh` over a mimeapps.list that has Impress for .pptx and eog for PNG.
+    - `gio mime` names `dev.cronkite.Frame.desktop`, and the entry runs `/root/.local/bin/frame %f`.
+    - `gio open` (a file manager's double-click) on a copy of layouts.pptx shows the window `clicked.pptx` at "Slide 1 of 10", from `/root/.local/bin/frame /tmp/f/clicked.pptx`.
+    - `--uninstall` removes the binary, entry, and icon and keeps `image/png=eog.desktop`.
 - **2026-10-12 FRAME-15:** Frame does the spec's reference task in fewer input actions than PowerPoint: 15 on the canvas and 19 in the outline, against PowerPoint's 21. Measured on the task the spec names: "Quarterly review" with a subtitle; "Highlights" with Growth, Margins, and Up 3% at the second level; "Revenue" with a 400×200 PNG from a file; "Next steps" with Hire and Ship; saved as .pptx. The user chose to build both a canvas and an outline flow:
   - Canvas flow, as PowerPoint's (`deck-edit` `canvas.rs`: `next_placeholder` and `relevel`; app `editing.rs` and `slide_list.rs`):
     - A new deck opens, and a slide New Slide adds (Ctrl+M, the button, a picked layout, the list's menu) opens, with the caret in its title.

@@ -34,7 +34,9 @@ use std::path::PathBuf;
 use suite_core::AppKind;
 
 const APP: AppKind = AppKind::Frame;
-const APP_ID: &str = "dev.bricks.Frame";
+/// The desktop entry and icon take this name (packaging/dev.cronkite.Frame.*), so docks
+/// match the window to its entry.
+const APP_ID: &str = "dev.cronkite.Frame";
 const USAGE: &str = "usage: frame [FILE.pptx] [--version] [--bench-draw FRAMES]";
 
 struct Args {
