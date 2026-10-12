@@ -5,21 +5,26 @@
 //!
 //! FRAME-11: formatting (text looks, alignment, bullets, fills, outlines, backgrounds)
 //! and layout changes save and read back as the edited deck, the rest byte for byte.
+//!
+//! FRAME-12: pictures (filling a placeholder, or centred), text boxes, shapes, lines, and
+//! tables inserted, a shape deleted, and text shrunk to fit save and read back as the
+//! edited deck, each picture's image a new media part.
 
 mod common;
 
 use deck_edit::{
-    BackgroundEdit, FrameEdit, History, LayoutEdit, LookEdit, ParagraphLook, ShapeLook,
-    ShapeLookEdit, ShapeRef, SlideEdit, TextEdit, TextLook, TextPos,
+    BackgroundEdit, Fit, FitEdit, FrameEdit, History, LayoutEdit, LookEdit, ParagraphLook,
+    ShapeEdit, ShapeLook, ShapeLookEdit, ShapeRef, SlideEdit, TextEdit, TextLook, TextPos,
 };
 use presentation_model::{
-    Align, Background, Color, Dash, Fill, Frame, Layer, Outline, Paragraph, PlaceholderKind,
-    Presentation, RunSources, ShapeKind, Slide, Source,
+    Align, Autofit, Background, Color, Dash, Fill, Frame, Image, ImageFormat, Layer, Outline,
+    Paragraph, PlaceholderKind, Presentation, RunSources, ShapeKind, Slide, Source,
 };
 use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 fn temp(test: &str, name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("frame-save-{}-{test}", std::process::id()));
@@ -925,5 +930,427 @@ fn libreoffice_reads_the_formatting_and_layout_changes() {
     assert_eq!(new[2].len(), old[2].len());
     for i in [0, 3, 4] {
         assert_eq!(new[i], old[i], "slide {}", i + 1);
+    }
+}
+
+/// A `w` by `h` PNG: red left half, blue right half (one stored zlib block, so `w` and
+/// `h` stay small).
+fn png(w: u32, h: u32) -> Vec<u8> {
+    fn crc(bytes: &[u8]) -> u32 {
+        let mut c = !0u32;
+        for &b in bytes {
+            c ^= u32::from(b);
+            for _ in 0..8 {
+                c = if c & 1 == 1 {
+                    0xEDB8_8320 ^ (c >> 1)
+                } else {
+                    c >> 1
+                };
+            }
+        }
+        !c
+    }
+    // Each row: filter type 0, then its pixels.
+    let row: Vec<u8> = std::iter::once(0)
+        .chain((0..w).flat_map(|x| if x < w / 2 { [255, 0, 0] } else { [0, 0, 255] }))
+        .collect();
+    let raw = row.repeat(h as usize);
+    let (mut a, mut b) = (1u32, 0u32);
+    for &byte in &raw {
+        a = (a + u32::from(byte)) % 65_521;
+        b = (b + a) % 65_521;
+    }
+    let len = u16::try_from(raw.len()).unwrap();
+    let mut zlib = vec![0x78, 0x01, 1];
+    zlib.extend(len.to_le_bytes());
+    zlib.extend((!len).to_le_bytes());
+    zlib.extend(&raw);
+    zlib.extend(((b << 16) | a).to_be_bytes());
+    let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
+    let mut chunk = |kind: &[u8], data: &[u8]| {
+        out.extend(u32::try_from(data.len()).unwrap().to_be_bytes());
+        let body = [kind, data].concat();
+        out.extend(&body);
+        out.extend(crc(&body).to_be_bytes());
+    };
+    let mut ihdr = Vec::new();
+    ihdr.extend(w.to_be_bytes());
+    ihdr.extend(h.to_be_bytes());
+    ihdr.extend([8, 2, 0, 0, 0]);
+    chunk(b"IHDR", &ihdr);
+    chunk(b"IDAT", &zlib);
+    chunk(b"IEND", &[]);
+    out
+}
+
+/// What `inserted` typed into slide 1's subtitle: more than its box holds.
+const LONG: &str = " that runs on and on, line after line,\nand on again, well past the bottom";
+
+/// layouts.pptx with things inserted: a new Title and Content slide 2 whose body a 40 x
+/// 30 PNG fills; a new Title Only slide 3 with the PNG centred and a 3 x 4 table, its
+/// cells typed into (`R1C1`, ...); on slide 1, a text box and an oval typed into, a line,
+/// and its subtitle typed long and shrunk to fit (62.5%, lines 20% closer); the
+/// original slide 7's second text box deleted; the last slide duplicated, the PNG
+/// centred on the copy. The pictures, the table, and the shapes come in as the window
+/// inserts them.
+fn inserted() -> (Presentation, Presentation) {
+    let mut deck = pptx::read(&common::data("layouts.pptx")).unwrap();
+    let read = deck.clone();
+    let mut h = History::new();
+    let image = || Image {
+        format: ImageFormat::Png,
+        bytes: Arc::from(png(40, 30)),
+    };
+    let add = SlideEdit::on_layout(&deck, Some(0), layout_named(&deck, "Title and Content"));
+    h.apply(&mut deck, add.unwrap());
+    let add = SlideEdit::on_layout(&deck, Some(1), layout_named(&deck, "Title Only"));
+    h.apply(&mut deck, add.unwrap());
+    let last = deck.slides.len() - 1;
+    let dup = SlideEdit::duplicate(&deck, last).unwrap();
+    h.apply(&mut deck, dup);
+    for slide in [1, 2, last + 1] {
+        let edit = ShapeEdit::picture(&deck, slide, image(), (40, 30), None).unwrap();
+        h.apply(&mut deck, edit);
+    }
+    let table = ShapeEdit::table(&deck, 2, 3, 4).unwrap();
+    let at = table.target().unwrap();
+    h.apply(&mut deck, table);
+    let ShapeKind::Table(t) = &mut deck.slides[2].shapes[at.shape].kind else {
+        panic!("no table");
+    };
+    for (r, row) in t.rows.iter_mut().enumerate() {
+        for (c, cell) in row.cells.iter_mut().enumerate() {
+            let p = &mut cell.text.paragraphs[0];
+            p.runs = vec![p.end.with_text(format!("R{}C{}", r + 1, c + 1))];
+        }
+    }
+    let text_box = ShapeEdit::text_box(&deck, 0, "").unwrap();
+    let at = text_box.target().unwrap();
+    h.apply(&mut deck, text_box);
+    type_at_end(&mut deck, &mut h, 0, at.shape, "Text box text");
+    let oval = ShapeEdit::shape(&deck, 0, "ellipse").unwrap();
+    let at = oval.target().unwrap();
+    h.apply(&mut deck, oval);
+    type_at_end(&mut deck, &mut h, 0, at.shape, "Oval text");
+    let line = ShapeEdit::shape(&deck, 0, "line").unwrap();
+    h.apply(&mut deck, line);
+    let sub = placeholder_ref(&deck, 0, PlaceholderKind::Subtitle);
+    type_at_end(&mut deck, &mut h, 0, sub.shape, LONG);
+    let fit = Fit {
+        font_scale: 0.625,
+        line_reduction: 0.2,
+    };
+    let fit = FitEdit::new(&deck, sub, fit).unwrap();
+    h.amend(&mut deck, fit);
+    let seven = deck
+        .slides
+        .iter()
+        .position(|s| s.part == read.slides[6].part)
+        .unwrap();
+    let shape = deck.slides[seven]
+        .shapes
+        .iter()
+        .position(|s| s.name == "TextBox 4")
+        .unwrap();
+    let remove = ShapeEdit::remove(
+        &deck,
+        ShapeRef {
+            slide: seven,
+            shape,
+        },
+    )
+    .unwrap();
+    h.apply(&mut deck, remove);
+    (read, deck)
+}
+
+/// The own shape of `slide` named `name`.
+fn named<'a>(slide: &'a Slide, name: &str) -> &'a presentation_model::Shape {
+    slide
+        .own_shapes()
+        .find(|s| s.name.starts_with(name))
+        .unwrap_or_else(|| panic!("no {name}"))
+}
+
+#[test]
+fn inserts_save_and_read_back() {
+    let (read, deck) = inserted();
+    let source = common::data("layouts.pptx");
+    let dest = temp("inserts", "saved.pptx");
+    pptx::save(&dest, &source, &read, &deck, &AtomicBool::new(false)).unwrap();
+    let back = pptx::read(&dest).unwrap();
+    reads_as(&back, &deck);
+    let png = png(40, 30);
+    let picture = |s: &presentation_model::Shape| match &s.kind {
+        ShapeKind::Picture(p) => p.clone(),
+        other => panic!("{} is {other:?}", s.name),
+    };
+
+    // Slide 2: the PNG fills the body placeholder, its top and bottom cropped to its shape.
+    let (now, again) = (&deck.slides[1], &back.slides[1]);
+    let body = placeholder(again, PlaceholderKind::Body);
+    let (b, was) = (&again.shapes[body], &now.shapes[body]);
+    assert_eq!((b.id, &b.slot, b.frame), (was.id, &was.slot, was.frame));
+    let (p, q) = (picture(b), picture(was));
+    assert_eq!(&*p.image.bytes, &png[..]);
+    assert!(p.crop.top > 0.05 && p.crop.left == 0.0, "{:?}", p.crop);
+    for (x, y) in [
+        (p.crop.top, q.crop.top),
+        (p.crop.bottom, q.crop.bottom),
+        (p.crop.left, q.crop.left),
+        (p.crop.right, q.crop.right),
+    ] {
+        assert!((x - y).abs() < 1e-5, "{:?} vs {:?}", p.crop, q.crop);
+    }
+
+    // Slide 3: the PNG centred at its size, and the table.
+    let (now, again) = (&deck.slides[2], &back.slides[2]);
+    let pic = named(again, "Picture");
+    assert_eq!(&*picture(pic).image.bytes, &png[..]);
+    assert_eq!((pic.frame.cx, pic.frame.cy), (40 * 9_525, 30 * 9_525));
+    assert_eq!(pic.frame, named(now, "Picture").frame);
+    let table = named(again, "Table");
+    let ShapeKind::Table(t) = &table.kind else {
+        panic!("{:?}", table.kind)
+    };
+    assert_eq!((t.rows.len(), t.columns.len()), (3, 4));
+    let cell = |r: usize, c: usize| &t.rows[r].cells[c];
+    assert_eq!(cell(1, 2).text.plain_text(), "R2C3");
+    assert_eq!(
+        [cell(0, 0).fill, cell(1, 0).fill, cell(2, 3).fill],
+        [
+            Some(deck_edit::ACCENT),
+            Some(deck_edit::BAND_1),
+            Some(deck_edit::BAND_2)
+        ]
+    );
+    let white = Some(Outline {
+        width: 12_700,
+        color: Color::WHITE,
+        dash: Dash::Solid,
+    });
+    let b = cell(2, 1).borders;
+    assert_eq!([b.top, b.bottom, b.left, b.right], [white; 4]);
+    let header = &cell(0, 1).text.paragraphs[0].runs[0];
+    assert_eq!(
+        (header.text.as_str(), header.bold, header.color),
+        ("R1C2", true, Color::WHITE)
+    );
+    assert!(!cell(1, 1).text.paragraphs[0].runs[0].bold);
+
+    // Slide 1: the text box, the oval, and the line, in front of what was there; the
+    // subtitle shrunk.
+    let again = &back.slides[0];
+    let names: Vec<&str> = again.own_shapes().map(|s| s.name.as_str()).collect();
+    assert_eq!(names.len(), 5, "{names:?}");
+    assert!(names[2].starts_with("TextBox"), "{names:?}");
+    assert!(names[3].starts_with("Oval"), "{names:?}");
+    assert!(names[4].starts_with("Line"), "{names:?}");
+    let text_box = named(again, "TextBox");
+    let body = text_box.text.as_ref().unwrap();
+    assert_eq!(text_box.plain_text(), "Text box text");
+    assert_eq!((body.autofit, body.wrap), (Autofit::Grow, true));
+    assert_eq!(text_box.fill, Fill::None);
+    let oval = named(again, "Oval");
+    assert!(matches!(&oval.kind, ShapeKind::Geometry { preset, .. } if preset == "ellipse"));
+    assert_eq!(oval.fill, Fill::Solid(deck_edit::ACCENT));
+    assert_eq!(oval.plain_text(), "Oval text");
+    let run = &oval.text.as_ref().unwrap().paragraphs[0].runs[0];
+    assert_eq!(run.color, Color::WHITE);
+    let line = named(again, "Line");
+    assert!(matches!(&line.kind, ShapeKind::Geometry { preset, .. } if preset == "line"));
+    assert_eq!((line.text.is_none(), line.frame.cy), (true, 0));
+    assert_eq!(line.outline.map(|o| o.color), Some(deck_edit::ACCENT));
+    let sub = &again.shapes[placeholder(again, PlaceholderKind::Subtitle)];
+    let body = sub.text.as_ref().unwrap();
+    assert_eq!(
+        (body.autofit, body.font_scale, body.line_reduction),
+        (Autofit::Shrink, 0.625, 0.2)
+    );
+    assert!(sub.plain_text().ends_with("well past the bottom"));
+
+    // The original slide 7: its second text box gone.
+    let seven = back
+        .slides
+        .iter()
+        .position(|s| s.part == read.slides[6].part)
+        .unwrap();
+    let names: Vec<&str> = back.slides[seven]
+        .own_shapes()
+        .map(|s| s.name.as_str())
+        .collect();
+    assert_eq!(names, ["Title 1", "TextBox 3"]);
+
+    // The copy of the last slide: its shapes, and the PNG.
+    let copy = back.slides.last().unwrap();
+    assert_eq!(&*picture(named(copy, "Picture")).image.bytes, &png[..]);
+    assert_eq!(
+        copy.own_shapes().count(),
+        read.slides[9].own_shapes().count() + 1
+    );
+
+    // The images are new media parts, their type the package's now; slide 1 says how
+    // its subtitle shrank; every other part is as it was (the last slide, now two on, has
+    // its slide number field written).
+    let saved = parts(&dest);
+    let media: Vec<&String> = saved
+        .keys()
+        .filter(|n| n.starts_with("ppt/media/") && n.ends_with(".png"))
+        .collect();
+    assert_eq!(media.len(), 3, "{media:?}");
+    assert!(media.iter().all(|m| saved[*m] == png));
+    let types = String::from_utf8(saved["[Content_Types].xml"].clone()).unwrap();
+    assert!(types.contains(r#"<Default Extension="png" ContentType="image/png"/>"#));
+    let slide1 = String::from_utf8(saved["ppt/slides/slide1.xml"].clone()).unwrap();
+    assert!(
+        slide1.contains(r#"<a:normAutofit fontScale="62500" lnSpcReduction="20000"/>"#),
+        "{slide1}"
+    );
+    untouched_but(&source, &dest, &changed_parts(&read, &[0, 6, 9], &[]));
+
+    // A saved deck saves again, from the file it was saved to.
+    let again = temp("inserts", "again.pptx");
+    pptx::save(&again, &dest, &back, &back, &AtomicBool::new(false)).unwrap();
+    reads_as(&pptx::read(&again).unwrap(), &deck);
+}
+
+/// The lines of shape `name` in a dump slide: its `shape` line and those after it, up to
+/// the next shape.
+fn shape_lines<'a>(lines: &[&'a str], name: &str) -> Vec<&'a str> {
+    let start = lines
+        .iter()
+        .position(|l| l.starts_with("shape\t") && l.split('\t').nth(10) == Some(name))
+        .unwrap_or_else(|| panic!("no {name} in {lines:?}"));
+    let len = lines[start + 1..]
+        .iter()
+        .position(|l| l.starts_with("shape\t"))
+        .map_or(lines.len() - start, |n| n + 1);
+    lines[start..start + len].to_vec()
+}
+
+#[test]
+#[ignore = "needs LibreOffice: cargo test -p pptx --test save -- --ignored"]
+fn libreoffice_reads_the_inserts() {
+    let (read, deck) = inserted();
+    let source = private_copy("libreoffice-inserts", "layouts.pptx");
+    let dest = temp("libreoffice-inserts", "saved.pptx");
+    pptx::save(&dest, &source, &read, &deck, &AtomicBool::new(false)).unwrap();
+    let (before, after) = (lo_dump(&source, 2173), lo_dump(&dest, 2173));
+    let (old, new) = (dump_slides(&before), dump_slides(&after));
+    assert_eq!(new.len(), deck.slides.len());
+    let png = "picture\timage/png\t40x30";
+    let frame = |lines: &[&str], kind: &str| -> [i64; 4] {
+        [3, 4, 5, 6].map(|n| shape_field(lines, kind, n))
+    };
+    let near = |a: [i64; 4], b: [i64; 4]| a.iter().zip(&b).all(|(x, y)| (x - y).abs() <= 720);
+
+    // Slide 2: the PNG at the body placeholder's frame (the original slide 2 has one of
+    // Title and Content's too).
+    assert!(new[1].contains(&png), "{:?}", new[1]);
+    let (pic, body) = (
+        frame(&new[1], "GraphicObjectShape"),
+        frame(&old[1], "OutlinerShape"),
+    );
+    assert!(near(pic, body), "{pic:?} vs {body:?}");
+
+    // Slide 3: the PNG centred, and the table with its fills, borders, and text.
+    assert!(new[2].contains(&png), "{:?}", new[2]);
+    let f = named(&deck.slides[2], "Picture").frame;
+    let pic = frame(&new[2], "GraphicObjectShape");
+    assert!(near(pic, [f.x, f.y, f.cx, f.cy]), "{pic:?} vs {f:?}");
+    let cells: Vec<&str> = new[2]
+        .iter()
+        .copied()
+        .filter(|l| l.starts_with("cell\t"))
+        .collect();
+    assert_eq!(cells.len(), 12, "{:?}", new[2]);
+    // Each border white, 1 pt: LibreOffice gives each of the two cells a border lies
+    // between half its width (to its 1/100 mm).
+    let white = |l: &&str| {
+        let borders = l.split('\t').nth(4).unwrap_or_default().split(' ');
+        borders.map(|b| b.split_once(':')).all(|b| {
+            b.is_some_and(|(c, w)| {
+                c == "FFFFFF" && (w.parse::<i64>().unwrap() - 6_350).abs() <= 360
+            })
+        })
+    };
+    assert!(cells.iter().all(white), "{cells:?}");
+    assert!(
+        cells[0].starts_with("cell\t0\t0\tsolid 4472C4 100"),
+        "{cells:?}"
+    );
+    assert!(
+        cells[4].starts_with("cell\t1\t0\tsolid CFD5EA 100"),
+        "{cells:?}"
+    );
+    assert!(
+        cells[8].starts_with("cell\t2\t0\tsolid E9EBF5 100"),
+        "{cells:?}"
+    );
+    assert!(new[2].contains(&"para\t0\tleft\tR2C3"), "{:?}", new[2]);
+    let header = new[2]
+        .iter()
+        .find(|l| l.starts_with("run\t") && l.ends_with("\tR1C1"))
+        .unwrap();
+    let header: Vec<&str> = header.split('\t').collect();
+    assert_eq!((header[2], header[6]), ("1", "FFFFFF"), "{header:?}");
+
+    // Slide 1: what was there (the subtitle aside), then the text box, the oval, and the
+    // line.
+    let text_free = |lines: &[&str]| -> Vec<String> {
+        lines
+            .iter()
+            .filter(|l| !l.starts_with("para\t") && !l.starts_with("run\t"))
+            .map(|l| l.to_string())
+            .collect()
+    };
+    let (was, is) = (text_free(&old[0]), text_free(&new[0]));
+    assert_eq!(is[..was.len()], was[..], "{is:?}");
+    let shape = |prefix: &str| {
+        let s = named(&deck.slides[0], prefix);
+        shape_lines(&new[0], &s.name)
+    };
+    let text_box = shape("TextBox");
+    assert!(
+        text_box.contains(&"para\t0\tleft\tText box text"),
+        "{text_box:?}"
+    );
+    assert!(text_box.contains(&"fill\tnone"), "{text_box:?}");
+    let oval = shape("Oval");
+    assert!(oval.contains(&"fill\tsolid 4472C4 100"), "{oval:?}");
+    assert!(oval.contains(&"para\t0\tcenter\tOval text"), "{oval:?}");
+    let run = oval.iter().find(|l| l.starts_with("run\t")).unwrap();
+    assert!(run.contains("\tFFFFFF\t"), "{run}");
+    let line = shape("Line");
+    assert!(
+        line[1..]
+            .iter()
+            .any(|l| l.starts_with("line\tsolid 4472C4")),
+        "{line:?}"
+    );
+    assert!(
+        new[0].contains(&"para\t0\tcenter\tand on again, well past the bottom"),
+        "{:?}",
+        new[0]
+    );
+    let saved = parts(&dest);
+    let slide1 = String::from_utf8(saved["ppt/slides/slide1.xml"].clone()).unwrap();
+    assert!(slide1.contains(r#"fontScale="62500" lnSpcReduction="20000""#));
+
+    // The original slide 7 without its second text box.
+    let mut without = old[6].clone();
+    let gone = shape_lines(&old[6], "TextBox 4");
+    let at = without.iter().position(|l| *l == gone[0]).unwrap();
+    without.drain(at..at + gone.len());
+    assert_eq!(new[8], without);
+
+    // The copy of the last slide: as it, then the PNG.
+    let copy = &new[new.len() - 1];
+    assert_eq!(copy[..old[9].len()], old[9][..], "{copy:?}");
+    assert!(copy[old[9].len()..].contains(&png), "{copy:?}");
+
+    // Every other slide as LibreOffice read it before.
+    for j in [1, 2, 3, 4, 5, 7, 8, 9] {
+        assert_eq!(new[j + 2], old[j], "saved slide {}", j + 3);
     }
 }

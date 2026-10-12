@@ -6,14 +6,17 @@
 //! with a slide list and a canvas, and F5 starts a full-screen slideshow. Without a file it
 //! shows a start window; Ctrl+O picks a file, and files dropped on a window open. FR1
 //! edits (ADR 0006): slide text on the canvas, adding, duplicating, deleting, and moving
-//! slides, moving and resizing shapes with snapping, and formatting in the inspector
-//! beside the canvas, with undo.
+//! slides, moving and resizing shapes with snapping, formatting in the inspector beside
+//! the canvas, and inserting text boxes, shapes, pictures, and tables, text shrinking to
+//! fit its box; with undo.
 //! `--bench-draw` redraws the deck's densest slide for FRAMES frames and prints how long
 //! each took (FRAME-4's acceptance test).
 
 mod arrange;
 mod deck;
 mod editing;
+mod fit;
+mod insert;
 mod inspector;
 mod render;
 mod saving;

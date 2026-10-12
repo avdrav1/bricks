@@ -334,7 +334,8 @@ impl SlideView {
         self.imp().last_ms.get()
     }
 
-    fn pango(&self) -> pango::Context {
+    /// The Pango context text is laid out with: fractional glyph positions.
+    pub(crate) fn pango(&self) -> pango::Context {
         self.imp()
             .pango
             .borrow_mut()

@@ -14,25 +14,33 @@
 //! - a new slide's part: the slide XML PowerPoint writes for one on its layout, with its
 //!   text; a duplicate's: its source's part and relationships, with its own copy of the
 //!   source's notes;
-//! - a deleted slide's part, relationships, and notes go.
+//! - a deleted slide's part, relationships, and notes go;
+//! - shapes added to a slide (text boxes, preset shapes, lines, pictures, tables): written
+//!   whole from the model at their place in its shape tree (`write`), a picture's image
+//!   as a new media part with a relationship from the slide; a placeholder a picture
+//!   filled becomes a picture that keeps its `<p:ph>`; shapes deleted go;
+//! - text shrunk to fit: its body's `<a:normAutofit>`.
 //!
 //! The package is written with each part's sizes in its local header (LibreOffice can't
 //! read a zip streamed with data descriptors), through `suite_file::save_atomic`.
 
 use crate::package::resolve;
 use crate::read::blank_slide;
+use crate::write::{self as shapes, Prefixes};
 use crate::xml::{self, escape, Element};
 use presentation_model::{
-    Align, Background, Bullet, BulletSize, Color, Dash, Fill, Frame, Layer, Outline, Paragraph,
-    PlaceholderSlot, Presentation, Run, Shape, Slide, Source, TextBody,
+    Align, Autofit, Background, Bullet, BulletSize, Color, Dash, Fill, Frame, Image, Layer,
+    Outline, Paragraph, PlaceholderSlot, Presentation, Run, Shape, ShapeKind, Slide, Source,
+    TextBody,
 };
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, BufReader, Read, Write};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use suite_file::{save_atomic, SaveError, WriteSeek};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
@@ -87,7 +95,9 @@ impl Drop for Original {
 /// Save `deck` at `dest`, atomically, by patching `source`, the package `read` was read
 /// from. Slides are matched to the parts they were read from by `Slide::part`. Verification
 /// reads the written file back: its slide count; the text, boxes, fills, and outlines of
-/// every shape the save wrote; and the backgrounds and layouts it wrote.
+/// every shape the save wrote; the kind of every shape it wrote whole (a picture's bytes,
+/// a table's cells); the text fits it wrote; the shapes it took out; and the backgrounds
+/// and layouts it wrote.
 pub fn save(
     dest: &Path,
     source: &Path,
@@ -108,12 +118,16 @@ pub fn save(
 }
 
 /// What a save wrote on one slide: the ids of the shapes whose text, boxes, and fills or
-/// outlines it wrote; whether it wrote the background and the layout.
+/// outlines it wrote, of those it wrote whole, of those whose text fit it wrote, and of
+/// those it took out; whether it wrote the background and the layout.
 #[derive(Debug, Default)]
 struct Wrote {
     text: Vec<u32>,
     frames: Vec<u32>,
     looks: Vec<u32>,
+    shapes: Vec<u32>,
+    fits: Vec<u32>,
+    removed: Vec<u32>,
     background: bool,
     layout: bool,
 }
@@ -153,7 +167,16 @@ fn verify(tmp: &Path, deck: &Presentation, written: Option<&Written>) -> Result<
             .looks
             .iter()
             .find(|id| differs(id, &|a, b| a.fill == b.fill && a.outline == b.outline));
-        if let Some(id) = text_differs.or(frame_differs).or(look_differs) {
+        let shape_differs = wrote.shapes.iter().find(|id| differs(id, &reads_back));
+        let fit_differs = wrote.fits.iter().find(|id| differs(id, &same_fit));
+        let still_there = wrote.removed.iter().find(|id| shape(again, **id).is_some());
+        if let Some(id) = text_differs
+            .or(frame_differs)
+            .or(look_differs)
+            .or(shape_differs)
+            .or(fit_differs)
+            .or(still_there)
+        {
             return Err(format!(
                 "slide {}'s shape {id} reads back differently",
                 n + 1
@@ -170,6 +193,56 @@ fn verify(tmp: &Path, deck: &Presentation, written: Option<&Written>) -> Result<
         }
     }
     Ok(())
+}
+
+/// Whether `b`, read back, is `a`, a shape the save wrote whole: its kind (a preset's
+/// name, a picture's bytes and crop, a table's grid and its cells' text and fills), box,
+/// text, and the fill and outline set on it.
+fn reads_back(a: &Shape, b: &Shape) -> bool {
+    let close = |x: f64, y: f64| (x - y).abs() < 1e-4;
+    let kind = match (&a.kind, &b.kind) {
+        (ShapeKind::Geometry { preset: p, .. }, ShapeKind::Geometry { preset: q, .. }) => {
+            p == q || p == "custom"
+        }
+        (ShapeKind::Picture(p), ShapeKind::Picture(q)) => {
+            let (c, d) = (p.crop, q.crop);
+            p.image.bytes == q.image.bytes
+                && close(c.left, d.left)
+                && close(c.top, d.top)
+                && close(c.right, d.right)
+                && close(c.bottom, d.bottom)
+        }
+        (ShapeKind::Table(t), ShapeKind::Table(u)) => {
+            t.columns == u.columns
+                && t.rows.len() == u.rows.len()
+                && t.rows.iter().zip(&u.rows).all(|(r, s)| {
+                    r.cells.len() == s.cells.len()
+                        && r.cells.iter().zip(&s.cells).all(|(c, d)| {
+                            c.text.plain_text() == d.text.plain_text() && c.fill == d.fill
+                        })
+                })
+        }
+        _ => false,
+    };
+    let written = |f: &Fill| matches!(f, Fill::None | Fill::Solid(_));
+    let fill = !a.sources.fill.is_own() || !written(&a.fill) || a.fill == b.fill;
+    let outline = !a.sources.outline.is_own() || a.outline == b.outline;
+    kind && a.frame == b.frame && a.plain_text() == b.plain_text() && fill && outline
+}
+
+/// Whether `b`'s text fit, read back, is `a`'s: its autofit, and when it shrinks, its
+/// font scale and line spacing reduction.
+fn same_fit(a: &Shape, b: &Shape) -> bool {
+    match (&a.text, &b.text) {
+        (Some(x), Some(y)) => {
+            let close = |p: f64, q: f64| (p - q).abs() < 1e-4;
+            (x.autofit == Autofit::Unset || x.autofit == y.autofit)
+                && (x.autofit != Autofit::Shrink
+                    || close(x.font_scale, y.font_scale)
+                        && close(x.line_reduction, y.line_reduction))
+        }
+        _ => false,
+    }
 }
 
 fn zip_error(e: zip::result::ZipError) -> io::Error {
@@ -277,9 +350,10 @@ fn relationship(id: &str, kind: &str, from: &str, target: &str) -> String {
     )
 }
 
-/// Replace the `spans` of `text` (any order, not overlapping) with their strings.
+/// Replace the `spans` of `text` (any order, not overlapping) with their strings. Where a
+/// span starts where another is inserted (an empty span), the insertion comes first.
 fn splice(text: &str, mut spans: Vec<(Range<usize>, String)>) -> String {
-    spans.sort_by_key(|(r, _)| std::cmp::Reverse(r.start));
+    spans.sort_by_key(|(r, _)| std::cmp::Reverse((r.start, r.end)));
     let mut out = text.to_owned();
     for (r, with) in spans {
         out.replace_range(r, &with);
@@ -531,7 +605,7 @@ fn srgb(a: &str, c: Color) -> String {
     format!(r#"<{a}srgbClr val="{hex}"><{a}alpha val="{alpha}"/></{a}srgbClr>"#)
 }
 
-fn solid_fill(a: &str, c: Color) -> String {
+pub(crate) fn solid_fill(a: &str, c: Color) -> String {
     format!("<{a}solidFill>{}</{a}solidFill>", srgb(a, c))
 }
 
@@ -739,7 +813,7 @@ fn field_close(start: &str) -> Option<String> {
 }
 
 /// A text body's paragraphs as DrawingML, `a` the DrawingML prefix with its colon.
-fn paragraphs(body: &TextBody, a: &str) -> io::Result<String> {
+pub(crate) fn paragraphs(body: &TextBody, a: &str) -> io::Result<String> {
     let mut out = String::new();
     for p in &body.paragraphs {
         paragraph(&mut out, p, a)?;
@@ -774,6 +848,13 @@ fn nv_of(shape: &Element) -> Option<&Element> {
         .find(|c| c.name.starts_with("nv") && c.name.ends_with("Pr"))
 }
 
+/// A shape element's own id (`cNvPr id`).
+fn own_id(e: &Element) -> Option<u32> {
+    nv_of(e)
+        .and_then(|nv| nv.child("cNvPr"))
+        .and_then(|c| c.num::<u32>("id"))
+}
+
 /// The shape with id `id` in `tree`, groups searched.
 fn find_shape(tree: &Element, id: u32) -> Option<&Element> {
     for e in tree.elements() {
@@ -783,39 +864,54 @@ fn find_shape(tree: &Element, id: u32) -> Option<&Element> {
             }
             continue;
         }
-        let own = nv_of(e)
-            .and_then(|nv| nv.child("cNvPr"))
-            .and_then(|c| c.num::<u32>("id"));
-        if own == Some(id) {
+        if own_id(e) == Some(id) {
             return Some(e);
         }
     }
     None
 }
 
+/// The child of `tree` that is shape `id`, or the group that holds it.
+fn top_level(tree: &Element, id: u32) -> Option<&Element> {
+    tree.elements().find(|e| match e.name.as_str() {
+        "grpSp" => find_shape(e, id).is_some(),
+        _ => own_id(e) == Some(id),
+    })
+}
+
 /// A shape's new fill and outline, by id; `None` for what stays.
 type Look<'a> = (u32, Option<&'a Fill>, Option<Option<Outline>>);
 
-/// What changed on a slide, by shape id: text bodies, boxes, fills and outlines,
-/// placeholder slots, shapes gone and placeholders added; the background, and the layout.
+/// What changed on a slide, by shape id: text bodies, boxes, fills and outlines, text
+/// fits, placeholder slots, shapes gone, placeholders added, shapes inserted, and
+/// placeholders a picture filled; the background, and the layout.
 #[derive(Default)]
 struct Edits<'a> {
     text: Vec<(u32, &'a TextBody)>,
     frames: Vec<(u32, Frame)>,
     looks: Vec<Look<'a>>,
+    fits: Vec<(u32, &'a TextBody)>,
     slots: Vec<(u32, &'a PlaceholderSlot)>,
     removed: Vec<u32>,
     added: Vec<&'a Shape>,
+    /// Shapes the base doesn't have, each with the id of the base's shape it goes in
+    /// front of (`None`: behind everything).
+    inserted: Vec<(&'a Shape, Option<u32>)>,
+    /// Placeholders that became pictures, each with its box in the base.
+    replaced: Vec<(&'a Shape, Frame)>,
     background: Option<Color>,
     /// The layout the slide moved to.
     layout: Option<usize>,
+    /// The relationship each picture written shows its image through, by shape id.
+    media: HashMap<u32, String>,
 }
 
-impl Edits<'_> {
+impl<'a> Edits<'a> {
     fn is_empty(&self) -> bool {
         self.text.is_empty()
             && self.frames.is_empty()
             && self.looks.is_empty()
+            && self.fits.is_empty()
             && !self.has_structure()
     }
 
@@ -824,7 +920,34 @@ impl Edits<'_> {
         !self.slots.is_empty()
             || !self.removed.is_empty()
             || !self.added.is_empty()
+            || !self.inserted.is_empty()
+            || !self.replaced.is_empty()
             || self.background.is_some()
+    }
+
+    /// The shapes written whole: those inserted, placeholders filled with a picture, and
+    /// placeholders added as pictures.
+    fn whole(&self) -> impl Iterator<Item = &'a Shape> + '_ {
+        let added = self
+            .added
+            .iter()
+            .copied()
+            .filter(|s| matches!(s.kind, ShapeKind::Picture(_)));
+        self.inserted
+            .iter()
+            .map(|(s, _)| *s)
+            .chain(self.replaced.iter().map(|(s, _)| *s))
+            .chain(added)
+    }
+
+    /// The pictures written, by shape id: each needs its image in the package.
+    fn pictures(&self) -> Vec<(u32, &'a Image)> {
+        self.whole()
+            .filter_map(|s| match &s.kind {
+                ShapeKind::Picture(p) => Some((s.id?, &p.image)),
+                _ => None,
+            })
+            .collect()
     }
 
     /// What writing these edits wrote, given the shapes whose looks it wrote.
@@ -833,6 +956,9 @@ impl Edits<'_> {
             text: self.text.iter().map(|(id, _)| *id).collect(),
             frames: self.frames.iter().map(|(id, _)| *id).collect(),
             looks,
+            shapes: self.whole().filter_map(|s| s.id).collect(),
+            fits: self.fits.iter().map(|(id, _)| *id).collect(),
+            removed: self.removed.clone(),
             background: self.background.is_some(),
             layout: self.layout.is_some(),
         }
@@ -842,14 +968,25 @@ impl Edits<'_> {
 /// What differs between `now` and `base`, its shapes matched by id. Only the slide's own
 /// shapes outside groups have boxes a save writes; fills, outlines, and backgrounds are
 /// written when an edit set them (`Source::Edit`) to what the base doesn't have on itself.
-/// `template` is the new slide of the layout `now` moved to, when it moved: placeholders
-/// the base doesn't have are compared with its.
+/// Shapes the base doesn't have (but placeholders a layout change added) are written
+/// whole, as are placeholders that became pictures. `template` is the new slide of the
+/// layout `now` moved to, when it moved: placeholders the base doesn't have are compared
+/// with its.
 fn edits<'a>(base: &'a Slide, now: &'a Slide, template: Option<&'a Slide>) -> Edits<'a> {
     let mut out = Edits::default();
+    // The last shape so far the base has: where the next one inserted goes.
+    let mut behind = None;
     for s in now.shapes.iter().filter(|s| s.layer == Layer::Slide) {
         let Some(id) = s.id else { continue };
         let old = match base.shapes.iter().find(|b| b.id == Some(id)) {
             Some(o) => {
+                behind = Some(id);
+                let filled = matches!(o.kind, ShapeKind::Geometry { .. })
+                    && matches!(s.kind, ShapeKind::Picture(_));
+                if filled && !s.grouped {
+                    out.replaced.push((s, o.frame));
+                    continue;
+                }
                 if let Some(slot) = s.slot.as_ref().filter(|slot| o.slot.as_ref() != Some(slot)) {
                     out.slots.push((id, slot));
                 }
@@ -858,6 +995,9 @@ fn edits<'a>(base: &'a Slide, now: &'a Slide, template: Option<&'a Slide>) -> Ed
             None => {
                 if s.slot.is_some() && !s.grouped {
                     out.added.push(s);
+                } else if !s.grouped {
+                    out.inserted.push((s, behind));
+                    continue;
                 }
                 template.and_then(|t| {
                     t.shapes
@@ -867,8 +1007,13 @@ fn edits<'a>(base: &'a Slide, now: &'a Slide, template: Option<&'a Slide>) -> Ed
             }
         };
         if let Some(body) = &s.text {
-            if old.and_then(|o| o.text.as_ref()).map(|o| &o.paragraphs) != Some(&body.paragraphs) {
+            let old_body = old.and_then(|o| o.text.as_ref());
+            if old_body.map(|o| &o.paragraphs) != Some(&body.paragraphs) {
                 out.text.push((id, body));
+            }
+            let fit = |t: &TextBody| (t.font_scale, t.line_reduction, t.autofit);
+            if old_body.map_or((1.0, 0.0, Autofit::Unset), fit) != fit(body) {
+                out.fits.push((id, body));
             }
         }
         if !s.grouped && old.map(|o| o.frame) != Some(s.frame) {
@@ -911,7 +1056,7 @@ fn patch_slide(xml: &str, name: &str, edits: &Edits<'_>) -> io::Result<(String, 
     if edits.has_structure() {
         xml = patch_structure(&xml, name, edits)?;
     }
-    if !edits.text.is_empty() || !edits.frames.is_empty() {
+    if !edits.text.is_empty() || !edits.frames.is_empty() || !edits.fits.is_empty() {
         xml = patch_content(&xml, name, edits)?;
     }
     let mut looks = Vec::new();
@@ -928,7 +1073,7 @@ fn shape_tree<'a>(root: &'a Element, name: &str) -> io::Result<&'a Element> {
 }
 
 /// `<p:ph>` for `slot`: its type (none for `obj`) and index.
-fn ph_tag(p: &str, slot: &PlaceholderSlot) -> String {
+pub(crate) fn ph_tag(p: &str, slot: &PlaceholderSlot) -> String {
     let kind = match &*slot.kind {
         "obj" => String::new(),
         k => format!(r#" type="{}""#, escape(k)),
@@ -940,17 +1085,50 @@ fn ph_tag(p: &str, slot: &PlaceholderSlot) -> String {
     format!("<{p}ph{kind}{idx}/>")
 }
 
-/// Shapes gone and placeholders added, placeholder slots, and the background.
+/// Shapes gone, placeholders added, shapes inserted, placeholders a picture filled,
+/// placeholder slots, and the background.
 fn patch_structure(xml: &str, name: &str, edits: &Edits<'_>) -> io::Result<String> {
     let root = parse(xml, name)?;
     let tree = shape_tree(&root, name)?;
     let p = prefix(xml, tree);
     let a = ns_prefix(xml, &root, DRAWINGML_NS, "a:");
+    let r = ns_prefix(xml, &root, REL_NS, "");
+    let ns = Prefixes {
+        p: p.to_owned(),
+        a: a.clone(),
+        r_decl: match r.as_str() {
+            "" => format!(r#" xmlns:r="{REL_NS}""#),
+            _ => String::new(),
+        },
+        r: match r.as_str() {
+            "" => "r:".to_owned(),
+            _ => r,
+        },
+    };
+    let rid = |s: &Shape| {
+        s.id.and_then(|id| edits.media.get(&id))
+            .map_or("", String::as_str)
+    };
     let mut spans = Vec::new();
     for id in &edits.removed {
         if let Some(s) = find_shape(tree, *id) {
             spans.push((s.span.clone(), String::new()));
         }
+    }
+    for (s, base_frame) in &edits.replaced {
+        let id = s.id.unwrap_or_default();
+        let ShapeKind::Picture(pic) = &s.kind else {
+            continue;
+        };
+        let old =
+            find_shape(tree, id).ok_or_else(|| damaged(format!("{name} has no shape {id}")))?;
+        let own_box = old.child("spPr").and_then(|p| p.child("xfrm")).is_some();
+        let placeholder = s
+            .slot
+            .as_ref()
+            .map(|slot| (slot, own_box || s.frame != *base_frame));
+        let with = shapes::picture(s, pic.crop, &ns, rid(s), placeholder)?;
+        spans.push((old.span.clone(), with));
     }
     for (id, slot) in &edits.slots {
         let nv_pr = find_shape(tree, *id)
@@ -967,16 +1145,24 @@ fn patch_structure(xml: &str, name: &str, edits: &Edits<'_>) -> io::Result<Strin
             }
         }
     }
-    if !edits.added.is_empty() {
-        let at = match tree.child("grpSpPr").or_else(|| tree.child("nvGrpSpPr")) {
-            Some(e) => e.span.end,
-            None => inner(xml, tree)?.start,
-        };
-        let shapes: String = edits
-            .added
-            .iter()
-            .map(|s| {
-                let ph = s.slot.as_ref().map(|slot| ph_tag(p, slot)).unwrap_or_default();
+    // What goes in where: placeholders added at the back, each inserted shape in front of
+    // the base's shape it follows; shapes inserted at one place, in their order.
+    let start = match tree.child("grpSpPr").or_else(|| tree.child("nvGrpSpPr")) {
+        Some(e) => e.span.end,
+        None => inner(xml, tree)?.start,
+    };
+    let mut inserts: BTreeMap<usize, String> = BTreeMap::new();
+    for s in &edits.added {
+        let markup = match (&s.kind, &s.slot) {
+            (ShapeKind::Picture(pic), Some(slot)) => {
+                shapes::picture(s, pic.crop, &ns, rid(s), Some((slot, false)))?
+            }
+            _ => {
+                let ph = s
+                    .slot
+                    .as_ref()
+                    .map(|slot| ph_tag(p, slot))
+                    .unwrap_or_default();
                 format!(
                     concat!(
                         r#"<{p}sp><{p}nvSpPr><{p}cNvPr id="{id}" name="{name}"/><{p}cNvSpPr>"#,
@@ -989,10 +1175,18 @@ fn patch_structure(xml: &str, name: &str, edits: &Edits<'_>) -> io::Result<Strin
                     name = escape(&s.name),
                     ph = ph,
                 )
-            })
-            .collect();
-        spans.push((at..at, shapes));
+            }
+        };
+        inserts.entry(start).or_default().push_str(&markup);
     }
+    for (s, behind) in &edits.inserted {
+        let at = behind
+            .and_then(|id| top_level(tree, id))
+            .map_or(start, |e| e.span.end);
+        let markup = shapes::shape(s, &ns, rid(s))?;
+        inserts.entry(at).or_default().push_str(&markup);
+    }
+    spans.extend(inserts.into_iter().map(|(at, markup)| (at..at, markup)));
     if let Some(c) = edits.background {
         let c_sld = root
             .child("cSld")
@@ -1013,15 +1207,32 @@ fn patch_structure(xml: &str, name: &str, edits: &Edits<'_>) -> io::Result<Strin
     Ok(splice(xml, spans))
 }
 
-/// Text and boxes.
+/// The children of a text body's properties (`CT_TextBodyProperties`), in order.
+const BODY_ORDER: &[&[&str]] = &[
+    &["prstTxWarp"],
+    AUTOFITS,
+    &["scene3d"],
+    &["sp3d"],
+    &["flatTx"],
+    &["extLst"],
+];
+
+/// A text body's autofit elements, which stand at one place in its properties.
+const AUTOFITS: &[&str] = &["noAutofit", "normAutofit", "spAutoFit"];
+
+/// Text, text fits, and boxes.
 fn patch_content(xml: &str, name: &str, edits: &Edits<'_>) -> io::Result<String> {
     let root = parse(xml, name)?;
     let tree = shape_tree(&root, name)?;
+    let fallback = ns_prefix(xml, &root, DRAWINGML_NS, "a:");
+    let text_of = |id: u32| {
+        find_shape(tree, id)
+            .and_then(|s| s.child("txBody"))
+            .ok_or_else(|| damaged(format!("{name} has no text shape {id}")))
+    };
     let mut spans = Vec::new();
     for (id, body) in &edits.text {
-        let tx = find_shape(tree, *id)
-            .and_then(|s| s.child("txBody"))
-            .ok_or_else(|| damaged(format!("{name} has no text shape {id}")))?;
+        let tx = text_of(*id)?;
         let a = tx.child("bodyPr").map_or("a:", |b| prefix(xml, b));
         let range = match (tx.all("p").next(), tx.all("p").last()) {
             (Some(first), Some(last)) => first.span.start..last.span.end,
@@ -1032,12 +1243,68 @@ fn patch_content(xml: &str, name: &str, edits: &Edits<'_>) -> io::Result<String>
         };
         spans.push((range, paragraphs(body, a)?));
     }
+    for (id, body) in &edits.fits {
+        let tx = text_of(*id)?;
+        match tx.child("bodyPr") {
+            Some(b) => {
+                let fit = shapes::autofit(body, prefix(xml, b));
+                let add: Vec<(&str, String)> = match fit.is_empty() {
+                    true => Vec::new(),
+                    false => vec![("normAutofit", fit)],
+                };
+                let with = rebuild(&xml[b.span.clone()], BODY_ORDER, &[], AUTOFITS, &add)?;
+                spans.push((b.span.clone(), with));
+            }
+            None => {
+                let a = fallback.as_str();
+                let at = inner(xml, tx)?.start;
+                let fit = shapes::autofit(body, a);
+                spans.push((at..at, format!("<{a}bodyPr>{fit}</{a}bodyPr>")));
+            }
+        }
+    }
     for (id, frame) in &edits.frames {
         let shape =
             find_shape(tree, *id).ok_or_else(|| damaged(format!("{name} has no shape {id}")))?;
         spans.extend(frame_spans(xml, shape, frame)?);
     }
     Ok(splice(xml, spans))
+}
+
+/// Line element `raw` (`<a:ln>`, a table cell's `<a:lnL>`, ...) as written, with the
+/// width, colour, and dash of `outline`, or no line for `None`.
+pub(crate) fn outline_markup(raw: &str, outline: Option<Outline>) -> io::Result<String> {
+    let la = tag_prefix(raw).to_owned();
+    match outline {
+        Some(o) => {
+            let dash = match o.dash {
+                Dash::Solid => "solid",
+                Dash::Dot => "sysDot",
+                Dash::Dash => "dash",
+                Dash::DashDot => "dashDot",
+                Dash::LongDash => "lgDash",
+            };
+            let mut gone = FILLS.to_vec();
+            gone.extend(["prstDash", "custDash"]);
+            rebuild(
+                raw,
+                LINE_ORDER,
+                &[("w", o.width.to_string())],
+                &gone,
+                &[
+                    ("solidFill", solid_fill(&la, o.color)),
+                    ("prstDash", format!(r#"<{la}prstDash val="{dash}"/>"#)),
+                ],
+            )
+        }
+        None => rebuild(
+            raw,
+            LINE_ORDER,
+            &[],
+            FILLS,
+            &[("noFill", format!("<{la}noFill/>"))],
+        ),
+    }
 }
 
 /// Fills and outlines, in each shape's `spPr`; graphic frames, which have none, are left
@@ -1070,39 +1337,8 @@ fn patch_looks(xml: &str, name: &str, edits: &Edits<'_>) -> io::Result<(String, 
         if let Some(outline) = outline {
             let old = sp_pr.child("ln");
             let raw = old.map_or_else(|| format!("<{a}ln/>"), |l| xml[l.span.clone()].to_owned());
-            let la = tag_prefix(&raw).to_owned();
-            let ln = match outline {
-                Some(o) => {
-                    let dash = match o.dash {
-                        Dash::Solid => "solid",
-                        Dash::Dot => "sysDot",
-                        Dash::Dash => "dash",
-                        Dash::DashDot => "dashDot",
-                        Dash::LongDash => "lgDash",
-                    };
-                    let mut gone = FILLS.to_vec();
-                    gone.extend(["prstDash", "custDash"]);
-                    rebuild(
-                        &raw,
-                        LINE_ORDER,
-                        &[("w", o.width.to_string())],
-                        &gone,
-                        &[
-                            ("solidFill", solid_fill(&la, o.color)),
-                            ("prstDash", format!(r#"<{la}prstDash val="{dash}"/>"#)),
-                        ],
-                    )?
-                }
-                None => rebuild(
-                    &raw,
-                    LINE_ORDER,
-                    &[],
-                    FILLS,
-                    &[("noFill", format!("<{la}noFill/>"))],
-                )?,
-            };
             remove.push("ln");
-            add.push(("ln", ln));
+            add.push(("ln", outline_markup(&raw, *outline)?));
         }
         let with = rebuild(&xml[sp_pr.span.clone()], SHAPE_ORDER, &[], &remove, &add)?;
         spans.push((sp_pr.span.clone(), with));
@@ -1173,15 +1409,23 @@ enum Plan<'a> {
     New { layout: usize, part: String },
 }
 
-/// Part names not taken yet: `{dir}/{stem}{n}.xml`, counting up.
+/// Part names not taken yet: `{dir}/{stem}{n}.{ext}`, counting up, `n` unused with any
+/// extension.
 struct Names(HashSet<String>);
 
 impl Names {
     fn next(&mut self, dir: &str, stem: &str) -> String {
-        let name = (1..)
-            .map(|n| format!("{dir}/{stem}{n}.xml"))
-            .find(|name| !self.0.contains(name))
+        self.next_with(dir, stem, "xml")
+    }
+
+    fn next_with(&mut self, dir: &str, stem: &str, ext: &str) -> String {
+        let n = (1..)
+            .find(|n| {
+                let taken = format!("{dir}/{stem}{n}.");
+                !self.0.iter().any(|name| name.starts_with(&taken))
+            })
             .expect("a free name");
+        let name = format!("{dir}/{stem}{n}.{ext}");
         self.0.insert(name.clone());
         name
     }
@@ -1197,14 +1441,17 @@ fn next_rid(ids: &mut HashSet<String>) -> String {
     id
 }
 
-/// What the new package holds: parts replaced (`Some` text) or left out (`None`), and new
-/// parts with their content types.
+/// What the new package holds: parts replaced (`Some` text) or left out (`None`), new
+/// parts with their content types, and new media parts with the content types of their
+/// extensions.
 #[derive(Default)]
 struct Changes {
     parts: HashMap<String, Option<String>>,
     added: Vec<(String, String)>,
     types_added: Vec<(String, &'static str)>,
     types_removed: HashSet<String>,
+    media: Vec<(String, Arc<[u8]>)>,
+    defaults: Vec<(&'static str, &'static str)>,
 }
 
 impl Changes {
@@ -1218,6 +1465,36 @@ impl Changes {
             self.types_added.push((part.to_owned(), kind));
         }
     }
+}
+
+/// Slide `part`'s relationships `rels` (as read; empty without) with one to a new media
+/// part for each picture `edits` writes, whose ids go in `edits.media`.
+fn add_media(
+    rels: &str,
+    part: &str,
+    edits: &mut Edits<'_>,
+    media_dir: &str,
+    names: &mut Names,
+    changes: &mut Changes,
+) -> io::Result<String> {
+    let pictures = edits.pictures();
+    if pictures.is_empty() {
+        return Ok(rels.to_owned());
+    }
+    let mut ids: HashSet<String> = rels_of(rels, part)?.into_iter().map(|r| r.id).collect();
+    let mut new = Vec::with_capacity(pictures.len());
+    for (id, image) in pictures {
+        let (ext, kind) = shapes::media_type(image.format);
+        let media = names.next_with(media_dir, "image", ext);
+        let rid = next_rid(&mut ids);
+        new.push(relationship(&rid, "image", dir(part), &media));
+        changes.media.push((media, image.bytes.clone()));
+        if !changes.defaults.iter().any(|(e, _)| *e == ext) {
+            changes.defaults.push((ext, kind));
+        }
+        edits.media.insert(id, rid);
+    }
+    add_relationships(rels, part, &new)
 }
 
 fn write(
@@ -1327,10 +1604,26 @@ fn write(
             .and_then(|l| deck.layouts.get(l))
             .map(|l| &l.slide)
     };
+    let media_dir = format!("{main_dir}/media");
     for (plan, slide) in plans.iter().zip(&deck.slides) {
         match plan {
             Plan::Keep { part, base } => {
-                let ed = edits(base, slide, moved_to(base, slide));
+                let mut ed = edits(base, slide, moved_to(base, slide));
+                if ed.layout.is_some() || !ed.pictures().is_empty() {
+                    let name = rels_name(part);
+                    let rels = read_text(&mut src, &name)?;
+                    let old = rels.as_deref().unwrap_or("");
+                    let mut text =
+                        add_media(old, part, &mut ed, &media_dir, &mut names, &mut changes)?;
+                    if let Some(l) = ed.layout {
+                        text = retarget_layout(&text, part, &deck.layouts[l].part)?;
+                    }
+                    if rels.is_some() {
+                        changes.parts.insert(name, Some(text));
+                    } else {
+                        changes.add(&name, text, None);
+                    }
+                }
                 let mut looks = Vec::new();
                 if !ed.is_empty() {
                     let xml = read_text(&mut src, part)?.unwrap_or_default();
@@ -1338,30 +1631,21 @@ fn write(
                     (patched, looks) = patch_slide(&xml, part, &ed)?;
                     changes.parts.insert(part.clone(), Some(patched));
                 }
-                if let Some(l) = ed.layout {
-                    let name = rels_name(part);
-                    let rels = read_text(&mut src, &name)?;
-                    let layout = &deck.layouts[l].part;
-                    let retargeted = retarget_layout(rels.as_deref().unwrap_or(""), part, layout)?;
-                    if rels.is_some() {
-                        changes.parts.insert(name, Some(retargeted));
-                    } else {
-                        changes.add(&name, retargeted, None);
-                    }
-                }
                 written.push(ed.wrote(looks));
             }
             Plan::Copy { from, part, base } => {
-                let ed = edits(base, slide, moved_to(base, slide));
-                let xml = read_text(&mut src, from)?.unwrap_or_default();
-                let (patched, looks) = patch_slide(&xml, part, &ed)?;
-                changes.add(part, patched, Some(SLIDE_TYPE));
+                let mut ed = edits(base, slide, moved_to(base, slide));
                 let rels = read_text(&mut src, &rels_name(from))?.unwrap_or_default();
-                let mut rels = copy_rels(&mut src, &rels, from, part, &mut names, &mut changes)?;
+                let rels = copy_rels(&mut src, &rels, from, part, &mut names, &mut changes)?;
+                let mut rels =
+                    add_media(&rels, part, &mut ed, &media_dir, &mut names, &mut changes)?;
                 if let Some(l) = ed.layout {
                     rels = retarget_layout(&rels, part, &deck.layouts[l].part)?;
                 }
                 changes.add(&rels_name(part), rels, None);
+                let xml = read_text(&mut src, from)?.unwrap_or_default();
+                let (patched, looks) = patch_slide(&xml, part, &ed)?;
+                changes.add(part, patched, Some(SLIDE_TYPE));
                 written.push(ed.wrote(looks));
             }
             Plan::New { layout, part } => {
@@ -1375,14 +1659,15 @@ fn write(
                     .find(|l| l.part == layout.part)
                     .unwrap_or(layout)
                     .slide;
-                let ed = edits(base, slide, None);
-                let (patched, looks) = patch_slide(&blank, part, &ed)?;
-                changes.add(part, patched, Some(SLIDE_TYPE));
+                let mut ed = edits(base, slide, None);
                 let rels = format!(
                     r#"{XML_DECLARATION}<Relationships xmlns="{RELS_NS}">{}</Relationships>"#,
                     relationship("rId1", "slideLayout", dir(part), &layout.part)
                 );
+                let rels = add_media(&rels, part, &mut ed, &media_dir, &mut names, &mut changes)?;
                 changes.add(&rels_name(part), rels, None);
+                let (patched, looks) = patch_slide(&blank, part, &ed)?;
+                changes.add(part, patched, Some(SLIDE_TYPE));
                 written.push(ed.wrote(looks));
             }
         }
@@ -1458,16 +1743,25 @@ fn write(
         })
         .map(|o| (o.span.clone(), String::new()))
         .collect();
-    let new_types: String = changes
-        .types_added
-        .iter()
-        .map(|(part, kind)| {
-            format!(
-                r#"<Override PartName="/{}" ContentType="{kind}"/>"#,
-                escape(part)
-            )
+    // A media part's type is its extension's, which the package may not have yet.
+    let has_default = |ext: &str| {
+        types.all("Default").any(|d| {
+            d.attr("Extension")
+                .is_some_and(|e| e.eq_ignore_ascii_case(ext))
         })
-        .collect();
+    };
+    let defaults = changes
+        .defaults
+        .iter()
+        .filter(|(ext, _)| !has_default(ext))
+        .map(|(ext, kind)| format!(r#"<Default Extension="{ext}" ContentType="{kind}"/>"#));
+    let overrides = changes.types_added.iter().map(|(part, kind)| {
+        format!(
+            r#"<Override PartName="/{}" ContentType="{kind}"/>"#,
+            escape(part)
+        )
+    });
+    let new_types: String = defaults.chain(overrides).collect();
     let at = end_tag(&types_xml, &types)?;
     type_spans.push((at..at, new_types));
     let patched_types = splice(&types_xml, type_spans);
@@ -1494,6 +1788,10 @@ fn write(
     for (name, text) in &changes.added {
         zip.start_file(name, options).map_err(zip_error)?;
         zip.write_all(text.as_bytes())?;
+    }
+    for (name, bytes) in &changes.media {
+        zip.start_file(name, options).map_err(zip_error)?;
+        zip.write_all(bytes)?;
     }
     zip.finish().map_err(zip_error)?;
     Ok(written)
@@ -1614,19 +1912,20 @@ fn retarget_layout(text: &str, part: &str, layout: &str) -> io::Result<String> {
     }
     let mut ids: HashSet<String> = rels.iter().map(|r| r.id.clone()).collect();
     let rel = relationship(&next_rid(&mut ids), "slideLayout", dir(part), layout);
+    add_relationships(text, part, &[rel])
+}
+
+/// Part `part`'s relationships (`text`, empty when it has none) with `rels` added.
+fn add_relationships(text: &str, part: &str, rels: &[String]) -> io::Result<String> {
     if text.trim().is_empty() {
         return Ok(format!(
-            r#"{XML_DECLARATION}<Relationships xmlns="{RELS_NS}">{rel}</Relationships>"#
+            r#"{XML_DECLARATION}<Relationships xmlns="{RELS_NS}">{}</Relationships>"#,
+            rels.concat()
         ));
     }
     let root = parse(text, &rels_name(part))?;
-    let with = rebuild(
-        &text[root.span.clone()],
-        &[],
-        &[],
-        &[],
-        &[("Relationship", rel)],
-    )?;
+    let add: Vec<(&str, String)> = rels.iter().map(|r| ("Relationship", r.clone())).collect();
+    let with = rebuild(&text[root.span.clone()], &[], &[], &[], &add)?;
     Ok(splice(text, vec![(root.span.clone(), with)]))
 }
 

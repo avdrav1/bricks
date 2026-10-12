@@ -66,6 +66,9 @@ pub struct Layout {
     /// (but date, footer, and slide number), empty, and what the layout and its master
     /// show.
     pub slide: Slide,
+    /// What text in a shape of a slide's own (a text box) looks like on this layout: the
+    /// master's other-text style over the presentation's default, an empty paragraph.
+    pub text_box: Option<TextBody>,
 }
 
 /// A width and height in EMU.
@@ -94,6 +97,9 @@ pub struct Slide {
     /// The part it was read from, or copied from for a duplicate; `None` for a slide made
     /// from a layout.
     pub part: Option<String>,
+    /// An id no shape in the slide's part has (`cNvPr id`, groups' included): where ids
+    /// for shapes added to the slide start.
+    pub next_id: u32,
 }
 
 impl Slide {
@@ -469,10 +475,26 @@ pub struct TextBody {
     pub line_reduction: f64,
     /// Text turned a quarter: `vert="vert"` (90 degrees clockwise) or `vert270`.
     pub vertical: Vertical,
+    /// What happens when the text doesn't fit its box (`bodyPr`'s autofit).
+    pub autofit: Autofit,
     /// What a paragraph without looks of its own gets at each level (0 to 8) from the
     /// body's list styles, its runs empty: the looks a paragraph takes when its level
     /// changes or its text moves to another placeholder. Empty for bodies nobody edits.
     pub levels: Arc<[Paragraph]>,
+}
+
+/// What a text body does when its text doesn't fit its box.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Autofit {
+    /// Nothing says: a placeholder's text shrinks (Frame's rule), other text overflows.
+    #[default]
+    Unset,
+    /// `noAutofit`: the text overflows.
+    Off,
+    /// `normAutofit`: the text shrinks (`TextBody::font_scale`, `line_reduction`).
+    Shrink,
+    /// `spAutoFit`: the shape grows to fit the text.
+    Grow,
 }
 
 impl TextBody {

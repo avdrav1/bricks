@@ -49,8 +49,12 @@ pub struct Deck {
     /// The file the deck saves to: the one it was opened from, until Save As.
     path: RefCell<PathBuf>,
     /// Decoded pictures by the address of their bytes (slides share an `Arc` per part).
-    textures: HashMap<usize, gdk::Texture>,
+    textures: RefCell<Textures>,
 }
+
+/// Decoded pictures by the address of their bytes, each with its bytes, so no other
+/// picture's can take that address while it's kept.
+type Textures = HashMap<usize, (Arc<[u8]>, gdk::Texture)>;
 
 fn key(image: &Image) -> usize {
     Arc::as_ptr(&image.bytes).cast::<u8>() as usize
@@ -96,7 +100,7 @@ impl Deck {
             // labelled outline.
             match gdk::Texture::from_bytes(&glib::Bytes::from(&image.bytes[..])) {
                 Ok(t) => {
-                    textures.insert(key(image), t);
+                    textures.insert(key(image), (image.bytes.clone(), t));
                 }
                 Err(e) => tracing::warn!("a {} picture doesn't decode: {e}", image.format.name()),
             }
@@ -106,7 +110,7 @@ impl Deck {
             presentation: RefCell::new(presentation),
             original: Arc::new(original),
             path: RefCell::new(path.to_owned()),
-            textures,
+            textures: RefCell::new(textures),
         })
     }
 
@@ -136,8 +140,18 @@ impl Deck {
     }
 
     /// The decoded picture, when it decodes.
-    pub fn texture(&self, image: &Image) -> Option<&gdk::Texture> {
-        self.textures.get(&key(image))
+    pub fn texture(&self, image: &Image) -> Option<gdk::Texture> {
+        self.textures
+            .borrow()
+            .get(&key(image))
+            .map(|(_, t)| t.clone())
+    }
+
+    /// Keep `texture`, decoded from `image`, to draw it (a picture inserted).
+    pub fn add_texture(&self, image: &Image, texture: gdk::Texture) {
+        self.textures
+            .borrow_mut()
+            .insert(key(image), (image.bytes.clone(), texture));
     }
 
     /// The slide with the most to draw (shapes, paragraphs, table cells), for the

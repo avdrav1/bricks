@@ -1,16 +1,19 @@
 //! Windows: the start window, a window per deck (slide list, canvas, inspector, status
 //! bar), the file dialog, drops, and alerts (spec FR0); the deck window's undo history and
 //! its keys (text editing itself is in [`crate::editing`], the slide list in
-//! [`crate::slide_list`], the inspector in [`crate::inspector`]).
+//! [`crate::slide_list`], the inspector in [`crate::inspector`], inserting in
+//! [`crate::insert`], text fitting its box in [`crate::fit`]).
 
 use crate::arrange;
 use crate::deck::Deck;
 use crate::editing;
+use crate::fit;
+use crate::insert;
 use crate::inspector::{self, Inspector};
 use crate::saving;
 use crate::slide_list::{self, THUMB_WIDTH};
 use crate::slide_view::{Editing, SlideView};
-use deck_edit::{Change, Edit, History};
+use deck_edit::{Change, Edit, History, ShapeEdit};
 use gtk::prelude::*;
 use gtk::{gdk, gio, glib};
 use std::cell::{Cell, RefCell};
@@ -144,8 +147,7 @@ pub fn choose_and_open(app: &gtk::Application) {
     });
 }
 
-/// Files dropped on a window open as Open does, each in its own window. They open after
-/// the drop is done: opening one may close the start window, the drop's target.
+/// Files dropped on a window open as Open does, each in its own window ([`open_later`]).
 fn accept_file_drops(app: &gtk::Application, window: &gtk::ApplicationWindow) {
     let target = gtk::DropTarget::new(gdk::FileList::static_type(), gdk::DragAction::COPY);
     target.connect_drop({
@@ -158,24 +160,34 @@ fn accept_file_drops(app: &gtk::Application, window: &gtk::ApplicationWindow) {
             if files.is_empty() {
                 return false;
             }
-            let (app, window) = (app.clone(), window.clone());
-            glib::idle_add_local_once(move || {
-                let parent = window.upgrade().map(|w| w.upcast::<gtk::Window>());
-                for file in files {
-                    match file.path() {
-                        Some(path) => open(&app, &path, None),
-                        None => alert(
-                            parent.as_ref(),
-                            &format!("Cannot open {}", file.uri()),
-                            "Only local files can be opened.",
-                        ),
-                    }
-                }
-            });
+            open_later(&app, &window, files);
             true
         }
     });
     window.add_controller(target);
+}
+
+/// Open `files`, dropped on `window`, as Open does, each in its own window. They open
+/// after the drop is done: opening one may close the start window, the drop's target.
+fn open_later(
+    app: &gtk::Application,
+    window: &glib::WeakRef<gtk::ApplicationWindow>,
+    files: Vec<gio::File>,
+) {
+    let (app, window) = (app.clone(), window.clone());
+    glib::idle_add_local_once(move || {
+        let parent = window.upgrade().map(|w| w.upcast::<gtk::Window>());
+        for file in files {
+            match file.path() {
+                Some(path) => open(&app, &path, None),
+                None => alert(
+                    parent.as_ref(),
+                    &format!("Cannot open {}", file.uri()),
+                    "Only local files can be opened.",
+                ),
+            }
+        }
+    });
 }
 
 pub(crate) fn alert(parent: Option<&gtk::Window>, message: &str, detail: &str) {
@@ -325,6 +337,11 @@ impl DeckWindow {
         self.window.upgrade()
     }
 
+    /// Open `files`, decks dropped on the window, each in its own window.
+    pub fn open_dropped(&self, files: Vec<gio::File>) {
+        open_later(&self.app, &self.window, files);
+    }
+
     /// Say `text` in the status bar until the slide changes.
     pub fn set_status(&self, text: &str) {
         self.status.set_text(text);
@@ -350,13 +367,39 @@ impl DeckWindow {
         });
     }
 
-    /// Apply `edit` to the deck as a step of its undo history, and show what it changed.
+    /// Apply `edit` to the deck as a step of its undo history, and show what it changed;
+    /// then fit the text it changed to its box, in the same step ([`crate::fit`]).
     pub fn apply(&self, edit: impl Into<Edit>) {
+        let edit = edit.into();
+        // What the edit changed that text fits to: the text or its looks (a new layout's
+        // placeholders, a new text box), or only a box.
+        let text = matches!(
+            edit,
+            Edit::Text(_)
+                | Edit::Look(_)
+                | Edit::Layout(_)
+                | Edit::Shapes(ShapeEdit::Insert { .. })
+        );
+        let refit = text || matches!(edit, Edit::Frame(_));
         let change = self
             .history
             .borrow_mut()
             .apply(&mut self.deck.presentation_mut(), edit);
         self.changed(change, true);
+        if refit {
+            fit::refit(self, change, text);
+        }
+    }
+
+    /// Apply `edit`, what the last edit caused (its text shrunk, its box grown), as part
+    /// of that edit's step, and redraw it; the selection and editing stay as they are.
+    pub fn amend(&self, edit: impl Into<Edit>) {
+        let change = self
+            .history
+            .borrow_mut()
+            .amend(&mut self.deck.presentation_mut(), edit);
+        self.redraw(change.slide());
+        self.inspector.refresh();
     }
 
     /// End the history's current step: the next edit won't join it.
@@ -657,7 +700,8 @@ fn show_deck(
             // Ctrl+Z undoes, Ctrl+Shift+Z and Ctrl+Y redo: the deck's one history, before
             // the canvas's input method sees the keys. Shifted, z arrives as Z. Ctrl+M
             // adds a slide even while text is edited; Ctrl+D, Ctrl+Up, and Ctrl+Down
-            // are the slide's only when no text is.
+            // are the slide's only when no text is. Ctrl+V pastes a picture
+            // (crate::insert), outside the inspector.
             if ctrl && !alt {
                 match key {
                     Key::z | Key::Z if !shift => view.undo(),
@@ -668,6 +712,11 @@ fn show_deck(
                     Key::d | Key::D if !shift && !text => slide_list::duplicate(&view),
                     Key::Up | Key::KP_Up if !shift && !text => slide_list::move_by(&view, -1),
                     Key::Down | Key::KP_Down if !shift && !text => slide_list::move_by(&view, 1),
+                    Key::v | Key::V if !shift && !view.inspector.has_focus() => {
+                        if !insert::paste(&view) {
+                            return glib::Propagation::Proceed;
+                        }
+                    }
                     _ => return glib::Propagation::Proceed,
                 }
                 return glib::Propagation::Stop;
@@ -677,8 +726,8 @@ fn show_deck(
             if text || ctrl || alt || view.inspector.has_focus() {
                 return glib::Propagation::Proceed;
             }
-            // A selected shape: the arrows nudge it a pixel (Shift: ten), Escape lets go;
-            // other keys are the slide's.
+            // A selected shape: the arrows nudge it a pixel (Shift: ten), Escape lets go,
+            // Delete and Backspace delete it; other keys are the slide's.
             if view.canvas.selected().is_some() && !slide_list::has_focus(&view) {
                 let by = if shift { 10.0 } else { 1.0 };
                 let nudge = match key {
@@ -690,6 +739,10 @@ fn show_deck(
                 };
                 if let Some((dx, dy)) = nudge {
                     arrange::nudge(&view, dx, dy);
+                    return glib::Propagation::Stop;
+                }
+                let delete = matches!(key, Key::Delete | Key::KP_Delete | Key::BackSpace);
+                if delete && insert::delete(&view) {
                     return glib::Propagation::Stop;
                 }
                 if key == Key::Escape {
@@ -744,6 +797,7 @@ fn show_deck(
     window.add_action_entries([from_start, from_here, save]);
     if let Some(bar) = window.titlebar().and_downcast::<gtk::HeaderBar>() {
         slide_list::attach(&view, window, &bar, &side);
+        insert::attach(&view, &bar);
         let save = gtk::Button::from_icon_name("document-save-symbolic");
         save.set_action_name(Some("win.save"));
         save.set_tooltip_text(Some("Save (Ctrl+S)"));

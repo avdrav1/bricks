@@ -162,7 +162,9 @@ impl LayoutEdit {
                 }
             }
         }
-        let mut next_id = own.iter().filter_map(|s| s.id).max().unwrap_or(1) + 1;
+        let mut next_id = old
+            .next_id
+            .max(own.iter().filter_map(|s| s.id).max().unwrap_or(1) + 1);
         let mut shapes: Vec<Shape> = template
             .shapes
             .iter()
@@ -201,6 +203,7 @@ impl LayoutEdit {
             notes: old.notes.clone(),
             layout: Some(layout),
             part: old.part.clone(),
+            next_id,
         };
         Some(LayoutEdit {
             slide,

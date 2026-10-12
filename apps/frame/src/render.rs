@@ -50,7 +50,7 @@ pub fn draw_slide(
         Background::Picture(image) => {
             snap.append_color(&gdk::RGBA::WHITE, &bounds);
             if let Some(t) = deck.texture(image) {
-                snap.append_scaled_texture(t, gsk::ScalingFilter::Trilinear, &bounds);
+                snap.append_scaled_texture(&t, gsk::ScalingFilter::Trilinear, &bounds);
             }
         }
     }
@@ -88,7 +88,7 @@ fn draw_shape(snap: &gtk::Snapshot, ctx: &pango::Context, deck: &Deck, shape: &S
         }
         ShapeKind::Picture(p) => {
             match deck.texture(&p.image) {
-                Some(t) => picture(snap, t, &p.crop, w, h),
+                Some(t) => picture(snap, &t, &p.crop, w, h),
                 None => unsupported(
                     snap,
                     ctx,
@@ -105,7 +105,7 @@ fn draw_shape(snap: &gtk::Snapshot, ctx: &pango::Context, deck: &Deck, shape: &S
         ShapeKind::Table(_) => {}
         ShapeKind::Unsupported { label, preview } => {
             match preview.as_ref().and_then(|i| deck.texture(i)) {
-                Some(t) => picture(snap, t, &Crop::default(), w, h),
+                Some(t) => picture(snap, &t, &Crop::default(), w, h),
                 None => unsupported(snap, ctx, label, w, h),
             }
         }
@@ -235,7 +235,11 @@ fn fill_path(snap: &gtk::Snapshot, deck: &Deck, path: &gsk::Path, fill: &Fill, w
         Fill::Picture(image) => {
             if let Some(t) = deck.texture(image) {
                 snap.push_fill(path, gsk::FillRule::Winding);
-                snap.append_scaled_texture(t, gsk::ScalingFilter::Trilinear, &rect(0.0, 0.0, w, h));
+                snap.append_scaled_texture(
+                    &t,
+                    gsk::ScalingFilter::Trilinear,
+                    &rect(0.0, 0.0, w, h),
+                );
                 snap.pop();
             }
         }
@@ -648,6 +652,18 @@ pub fn place_text(ctx: &pango::Context, shape: &Shape, scale: f32) -> Option<Pla
     })
 }
 
+/// The height of `shape`'s text laid out at `scale`, and the height its box leaves for
+/// text (less its insets), in pixels; `None` without text.
+pub fn text_room(ctx: &pango::Context, shape: &Shape, scale: f32) -> Option<(f32, f32)> {
+    let body = shape.text.as_ref()?;
+    let frame = shape.text_frame.as_ref().unwrap_or(&shape.frame);
+    let (t, w, h) = frame_transform(frame, scale);
+    let (_, w, h) = upright(t, body, w, h);
+    let (block, _, _) = lay_out_in(ctx, body, w, h, scale);
+    let ins = &body.insets;
+    Some((block.height, h - (ins.top + ins.bottom) as f32 * scale))
+}
+
 /// The byte offset `trailing` characters after byte `index` of `layout`'s text.
 fn offset(layout: &pango::Layout, index: i32, trailing: i32) -> usize {
     let text = layout.text();
@@ -852,11 +868,13 @@ fn dashed_box(snap: &gtk::Snapshot, f: &Frame, scale: f32, color: &gdk::RGBA) {
 }
 
 /// Dashed outlines of the slide's empty placeholders, so there's somewhere to click to
-/// type into them. The canvas shows them; thumbnails and the slideshow don't.
+/// type into them (a placeholder a picture fills isn't empty). The canvas shows them;
+/// thumbnails and the slideshow don't.
 pub fn draw_empty_placeholders(snap: &gtk::Snapshot, slide: &Slide, scale: f32, color: &gdk::RGBA) {
     let empty = slide.shapes.iter().filter(|s| {
         s.layer == Layer::Slide
             && s.placeholder.is_some()
+            && matches!(s.kind, ShapeKind::Geometry { .. })
             && s.text.as_ref().is_none_or(TextBody::is_empty)
     });
     for shape in empty {

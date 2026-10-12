@@ -13,6 +13,7 @@ mod read;
 mod save;
 mod table;
 mod text;
+mod write;
 mod xml;
 
 pub use detect::{kind, refusal, Kind};

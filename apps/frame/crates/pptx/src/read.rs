@@ -225,6 +225,7 @@ impl Reader {
                 let Ok(slide) = self.slide(&blank, Some(&layout), 0) else {
                     continue;
                 };
+                let text_box = self.text_box(&layout);
                 let root = &layout.part.root;
                 index.insert(path.clone(), out.len());
                 out.push(ModelLayout {
@@ -240,10 +241,24 @@ impl Reader {
                         layout: Some(out.len()),
                         ..slide
                     },
+                    text_box,
                 });
             }
         }
         (out, index)
+    }
+
+    /// What a text box's text looks like on slides of `layout`: an empty text box read on
+    /// a slide of it.
+    fn text_box(&mut self, layout: &Rc<Layout>) -> Option<TextBody> {
+        let source = TEXT_BOX_SLIDE.as_bytes().to_vec();
+        let part = Part {
+            root: crate::xml::parse(&source).ok()?,
+            source,
+            rels: Default::default(),
+        };
+        let slide = self.slide(&part, Some(layout), 0).ok()?;
+        slide.shapes.into_iter().rev().find_map(|s| s.text)
     }
 
     /// The slide in `part` on `layout`; `number` is its slide number, for fields.
@@ -328,6 +343,7 @@ impl Reader {
             notes,
             layout: None,
             part: None,
+            next_id: max_id(root) + 1,
         })
     }
 
@@ -382,6 +398,28 @@ fn sp_tree(root: &Element) -> &Element {
     static EMPTY: LazyLock<Element> = LazyLock::new(Element::default);
     root.path(&["cSld", "spTree"]).unwrap_or(&EMPTY)
 }
+
+/// The highest `cNvPr id` in `e` and below it (0 for none).
+fn max_id(e: &Element) -> u32 {
+    let own = if e.name == "cNvPr" {
+        e.num("id").unwrap_or(0)
+    } else {
+        0
+    };
+    e.elements().map(max_id).fold(own, u32::max)
+}
+
+/// A slide with one empty text box, as PowerPoint inserts one, for reading what a text
+/// box's text looks like on a layout.
+const TEXT_BOX_SLIDE: &str = concat!(
+    r#"<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" "#,
+    r#"xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">"#,
+    r#"<p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/>"#,
+    r#"</p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id="2" name="TextBox 1"/>"#,
+    r#"<p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr/><p:txBody>"#,
+    r#"<a:bodyPr wrap="square"><a:spAutoFit/></a:bodyPr><a:lstStyle/><a:p/></p:txBody>"#,
+    r#"</p:sp></p:spTree></p:cSld></p:sld>"#,
+);
 
 /// The placeholders of a layout or master shape tree (groups included).
 fn placeholders(tree: &Element) -> Vec<Placeholder> {
