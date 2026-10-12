@@ -28,7 +28,7 @@ Anything else is refused with a message naming the format (`.doc`, `.odt`, `.rtf
 
 ## SL1: editor (not built yet)
 
-Typing, formatting commands with undo, save and save-as with atomic writes, crash recovery, find and replace, and the editing engine for the pageless flow (a decision story with a spike, per [ADR 0002](../adr/0002-gtk4-for-the-suite.md)). See [ADR 0005](../adr/0005-slate-is-pageless.md).
+Typing, formatting commands with undo, save and save-as with atomic writes, crash recovery, and find and replace, in Slate's own pageless text engine, a custom Pango flow ([ADR 0007](../adr/0007-slate-editing-engine.md); pageless per [ADR 0005](../adr/0005-slate-is-pageless.md)).
 
 ## Non-goals for now
 

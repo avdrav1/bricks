@@ -1,6 +1,6 @@
 # ADR 0007: Slate's Editing Engine for the Pageless Flow
 
-Status: Proposed
+Status: Accepted
 
 Date: 2026-10-11
 
@@ -43,14 +43,22 @@ These numbers are **software rendered** (see Spike). Typing and frame CPU includ
 
 ## Decision
 
-Pending the user's acceptance.
+Slate's editor is the custom Pango flow (user decision, 2026-10-11, on the software-rendered numbers above).
+
+- **`apps/slate/crates/flow`** (new, toolkit-free): the document's layout state. It holds, per block, the cached height at a width; a Fenwick height index for y ↔ block; estimated heights until a time-sliced pass measures every block; scroll anchoring to a block and an offset; hit-testing; and caret and selection positions in model coordinates. Text shaping goes behind a small trait, so the crate depends on neither GTK nor Pango and its tests run without a display.
+- **The widget in `apps/slate`** implements that trait with `pango::Layout`. It draws through `snapshot`, takes input through a `GtkIMMulticontext`, and implements `gtk::AccessibleText`.
+- **Edits are document-model commands** with undo, as in Bricks. The flow never keeps a second copy of the text.
+- **Layout runs on the main thread in 4 ms idle slices** below redraw priority, as in the spike. Per-thread Pango contexts are a later optimization, adopted only if measurements ask for it.
 
 ## Consequences
 
-If accepted:
-
-- The custom flow goes in a new toolkit-free layout crate (paragraph layout cache, height index, anchoring, hit-testing behind a small text-shaping trait) plus a GTK widget in `apps/slate`. SL1's stories split into the flow, selection and clipboard, IME, undo, and accessibility.
-- The SL0 GtkTextView viewer is replaced when the flow can show everything it shows: tables and pictures drawn in the flow.
+- SL1's engine work is split into backlog stories:
+  - SLATE-11: the flow shows documents, tables and pictures included, and replaces the SL0 GtkTextView viewer, which is then removed.
+  - SLATE-6: caret, typing, and formatting as undoable commands.
+  - SLATE-12: editing inside tables.
+  - SLATE-13: IME composition.
+  - SLATE-14: selection and clipboard.
+  - SLATE-15: accessibility.
 - Full accessibility needs gtk4-rs `v4_16` (extents) and later `v4_22` (caret set by assistive tech). Raising Slate's minimum above GTK 4.14 drops Ubuntu 24.04's stock GTK (ADR 0002). Until that's decided, Slate ships contents, caret, and text-at-offset on 4.14.
 - **Revisit if:** the flow's selection and IME work run well past the estimate, or the numbers rerun on working GPU rendering reverse the re-wrap result.
 
