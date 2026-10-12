@@ -1,7 +1,7 @@
 //! An open deck: the presentation as `pptx` read it and as edits change it, with its
 //! pictures decoded into GDK textures, and what saving it patches: a copy of the package
-//! it was read from. Copying, reading, and decoding happen in [`Deck::load`], off the UI
-//! thread (ADR 0004).
+//! it was read from. Copying, reading, and decoding happen in [`Deck::load`] and
+//! [`Deck::blank`], off the UI thread (ADR 0004).
 
 use gtk::{gdk, glib};
 use presentation_model::{Background, Fill, Image, Presentation, ShapeKind};
@@ -46,8 +46,9 @@ pub struct Deck {
     /// every save patches that copy with what changed since (ADR 0006).
     read: Arc<Presentation>,
     original: Arc<pptx::Original>,
-    /// The file the deck saves to: the one it was opened from, until Save As.
-    path: RefCell<PathBuf>,
+    /// The file the deck saves to: the one it was opened from, until Save As; none for
+    /// a new deck until it's first saved.
+    path: RefCell<Option<PathBuf>>,
     /// Decoded pictures by the address of their bytes (slides share an `Arc` per part).
     textures: RefCell<Textures>,
 }
@@ -68,6 +69,18 @@ impl Deck {
             return Err(OpenError::Refused(why));
         }
         let original = pptx::Original::copy_of(path).map_err(OpenError::Io)?;
+        Self::read(original, Some(path.to_owned()))
+    }
+
+    /// A new, untitled deck: Frame's built-in blank deck ([`pptx::blank`]). Blocking: run
+    /// it off the UI thread.
+    pub fn blank() -> Result<Deck, OpenError> {
+        let original = pptx::Original::of_bytes(pptx::blank()).map_err(OpenError::Io)?;
+        Self::read(original, None)
+    }
+
+    /// Read the package `original` and decode its pictures.
+    fn read(original: pptx::Original, path: Option<PathBuf>) -> Result<Deck, OpenError> {
         let presentation = pptx::read(original.path()).map_err(OpenError::Read)?;
         let mut images = Vec::new();
         // Layouts' new slides too: a slide added on a layout no slide uses shows its
@@ -109,7 +122,7 @@ impl Deck {
             read: Arc::new(presentation.clone()),
             presentation: RefCell::new(presentation),
             original: Arc::new(original),
-            path: RefCell::new(path.to_owned()),
+            path: RefCell::new(path),
             textures: RefCell::new(textures),
         })
     }
@@ -124,13 +137,13 @@ impl Deck {
         self.presentation.borrow_mut()
     }
 
-    /// The file the deck saves to.
-    pub fn path(&self) -> PathBuf {
+    /// The file the deck saves to; none for a deck never saved.
+    pub fn path(&self) -> Option<PathBuf> {
         self.path.borrow().clone()
     }
 
     pub fn set_path(&self, path: PathBuf) {
-        self.path.replace(path);
+        self.path.replace(Some(path));
     }
 
     /// What a save needs besides the deck as it is now: the deck as read, and the package

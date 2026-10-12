@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # FRAME-4 acceptance: Frame's viewer window; FRAME-5: its slideshow; FRAME-6: text editing;
 # FRAME-7: adding, duplicating, deleting, and moving slides; FRAME-8: saving; FRAME-12:
-# inserting; FRAME-13: the outline.
+# inserting; FRAME-13: the outline; FRAME-14: new decks.
 #
 #   scripts/check_frame.sh [BINARY]   (default target/release/frame)
 #
@@ -19,9 +19,10 @@
 #      blue at its right quarter. The slide is found in the screenshot inside the canvas
 #      (its accessible extents) as what differs from the canvas backdrop;
 #   4. Ctrl+O opens the file dialog; typing a path opens that deck in its own window;
-#   5. a file dropped on the start window opens (a drag source window offers it as
-#      text/uri-list, as file managers do; the pointer drags it through the
-#      wlr-virtual-pointer protocol, scripts/dnd_helpers.py);
+#   5. without a file, the new deck window shows (Untitled, Slide 1 of 1); a file dropped
+#      on it opens in its own window (a drag source window offers it as text/uri-list,
+#      as file managers do; the pointer drags it through the wlr-virtual-pointer
+#      protocol, scripts/dnd_helpers.py);
 #   6. files that can't be read alert with the file name and the reason: a .ppt ("Save
 #      it as .pptx first") and a damaged .pptx.
 # FRAME-5 acceptance: the full-screen slideshow.
@@ -90,6 +91,14 @@
 #      number; Ctrl+Z in the outline undoes the canvas typing too (one history).
 #      Ctrl+S writes the new slide into a part of its own, Up 3% at lvl="1", slide 1 as
 #      it was. On the fixture, a slide with shapes shows how many other items it holds.
+# FRAME-14 acceptance, the window's half (LibreOffice's reading of the saved blank deck is
+# `cargo test -p pptx --test blank -- --ignored`):
+#  16. without a file, the window is Untitled on slide 1 of 1, a Title Slide, the slide
+#      16:9 on the canvas; the New Slide menu lists exactly the five layouts. A click on
+#      the title and typing "Quarterly review", then Ctrl+S: Save As asks, and a typed
+#      path saves it; the window takes the file name, the slide part holds the title and
+#      the package five layouts. Ctrl+N opens another Untitled window, and Ctrl+N again
+#      an Untitled 2.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -186,6 +195,17 @@ def part(path, name, needle):
     text = zipfile.ZipFile(path).read(name).decode()
     print(f"part {name} {needle}: {text.count(needle)}")
 
+def parts(path, pattern):
+    # How many part names of the package at PATH match the regular expression PATTERN.
+    import re, zipfile
+    n = sum(1 for p in zipfile.ZipFile(path).namelist() if re.search(pattern, p))
+    print(f"parts {pattern}: {n}")
+
+def aspect(path):
+    # The slide in the screenshot and whether its sides are 16:9, within two pixels.
+    _, _, _, w, h = slide(path)
+    print(f"aspect {w}x{h}: " + ("yes" if abs(w * 9 / 16 - h) <= 2 else "no"))
+
 def blue(path, name, fy="0.30"):
     # Where the fixture slide 3 blue rectangle is: its centre, in screen pixels from the
     # slide centre, along a row through it at FY of the slide.
@@ -269,6 +289,10 @@ elif sys.argv[1] == "where":
     where(sys.argv[2])
 elif sys.argv[1] == "part":
     part(*sys.argv[2:5])
+elif sys.argv[1] == "parts":
+    parts(*sys.argv[2:4])
+elif sys.argv[1] == "aspect":
+    aspect(sys.argv[2])
 elif sys.argv[1] == "blue":
     blue(*sys.argv[2:5])
 elif sys.argv[1] == "count":
@@ -585,7 +609,7 @@ session() {
   pkill -x frame; sleep 0.5
 
   echo "== 5 drop"
-  frame >>/tmp/app.log 2>&1 & sleep 2
+  frame >>/tmp/app.log 2>&1 & sleep 3
   python3 /scripts/dnd_helpers.py source /tmp/f/layouts.pptx >/dev/null 2>&1 & src=$!; sleep 2
   shown start
   python3 /scripts/dnd_helpers.py drag 960 360 320 360
@@ -601,6 +625,24 @@ session() {
     shown $f
     pkill -x frame; sleep 0.5
   done
+
+  echo "== 16 new"
+  frame >>/tmp/app.log 2>&1 & sleep 3
+  shot new0; shown new
+  python3 /tmp/px.py aspect /shots/new0.png
+  read x y < <(python3 /tmp/px.py where Layouts)
+  python3 /scripts/dnd_helpers.py click $x $y; sleep 1; shot newmenu; shown menu
+  keys -k Escape; sleep 0.5
+  read x y < <(python3 /tmp/px.py point /shots/new0.png 0.5 0.3377)
+  python3 /scripts/dnd_helpers.py click $x $y; sleep 0.5
+  keys "Quarterly review" -k Escape; sleep 0.5; shot new1; shown typed
+  keys -M ctrl s -m ctrl; sleep 2; shot newdialog; shown dialog
+  keys -M ctrl a -m ctrl "/tmp/f/new.pptx" -k Return; sleep 3; shot newsaved; shown saved
+  python3 /tmp/px.py part /tmp/f/new.pptx ppt/slides/slide1.xml ">Quarterly review<"
+  python3 /tmp/px.py parts /tmp/f/new.pptx "^ppt/slideLayouts/slideLayout[0-9]+[.]xml$"
+  keys -M ctrl n -m ctrl; sleep 3; shown second
+  keys -M ctrl n -m ctrl; sleep 3; shot new2; shown third
+  pkill -x frame; sleep 0.5
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -633,10 +675,11 @@ check "3: the picture's blue half draws where it is" "3 drawing" "^match blue: y
 check "4: Ctrl+O opens a deck in its own window" "4 open dialog" "^shown: shapes\.pptx$"
 check "4: ... next to the first" "4 open dialog" "^shown: fixture\.pptx$"
 check "4: ... and shows it" "4 open dialog" "^shown: Slide 1 of 6$"
-check "5: a dropped deck opens" "5 drop" "^shown: layouts\.pptx$"
+check "5: without a file, the new deck window shows" "5 drop" "^start: Untitled$"
+check "5: ... on its one slide" "5 drop" "^start: Slide 1 of 1$"
+check "5: a dropped deck opens in its own window" "5 drop" "^shown: layouts\.pptx$"
 check "5: ... and shows it" "5 drop" "^shown: Slide 1 of 10$"
-check "5: without a file, a start window shows" "5 drop" "^start: Open a presentation$"
-absent "5: the start window closes" "5 drop" "^shown: Open a presentation$"
+check "5: ... beside the new deck" "5 drop" "^shown: Untitled$"
 check "6: a .ppt alerts with its name" "6 alerts" "^old\.ppt: Cannot open “old\.ppt”$"
 check "6: ... and says to save it as .pptx" "6 alerts" "^old\.ppt: .*Save it as \.pptx first\.$"
 check "6: a damaged deck alerts with its name" "6 alerts" "^damaged\.pptx: Cannot open “damaged\.pptx”$"
@@ -802,6 +845,26 @@ for n in ">Highlights 2027<" ">Growth<" ">Margins<" ">Up 3%<" "lvl=\"1\""; do
 done
 check "15: ... slide 1 as it was" "15 outline" "^part ppt/slides/slide1.xml >subtitle<: 1$"
 check "15: a slide with shapes shows how many other items it holds" "15 outline" "^fixture: 8 other items$"
+# FRAME-14: new decks.
+check "16: without a file, an Untitled window" "16 new" "^new: Untitled$"
+check "16: ... on slide 1 of 1" "16 new" "^new: Slide 1 of 1$"
+check "16: ... a Title Slide" "16 new" "^new: Slide 1, Title Slide$"
+check "16: ... 16:9 on the canvas" "16 new" "^aspect [0-9]+x[0-9]+: yes$"
+for l in "Title Slide" "Title and Content" "Section Header" "Two Content" "Title Only"; do
+  check "16: the New Slide menu lists $l" "16 new" "^menu: $l$"
+done
+for l in "Blank" "Comparison" "Content with Caption" "Picture with Caption" "Title and Vertical Text"; do
+  absent "16: ... and not $l" "16 new" "^menu: $l$"
+done
+check "16: a click on the title and typing fill it" "16 new" "^typed: Quarterly review$"
+check "16: Ctrl+S on a new deck asks where, as Save As" "16 new" "^dialog: Save As$"
+check "16: ... a typed path saves it" "16 new" "^saved: Saved “new\.pptx”$"
+check "16: ... and the window is that file's" "16 new" "^saved: new\.pptx$"
+check "16: ... the title into slide 1's part" "16 new" "^part ppt/slides/slide1.xml >Quarterly review<: 1$"
+check "16: ... and the five layouts into the package" "16 new" "^parts .*slideLayout.*: 5$"
+check "16: Ctrl+N opens another Untitled window" "16 new" "^second: Untitled$"
+check "16: ... beside the saved one" "16 new" "^second: new\.pptx$"
+check "16: Ctrl+N again opens Untitled 2" "16 new" "^third: Untitled 2$"
 if [ $fail = 0 ]; then echo "FRAME OK"; else
   echo "FRAME CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

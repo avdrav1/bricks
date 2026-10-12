@@ -4,6 +4,7 @@ deck as LibreOffice reads it.
 
 Usage: python3 scripts/lo_pptx.py fixture OUT   (store the fixture deck at OUT)
        python3 scripts/lo_pptx.py dump FILE     (print FILE's slides and shapes)
+       python3 scripts/lo_pptx.py layouts FILE  (print FILE's layouts: `layout NAME` lines)
 
 `dump` prints tab-separated lines. Lengths are EMU: LibreOffice's 1/100 mm times 360, so
 they are exact to 360 EMU (LibreOffice rounds what it reads to 1/100 mm).
@@ -434,7 +435,7 @@ def dump(doc):
 
 
 def main():
-    if len(sys.argv) != 3 or sys.argv[1] not in ("fixture", "dump"):
+    if len(sys.argv) != 3 or sys.argv[1] not in ("fixture", "dump", "layouts"):
         sys.exit(__doc__)
     path = Path(sys.argv[2]).resolve()
     ctx = connect()
@@ -452,6 +453,12 @@ def main():
                 doc.storeToURL(path.as_uri(), (prop("FilterName", "Impress MS PowerPoint 2007 XML"),))
             patch(path)
             print(f"fixture -> {path}")
+        elif sys.argv[1] == "layouts":
+            # LibreOffice reads each of a deck's layouts as a master page of its name.
+            doc = desktop.loadComponentFromURL(path.as_uri(), "_blank", 0, hidden)
+            masters = doc.MasterPages
+            for i in range(masters.getCount()):
+                print(f"layout\t{masters.getByIndex(i).Name}")
         else:
             doc = desktop.loadComponentFromURL(path.as_uri(), "_blank", 0, hidden)
             sys.stdout.write(dump(doc))

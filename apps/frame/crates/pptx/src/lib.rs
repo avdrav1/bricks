@@ -86,3 +86,10 @@ pub fn read(path: &Path) -> Result<Presentation, Error> {
 pub fn read_from(reader: impl Read + Seek + 'static) -> Result<Presentation, Error> {
     read::Reader::new(package::Package::open(Box::new(reader))?).presentation()
 }
+
+/// Frame's built-in blank deck (`data/blank.pptx`, written by `scripts/blank_deck.py`):
+/// 16:9, one title slide, the Office theme, and five layouts (Title Slide, Title and
+/// Content, Section Header, Two Content, Title Only).
+pub fn blank() -> &'static [u8] {
+    include_bytes!("../data/blank.pptx")
+}
