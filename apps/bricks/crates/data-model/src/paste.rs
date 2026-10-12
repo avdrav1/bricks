@@ -85,8 +85,9 @@ fn quoted_cell(text: &str, i: usize) -> Option<(String, usize)> {
 
 impl CsvTable {
     /// The edits that paste `cells` with its first cell at table row `row`, column `col`:
-    /// rows added at the end of the file if it runs past the last row, then every cell set
-    /// to its raw text. While filtered, the cells go into the rows shown, and added rows
+    /// rows added at the end of the file if it runs past the last row (empty ones first
+    /// when `row` is past it, GRID-6), then every cell set to its raw text. While
+    /// filtered, the cells go into the rows shown, and added rows
     /// stay shown (FILT-4). Cells that already show that text, and empty text where a row
     /// has no such cell, are left alone. Run them in order (one undo step:
     /// `commands::Batch`).
@@ -101,7 +102,7 @@ impl CsvTable {
             return Err(PasteError::TooLarge(count));
         }
         let rows = self.row_count();
-        let start = row.min(rows);
+        let start = row;
         let end = start + cells.len() as u64;
         let mut edits = Vec::new();
         let mut added = None;
