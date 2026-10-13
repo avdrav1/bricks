@@ -2,7 +2,8 @@
 //! and tables, each one undo step giving back the document exactly.
 
 use document_edit::{
-    copy, delete, normalize, paste, text, Change, Container, Edit, Fragment, History, Pos,
+    copy, delete, normalize, paste, replace_document, text, Change, Container, Edit, Fragment,
+    History, Pos,
 };
 use document_model::{
     read_markdown, Block, Document, Image, ImageFormat, ImageSource, ListKind, Paragraph,
@@ -436,4 +437,16 @@ fn cut_then_paste_moves_the_text() {
     history.undo(&mut doc).expect("the paste");
     history.undo(&mut doc).expect("the cut");
     assert_eq!(doc, original);
+}
+
+/// Crash recovery's restore: the whole document becomes the recovered one in one step, and
+/// one undo gives the file's back; the same blocks make no step.
+#[test]
+fn replacing_the_document_is_one_step() {
+    let mut file = doc();
+    let recovered = md("Intro changed\n\n| A | B |\n|---|---|\n| c | edited |\n");
+    let change = checked(&mut file, |d| replace_document(d, recovered.blocks.clone()));
+    assert_eq!(file.blocks, recovered.blocks);
+    assert_eq!(change.caret, pos(0, 0));
+    assert!(replace_document(&recovered, recovered.blocks.clone()).is_none());
 }

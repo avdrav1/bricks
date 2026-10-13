@@ -9,8 +9,10 @@
 //! document saved is the one shown when the save began.
 //!
 //! The window's title starts with "• " while the document differs from its file, and
-//! closing it then asks whether to save.
+//! closing it then asks whether to save. Meanwhile its unsaved edits are journaled for
+//! crash recovery ([`crate::recovery`]).
 
+use crate::recovery::{self, Header, WRITE_AFTER};
 use crate::view::Page;
 use document_model::{
     write_markdown, write_text, Document, Encoding, LineEnding, MarkdownSource, TextInfo,
@@ -160,18 +162,38 @@ pub struct Saver {
     waiting: RefCell<VecDeque<Waiting>>,
     /// Closing goes ahead without asking (the user chose).
     closing: Cell<bool>,
+    /// The file's size and modification time when it was last read or saved.
+    identity: Cell<Option<(u64, u64)>>,
+    /// This window's crash recovery journal.
+    journal: PathBuf,
+    journaling: RefCell<Journaling>,
+}
+
+/// Where the crash recovery journal stands.
+#[derive(Default)]
+struct Journaling {
+    /// The journal file is there.
+    exists: bool,
+    /// The page's position the journal holds.
+    written: Option<u64>,
+    /// The write that is due.
+    due: Option<glib::SourceId>,
+    writing: bool,
+    /// The window closed: no more journal.
+    closed: bool,
 }
 
 impl Saver {
     /// The saver of `window`, whose page shows `path` read as `target` (`None`: a new
-    /// document). Adds the window's `save` and `save-as` actions and asks before a window
-    /// with changes closes.
+    /// document), the file's `identity` as read. Adds the window's `save` and `save-as`
+    /// actions, asks before a window with changes closes, and journals unsaved edits.
     pub fn attach(
         window: &gtk::ApplicationWindow,
         page: &Page,
         status: &gtk::Label,
         path: Option<PathBuf>,
         target: Target,
+        identity: Option<(u64, u64)>,
     ) {
         let saver = Rc::new(Saver {
             window: window.downgrade(),
@@ -183,6 +205,9 @@ impl Saver {
             saving: Cell::new(false),
             waiting: RefCell::new(VecDeque::new()),
             closing: Cell::new(false),
+            identity: Cell::new(identity),
+            journal: recovery::store().new_journal(),
+            journaling: RefCell::default(),
         });
         // The window's actions and handlers own the saver; it holds the window weakly.
         let action = |name: &str, run: fn(&Rc<Saver>)| {
@@ -197,16 +222,103 @@ impl Saver {
         ]);
         page.connect_edited({
             let saver = saver.clone();
-            move || saver.show_title()
+            move || {
+                saver.show_title();
+                saver.journal_changed();
+            }
         });
         window.connect_close_request(move |_| {
             if saver.modified() && !saver.closing.get() {
                 saver.ask_before_closing();
                 glib::Propagation::Stop
             } else {
+                // Saved, or the user chose to discard: nothing to recover.
+                saver.close_journal();
                 glib::Propagation::Proceed
             }
         });
+    }
+
+    /// The document changed or was saved: journal it within [`WRITE_AFTER`] while it has
+    /// unsaved edits the journal doesn't hold, else remove the journal.
+    fn journal_changed(self: &Rc<Self>) {
+        let position = self.page.upgrade().map(|p| p.position());
+        let modified = self.modified();
+        let mut j = self.journaling.borrow_mut();
+        if j.closed || j.writing {
+            return; // the write in progress looks again when it ends
+        }
+        if !modified {
+            if let Some(due) = j.due.take() {
+                due.remove();
+            }
+            if j.exists {
+                recovery::store().remove(&self.journal);
+                (j.exists, j.written) = (false, None);
+            }
+        } else if j.due.is_none() && j.written != position {
+            let saver = self.clone();
+            j.due = Some(glib::timeout_add_local_once(WRITE_AFTER, move || {
+                saver.journaling.borrow_mut().due = None;
+                saver.write_journal();
+            }));
+        }
+    }
+
+    /// Write the document to the journal off the UI thread, then look again.
+    fn write_journal(self: &Rc<Self>) {
+        let Some(page) = self.page.upgrade() else {
+            return;
+        };
+        if !self.modified() || self.journaling.borrow().closed {
+            self.journal_changed();
+            return;
+        }
+        let position = page.position();
+        let blocks = page.document().blocks;
+        let header = Header {
+            path: self.path.borrow().clone(),
+            file: self.identity.get(),
+            saved_ms: recovery::now_ms(),
+        };
+        let journal = self.journal.clone();
+        self.journaling.borrow_mut().writing = true;
+        let saver = self.clone();
+        glib::spawn_future_local(async move {
+            let written = gio::spawn_blocking(move || {
+                recovery::write(&recovery::store(), &journal, &header, &blocks)
+            })
+            .await;
+            {
+                let mut j = saver.journaling.borrow_mut();
+                j.writing = false;
+                match written {
+                    Ok(Ok(())) => (j.exists, j.written) = (true, Some(position)),
+                    Ok(Err(e)) => tracing::warn!("cannot write the recovery journal: {e}"),
+                    Err(_) => tracing::warn!("writing the recovery journal failed"),
+                }
+                if j.closed {
+                    // Closed while it was being written.
+                    recovery::store().remove(&saver.journal);
+                    j.exists = false;
+                    return;
+                }
+            }
+            saver.journal_changed();
+        });
+    }
+
+    /// The window closes with nothing to recover: no journal.
+    fn close_journal(&self) {
+        let mut j = self.journaling.borrow_mut();
+        j.closed = true;
+        if let Some(due) = j.due.take() {
+            due.remove();
+        }
+        if j.exists && !j.writing {
+            recovery::store().remove(&self.journal);
+            j.exists = false;
+        }
     }
 
     /// The file's name, or "Untitled" for a new document.
@@ -373,7 +485,10 @@ impl Saver {
         glib::spawn_future_local(async move {
             let job = gio::spawn_blocking({
                 let dest = dest.clone();
-                move || write(&doc, &dest, target, save_as)
+                move || {
+                    let target = write(&doc, &dest, target, save_as)?;
+                    Ok((target, recovery::identity(&dest)))
+                }
             });
             let result = job
                 .await
@@ -381,9 +496,11 @@ impl Saver {
             saver.saving.set(false);
             let name = suite_file::document_name(&dest).into_owned();
             match result {
-                Ok(target) => {
+                Ok((target, identity)) => {
                     tracing::info!("saved {}", dest.display());
+                    saver.identity.set(identity);
                     saver.saved(dest, target, position);
+                    saver.journal_changed();
                     if let Some(then) = then {
                         then();
                     }

@@ -309,6 +309,23 @@ impl BlocksEdit {
     }
 }
 
+/// The whole document replaced by `blocks` as one step, as crash recovery puts unsaved edits
+/// back onto the file they were made to: undoing it gives the file's blocks back. The caret
+/// goes to the start either way. `None` when `blocks` are the document's already.
+pub fn replace_document(doc: &Document, blocks: Vec<Block>) -> Option<Edit> {
+    if doc.blocks == blocks {
+        return None;
+    }
+    let start = Pos::default();
+    Some(Edit::Blocks(BlocksEdit::new(
+        0,
+        doc.blocks.clone(),
+        blocks,
+        start,
+        start,
+    )))
+}
+
 /// `from` and `to` in document order, `None` when they're equal.
 fn ordered(from: Pos, to: Pos) -> Option<(Pos, Pos)> {
     (from != to).then(|| (from.min(to), from.max(to)))

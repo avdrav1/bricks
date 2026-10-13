@@ -9,7 +9,7 @@
 //! changed since (size or modification time), and puts the edits back as one undo step.
 
 use crate::grid_view::GridView;
-use crate::recovery::{now_ms, Crashed, Store};
+use crate::recovery::{self, now_ms, store, Crashed};
 use crate::{
     alert, build_window, canonical, close_start_window, remember, status, DocKind, Session,
 };
@@ -45,7 +45,7 @@ pub struct Journal {
 impl Journal {
     pub fn new() -> Rc<RefCell<Self>> {
         Rc::new(RefCell::new(Self {
-            path: Store::open().new_journal(),
+            path: store().new_journal(),
             written: None,
             first: None,
             writing: false,
@@ -60,7 +60,7 @@ pub fn closed(j: &Rc<RefCell<Journal>>) {
     let mut s = j.borrow_mut();
     s.closed = true;
     if s.exists {
-        Store::open().remove(&s.path);
+        store().remove(&s.path);
         s.exists = false;
     }
 }
@@ -74,7 +74,7 @@ pub fn journal_tick(grid: &GridView, session: &Session, j: &Rc<RefCell<Journal>>
     let changes = grid.edit_count();
     if changes == 0 {
         if s.exists {
-            Store::open().remove(&s.path);
+            store().remove(&s.path);
             s.exists = false;
         }
         (s.written, s.first) = (None, None);
@@ -108,8 +108,7 @@ pub fn journal_tick(grid: &GridView, session: &Session, j: &Rc<RefCell<Journal>>
     };
     s.writing = true;
     let file = s.path.clone();
-    let job =
-        jobs::spawn(move |_| Store::open().write(&file, |f| snapshot.write_journal(&header, f)));
+    let job = jobs::spawn(move |_| store().write(&file, |f| snapshot.write_journal(&header, f)));
     let j = j.clone();
     glib::spawn_future_local(async move {
         let result = job.finished().await;
@@ -119,7 +118,7 @@ pub fn journal_tick(grid: &GridView, session: &Session, j: &Rc<RefCell<Journal>>
             Ok(Ok(())) => {
                 (s.exists, s.written, s.first) = (true, Some(rev), None);
                 if s.closed {
-                    Store::open().remove(&s.path); // closed while it was being written
+                    store().remove(&s.path); // closed while it was being written
                     s.exists = false;
                 }
             }
@@ -135,8 +134,7 @@ pub fn journal_tick(grid: &GridView, session: &Session, j: &Rc<RefCell<Journal>>
 /// A crashed session's journal for `path`, if there is one.
 pub fn crashed_for(path: &Path) -> Option<Crashed> {
     let path = canonical(path);
-    Store::open()
-        .crashed()
+    recovery::crashed()
         .into_iter()
         .find(|c| c.header.path.as_deref().map(canonical).as_ref() == Some(&path))
 }
@@ -229,7 +227,7 @@ pub fn pending_tick(window: &gtk::ApplicationWindow, grid: &GridView, session: &
     glib::spawn_future_local(async move {
         match dialog.choose_future(Some(&window)).await {
             Ok(1) => restore(&window, &grid, p.crashed),
-            Ok(0) => Store::open().remove(&p.crashed.journal),
+            Ok(0) => store().remove(&p.crashed.journal),
             _ => {} // dismissed: offered again next time
         }
     });
@@ -254,7 +252,7 @@ fn changed_since(window: &gtk::ApplicationWindow, crashed: Crashed) {
     let window = window.clone();
     glib::spawn_future_local(async move {
         if let Ok(1) = dialog.choose_future(Some(&window)).await {
-            Store::open().remove(&crashed.journal);
+            store().remove(&crashed.journal);
         }
     });
 }
@@ -274,7 +272,7 @@ fn restore(window: &gtk::ApplicationWindow, grid: &GridView, crashed: Crashed) {
             Err(_) => Err(data_model::JournalError::Corrupt("reading it failed")),
         };
         match result {
-            Ok(()) => Store::open().remove(&crashed.journal),
+            Ok(()) => store().remove(&crashed.journal),
             Err(e) => {
                 eprintln!("brick: cannot restore unsaved edits: {e}");
                 alert(
@@ -290,7 +288,7 @@ fn restore(window: &gtk::ApplicationWindow, grid: &GridView, crashed: Crashed) {
 /// The start window's list of crashed sessions, and its first Restore button (it takes
 /// the focus: after a crash, putting the work back is the likely next step).
 pub fn start_section(app: &gtk::Application) -> Option<(gtk::Box, gtk::Button)> {
-    let crashed = Store::open().crashed();
+    let crashed = recovery::crashed();
     if crashed.is_empty() {
         return None;
     }
@@ -333,7 +331,7 @@ pub fn start_section(app: &gtk::Application) -> Option<(gtk::Box, gtk::Button)> 
         discard.connect_clicked({
             let (journal, row) = (c.journal.clone(), row.downgrade());
             move |_| {
-                Store::open().remove(&journal);
+                store().remove(&journal);
                 if let Some(r) = row.upgrade() {
                     r.set_visible(false);
                 }

@@ -1123,6 +1123,8 @@ dependencies = [
  "docx",
  "flow",
  "gtk4",
+ "serde",
+ "serde_json",
  "suite-core",
  "suite-file",
  "suite-platform",

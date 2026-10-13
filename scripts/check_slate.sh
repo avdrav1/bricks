@@ -104,6 +104,16 @@
 #      in the replace row, Enter twice replaces one match, Replace All the rest, leaving
 #      "Cat" and No matches; one undo takes back Replace All and the next Replace;
 #      closing the bar clears the count.
+#  24. crash recovery: r.txt, r.md, and r.docx edited in one process have no journal right
+#      after the edit and one each 7 s later; kill -9 leaves the files and the journals.
+#      `slate` alone lists the three on its start window; Restore on r.txt opens it marked
+#      "• " with the edit, the list still showing; `slate r.md r.docx` asks in each window,
+#      and Restore puts their edits back, marked "• ", the files unchanged and the crashed
+#      journals gone; the restored windows journal again. One undo in r.txt gives back the
+#      file; Ctrl+S in r.md, then closing every window (Discard for r.docx) ends Slate and
+#      leaves no journal. An edit crashed and discarded leaves the file and no journal.
+#      Typing a letter every half second for 20 s, the journal shows up about 5 s after the
+#      first and is rewritten at least 5 s apart.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -359,6 +369,32 @@ elif cmd == "page":
         if ti is not None and name in (None, node.get_name()):
             print("page: " + Atspi.Text.get_text(ti, 0, -1).replace("\n", "|"))
             break
+elif cmd == "press":
+    # Press each showing button named argv[2]; with argv[3] "dialog", only those in a
+    # dialog (each window has its own), else only the one in the row showing argv[3].
+    def in_dialog(node):
+        while node is not None:
+            if node.get_role_name() in ("alert", "dialog"):
+                return True
+            node = node.get_parent()
+        return False
+    def in_row(node, text):
+        row = node.get_parent()
+        return any(row.get_child_at_index(i).get_name() == text for i in range(row.get_child_count()))
+    scope = sys.argv[3] if len(sys.argv) > 3 else None
+    pressed = 0
+    for node in [n for a in apps() for n in walk(a)]:
+        if node.get_role_name() != "button" or node.get_name() != sys.argv[2] \
+                or not node.get_state_set().contains(Atspi.StateType.SHOWING):
+            continue
+        if scope == "dialog" and not in_dialog(node) or scope not in (None, "dialog") and not in_row(node, scope):
+            continue
+        Atspi.Action.do_action(node.get_action_iface(), 0)
+        pressed += 1
+    print(f"pressed {pressed}")
+elif cmd == "count":
+    # How many accessible objects of every Slate process are named argv[2].
+    print(sum(1 for a in apps() for n in walk(a) if n.get_name() == sys.argv[2]))
 PY
 cat > /tmp/fmt.py <<"PY"
 import gi
@@ -462,7 +498,9 @@ session() {
   keys() { wtype -s 400 "$@" -s 400; }
   titles() { echo "titles: $(swaymsg -t get_tree | jq -r ".. | objects | select(.type==\"con\" and .name!=null) | .name" | sort | tr "\n" ",")"; }
   a11y() { python3 /tmp/a11y.py "$@" 2>&1; }
-  quit() { pkill -x slate; sleep 1; }
+  # SIGTERM ends Slate without closing its windows, which leaves crash journals of their
+  # unsaved edits (SLATE-17): later sections start without them.
+  quit() { pkill -x slate; sleep 1; rm -rf /tmp/state/slate/recovery; }
   # Wait up to 20 s for a save to end: no window title marked "• " (changes not saved).
   saved() { for i in $(seq 40); do swaymsg -t get_tree | jq -r ".. | objects | .name? // empty" | grep -q "^• " || return 0; sleep 0.5; done; }
   # Screenshot each column window (focused in turn) and measure it: "LABEL col-X.md: rule ...".
@@ -737,6 +775,58 @@ print(\"line:\", \"First line\" in x)"
   keys -k Escape; sleep 0.5; keys -M ctrl z -m ctrl; sleep 1; a11y page find.md | sed "s/^/undo-all /"
   keys -M ctrl z -m ctrl; sleep 1; a11y page find.md | sed "s/^/undo-one /"
   a11y dump | grep -cE "^([0-9]+ of [0-9]+|No matches)$" | sed "s/^/counts after closing: /"; quit
+  echo "== 24 recovery"
+  J=/tmp/state/slate/recovery; rm -rf $J /tmp/rec; mkdir -p /tmp/rec
+  journals() { ls $J 2>/dev/null | grep -c "\.journal$"; }
+  printf "plain line\n" > /tmp/rec/r.txt; printf "# Notes\n\nmd line\n" > /tmp/rec/r.md
+  cp /tmp/fixture.docx /tmp/rec/r.docx; sha256sum /tmp/rec/r.* > /tmp/rec.sums
+  slate /tmp/rec/r.txt /tmp/rec/r.md /tmp/rec/r.docx >>/tmp/app.log 2>&1 & sleep 5
+  for f in r.txt r.md r.docx; do
+    swaymsg "[title=$f] focus" >/dev/null; sleep 0.5; keys -M ctrl -k End -m ctrl; keys " Unsaved"
+    [ $f = r.txt ] && echo "journals right after typing: $(journals)"
+  done
+  sleep 7; echo "journals: $(journals)"; titles | sed "s/^/edited-/"
+  old=$(pgrep -x slate); pkill -9 -x slate; sleep 1
+  sha256sum -c --quiet /tmp/rec.sums && echo "files unchanged after the kill"
+  echo "journals after the kill: $(journals)"
+  slate >>/tmp/app.log 2>&1 & sleep 4; shot recovery-start
+  a11y dump | grep -E "^r\.(docx|md|txt)$" | sort -u | tr "\n" "," | sed "s/^/offered: /"; echo
+  a11y press Restore r.txt; sleep 3; titles | sed "s/^/from-start-/"
+  a11y page r.txt | sed "s/^/restored-txt /"
+  slate /tmp/rec/r.md /tmp/rec/r.docx >>/tmp/app.log 2>&1 & sleep 5; shot recovery-ask
+  echo "asked: $(a11y count "Restore unsaved edits?")"
+  a11y press Restore dialog; sleep 3; titles | sed "s/^/restored-/"
+  a11y page r.md | sed "s/^/restored-md /"; a11y page r.docx | grep -c "Unsaved$" | sed "s/^/restored-docx: /"
+  sha256sum -c --quiet /tmp/rec.sums && echo "files unchanged after restoring"
+  echo "old journals left: $(ls $J | grep -c "^$old-")"
+  sleep 6; echo "journals while restored: $(journals)"
+  swaymsg "[title=r.txt] focus" >/dev/null; sleep 0.5; keys -M ctrl z -m ctrl; sleep 1; titles | sed "s/^/undone-/"
+  swaymsg "[title=r.md] focus" >/dev/null; sleep 0.5; keys -M ctrl s -m ctrl; sleep 2; saved
+  for f in r.txt r.md r.docx Slate; do swaymsg "[title=$f] focus" >/dev/null; sleep 0.5; keys -M ctrl w -m ctrl; sleep 1; done
+  a11y press Discard dialog; sleep 2
+  pgrep -x slate >/dev/null && echo "after closing: slate still running" || echo "after closing: slate exited"
+  echo "journals after a clean close: $(journals)"
+  grep -c "^md line Unsaved$" /tmp/rec/r.md | sed "s/^/md saved: /"
+  grep -v r.md /tmp/rec.sums | sha256sum -c --quiet && echo "txt and docx unchanged"
+  pkill -9 -x slate; rm -rf $J; sleep 1
+  slate /tmp/rec/r.txt >>/tmp/app.log 2>&1 & sleep 4
+  keys -M ctrl -k End -m ctrl; keys " Again"; sleep 7; pkill -9 -x slate; sleep 1
+  slate /tmp/rec/r.txt >>/tmp/app.log 2>&1 & sleep 4; a11y press Discard dialog; sleep 1
+  a11y page r.txt | sed "s/^/discarded-txt /"; echo "journals after discarding: $(journals)"; titles | sed "s/^/discarded-/"
+  pid=$(pgrep -x slate | head -1)
+  # Type a letter every half second for 20 s; note when the journal first shows up and
+  # each time it is rewritten (its modification time).
+  keys -M ctrl -k End -m ctrl; t0=$(date +%s%3N); first=""; : > /tmp/rec.times
+  while [ $(( $(date +%s%3N) - t0 )) -lt 20000 ]; do
+    wtype a; f=$(ls $J/$pid-*.journal 2>/dev/null | head -1)
+    if [ -n "$f" ]; then stat -c %.3Y "$f" >> /tmp/rec.times; [ -z "$first" ] && first=$(( $(date +%s%3N) - t0 )); fi
+    sleep 0.5
+  done
+  python3 -c "
+t = sorted({float(l) for l in open(\"/tmp/rec.times\")})
+gap = min((b - a for a, b in zip(t, t[1:])), default=0)
+print(f\"typing for 20 s: first journal after ${first:-0} ms, writes {len(t)}, shortest gap {gap * 1000:.0f} ms\")"
+  quit
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -915,6 +1005,32 @@ check "23: one undo takes back Replace All" "23 find" \
 check "23: the next takes back Replace" "23 find" \
   "^undo-one page: A cat sat\.\|The Cat and the cat\.\|x\|y\|X\|dog\|Last cat\.$"
 check "23: closing the bar clears the count" "23 find" "^counts after closing: 0$"
+check "24: a journal isn't written as soon as an edit is made" "24 recovery" "^journals right after typing: 0$"
+check "24: within seconds each edited window has one" "24 recovery" "^journals: 3$"
+check "24: the windows show unsaved edits" "24 recovery" "^edited-titles: • r\.docx,• r\.md,• r\.txt,$"
+check "24: kill -9 leaves the files as they were" "24 recovery" "^files unchanged after the kill$"
+check "24: and the journals" "24 recovery" "^journals after the kill: 3$"
+check "24: the start window offers each" "24 recovery" "^offered: r\.docx,r\.md,r\.txt,$"
+check "24: Restore there opens the file marked unsaved, the list still showing" "24 recovery" \
+  "^from-start-titles: Slate,• r\.txt,$"
+check "24: with the edit" "24 recovery" "^restored-txt page: plain line Unsaved$"
+check "24: opening the others asks in each" "24 recovery" "^asked: 2$"
+check "24: Restore puts their edits back, marked unsaved" "24 recovery" \
+  "^restored-titles: Slate,• r\.docx,• r\.md,• r\.txt,$"
+check "24: the Markdown edit" "24 recovery" "^restored-md page: Notes\|md line Unsaved$"
+check "24: the Word document edit" "24 recovery" "^restored-docx: 1$"
+check "24: the files stay as they were until saved" "24 recovery" "^files unchanged after restoring$"
+check "24: restored journals are gone" "24 recovery" "^old journals left: 0$"
+check "24: the restored windows journal their unsaved edits again" "24 recovery" "^journals while restored: 3$"
+check "24: one undo gives back the file (no longer unsaved)" "24 recovery" "^undone-titles: Slate,r\.txt,• r\.docx,• r\.md,$"
+check "24: saving, undoing, and discarding, then closing, ends Slate" "24 recovery" "^after closing: slate exited$"
+check "24: and leaves no recovery data" "24 recovery" "^journals after a clean close: 0$"
+check "24: the saved file has the edit" "24 recovery" "^md saved: 1$"
+check "24: the others are as they were" "24 recovery" "^txt and docx unchanged$"
+check "24: Discard after a crash keeps the file as it is" "24 recovery" "^discarded-txt page: plain line$"
+check "24: and leaves no recovery data either" "24 recovery" "^journals after discarding: 0$"
+check "24: typing, the journal is written 5 s after the first edit, then at most every 5 s" \
+  "24 recovery" "^typing for 20 s: first journal after (4[5-9]|[5-8][0-9])[0-9]{2} ms, writes [234], shortest gap ([5-9][0-9]{3}|[0-9]{5}) ms$"
 if [ $fail = 0 ]; then echo "SLATE OK"; else
   echo "SLATE CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

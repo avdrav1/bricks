@@ -18,6 +18,9 @@ pub struct Opened {
     /// How a save writes it back: a Markdown file's source and a Word document's package,
     /// so a save changes only what was edited.
     pub target: Target,
+    /// The file's size and modification time as read (`None` for a new document): crash
+    /// recovery puts edits back only onto the same file.
+    pub identity: Option<(u64, u64)>,
 }
 
 /// Where the blocks came from, for a save.
@@ -83,6 +86,7 @@ fn kind(path: &Path) -> Result<Kind, OpenError> {
 /// decode its pictures. A Word document is read from a private copy of its package, which
 /// its saves patch.
 pub fn read(path: &Path) -> Result<Opened, OpenError> {
+    let identity = suite_file::recovery::identity(path);
     let (doc, source) = match kind(path)? {
         Kind::Text => (
             document_model::read_text(&std::fs::read(path)?),
@@ -111,7 +115,10 @@ pub fn read(path: &Path) -> Result<Opened, OpenError> {
             (doc, Source::Docx(source, original))
         }
     };
-    Ok(ready(doc, source))
+    Ok(Opened {
+        identity,
+        ..ready(doc, source)
+    })
 }
 
 /// A new document (SLATE-18): Slate's built-in blank Word document, read from a private
@@ -150,12 +157,13 @@ fn ready(mut doc: Document, mut source: Source) -> Opened {
         textures,
         words,
         target,
+        identity: None,
     }
 }
 
 /// Decode every embedded PNG, JPEG, and GIF once; a picture that doesn't decode shows as
 /// its alt text.
-fn decode_pictures(blocks: &[Block], textures: &mut Textures) {
+pub fn decode_pictures(blocks: &[Block], textures: &mut Textures) {
     for block in blocks {
         match block {
             Block::Image(image) => {

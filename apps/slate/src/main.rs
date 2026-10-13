@@ -18,6 +18,7 @@
 mod bench;
 mod find_bar;
 mod open;
+mod recovery;
 mod saving;
 mod settings;
 mod view;
@@ -116,7 +117,7 @@ fn main() -> glib::ExitCode {
             .activate(|app: &gtk::Application, _, _| choose_and_open(app))
             .build();
         let new = gio::ActionEntry::builder("new")
-            .activate(|app: &gtk::Application, _, _| open_window(app, None, None))
+            .activate(|app: &gtk::Application, _, _| open_window(app, None, None, None))
             .build();
         let close = gio::ActionEntry::builder("close")
             .activate(|app: &gtk::Application, _, _| {
@@ -161,7 +162,7 @@ fn main() -> glib::ExitCode {
     app.connect_activate(move |app| match files.take() {
         Some(files) if !files.is_empty() => {
             for f in files {
-                open_window(app, Some(&f), bench);
+                open_window(app, Some(&f), bench, None);
             }
         }
         _ if app.windows().is_empty() => start_window(app),
@@ -360,12 +361,25 @@ fn start_window(app: &gtk::Application) {
     content.append(&heading);
     content.append(&hint);
     content.append(&buttons);
+    // After a crash: the unsaved edits it left, each to restore or discard.
+    let restore = recovery::start_section(app).map(|(section, first)| {
+        content.append(&section);
+        first
+    });
     window.set_child(Some(&content));
     accept_drops(app, &window);
     window.present();
+    if let Some(first) = restore {
+        first.grab_focus();
+    }
 }
 
+/// Close the start window once a document shows, unless it still lists unsaved edits
+/// from a crash to restore.
 fn close_start_window(app: &gtk::Application) {
+    if recovery::offers_left() {
+        return;
+    }
     for w in app.windows() {
         if w.widget_name() == START_WINDOW {
             w.close();
@@ -416,7 +430,7 @@ fn choose_and_open(app: &gtk::Application) {
 
 fn open_file(app: &gtk::Application, file: &gio::File, parent: Option<&gtk::Window>) {
     match file.path() {
-        Some(path) => open_window(app, Some(&path), None),
+        Some(path) => open_window(app, Some(&path), None, None),
         None => alert(
             parent,
             &format!("Cannot open {}", file.uri()),
@@ -463,8 +477,15 @@ fn alert(parent: Option<&gtk::Window>, message: &str, detail: &str) {
 
 /// Show `path` in a window: its own if it is open, else a new one that says "Opening…"
 /// while the file is read in the background; with no path, a new window with a new
-/// document, titled Untitled (SLATE-18). `bench`: run that benchmark on it.
-fn open_window(app: &gtk::Application, path: Option<&Path>, bench: Option<bench::Mode>) {
+/// document, titled Untitled (SLATE-18). `bench`: run that benchmark on it. `restore`: put
+/// back the unsaved edits of that crashed session (SLATE-17) without asking; otherwise a
+/// crashed session's edits to the file are offered back.
+fn open_window(
+    app: &gtk::Application,
+    path: Option<&Path>,
+    bench: Option<bench::Mode>,
+    restore: Option<recovery::Crashed>,
+) {
     let path = path.map(canonical);
     if let Some(window) = path.as_deref().and_then(window_for) {
         window.present();
@@ -518,18 +539,34 @@ fn open_window(app: &gtk::Application, path: Option<&Path>, bench: Option<bench:
     }
     window.present();
 
+    let restoring = restore.is_some();
     let reading = gio::spawn_blocking({
         let path = path.clone();
-        move || match path {
-            Some(path) => open::read(&path),
-            None => open::blank(),
+        move || {
+            let mut opened = match &path {
+                Some(path) => open::read(path),
+                None => open::blank(),
+            }?;
+            let crashed = match (restore, &path) {
+                (Some(c), _) => Some((c, false)),
+                (None, Some(path)) if bench.is_none() => {
+                    recovery::crashed_for(path).map(|c| (c, true))
+                }
+                _ => None,
+            };
+            let recovered =
+                crashed.and_then(|(c, ask)| recovery::Recovered::read(c, ask, &mut opened));
+            Ok::<_, open::OpenError>((opened, recovered))
         }
     });
     let app = app.clone();
     glib::spawn_future_local(async move {
         let reason = match reading.await {
-            Ok(Ok(opened)) => {
-                show(&app, &stack, &status, path.as_deref(), &name, opened, bench);
+            Ok(Ok((opened, recovered))) => {
+                let page = show(&app, &stack, &status, path.as_deref(), &name, opened, bench);
+                if let Some(recovered) = recovered {
+                    recovered.offer(&window, &page);
+                }
                 close_start_window(&app);
                 return;
             }
@@ -540,9 +577,14 @@ fn open_window(app: &gtk::Application, path: Option<&Path>, bench: Option<bench:
         if bench.is_some() {
             std::process::exit(1);
         }
+        let detail = if restoring {
+            format!("{reason} The unsaved edits are kept for later.")
+        } else {
+            reason
+        };
         let dialog = gtk::AlertDialog::builder()
             .message(format!("Cannot open “{name}”"))
-            .detail(&reason)
+            .detail(&detail)
             .buttons(["Close"])
             .default_button(0)
             .cancel_button(0)
@@ -621,7 +663,7 @@ fn text_width(app: &gtk::Application) -> TextWidth {
 }
 
 /// Replace "Opening…" with the document of `path` (`None`: a new document), shown as
-/// `name`. `bench`: run that benchmark on it.
+/// `name`; its page. `bench`: run that benchmark on it.
 fn show(
     app: &gtk::Application,
     stack: &gtk::Stack,
@@ -630,7 +672,7 @@ fn show(
     name: &str,
     opened: open::Opened,
     bench: Option<bench::Mode>,
-) {
+) -> view::Page {
     let words = opened.words;
     status.set_text(&format!(
         "{} · {} word{}",
@@ -663,12 +705,14 @@ fn show(
             status,
             path.map(Path::to_owned),
             opened.target,
+            opened.identity,
         );
     }
     page.grab_focus();
     if let Some(mode) = bench {
         bench::run(app, &page, words, mode);
     }
+    page
 }
 
 /// `1234567` as `1,234,567`.

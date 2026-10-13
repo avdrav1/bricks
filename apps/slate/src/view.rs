@@ -1070,7 +1070,11 @@ mod imp {
         /// Make the edit `make` builds from the state, apply it, and show the result.
         /// `keep_caret`: a paragraph command given at the caret, not a selection, leaves
         /// the caret where it was rather than selecting what it changed.
-        fn edit_with(&self, keep_caret: bool, make: impl FnOnce(&mut State) -> Option<Edit>) {
+        pub(super) fn edit_with(
+            &self,
+            keep_caret: bool,
+            make: impl FnOnce(&mut State) -> Option<Edit>,
+        ) {
             let (change, text) = {
                 let mut state = self.state.borrow_mut();
                 let Some(st) = state.as_mut() else {
@@ -1702,6 +1706,19 @@ impl Page {
         let state = self.imp().state.borrow();
         let st = state.as_ref().expect("a page has its document");
         st.flow.document().clone()
+    }
+
+    /// Put `blocks` (unsaved edits recovered after a crash) in place of the document's, as
+    /// one undoable step; the caret goes to the start.
+    pub fn restore(&self, blocks: Vec<document_model::Block>) {
+        let imp = self.imp();
+        imp.edit_with(false, |st| {
+            document_edit::replace_document(st.flow.document(), blocks)
+        });
+        if let Some(st) = imp.state.borrow_mut().as_mut() {
+            st.caret = caret::first(st);
+        }
+        self.queue_draw();
     }
 
     /// Call `f` after every edit, undo, and redo is shown.
