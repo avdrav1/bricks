@@ -33,15 +33,18 @@ mod tree;
 
 pub use content::Content;
 pub use tree::{
-    CELL_BORDER, CELL_PADDING, CODE_INSET, LEVEL_INDENT, PAGE_BREAK_HEIGHT, RULE_HEIGHT,
-    RULE_MARGIN, TABLE_MARGIN,
+    px, CELL_BORDER, CELL_PADDING, CODE_INSET, LEVEL_INDENT, PAGE_BREAK_HEIGHT, RULE_HEIGHT,
+    RULE_MARGIN, TABLE_MARGIN, TWIPS_PER_PX,
 };
 
 use document_model::{Block, Document, Image};
 use fenwick::Fenwick;
 use std::borrow::Cow;
 use std::ops::Range;
-use tree::{Builder, Cx, Leaf, Node, LOOKS};
+use tree::{Builder, Cx, Leaf, Looks, Node};
+
+/// The family code and raw source are drawn in.
+pub const MONOSPACE: &str = "monospace";
 
 /// What a shaper caches a leaf's layout under. A rebuilt leaf gets a new key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -96,15 +99,13 @@ pub struct Position {
     pub offset: usize,
 }
 
-/// A text look whose line metrics estimates use.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Look {
-    Body,
-    Title,
-    /// Heading level 1 to 6.
-    Heading(u8),
-    /// Code and raw source.
-    Mono,
+/// A text look whose line metrics estimates use: a font family at a size, bold or not.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Look {
+    pub font: String,
+    /// In half-points.
+    pub size: u16,
+    pub bold: bool,
 }
 
 /// A look's average character width and line height, in pixels.
@@ -127,8 +128,8 @@ pub struct Hit {
 
 /// Lays out text for the flow; the widget implements it with Pango.
 pub trait Shaper {
-    /// The average character width and line height of `look` at the normal size.
-    fn metrics(&mut self, look: Look) -> Metrics;
+    /// The average character width and line height of `look`.
+    fn metrics(&mut self, look: &Look) -> Metrics;
     /// Lay out `content`, whose layout is cached under `key`, wrapped at `width` pixels; its
     /// height in pixels.
     fn shape(&mut self, key: LayoutKey, content: Content<'_>, width: i32) -> i32;
@@ -255,7 +256,9 @@ pub struct Flow {
     /// Where the next layout slice starts.
     next: usize,
     anchor: Anchor,
-    metrics: Option<[Metrics; 9]>,
+    /// Its text boxes' looks, with their metrics once laid out (every look's while the
+    /// width is set).
+    looks: Looks,
     page_breaks: usize,
     break_tops: Vec<usize>,
     /// The next leaf's layout key.
@@ -267,8 +270,9 @@ pub struct Flow {
 impl Flow {
     /// The flow of `doc`, not laid out yet: [`Flow::set_width`] lays it out.
     pub fn new(doc: Document) -> Self {
+        let mut looks = Looks::new(&doc.styles);
         let mut builder = Builder::new(&doc, 0, 0);
-        let tops = builder.tops(&doc.blocks, 0..doc.blocks.len());
+        let tops = builder.tops(&mut looks, &doc.blocks, 0..doc.blocks.len());
         let chars = Fenwick::build(builder.leaves.iter().map(leaf_chars));
         let (leaves, page_breaks, break_tops, next_key) = (
             builder.leaves,
@@ -289,7 +293,7 @@ impl Flow {
                 block: 0,
                 offset: -f64::from(TOP_MARGIN),
             },
-            metrics: None,
+            looks,
             page_breaks,
             break_tops,
             next_key,
@@ -319,9 +323,7 @@ impl Flow {
         if width == self.width {
             return;
         }
-        let metrics = *self
-            .metrics
-            .get_or_insert_with(|| LOOKS.map(|look| shaper.metrics(look)));
+        self.looks.measure(shaper);
         tree::prepare_pictures(&mut self.tops, &self.doc, &self.leaves, shaper);
         let old = self
             .tops
@@ -330,7 +332,7 @@ impl Flow {
         self.width = width;
         self.exact = 0;
         for node in &mut self.tops {
-            node.height = tree::estimate(node, width, &self.leaves, &metrics);
+            node.height = tree::estimate(node, width, &self.leaves, &self.looks);
             if node.laid == width {
                 self.exact += 1;
             }
@@ -390,15 +392,15 @@ impl Flow {
         if node.laid == self.width {
             return false;
         }
-        let Some(metrics) = &self.metrics else {
+        if self.width == 0 {
             return false;
-        };
+        }
         let before = node.height;
         let mut cx = Cx {
             doc: &self.doc,
             leaves: &mut self.leaves,
             shaper,
-            metrics,
+            looks: &self.looks,
         };
         let after = tree::measure(node, self.width, &mut cx);
         if after != before {
@@ -633,7 +635,7 @@ impl Flow {
         let had_breaks = self.page_breaks > 0;
 
         let mut builder = Builder::new(&self.doc, first, self.next_key);
-        let mut nodes = builder.tops(&self.doc.blocks, s.start..new_end);
+        let mut nodes = builder.tops(&mut self.looks, &self.doc.blocks, s.start..new_end);
         self.next_key = builder.keys;
         let new_breaks = builder.page_breaks > 0;
         let added = builder.leaves.len();
@@ -646,10 +648,11 @@ impl Flow {
                 leaf.path[0] = (i64::from(leaf.path[0]) + block_shift) as u32;
             }
         }
-        if let Some(metrics) = self.metrics {
+        if width > 0 {
+            self.looks.measure(shaper);
             tree::prepare_pictures(&mut nodes, &self.doc, &self.leaves, shaper);
             for node in &mut nodes {
-                node.height = tree::estimate(node, width, &self.leaves, &metrics);
+                node.height = tree::estimate(node, width, &self.leaves, &self.looks);
             }
         }
         let old: Vec<i32> = self.tops[s.start..old_end]

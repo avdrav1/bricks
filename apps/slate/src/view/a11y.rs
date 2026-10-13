@@ -106,7 +106,8 @@ pub fn boundary(
 /// Looks as AT-SPI names them: attribute names and values.
 pub type Looks = Vec<(&'static str, String)>;
 
-/// The page's text as a whole: what every run has unless its attributes say otherwise.
+/// The page's text as a whole: what every run has unless its attributes say otherwise
+/// (the family and size of the document's default style).
 pub fn default_attributes(shaper: &PangoShaper) -> Looks {
     font_attributes(&shaper.font())
         .into_iter()

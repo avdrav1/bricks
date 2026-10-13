@@ -101,10 +101,10 @@ pub struct StyleSheet {
 /// The built-in sheet's normal font and size (the page's: Liberation Sans 11 pt).
 const BUILTIN_FONT: &str = "Liberation Sans";
 const BUILTIN_SIZE: u16 = 22;
-/// Heading sizes relative to body text, levels 1 to 6; and the title's (the shaper's).
+/// Heading sizes relative to body text, levels 1 to 6; and the title's (SL1's page looks).
 const HEADING_SCALE: [f32; 6] = [2.0, 1.6, 1.35, 1.2, 1.1, 1.0];
 const TITLE_SCALE: f32 = 2.4;
-/// The flow's spacing, in pixels at 96 dpi.
+/// Spacing, in pixels at 96 dpi (SL1's flow's).
 const PARAGRAPH_SPACE: u32 = 8;
 const HEADING_ABOVE: [u32; 6] = [18, 14, 12, 10, 8, 8];
 const HEADING_BELOW: u32 = 6;

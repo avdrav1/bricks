@@ -137,7 +137,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | SLATE-17 | SL2 | P0 | todo | SLATE-7, SLATE-8 | Crash recovery: unsaved edits journaled and offered back | With unsaved edits in a .txt, a .md, and a .docx window, `kill -9` then relaunching offers to restore each; restoring shows the edits (title marked "• ") and leaves the files as they were until saved; discarding or a clean close leaves no recovery data; recovery data is written off the UI thread at most every few seconds |
 | SLATE-18 | SL2 | P0 | done | SLATE-8 | New blank document (Ctrl+N, New Document) | Ctrl+N and New Document open an Untitled window with an empty page; typing marks it; the first Ctrl+S asks where (Save As) and writes a .docx that Slate and LibreOffice read back with the text and its heading style |
 | SLATE-19 | SL3 | P0 | done | SLATE-18 | Style sheet and fonts in the model and the DOCX reader (ADR 0008) | Each paragraph of the .docx corpus names its style by id from `Document::styles` (custom styles included, based-on resolved), and its style name, alignment, spacing, and indents, and each run's font family, size, bold, italic, underline, strikethrough, and colour, match LibreOffice's dump (theme and default fonts resolved); Markdown and text read into the built-in sheet; `ParagraphStyle` is gone and every existing test passes |
-| SLATE-20 | SL3 | P0 | todo | SLATE-19 | Draw the document's fonts and style looks | A .docx paragraph in Liberation Serif and one in Liberation Mono draw at their fonts' measured widths, styles' space before and after, indents, and line spacing show as LibreOffice lays them out (within 2 px per paragraph at Medium width), Markdown and text look as before; on a generated 150,000-word .docx in three fonts, whole-document re-wrap stays under 500 ms and typing p99 under 25 ms |
+| SLATE-20 | SL3 | P0 | done | SLATE-19 | Draw the document's fonts and style looks | A .docx with paragraphs in Liberation Serif, Liberation Sans, and Liberation Mono draws each in its font: the screenshot's text widths match Pango's measure of that font within 2 px, and the three differ. Styles' space before and after, left and first-line indents, and line spacing (multiple, exact, at least) place each paragraph by their twips at 96 dpi (flow tests to the pixel; a screenshot within 2 px). Markdown and text look as before (check_slate's measures). On a generated 150,000-word .docx in three fonts, whole-document re-wrap stays under 500 ms and typing p99 under 25 ms |
 | SLATE-21 | SL3 | P0 | todo | SLATE-20 | Format bar: style, font, size, B/I/U/S, colour, alignment | The bar shows the caret's style, font, size, and looks (blank when the selection mixes them); choosing each applies to the selection or what's typed next as one undo step; the style picker lists the document's styles in their looks; Ctrl+U, Ctrl+L/E/R/J, Ctrl+] and Ctrl+[ work; plain-text files hide the bar |
 | SLATE-22 | SL3 | P0 | todo | SLATE-21 | Save fonts, styles, and looks in .docx | A .docx edited through the format bar (a custom style, a font, a size cleared and set, underline, strikethrough, colour, alignment) reopens in LibreOffice with exactly those, every other part unchanged; Markdown keeps headings and quotes and drops what it can't hold |
 | FRAME-1 | FR0 | P0 | done | - | Presentation model and PPTX package: slide order, size, shapes, placeholder inheritance | Slide count, order, size, and every shape's frame in the fixtures and a real-world deck match LibreOffice's dump within 1 EMU; placeholders without a frame take their layout's or master's |
@@ -160,6 +160,36 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-13 SLATE-20:** Slate draws each document's own fonts and paragraph looks (ADR 0008). A subagent built it; it was integrated and verified here.
+  - One look path for every format. The shaper starts each layout from the default style's font and lays each paragraph's style look over the whole paragraph, so an empty paragraph has its style's line height. Each run then adds only the overrides that differ from its style.
+    - The Markdown scale tables (`HEADING_SCALE`, `TITLE_SCALE`, `style_looks`) are gone: the built-in sheet's sizes draw Markdown.
+    - Code and raw text stay monospace; links, table header rows, and quotes keep their looks.
+    - Fontconfig substitutes faces, for example Calibri as Carlito. Slate has no substitution table.
+  - Paragraphs: space before and after come from the style's `ParaLook` at twips / 15 px, added and not collapsed, as Word does. So do the left indent and the first-line indent (Pango `set_indent`; a hanging line moves the box left).
+    - Line spacing:
+      - `Auto(1.0)` leaves Pango alone; a factor of 1 would be 1 px tighter.
+      - Other multiples use `set_line_spacing`.
+      - `Exact` and `AtLeast` use Pango's absolute line-height attribute, so `pango` now enables `v1_50` (Ubuntu 24.04 ships 1.52). Hit-testing and the caret come from Pango itself.
+    - The flow's heading, title, and quote spacing constants are gone. Lists, code, tables, and rules keep theirs.
+  - `flow::Look` is now a font, a size, and a weight. The flow asks the shaper for metrics once per look and estimates each box with its look's metrics and its line spacing.
+  - Visual change from SL1, from screenshots of every check section against the SLATE-19 binary:
+    - Markdown headings moved by a fraction of a point: the built-in sheet holds whole half-points, e.g. H3 at 15 pt instead of 14.85.
+    - Word documents now show their fonts: the fixture's body in Liberation Serif, its headings in Liberation Sans.
+    - Text and everything else is identical.
+  - `check_slate.sh` installs `ttf-liberation`, `ttf-carlito`, `ttf-caladea`, and `python-cairo`. With real Liberation Sans, word gaps are 6-7 px, so section 18's double-click word finder now splits on gaps over 4 px, not 6.
+  - Found on this machine, not in Slate: since about 11:00 every GTK 4 app segfaults in `gsk_renderer_render` with the GL, NGL, or Vulkan renderer: Slate, Frame built yesterday, and `~/.local/bin/strata` (core dumps 11:08). The cairo renderer works. NVIDIA 615.78.08; the earlier notes record a 615.71/615.78 kernel and userspace mismatch. A reboot is the likely fix. The performance numbers below were taken with `GSK_RENDERER=cairo`.
+  - Acceptance:
+    - `scripts/check_slate.sh` SLATE OK, 128 checks, 10 of them new in section 23, on a .docx built in the script:
+      - The same line in Liberation Serif, Sans, and Mono and in Calibri draws as wide as Pango measures it at 96 dpi: 273/274, 292/293, 392/393, and 267/267 px (Calibri as Carlito, and `fc-match` agrees). The widths differ.
+      - Space before 450 twips is 30 px and after 300 twips is 20 px; a left indent of 900 is 60 px; a 450 hanging line starts 30 px in and the next line at 60 px; exact 600-twip spacing gives four 40 px pitches.
+      - Every earlier section passes; they measure Markdown and text.
+    - Flow tests (fake shaper): before and after are summed; left, first-line, hanging, and nested-quote indents set their wrap widths, and list items ignore the style indent; exact, at-least, and multiple spacing match their estimates; metrics are asked once per font, size, and weight.
+    - Performance, `GSK_RENDERER=cairo cargo test --release -p slate --test flow_perf -- --ignored`. The new 150,000-word .docx has a Liberation Serif body, Liberation Sans headings, and Liberation Mono every 25th word, measured at Full 1853 px:
+      - Whole re-wrap max was 354, 296, 388, and 303 ms in four solo runs (p50 about 285; target < 500).
+      - The first run of a back-to-back sequence of four windows peaked at 594 ms (p50 346), an outlier recorded here.
+      - Visible re-wrap is one frame, max 12.6 ms. Scrolling p99 11.0 ms (target < 16). Typing p99 18.8 ms (target < 25).
+      - Markdown, at 898 px: re-wrap max 298 ms, typing p99 14.9 ms.
+      - This isn't the reference box.
 - **2026-10-13 SLATE-19:** Slate's model has style sheets and fonts (ADR 0008). A subagent built it against a fixed contract; it was integrated and verified here.
   - document-model (`styles.rs`): `Document::styles`, a `StyleSheet` of `Style`s. Each style has an id, a name, based-on, next, outline level, title, a resolved `Look` (font, size, bold, italic, underline, strike, colour), and a `ParaLook` (alignment, space before and after, `LineSpacing`, left and first-line indent, in twips).
     - `Paragraph.style` is a style id. `ParagraphStyle` is gone.

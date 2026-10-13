@@ -34,10 +34,10 @@ const USAGE: &str =
     "usage: slate [FILE.txt|FILE.md|FILE.docx]... [--version] [--bench-flow|--bench-typing]";
 const START_WINDOW: &str = "start";
 
-/// The page's text is one document font whatever the desktop's: Liberation Sans (metric-
-/// compatible with Arial), else the system's sans, at 11 pt. Variable desktop fonts such as
-/// Adwaita Sans take twice as long to lay out (SLATE-11). A page break's dashed line has
-/// room above and below it (`flow::PAGE_BREAK_HEIGHT` in all).
+/// The page's own font, for what it shows outside the document: Liberation Sans, else the
+/// system's sans, at 11 pt. A document's text is drawn in its own fonts, from its style
+/// sheet (ADR 0008; Markdown and plain text in Slate's built-in Liberation Sans 11 pt). A
+/// page break's dashed line has room above and below it (`flow::PAGE_BREAK_HEIGHT` in all).
 const CSS: &str = "
 slatepage { font-family: \"Liberation Sans\", sans-serif; font-size: 11pt; }
 separator.page-break {

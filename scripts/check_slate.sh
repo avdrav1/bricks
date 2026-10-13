@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# SLATE-4, SLATE-10, SLATE-11, SLATE-6, SLATE-12, and SLATE-13 acceptance: the window
-# opens, shows, and refuses documents, its pageless column follows View → Text Width, its
-# text selects and copies, it edits with undo, table cells included, and it composes
-# through an input method.
+# SLATE-4, SLATE-10, SLATE-11, SLATE-6, SLATE-12, SLATE-13, and SLATE-20 acceptance: the
+# window opens, shows, and refuses documents, its pageless column follows View → Text
+# Width, its text selects and copies, it edits with undo, table cells included, it composes
+# through an input method, and it draws a Word document's fonts and paragraph looks.
 #
 #   scripts/check_slate.sh [BINARY]   (default target/release/slate)
 #
@@ -96,6 +96,15 @@
 #      a Word document with the heading in Heading 1 and the line, titled plans.docx;
 #      Ctrl+N in a document window opens another Untitled window; reopened, plans.docx
 #      shows the line.
+#  23. fonts.docx (written by /tmp/fonts.py with Liberation, Carlito, and Caladea
+#      installed): the same line in paragraph styles of Liberation Serif, Liberation Sans,
+#      Liberation Mono, and Calibri at 11 pt draws as wide (ink, in a screenshot) as Pango
+#      measures it in that font at 96 dpi, within 2 px, Calibri as Carlito, and the three
+#      Liberation widths differ; then paragraphs of "Hamburg" in Liberation Sans: one with
+#      space before 450 and after 300 twips between two plain ones, one indented 900, one
+#      indented 900 with a 450 hanging first line, and one with lines exactly 600 apart;
+#      their ink tops and left edges are 30 and 20 px further apart than plain lines, 60 px
+#      in, the first line 30 px in and the next 60, and lines 40 px apart, each within 2 px.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -112,7 +121,8 @@ out=$(docker run --rm --cap-add SYS_NICE -v "$bin:/usr/local/bin/slate:ro" \
   archlinux:latest bash -c '
 set -uo pipefail
 pacman -Syu --noconfirm --needed sway wtype grim gtk4 ttf-dejavu wqy-zenhei dbus python-gobject \
-  at-spi2-core python-pywayland wlr-protocols wayland pkgconf jq wl-clipboard >/dev/null 2>&1
+  at-spi2-core python-pywayland wlr-protocols wayland pkgconf jq wl-clipboard \
+  ttf-liberation ttf-carlito ttf-caladea python-cairo >/dev/null 2>&1
 mkdir -p /shots /tmp/rt /tmp/md /tmp/proto && chmod 700 /tmp/rt && touch /tmp/proto/__init__.py
 python -m pywayland.scanner -i /usr/share/wayland/wayland.xml \
   /usr/share/wlr-protocols/unstable/wlr-virtual-pointer-unstable-v1.xml -o /tmp/proto/wlr_proto >/dev/null
@@ -205,7 +215,7 @@ while y1 + 1 in rows:
 cols = [x for x in range(w) if any(dark(x, y) for y in range(y0, y1 + 1))]
 words, start, last = [], cols[0], cols[0]
 for x in cols[1:]:
-    if x - last > 6:
+    if x - last > 4:
         words.append((start + last) // 2)
         start = x
     last = x
@@ -438,6 +448,144 @@ for y in range(max(0, (rule_y or 0) - 60), rule_y or 0):
     if dark:
         text = max(text, dark[-1] - dark[0] + 1)
 print(f"rule {rule} text {text} off {rule_x + rule // 2 - w // 2}")
+PY
+# SLATE-20: `make PATH` writes fonts.docx; `measure PNG` measures its screenshot: each
+# band of ink (a line of text) and its left and right edges, against Pango at 96 dpi and
+# the twips of the styles.
+cat > /tmp/fonts.py <<"PY"
+import sys
+import zipfile
+
+TEXT = "Sphinx of black quartz, judge my vow quickly."
+FONTS = [("serif", "Liberation Serif"), ("sans", "Liberation Sans"),
+         ("mono", "Liberation Mono"), ("calibri", "Calibri")]
+BEFORE, AFTER, LEFT, HANG, EXACT = 450, 300, 900, 450, 600
+W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+PKG = "http://schemas.openxmlformats.org/package/2006/relationships"
+CT = "http://schemas.openxmlformats.org/package/2006/content-types"
+OOXML = "application/vnd.openxmlformats-officedocument.wordprocessingml"
+HEAD = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"""
+
+def rfonts(font):
+    return f"""<w:rFonts w:ascii="{font}" w:hAnsi="{font}"/>"""
+
+def style(sid, ppr="", rpr=""):
+    return (f"""<w:style w:type="paragraph" w:styleId="{sid}"><w:name w:val="{sid}"/>"""
+            f"""<w:basedOn w:val="Normal"/><w:pPr>{ppr}</w:pPr><w:rPr>{rpr}</w:rPr></w:style>""")
+
+def para(sid, text):
+    return (f"""<w:p><w:pPr><w:pStyle w:val="{sid}"/></w:pPr>"""
+            f"""<w:r><w:t xml:space="preserve">{text}</w:t></w:r></w:p>""")
+
+def make(path):
+    styles = [
+        f"""<w:docDefaults><w:rPrDefault><w:rPr>{rfonts("Liberation Sans")}<w:sz w:val="22"/>"""
+        """</w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:before="0" w:after="0" """
+        """w:line="240" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>""",
+        """<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>""",
+    ]
+    styles += [style(name.title(), rpr=rfonts(font)) for name, font in FONTS]
+    styles += [
+        style("Spaced", ppr=f"""<w:spacing w:before="{BEFORE}" w:after="{AFTER}"/>"""),
+        style("Indented", ppr=f"""<w:ind w:left="{LEFT}"/>"""),
+        style("Hanging", ppr=f"""<w:ind w:left="{LEFT}" w:hanging="{HANG}"/>"""),
+        style("Exact", ppr=f"""<w:spacing w:line="{EXACT}" w:lineRule="exact"/>"""),
+    ]
+    paras = [para(name.title(), TEXT) for name, _ in FONTS]
+    paras += [para("Normal", "Hamburg one"), para("Spaced", "Hamburg two"),
+              para("Normal", "Hamburg three"), para("Indented", "Hamburg four"),
+              para("Hanging", " ".join(["Hamburg"] * 20)), para("Exact", " ".join(["Hamburg"] * 30)),
+              para("Normal", "Z")]
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("[Content_Types].xml", HEAD + f"""<Types xmlns="{CT}">"""
+                   """<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"""
+                   """<Default Extension="xml" ContentType="application/xml"/>"""
+                   f"""<Override PartName="/word/document.xml" ContentType="{OOXML}.document.main+xml"/>"""
+                   f"""<Override PartName="/word/styles.xml" ContentType="{OOXML}.styles+xml"/></Types>""")
+        z.writestr("_rels/.rels", HEAD + f"""<Relationships xmlns="{PKG}"><Relationship Id="rId1" """
+                   f"""Type="{REL}/officeDocument" Target="word/document.xml"/></Relationships>""")
+        z.writestr("word/_rels/document.xml.rels", HEAD + f"""<Relationships xmlns="{PKG}">"""
+                   f"""<Relationship Id="rId1" Type="{REL}/styles" Target="styles.xml"/></Relationships>""")
+        z.writestr("word/styles.xml", HEAD + f"""<w:styles xmlns:w="{W}">""" + "".join(styles) + "</w:styles>")
+        z.writestr("word/document.xml", HEAD + f"""<w:document xmlns:w="{W}"><w:body>"""
+                   + "".join(paras) + "</w:body></w:document>")
+
+def measure(png):
+    import cairo
+    import gi
+    gi.require_version("GdkPixbuf", "2.0")
+    gi.require_version("Pango", "1.0")
+    gi.require_version("PangoCairo", "1.0")
+    from gi.repository import GdkPixbuf, Pango, PangoCairo
+    p = GdkPixbuf.Pixbuf.new_from_file(png)
+    w, h, rs, n, px = p.get_width(), p.get_height(), p.get_rowstride(), p.get_n_channels(), p.get_pixels()
+    # Bands of rows with ink (anything darker than the paper), each [top, bottom, left, right].
+    bands, cur = [], None
+    for y in range(70, h - 10):
+        row = px[y * rs:y * rs + w * n]
+        xs = [x for x in range(40, w - 40) if row[x * n] + row[x * n + 1] + row[x * n + 2] < 600]
+        if xs:
+            if cur is None:
+                cur = [y, y, xs[0], xs[-1]]
+            cur[1], cur[2], cur[3] = y, min(cur[2], xs[0]), max(cur[3], xs[-1])
+        elif cur is not None:
+            bands.append(cur)
+            cur = None
+    print("bands: " + " ".join(f"{b[0]}-{b[1]}@{b[2]}-{b[3]}" for b in bands))
+    if len(bands) < 13:
+        print("too few lines")
+        return
+    fm = PangoCairo.FontMap.get_default()
+    # As GTK lays text out: metrics unhinted, glyphs at fractional positions (rounded is
+    # printed too, for comparison).
+    def pango(font, rounded):
+        ctx = fm.create_context()
+        PangoCairo.context_set_resolution(ctx, 96)
+        options = cairo.FontOptions()
+        options.set_hint_metrics(cairo.HINT_METRICS_OFF)
+        PangoCairo.context_set_font_options(ctx, options)
+        ctx.set_round_glyph_positions(rounded)
+        desc = Pango.FontDescription.from_string(font + " 11")
+        layout = Pango.Layout.new(ctx)
+        layout.set_font_description(desc)
+        layout.set_text(TEXT, -1)
+        face = fm.load_font(ctx, desc).describe().get_family()
+        return layout.get_pixel_extents()[0].width, face
+    widths, match = {}, True
+    for (name, font), b in zip(FONTS, bands):
+        shot = b[3] - b[2] + 1
+        want, face = pango(font, False)
+        rounded, _ = pango(font, True)
+        widths[name] = shot
+        match = match and abs(shot - want) <= 2
+        print(f"font {name}: shot {shot} pango {want} (rounded positions {rounded}) face {face}")
+        if name == "calibri":
+            print(f"calibri face: {face}")
+    print("font widths match pango: " + ("yes" if match else "no"))
+    a, b, c = widths["serif"], widths["sans"], widths["mono"]
+    print("font widths differ: " + ("yes" if min(abs(a - b), abs(b - c), abs(a - c)) > 2 else "no"))
+    one, two, three, four = bands[4:8]
+    # Lines of the hanging paragraph are indented; the exact paragraph (and Z, last) not.
+    rest, left0, hanging = bands[8:-1], three[2], []
+    while rest and rest[0][2] - left0 > 15:
+        hanging.append(rest.pop(0))
+    line = four[0] - three[0]
+    print(f"plain line: {line}")
+    def report(label, got, want):
+        verdict = "ok" if abs(got - want) <= 2 else "off"
+        print(f"{label}: {got} (want {want}) {verdict}")
+    report("space before", two[0] - one[0] - line, BEFORE // 15)
+    report("space after", three[0] - two[0] - line, AFTER // 15)
+    report("left indent", four[2] - left0, LEFT // 15)
+    report("hanging first line", hanging[0][2] - left0 if hanging else -1, (LEFT - HANG) // 15)
+    report("hanging next line", hanging[1][2] - left0 if len(hanging) > 1 else -1, LEFT // 15)
+    pitches = [b2[0] - b1[0] for b1, b2 in zip(rest, rest[1:])]
+    print("exact pitches: " + " ".join(map(str, pitches)))
+    worst = max(pitches, key=lambda p: abs(p - EXACT // 15)) if pitches else -1
+    report("exact line", worst, EXACT // 15)
+
+make(sys.argv[2]) if sys.argv[1] == "make" else measure(sys.argv[2])
 PY
 cat > /tmp/copied.py <<"PY"
 import subprocess, sys
@@ -709,6 +857,13 @@ print(\"line:\", \"First line\" in x)"
   keys -M ctrl n -m ctrl; sleep 3; titles | sed "s/^/another-/"; quit
   slate /tmp/docs/plans.docx >>/tmp/app.log 2>&1 & sleep 4
   a11y page plans.docx | grep -c "First line$" | sed "s/^/reopened plans: /"; quit
+  echo "== 23 fonts"
+  echo "fc-match calibri: $(fc-match -f "%{family}" Calibri)"
+  python3 /tmp/fonts.py make /tmp/fonts.docx
+  slate /tmp/fonts.docx >>/tmp/app.log 2>&1 & sleep 4
+  # The caret on the last line, Z, which the measurements leave out.
+  keys -M ctrl -k End -m ctrl; sleep 1; shot fonts
+  python3 /tmp/fonts.py measure /shots/fonts.png 2>&1; quit
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -867,6 +1022,17 @@ check "22: a Word document with the heading" "22 new document" "^heading 1: True
 check "22: and the line" "22 new document" "^line: True$"
 check "22: Ctrl+N in a document opens another" "22 new document" "^another-titles: Untitled,plans.docx,$"
 check "22: reopened, it shows the line" "22 new document" "^reopened plans: 1$"
+check "23: Calibri is Carlito (fontconfig)" "23 fonts" "^fc-match calibri: Carlito$"
+check "23: each font's line is as wide as Pango measures it, within 2 px" "23 fonts" \
+  "^font widths match pango: yes$"
+check "23: Liberation Serif, Sans, and Mono draw at different widths" "23 fonts" "^font widths differ: yes$"
+check "23: a Calibri paragraph draws in Carlito" "23 fonts" "^calibri face: Carlito$"
+check "23: space before adds to the line above's" "23 fonts" "^space before: .* ok$"
+check "23: space after adds to the line below's" "23 fonts" "^space after: .* ok$"
+check "23: a left indent moves the text in" "23 fonts" "^left indent: .* ok$"
+check "23: a hanging first line starts left of the indent" "23 fonts" "^hanging first line: .* ok$"
+check "23: the hanging paragraph's next line starts at the indent" "23 fonts" "^hanging next line: .* ok$"
+check "23: exact line spacing sets every line's pitch" "23 fonts" "^exact line: .* ok$"
 if [ $fail = 0 ]; then echo "SLATE OK"; else
   echo "SLATE CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

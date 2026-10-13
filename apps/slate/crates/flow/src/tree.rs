@@ -1,11 +1,25 @@
 //! The layout tree: one node per block, mirroring the document (a table's cells hold
 //! nodes of their own), with the viewer's spacing rules, measuring through a [`Shaper`],
 //! estimating without one, and walking it to paint and to hit-test.
+//!
+//! A paragraph's space above and below, its left and first-line indents, and its line
+//! spacing come from its style ([`ParaLook`]); lists, code blocks, tables, rules, and page
+//! breaks keep the viewer's own spacing.
 
 use crate::content::{code_text, floor_boundary, Content};
-use crate::{LayoutKey, LeafId, Located, Look, Metrics, Paint, Position, Shaper};
-use document_model::{Block, Document, Format, Image, Paragraph, StyleSheet};
+use crate::{LayoutKey, LeafId, Located, Look, Metrics, Paint, Position, Shaper, MONOSPACE};
+use document_model::{
+    Block, Document, Format, Image, LineSpacing, ParaLook, Paragraph, Style, StyleSheet,
+};
 use std::ops::Range;
+
+/// Twips (DOCX's 1/20 pt) per pixel at 96 dpi.
+pub const TWIPS_PER_PX: f64 = 15.0;
+
+/// `twips` in whole pixels at 96 dpi.
+pub fn px(twips: i64) -> i32 {
+    (twips as f64 / TWIPS_PER_PX).round() as i32
+}
 
 /// How far each list or quote level indents.
 pub const LEVEL_INDENT: i32 = 28;
@@ -28,30 +42,56 @@ pub const RULE_MARGIN: i32 = 12;
 
 const PARAGRAPH_SPACE: i32 = 8;
 const ITEM_SPACE: i32 = 3;
-const HEADING_ABOVE: [i32; 6] = [18, 14, 12, 10, 8, 8];
-const HEADING_BELOW: i32 = 6;
-const TITLE_BELOW: i32 = 12;
 const CODE_ABOVE: i32 = 4;
 
-/// The looks a shaper reports metrics for, in [`LOOKS`] order.
-pub(crate) const LOOKS: [Look; 9] = [
-    Look::Body,
-    Look::Title,
-    Look::Heading(1),
-    Look::Heading(2),
-    Look::Heading(3),
-    Look::Heading(4),
-    Look::Heading(5),
-    Look::Heading(6),
-    Look::Mono,
-];
+/// The text looks of a document's text boxes, each with its line metrics once a shaper
+/// gave them, numbered as they are first met. The first is the document's default style's.
+#[derive(Debug, Default)]
+pub(crate) struct Looks {
+    looks: Vec<Look>,
+    metrics: Vec<Metrics>,
+}
 
-fn look_index(look: Look) -> usize {
-    match look {
-        Look::Body => 0,
-        Look::Title => 1,
-        Look::Heading(n) => 1 + usize::from(n.clamp(1, 6)),
-        Look::Mono => 8,
+impl Looks {
+    pub fn new(styles: &StyleSheet) -> Self {
+        let mut looks = Looks::default();
+        let run = &styles.default_style().run;
+        looks.id(&run.font, run.size, run.bold);
+        looks
+    }
+
+    /// The number of the look of `font` at `size` half-points, bold or not.
+    fn id(&mut self, font: &str, size: u16, bold: bool) -> u32 {
+        let found = self
+            .looks
+            .iter()
+            .position(|l| l.size == size && l.bold == bold && l.font == font);
+        let i = found.unwrap_or_else(|| {
+            self.looks.push(Look {
+                font: font.to_owned(),
+                size,
+                bold,
+            });
+            self.looks.len() - 1
+        });
+        i as u32
+    }
+
+    /// Ask `shaper` for the metrics of the looks that have none yet.
+    pub fn measure(&mut self, shaper: &mut dyn Shaper) {
+        while self.metrics.len() < self.looks.len() {
+            let m = shaper.metrics(&self.looks[self.metrics.len()]);
+            self.metrics.push(m);
+        }
+    }
+
+    fn metrics(&self, id: u32) -> Metrics {
+        self.metrics[id as usize]
+    }
+
+    /// The default style's metrics: an empty table cell's and a picture label's.
+    fn body(&self) -> Metrics {
+        self.metrics(0)
     }
 }
 
@@ -113,14 +153,17 @@ pub(crate) struct TextBox {
     pub leaf: LeafId,
     pub above: i32,
     pub below: i32,
+    /// The text's left edge from the box's: the paragraph's left indent, less a hanging
+    /// first line's.
     pub indent: i32,
     /// A list item: its marker hangs in the indent's last level.
     pub marker: bool,
     /// A code block: its band starts this far in.
     pub band: Option<i32>,
-    pub look: Look,
-    /// The first run's size relative to the normal size, for estimates.
-    pub scale: f64,
+    /// Its first run's look ([`Looks`]), for estimates.
+    pub look: u32,
+    /// Its line spacing, for estimates (the shaper lays it out).
+    pub line: LineSpacing,
     /// The text's height measured at `laid`.
     pub text_height: i32,
 }
@@ -171,8 +214,6 @@ pub(crate) struct Builder<'a> {
     pub break_tops: Vec<usize>,
     styles: &'a StyleSheet,
     plain: bool,
-    /// A Word document: its runs' sizes are its own, not the page font's scaled by style.
-    docx: bool,
     /// The first leaf's number: leaves before the stretch built.
     base: u32,
     /// The next layout key.
@@ -187,26 +228,31 @@ impl<'a> Builder<'a> {
             break_tops: Vec::new(),
             styles: &doc.styles,
             plain: matches!(doc.format, Format::Text(_)),
-            docx: matches!(doc.format, Format::Docx),
             base: base as u32,
             keys,
         }
     }
 
-    /// Nodes for top-level blocks `range` of `all`.
-    pub fn tops(&mut self, all: &[Block], range: Range<usize>) -> Vec<Node> {
+    /// Nodes for top-level blocks `range` of `all`, their looks numbered in `looks`.
+    pub fn tops(&mut self, looks: &mut Looks, all: &[Block], range: Range<usize>) -> Vec<Node> {
         range
-            .map(|i| self.block(&all[i], all.get(i + 1), vec![i as u32], false))
+            .map(|i| self.block(looks, &all[i], all.get(i + 1), vec![i as u32], false))
             .collect()
     }
 
     /// Nodes for `blocks`, whose paths start with `prefix`.
-    fn blocks(&mut self, blocks: &[Block], prefix: &[u32], header: bool) -> Vec<Node> {
+    fn blocks(
+        &mut self,
+        looks: &mut Looks,
+        blocks: &[Block],
+        prefix: &[u32],
+        header: bool,
+    ) -> Vec<Node> {
         let mut nodes = Vec::with_capacity(blocks.len());
         for (i, block) in blocks.iter().enumerate() {
             let mut path = prefix.to_vec();
             path.push(i as u32);
-            nodes.push(self.block(block, blocks.get(i + 1), path, header));
+            nodes.push(self.block(looks, block, blocks.get(i + 1), path, header));
         }
         nodes
     }
@@ -237,8 +283,14 @@ impl<'a> Builder<'a> {
         id
     }
 
-    fn block(&mut self, block: &Block, next: Option<&Block>, path: Vec<u32>, header: bool) -> Node {
-        let space = self.space();
+    fn block(
+        &mut self,
+        looks: &mut Looks,
+        block: &Block,
+        next: Option<&Block>,
+        path: Vec<u32>,
+        header: bool,
+    ) -> Node {
         let kind = match block {
             Block::Paragraph(p) => {
                 let content = Content::Paragraph {
@@ -248,21 +300,16 @@ impl<'a> Builder<'a> {
                     header,
                 };
                 let leaf = self.leaf(path, Some(&content.text()));
-                let mut b = TextBox::new(leaf, Look::Body, self.scale(p));
-                b.below = space;
-                b.indent = i32::from(p.indent) * LEVEL_INDENT;
                 let style = self.styles.style_of(&p.style);
-                if style.title {
-                    b.below = TITLE_BELOW;
-                    b.look = Look::Title;
-                } else if let Some(n) = style.outline {
-                    let n = n.clamp(1, 6);
-                    b.above = HEADING_ABOVE[usize::from(n) - 1];
-                    b.below = HEADING_BELOW;
-                    b.look = Look::Heading(n);
-                } else if style.is_quote() {
-                    b.indent += LEVEL_INDENT;
+                let mut b = TextBox::paragraph(leaf, looks, p, style, header);
+                let para: &ParaLook = &style.para;
+                // Plain text's paragraphs are the file's lines, without space between.
+                if !self.plain {
+                    b.above = px(i64::from(para.space_before));
+                    b.below = px(i64::from(para.space_after));
                 }
+                let left = i32::from(p.indent) * LEVEL_INDENT + px(i64::from(para.indent_left));
+                b.indent = (left + content.first_indent().min(0)).max(0);
                 Kind::Text(b)
             }
             Block::ListItem(item) => {
@@ -273,7 +320,8 @@ impl<'a> Builder<'a> {
                     header,
                 };
                 let leaf = self.leaf(path, Some(&content.text()));
-                let mut b = TextBox::new(leaf, Look::Body, self.scale(&item.paragraph));
+                let style = self.styles.style_of(&item.paragraph.style);
+                let mut b = TextBox::paragraph(leaf, looks, &item.paragraph, style, header);
                 b.below = self.item_below(next);
                 b.indent = i32::from(item.level) * LEVEL_INDENT + LEVEL_INDENT;
                 b.marker = true;
@@ -281,7 +329,7 @@ impl<'a> Builder<'a> {
             }
             Block::CodeBlock(code) => {
                 let leaf = self.leaf(path, Some(code_text(code)));
-                let mut b = TextBox::new(leaf, Look::Mono, 1.0);
+                let mut b = TextBox::new(leaf, self.mono(looks));
                 let band = i32::from(code.indent) * LEVEL_INDENT;
                 b.band = Some(band);
                 b.indent = band + CODE_INSET;
@@ -291,7 +339,7 @@ impl<'a> Builder<'a> {
             }
             Block::Raw(raw) => {
                 let leaf = self.leaf(path, Some(&raw.source));
-                let mut b = TextBox::new(leaf, Look::Mono, 1.0);
+                let mut b = TextBox::new(leaf, self.mono(looks));
                 b.below = PARAGRAPH_SPACE;
                 Kind::Text(b)
             }
@@ -338,7 +386,7 @@ impl<'a> Builder<'a> {
                             x: 0,
                             width: 0,
                             first_leaf,
-                            nodes: self.blocks(&cell.blocks, &prefix, row.header),
+                            nodes: self.blocks(looks, &cell.blocks, &prefix, row.header),
                         });
                     }
                     rows.push(RowBox {
@@ -353,22 +401,9 @@ impl<'a> Builder<'a> {
         Node::new(kind)
     }
 
-    /// The first run's size relative to the normal size (11 pt, 22 half-points): a Word
-    /// document's as its style and the run give it; elsewhere the run's own (the style's
-    /// size is in the look's metrics).
-    fn scale(&self, p: &Paragraph) -> f64 {
-        let size = p.runs.first().and_then(|r| {
-            if self.docx {
-                Some(
-                    r.style
-                        .size
-                        .unwrap_or(self.styles.style_of(&p.style).run.size),
-                )
-            } else {
-                r.style.size
-            }
-        });
-        size.map_or(1.0, |half| f64::from(half) / 22.0)
+    /// The look of code and raw source: monospace at the default style's size.
+    fn mono(&self, looks: &mut Looks) -> u32 {
+        looks.id(MONOSPACE, self.styles.default_style().run.size, false)
     }
 
     fn space(&self) -> i32 {
@@ -511,7 +546,7 @@ pub(crate) fn unlay(node: &mut Node, leaf: LeafId) -> bool {
 }
 
 impl TextBox {
-    fn new(leaf: LeafId, look: Look, scale: f64) -> Self {
+    fn new(leaf: LeafId, look: u32) -> Self {
         TextBox {
             leaf,
             above: 0,
@@ -520,8 +555,36 @@ impl TextBox {
             marker: false,
             band: None,
             look,
-            scale,
+            line: LineSpacing::default(),
             text_height: 1,
+        }
+    }
+
+    /// The box of paragraph `p` in `style` (in a table's header row: `header`): its first
+    /// run's look, as the shaper draws it, and the style's line spacing.
+    fn paragraph(
+        leaf: LeafId,
+        looks: &mut Looks,
+        p: &Paragraph,
+        style: &Style,
+        header: bool,
+    ) -> Self {
+        let look = &style.run;
+        let id = match p.runs.first().map(|r| &r.style) {
+            Some(r) => {
+                let font = if r.code || r.raw {
+                    MONOSPACE
+                } else {
+                    r.font.as_deref().unwrap_or(&look.font)
+                };
+                let bold = r.bold.unwrap_or(look.bold) || header;
+                looks.id(font, r.size.unwrap_or(look.size), bold)
+            }
+            None => looks.id(&look.font, look.size, look.bold || header),
+        };
+        TextBox {
+            line: style.para.line,
+            ..TextBox::new(leaf, id)
         }
     }
 }
@@ -531,7 +594,7 @@ pub(crate) struct Cx<'a> {
     pub doc: &'a Document,
     pub leaves: &'a mut [Leaf],
     pub shaper: &'a mut dyn Shaper,
-    pub metrics: &'a [Metrics; 9],
+    pub looks: &'a Looks,
 }
 
 /// The model block at `path`, and whether it is in a table's header row.
@@ -656,7 +719,7 @@ pub(crate) fn measure(node: &mut Node, width: i32, cx: &mut Cx<'_>) -> i32 {
         Kind::Rule { .. } => RULE_HEIGHT,
         Kind::Table(table) => {
             let column = column_width(table.columns, width);
-            let empty = cx.metrics[0].line_height.round() as i32;
+            let empty = cx.looks.body().line_height.round() as i32;
             let mut y = 0;
             for row in &mut table.rows {
                 let mut x = 0;
@@ -692,30 +755,32 @@ pub(crate) fn measure(node: &mut Node, width: i32, cx: &mut Cx<'_>) -> i32 {
 
 /// `node`'s estimated height at `width`, from character counts and line metrics: what it
 /// shows until it is measured.
-pub(crate) fn estimate(node: &Node, width: i32, leaves: &[Leaf], metrics: &[Metrics; 9]) -> i32 {
+pub(crate) fn estimate(node: &Node, width: i32, leaves: &[Leaf], looks: &Looks) -> i32 {
     if node.laid == width {
         return node.laid_height;
     }
     let height = match &node.kind {
         Kind::Text(b) => {
-            let m = metrics[look_index(b.look)];
-            b.above + estimate_text(&leaves[b.leaf.index()], m, b.scale, width - b.indent) + b.below
+            let m = looks.metrics(b.look);
+            let text = estimate_text(&leaves[b.leaf.index()], m, b.line, width - b.indent);
+            b.above + text + b.below
         }
         Kind::Picture { leaf, natural, .. } => match natural.flatten() {
             Some(size) => fit(size, width).1,
             None => {
+                let body = looks.body();
                 let label = leaves[leaf.index()].chars.unwrap_or(0) + 11;
-                let lines = (f64::from(label) * metrics[0].char_width / f64::from(width.max(1)))
+                let lines = (f64::from(label) * body.char_width / f64::from(width.max(1)))
                     .ceil()
                     .max(1.0);
-                (lines * metrics[0].line_height).round() as i32
+                (lines * body.line_height).round() as i32
             }
         },
         Kind::PageBreak { .. } => PAGE_BREAK_HEIGHT,
         Kind::Rule { .. } => RULE_HEIGHT,
         Kind::Table(table) => {
             let column = column_width(table.columns, width);
-            let empty = metrics[0].line_height.round() as i32;
+            let empty = looks.body().line_height.round() as i32;
             let rows: i32 = table
                 .rows
                 .iter()
@@ -727,7 +792,7 @@ pub(crate) fn estimate(node: &Node, width: i32, leaves: &[Leaf], metrics: &[Metr
                             let content: i32 = cell
                                 .nodes
                                 .iter()
-                                .map(|n| estimate(n, inner, leaves, metrics))
+                                .map(|n| estimate(n, inner, leaves, looks))
                                 .sum();
                             2 * CELL_TOP
                                 + if cell.nodes.is_empty() {
@@ -746,14 +811,23 @@ pub(crate) fn estimate(node: &Node, width: i32, leaves: &[Leaf], metrics: &[Metr
     height.max(1)
 }
 
-fn estimate_text(leaf: &Leaf, m: Metrics, scale: f64, width: i32) -> i32 {
-    let per_line = f64::from(width.max(1)) / (m.char_width * scale).max(0.1);
+fn estimate_text(leaf: &Leaf, m: Metrics, line: LineSpacing, width: i32) -> i32 {
+    let per_line = f64::from(width.max(1)) / m.char_width.max(0.1);
     let lines: f64 = leaf
         .lines
         .iter()
         .map(|&n| (f64::from(n) / per_line).ceil().max(1.0))
         .sum();
-    (lines.max(1.0) * m.line_height * scale).round() as i32
+    (lines.max(1.0) * line_height(m.line_height, line)).round() as i32
+}
+
+/// How far apart lines of a font `natural` px tall are with spacing `line`.
+fn line_height(natural: f64, line: LineSpacing) -> f64 {
+    match line {
+        LineSpacing::Auto(m) => natural * f64::from(m),
+        LineSpacing::Exact(t) => f64::from(t) / TWIPS_PER_PX,
+        LineSpacing::AtLeast(t) => natural.max(f64::from(t) / TWIPS_PER_PX),
+    }
 }
 
 /// What painting needs besides the node.

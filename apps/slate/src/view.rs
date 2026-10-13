@@ -1430,7 +1430,7 @@ impl Page {
         let page: Self = glib::Object::new();
         let imp = page.imp();
         imp.setting.set(setting);
-        let shaper = PangoShaper::new(page.pango_context(), &doc.format, textures);
+        let shaper = PangoShaper::new(page.pango_context(), &doc.styles, textures);
         let plain = matches!(doc.format, document_model::Format::Text(_));
         let flow = Flow::new(doc);
         let lines = (0..flow.page_break_count())
