@@ -2,6 +2,12 @@
 
 Releases are added by the ship-it skill.
 
+## Slate v0.1.2 (2026-10-13)
+
+Find and replace: Ctrl+F opens a find bar that highlights every match in the document, table cells included, and counts them; Enter and Shift+Enter step through them, and Match Case makes case matter. Ctrl+H adds Replace and Replace All, and one undo takes back a Replace All.
+
+- SLATE-16: Find and replace with a find bar, highlights, and one-step Replace All
+
 ## Slate v0.1.1 (2026-10-13)
 
 Start a new document: Ctrl+N (File → New) or New Document on the start window opens an Untitled Word document with the usual styles; the first save asks where, suggesting Untitled.docx in your Documents folder.

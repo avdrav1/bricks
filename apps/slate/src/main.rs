@@ -12,9 +12,11 @@
 //!
 //! `slate FILE --bench-flow` measures the flow on FILE in a 1600x1000 window: re-wrapping
 //! after width changes and the frames of scrolling (SLATE-11's acceptance test);
-//! `--bench-typing` measures typing in it (SLATE-6's). Each prints a JSON line.
+//! `--bench-typing` measures typing in it (SLATE-6's), `--bench-find` finding in it
+//! (SLATE-16's). Each prints a JSON line.
 
 mod bench;
+mod find_bar;
 mod format_bar;
 mod open;
 mod saving;
@@ -32,7 +34,7 @@ use suite_core::AppKind;
 const APP: AppKind = AppKind::Slate;
 const APP_ID: &str = "dev.cronkite.Slate";
 const USAGE: &str =
-    "usage: slate [FILE.txt|FILE.md|FILE.docx]... [--version] [--bench-flow|--bench-typing]";
+    "usage: slate [FILE.txt|FILE.md|FILE.docx]... [--version] [--bench-flow|--bench-typing|--bench-find]";
 const START_WINDOW: &str = "start";
 
 /// The page's own font, for what it shows outside the document: Liberation Sans, else the
@@ -74,6 +76,7 @@ fn main() -> glib::ExitCode {
             }
             Some("--bench-flow") => bench = Some(bench::Mode::Flow),
             Some("--bench-typing") => bench = Some(bench::Mode::Typing),
+            Some("--bench-find") => bench = Some(bench::Mode::Find),
             Some(a) if a.starts_with('-') => {
                 eprintln!("slate: unknown option {a}\n{USAGE}");
                 return glib::ExitCode::from(2);
@@ -255,6 +258,8 @@ fn edit_menu() -> gio::Menu {
     menu.append_item(&item("Copy", "win.copy", "<Control>c"));
     menu.append_item(&item("Paste", "win.paste", "<Control>v"));
     menu.append_item(&item("Select All", "win.select-all", "<Control>a"));
+    menu.append_item(&item("Find…", "win.find", "<Control>f"));
+    menu.append_item(&item("Replace…", "win.replace", "<Control>h"));
     menu
 }
 
@@ -688,6 +693,9 @@ fn show(
     stack.set_visible_child_name("document");
     if let Some(window) = stack.root().and_downcast::<gtk::ApplicationWindow>() {
         add_page_actions(&window, &page);
+        if let Some(content) = stack.parent().and_downcast::<gtk::Box>() {
+            find_bar::attach(&window, &content, &page);
+        }
         saving::Saver::attach(
             &window,
             &page,

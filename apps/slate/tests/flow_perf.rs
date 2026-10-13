@@ -3,6 +3,8 @@
 //!   500 ms, and scrolling keeps frame CPU p99 under 16 ms (`--bench-flow`);
 //! - SLATE-6: typing latency p99 is under 25 ms (`--bench-typing`);
 //! - SLATE-20: both again on the same text as a Word document in three fonts.
+//! - SLATE-16: a search's first match shows in under 100 ms, and typing a search never
+//!   stalls the UI thread for a frame (`--bench-find`).
 //!
 //! Writes ADR 0007's spike document as Markdown (headings, two bullet levels, bold and
 //! italic words), and as a .docx (ADR 0008: body text in Liberation Serif, headings in
@@ -306,4 +308,28 @@ fn the_flow_rewraps_and_scrolls_a_150000_word_document_in_three_fonts_in_time() 
 #[ignore = "opens a window; run with --release --ignored"]
 fn typing_in_a_150000_word_document_in_three_fonts_shows_each_key_in_time() {
     shows_each_key_in_time(&bench("--bench-typing", true));
+}
+
+#[test]
+#[ignore = "opens a window; run with --release --ignored"]
+fn finding_in_a_150000_word_document_shows_matches_in_time() {
+    let line = bench("--bench-find", false);
+    assert!(field(&line, "words") >= WORDS as f64, "{line}");
+    assert_eq!(field(&line, "found"), 5.0, "{line}");
+    assert_eq!(field(&line, "typing/keystrokes"), 10.0, "{line}");
+    if cfg!(debug_assertions) {
+        eprintln!("debug build: timing not checked; use --release");
+        return;
+    }
+    let first = field(&line, "first_match_ms/max");
+    let stall = field(&line, "typing/stall_ms/max");
+    eprintln!(
+        "first match shown in at most {first:.1} ms (target < 100); typing the search \
+         stalled the UI thread at most {stall:.1} ms (target < 16)"
+    );
+    assert!(first < 100.0, "the first match took {first:.1} ms");
+    assert!(
+        stall < 16.0,
+        "typing the search stalled the UI thread {stall:.1} ms"
+    );
 }
