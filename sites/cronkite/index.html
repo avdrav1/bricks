@@ -61,12 +61,30 @@
   td code { white-space: nowrap; }
   .note { color: var(--muted); font-size: 15px; }
 
+  .gallery { display: grid; grid-template-columns: repeat(2, 1fr); gap: 28px 24px; }
+  .shot { margin: 0; }
+  .shot.wide { grid-column: 1 / -1; }
+  .shot a { display: block; border: 1px solid var(--rule); line-height: 0; transition: border-color 0.15s; }
+  .shot a:hover { border-color: var(--accent); }
+  .shot img { width: 100%; height: auto; }
+  .shot figcaption { margin-top: 8px; font-size: 15px; line-height: 1.45; }
+  .shot figcaption b, .viewer .caption b { color: var(--accent); font-size: 13px; letter-spacing: 0.05em; text-transform: uppercase; margin-right: 6px; }
+
+  dialog.viewer { border: 0; padding: 0; max-width: min(96vw, 1440px); background: var(--paper); color: var(--ink); }
+  dialog.viewer::backdrop { background: rgb(10 16 13 / 0.82); }
+  .viewer img { display: block; width: 100%; height: auto; max-height: 82vh; object-fit: contain; }
+  .viewer .bar { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-top: 1px solid var(--rule); }
+  .viewer .caption { flex: 1; margin: 0; font-size: 15px; }
+  .viewer button { font: 600 14px var(--font); color: var(--ink); background: var(--head); border: 1px solid var(--rule); padding: 6px 12px; cursor: pointer; }
+  .viewer button:hover { background: var(--accent-tint); }
+
   footer { border-top: 1px solid var(--rule); margin-top: 72px; padding: 18px 20px; color: var(--muted); font-size: 14px; text-align: center; }
 
   @media (max-width: 720px) {
     .apps { grid-template-columns: 1fr; }
     .app { border-right: 0; border-bottom: 1px solid var(--rule); }
     .app:last-child { border-bottom: 0; }
+    .gallery { grid-template-columns: 1fr; }
     td code { white-space: normal; }
   }
 </style>
@@ -104,6 +122,41 @@
         <p>Opens, edits, plays, and saves PowerPoint decks (<code>.pptx</code>), directly on the slide or in an outline, with one inspector instead of a ribbon. Saving changes only what you edited.</p>
         <a class="more" href="#install-frame">Install Frame &darr;</a>
       </article>
+    </div>
+  </section>
+
+  <section id="screenshots" aria-labelledby="shots-h">
+    <h2 id="shots-h">See them work</h2>
+    <p class="sub">Screenshots of the current releases on Linux. Click one to see it full size.</p>
+    <div class="gallery">
+      <figure class="shot wide">
+        <a href="shots/brick-rows.webp"><img src="shots/brick-rows-1920.webp" srcset="shots/brick-rows-960.webp 960w, shots/brick-rows-1920.webp 1920w, shots/brick-rows.webp 2880w" sizes="(max-width: 980px) 100vw, 940px" width="1920" height="1200" alt="Brick showing a 1 GB CSV file at its last rows, row numbers past 19 million, with the status bar reading 19,094,579 rows."></a>
+        <figcaption><b>Brick</b>A 1 GB CSV with 19 million rows, one Ctrl+End from the top to the bottom.</figcaption>
+      </figure>
+      <figure class="shot">
+        <a href="shots/brick-find.webp"><img src="shots/brick-find-960.webp" srcset="shots/brick-find-960.webp 960w, shots/brick-find-1920.webp 1920w" sizes="(max-width: 720px) 100vw, 470px" width="960" height="600" loading="lazy" alt="Brick's find bar searching the 19-million-row file for portland, at match 1 of 2,725,768."></a>
+        <figcaption><b>Brick</b>Find searches the whole file in the background: 2.7 million matches for “portland”.</figcaption>
+      </figure>
+      <figure class="shot">
+        <a href="shots/brick-workbook.webp"><img src="shots/brick-workbook-960.webp" srcset="shots/brick-workbook-960.webp 960w, shots/brick-workbook-1920.webp 1920w" sizes="(max-width: 720px) 100vw, 470px" width="960" height="600" loading="lazy" alt="Brick with an Excel workbook: a styled budget table with currency formats, a total row, three sheet tabs, and a SUM formula in the formula bar."></a>
+        <figcaption><b>Brick</b>An Excel workbook with its sheets, cell styles, number formats, and formulas.</figcaption>
+      </figure>
+      <figure class="shot">
+        <a href="shots/slate-docx.webp"><img src="shots/slate-docx-960.webp" srcset="shots/slate-docx-960.webp 960w, shots/slate-docx-1920.webp 1920w" sizes="(max-width: 720px) 100vw, 470px" width="960" height="600" loading="lazy" alt="Slate showing a Word document with a title, headings, a bulleted list, and a bar chart on one continuous page."></a>
+        <figcaption><b>Slate</b>A Word document on one endless page: no page breaks, no margins to fight.</figcaption>
+      </figure>
+      <figure class="shot">
+        <a href="shots/slate-find.webp"><img src="shots/slate-find-960.webp" srcset="shots/slate-find-960.webp 960w, shots/slate-find-1920.webp 1920w" sizes="(max-width: 720px) 100vw, 470px" width="960" height="600" loading="lazy" alt="Slate's find bar searching a Markdown file for tune-up, with four matches highlighted, including two in a table."></a>
+        <figcaption><b>Slate</b>Markdown shown formatted, and find highlights every match, tables included.</figcaption>
+      </figure>
+      <figure class="shot">
+        <a href="shots/frame-deck.webp"><img src="shots/frame-deck-960.webp" srcset="shots/frame-deck-960.webp 960w, shots/frame-deck-1920.webp 1920w" sizes="(max-width: 720px) 100vw, 470px" width="960" height="600" loading="lazy" alt="Frame with a PowerPoint deck: the slide list on the left, a slide with a bar chart in the middle, and the inspector on the right."></a>
+        <figcaption><b>Frame</b>A PowerPoint deck: slides on the left, one inspector on the right, no ribbon.</figcaption>
+      </figure>
+      <figure class="shot">
+        <a href="shots/frame-outline.webp"><img src="shots/frame-outline-960.webp" srcset="shots/frame-outline-960.webp 960w, shots/frame-outline-1920.webp 1920w" sizes="(max-width: 720px) 100vw, 470px" width="960" height="600" loading="lazy" alt="Frame's outline view listing each slide's title and bullets as one editable outline."></a>
+        <figcaption><b>Frame</b>The outline view: type titles and bullets, and Frame makes the slides.</figcaption>
+      </figure>
     </div>
   </section>
 
@@ -179,6 +232,15 @@
   </section>
 </main>
 <footer>Cronkite &middot; a native office suite for Linux &middot; <a href="https://brick.cronkite.cc">brick.cronkite.cc</a> &middot; <a href="https://slate.cronkite.cc">slate.cronkite.cc</a> &middot; <a href="https://frame.cronkite.cc">frame.cronkite.cc</a></footer>
+<dialog class="viewer" aria-label="Screenshot">
+  <img alt="">
+  <div class="bar">
+    <p class="caption"></p>
+    <button type="button" data-step="-1" aria-label="Previous screenshot">&larr;</button>
+    <button type="button" data-step="1" aria-label="Next screenshot">&rarr;</button>
+    <button type="button" data-close>Close</button>
+  </div>
+</dialog>
 <script>
   for (const button of document.querySelectorAll("button[data-copy]")) {
     button.addEventListener("click", async () => {
@@ -192,6 +254,31 @@
       setTimeout(() => { button.textContent = "Copy"; }, 1600);
     });
   }
+  // The gallery's links open the full-size screenshot; with script, in a viewer over the page.
+  const viewer = document.querySelector("dialog.viewer");
+  const shots = [...document.querySelectorAll(".shot")];
+  let current = 0;
+  function show(i) {
+    current = (i + shots.length) % shots.length;
+    const link = shots[current].querySelector("a");
+    viewer.querySelector("img").src = link.href;
+    viewer.querySelector("img").alt = link.querySelector("img").alt;
+    viewer.querySelector(".caption").innerHTML = shots[current].querySelector("figcaption").innerHTML;
+  }
+  shots.forEach((shot, i) => shot.querySelector("a").addEventListener("click", (event) => {
+    event.preventDefault();
+    show(i);
+    viewer.showModal();
+  }));
+  for (const button of viewer.querySelectorAll("[data-step]")) {
+    button.addEventListener("click", () => show(current + Number(button.dataset.step)));
+  }
+  viewer.querySelector("[data-close]").addEventListener("click", () => viewer.close());
+  viewer.addEventListener("click", (event) => { if (event.target === viewer) viewer.close(); });
+  viewer.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowLeft") show(current - 1);
+    if (event.key === "ArrowRight") show(current + 1);
+  });
 </script>
 </body>
 </html>

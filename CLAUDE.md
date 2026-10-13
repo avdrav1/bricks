@@ -99,6 +99,7 @@ cargo run --release -p xlsx --example gen_corpus_xlsx -- --styled   # corpus/sty
 python3 scripts/lo_pptx.py fixture|dump|layouts FILE  # LibreOffice fixture deck, dumps, and layout names (FRAME-*)
 python3 scripts/blank_deck.py           # Frame's built-in blank deck: apps/frame/crates/pptx/data/blank.pptx (FRAME-14)
 python3 scripts/blank_docx.py           # Slate's built-in blank document: apps/slate/crates/docx/data/blank.docx (SLATE-18)
+scripts/site_shots.sh [OUTDIR]          # cronkite.cc's gallery: the latest releases of Brick, Slate, and Frame screenshotted in a container on demo files (scripts/site_demo.py, LibreOffice) into sites/cronkite/shots (needs corpus/)
 scripts/check_frame.sh [BINARY]          # Frame in a container: decks, drawing, Ctrl+O, drop, alerts, slideshow, editing, slides, save, shapes, inspector, insert, outline, new deck, with undo; the reference task counted against PowerPoint, read back by LibreOffice; the installer and a .pptx double-click (FRAME-4 to FRAME-15)
 python3 -m unittest discover -s scripts  # script tests (corpus generator, backlog helper)
 cargo bench                              # prints the apps/brick/docs/BENCHMARKS.md table (needs corpus/)
