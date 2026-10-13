@@ -16,22 +16,27 @@
 //! The text selects by dragging, and Ctrl+A and Ctrl+C copy it as plain text. Ctrl+click
 //! opens a link. Screen readers read the text through `GtkAccessibleText`; page breaks are
 //! child widgets named "Page break" that draw their own dashed line.
+//!
+//! Ctrl+F and Ctrl+H open the window's find bar (SLATE-16); the page finds its text off
+//! the UI thread, highlights the matches, and selects them one by one ([`find`]).
 
 mod a11y;
 mod caret;
+mod find;
 mod shaper;
 
 use crate::settings::TextWidth;
-use document_edit::{Change, Container, Edit, Flag, Fragment, History, Pos};
+use document_edit::{Change, Container, Edit, Flag, Fragment, History, Match, Pos};
 use document_model::{ParagraphStyle, RunStyle};
 use flow::{Flow, Located, Paint, Splice, LEVEL_INDENT};
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
-use gtk::{gdk, glib, graphene, gsk, pango};
+use gtk::{gdk, gio, glib, graphene, gsk, pango};
 use shaper::PangoShaper;
 use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::HashMap;
 use std::ops::Range;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -56,6 +61,12 @@ const CODE_BAND: u32 = 0xF4F4F4;
 const LINE: u32 = 0xC0BFBC;
 /// The selection: GNOME's blue, translucent over the paper.
 const SELECTION: (u32, f32) = (0x3584E4, 0.3);
+/// Find's matches, and the current one: yellow and orange highlighter.
+const FOUND: (u32, f32) = (0xF6D32D, 0.45);
+const FOUND_CURRENT: (u32, f32) = (0xFF7800, 0.5);
+
+/// Told find's current match (if any), the count, and whether there are more than counted.
+type FoundCallback = Box<dyn Fn(Option<usize>, usize, bool)>;
 
 /// Decoded pictures, by the address of their bytes in the document.
 pub type Textures = HashMap<usize, gdk::Texture>;
@@ -135,6 +146,8 @@ struct State {
     /// Where the selection was started, as made (the flow holds it with its ends that run
     /// into a table moved to the table's edges).
     anchor: Option<flow::Position>,
+    /// The find bar's matches, while it is open.
+    found: Option<find::Found>,
 }
 
 impl State {
@@ -182,6 +195,15 @@ mod imp {
         removal: RefCell<Option<(usize, String)>>,
         /// Called after every edit, undo, and redo has been shown.
         pub(super) edited: RefCell<Option<Box<dyn Fn()>>>,
+        /// The find bar's text and whether case matters, while it is open.
+        find_query: RefCell<Option<(String, bool)>>,
+        /// The latest search, and the flag that stops it.
+        find_gen: Cell<u64>,
+        find_cancel: RefCell<Option<Arc<AtomicBool>>>,
+        /// Select the current match once the next search shows (after a Replace).
+        select_found: Cell<bool>,
+        /// Told the current match and the count whenever they change.
+        pub(super) found_cb: RefCell<Option<FoundCallback>>,
     }
 
     #[glib::object_subclass]
@@ -442,9 +464,16 @@ mod imp {
             if let Some(st) = self.state.borrow_mut().as_mut() {
                 let left = column_left(w, st.flow.width()) as f32;
                 let top = st.flow.scroll();
-                let State { flow, shaper, .. } = st;
+                let State {
+                    flow,
+                    shaper,
+                    found,
+                    ..
+                } = st;
+                let flow = &*flow;
                 flow.paint(top, top + f64::from(h), &mut |p| {
-                    draw(snapshot, shaper, p, left, top);
+                    let found = found.as_ref().map(|f| (f, flow));
+                    draw(snapshot, shaper, p, left, top, found);
                 });
                 if obj.has_focus() {
                     if let Some((x, y, ch)) = st.shown_caret().and_then(|c| caret::rect(st, c)) {
@@ -797,6 +826,16 @@ mod imp {
                 if matches!(key, K::s | K::S) {
                     // The window's File → Save and Save As (`saving`).
                     let action = if shift { "win.save-as" } else { "win.save" };
+                    let _ = self.obj().activate_action(action, None);
+                    return glib::Propagation::Stop;
+                }
+                if matches!(key, K::f | K::F | K::h | K::H) {
+                    // The window's find bar (`find_bar`).
+                    let action = if matches!(key, K::f | K::F) {
+                        "win.find"
+                    } else {
+                        "win.replace"
+                    };
                     let _ = self.obj().activate_action(action, None);
                     return glib::Propagation::Stop;
                 }
@@ -1172,6 +1211,176 @@ mod imp {
             if let Some(edited) = self.edited.borrow().as_ref() {
                 edited();
             }
+            // The matches moved with the edit: find them again.
+            if self.find_query.borrow().is_some() {
+                if let Some(st) = self.state.borrow_mut().as_mut() {
+                    st.found = None;
+                }
+                self.run_find();
+            }
+        }
+
+        // ---- find and replace (SLATE-16) ----
+
+        /// Search the document as it is now for the find bar's text, off the UI thread; a
+        /// newer search stops this one, and only the newest shows.
+        pub(super) fn run_find(&self) {
+            if let Some(old) = self.find_cancel.take() {
+                old.store(true, Ordering::Relaxed);
+            }
+            let Some((needle, match_case)) = self.find_query.borrow().clone() else {
+                return;
+            };
+            let Some(doc) = self
+                .state
+                .borrow()
+                .as_ref()
+                .map(|st| st.flow.document().clone())
+            else {
+                return;
+            };
+            let gen = self.find_gen.get() + 1;
+            self.find_gen.set(gen);
+            let cancel = Arc::new(AtomicBool::new(false));
+            self.find_cancel.replace(Some(cancel.clone()));
+            let search = gio::spawn_blocking(move || {
+                document_edit::find(&doc, &needle, match_case, find::MAX_MATCHES, &cancel)
+            });
+            let page = self.obj().downgrade();
+            glib::spawn_future_local(async move {
+                let Ok(Some(matches)) = search.await else {
+                    return;
+                };
+                if let Some(page) = page.upgrade() {
+                    let imp = page.imp();
+                    if imp.find_gen.get() == gen && imp.find_query.borrow().is_some() {
+                        imp.show_found(matches);
+                    }
+                }
+            });
+        }
+
+        /// Highlight `matches`; the current one is the first from the caret on, selected
+        /// after a Replace.
+        fn show_found(&self, matches: Vec<Match>) {
+            let select = self.select_found.replace(false);
+            let current = {
+                let mut state = self.state.borrow_mut();
+                let Some(st) = state.as_mut() else {
+                    return;
+                };
+                let mut found = find::Found::new(matches);
+                found.current = st.caret.and_then(|c| found.at_or_after(c));
+                let current = found.current;
+                st.found = Some(found);
+                current
+            };
+            match (select, current) {
+                (true, Some(i)) => self.select_match(i),
+                _ => {
+                    self.notify_found();
+                    self.obj().queue_draw();
+                }
+            }
+        }
+
+        /// Tell the find bar the current match, the count, and whether there are more.
+        fn notify_found(&self) {
+            let (current, count, more) = self
+                .state
+                .borrow()
+                .as_ref()
+                .and_then(|st| st.found.as_ref())
+                .map_or((None, 0, false), |f| (f.current, f.matches.len(), f.capped));
+            if let Some(cb) = self.found_cb.borrow().as_ref() {
+                cb(current, count, more);
+            }
+        }
+
+        /// Make match `i` the current one, select it, and scroll to it.
+        fn select_match(&self, i: usize) {
+            {
+                let mut state = self.state.borrow_mut();
+                let Some(st) = state.as_mut() else {
+                    return;
+                };
+                let Some(m) = st.found.as_ref().and_then(|f| f.matches.get(i)).copied() else {
+                    return;
+                };
+                if let Some(found) = st.found.as_mut() {
+                    found.current = Some(i);
+                }
+                if let (Some(a), Some(c)) = (caret::to_flow(st, m.from), caret::to_flow(st, m.to)) {
+                    caret::select(st, a, c);
+                }
+                st.caret = Some(m.to);
+                st.goal = None;
+                st.history.seal();
+            }
+            self.notify_found();
+            self.selection_changed();
+            self.reveal_caret();
+        }
+
+        /// Select the next match (the previous one when not `forward`): next to the current
+        /// one while it's selected, else the first from the caret on (the last before it).
+        pub(super) fn find_step(&self, forward: bool) {
+            let selected = self.selected_match().is_some();
+            let next = self.state.borrow().as_ref().and_then(|st| {
+                let found = st.found.as_ref()?;
+                found.step(forward, selected, st.caret)
+            });
+            if let Some(i) = next {
+                self.select_match(i);
+            }
+        }
+
+        /// The current match while it is what's selected.
+        fn selected_match(&self) -> Option<Match> {
+            let state = self.state.borrow();
+            let st = state.as_ref()?;
+            let found = st.found.as_ref()?;
+            let m = *found.matches.get(found.current?)?;
+            (caret::selection(st) == Some((m.from, m.to))).then_some(m)
+        }
+
+        /// Replace the current match with `with` and go on to the next one; select the
+        /// current match first when it isn't selected yet.
+        pub(super) fn replace_found(&self, with: &str) {
+            let Some(m) = self.selected_match() else {
+                self.find_step(true);
+                return;
+            };
+            self.select_found.set(true);
+            self.edit_with(false, |st| {
+                document_edit::replace_one(st.flow.document(), m, with)
+            });
+        }
+
+        /// Replace every match with `with`, as one step.
+        pub(super) fn replace_all_found(&self, with: &str) {
+            self.edit_with(false, |st| {
+                let matches = &st.found.as_ref()?.matches;
+                document_edit::replace_all(st.flow.document(), matches, with)
+            });
+        }
+
+        /// Find `needle` (case mattering when `match_case`), or stop finding (`None`).
+        pub(super) fn set_find(&self, query: Option<(String, bool)>) {
+            let stop = query.is_none();
+            self.find_query.replace(query);
+            if stop {
+                if let Some(old) = self.find_cancel.take() {
+                    old.store(true, Ordering::Relaxed);
+                }
+                if let Some(st) = self.state.borrow_mut().as_mut() {
+                    st.found = None;
+                }
+                self.notify_found();
+                self.obj().queue_draw();
+            } else {
+                self.run_find();
+            }
         }
 
         /// Keep one page-break child per page break.
@@ -1444,6 +1653,7 @@ impl Page {
             revision: 0,
             preedit: None,
             anchor: None,
+            found: None,
         };
         state.caret = caret::first(&state);
         imp.state.replace(Some(state));
@@ -1528,6 +1738,34 @@ impl Page {
     /// still estimated.
     pub fn completed_at(&self) -> Option<Instant> {
         self.imp().completed.get()
+    }
+
+    /// Find `needle` in the document, case mattering when `match_case`; `None` stops
+    /// finding and takes the highlights away.
+    pub fn set_find(&self, query: Option<(String, bool)>) {
+        self.imp().set_find(query);
+    }
+
+    /// Select the next match (the previous one when not `forward`).
+    pub fn find_step(&self, forward: bool) {
+        self.imp().find_step(forward);
+    }
+
+    /// Replace the current match with `with` and go on to the next; selects the current
+    /// match first when it isn't selected.
+    pub fn replace_found(&self, with: &str) {
+        self.imp().replace_found(with);
+    }
+
+    /// Replace every match with `with`, as one undoable step.
+    pub fn replace_all_found(&self, with: &str) {
+        self.imp().replace_all_found(with);
+    }
+
+    /// Call `f` with the current match (if any), the count, and whether there are more
+    /// than counted, whenever they change.
+    pub fn connect_found(&self, f: impl Fn(Option<usize>, usize, bool) + 'static) {
+        self.imp().found_cb.replace(Some(Box::new(f)));
     }
 }
 
@@ -1616,11 +1854,19 @@ fn page_break(page: &Page) -> gtk::Separator {
 }
 
 /// Draw `p`, with the column's left edge at `left` and the viewport's top at document y
-/// `top`.
-fn draw(snapshot: &gtk::Snapshot, shaper: &mut PangoShaper, p: Paint<'_>, left: f32, top: f64) {
+/// `top`; with find's matches highlighted, when it has them.
+fn draw(
+    snapshot: &gtk::Snapshot,
+    shaper: &mut PangoShaper,
+    p: Paint<'_>,
+    left: f32,
+    top: f64,
+    found: Option<(&find::Found, &Flow)>,
+) {
     let at = |x: i32, y: f64| (left + x as f32, (y - top) as f32);
     match p {
         Paint::Text {
+            leaf,
             key,
             content,
             x,
@@ -1645,8 +1891,18 @@ fn draw(snapshot: &gtk::Snapshot, shaper: &mut PangoShaper, p: Paint<'_>, left: 
             let layout = shaper.layout(key, content, width);
             snapshot.save();
             snapshot.translate(&graphene::Point::new(x, y));
+            if let Some((found, flow)) = found {
+                for (i, m) in found.in_block(flow.path(leaf)) {
+                    let colour = if found.current == Some(i) {
+                        FOUND_CURRENT
+                    } else {
+                        FOUND
+                    };
+                    highlight(snapshot, layout, m.from.offset..m.to.offset, colour);
+                }
+            }
             if let Some(range) = selected {
-                highlight(snapshot, layout, range);
+                highlight(snapshot, layout, range, SELECTION);
             }
             snapshot.append_layout(layout, &rgba(INK));
             snapshot.restore();
@@ -1697,9 +1953,15 @@ fn draw(snapshot: &gtk::Snapshot, shaper: &mut PangoShaper, p: Paint<'_>, left: 
     }
 }
 
-/// The selection's background behind bytes `range` of `layout`.
-fn highlight(snapshot: &gtk::Snapshot, layout: &pango::Layout, range: Range<usize>) {
-    let colour = rgba_alpha(SELECTION.0, SELECTION.1);
+/// A highlight (`colour`, alpha) behind bytes `range` of `layout`: the selection, or a
+/// match.
+fn highlight(
+    snapshot: &gtk::Snapshot,
+    layout: &pango::Layout,
+    range: Range<usize>,
+    colour: (u32, f32),
+) {
+    let colour = rgba_alpha(colour.0, colour.1);
     let scale = pango::SCALE as f32;
     let mut lines = layout.iter();
     loop {

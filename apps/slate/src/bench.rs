@@ -11,12 +11,17 @@
 //!   characters are typed 80 to 150 ms apart through the input method's path
 //!   ([`Page::type_text`]). Each one's latency runs from the call to the after-paint of the
 //!   frame that shows it; input delivery from the compositor isn't included.
+//! - `--bench-find` (SLATE-16): with the caret at the start, five words are found one after
+//!   another as the find bar finds them ([`Page::set_find`]); each one's time runs from
+//!   the call to the after-paint of the frame that shows its matches. Then "throughout" is
+//!   typed into the search a letter at a time, 80 to 150 ms apart, while a 4 ms timer
+//!   records how late the UI thread runs it (a stall).
 
 use crate::settings::TextWidth;
 use crate::view::{self, Page};
 use gtk::glib;
 use gtk::prelude::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -32,12 +37,24 @@ const GIVE_UP: Duration = Duration::from_secs(20);
 const KEYSTROKES: usize = 100;
 /// What is typed, a character at a time, round and round.
 const TYPED: &str = "the quick brown fox jumps over the lazy dog ";
+/// The words found one by one, and the search typed a letter at a time.
+const FOUND: [&str; 5] = [
+    "uncharacteristically",
+    "considered",
+    "Zürich",
+    "fjord",
+    "embarrassment",
+];
+const SEARCHED: &str = "throughout";
+/// The stall timer's period.
+const TICK: Duration = Duration::from_millis(4);
 
 /// Which benchmark to run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Flow,
     Typing,
+    Find,
 }
 
 #[derive(Clone, Copy)]
@@ -81,6 +98,105 @@ pub fn run(app: &gtk::Application, page: &Page, words: usize, mode: Mode) {
     match mode {
         Mode::Flow => flow(app, page, words),
         Mode::Typing => typing(app, page, words),
+        Mode::Find => find(app, page, words),
+    }
+}
+
+/// Find words in `page`, then type a search, once it is laid out.
+fn find(app: &gtk::Application, page: &Page, words: usize) {
+    let Some(clock) = page.frame_clock() else {
+        let app = app.clone();
+        page.connect_realize(move |page| find(&app, page, words));
+        return;
+    };
+    let painted: Rc<Cell<Option<Instant>>> = Rc::default();
+    clock.connect_after_paint({
+        let painted = painted.clone();
+        move |_| painted.set(Some(Instant::now()))
+    });
+    let found: Rc<Cell<Option<(Instant, usize)>>> = Rc::default();
+    page.connect_found({
+        let found = found.clone();
+        move |_, count, _| found.set(Some((Instant::now(), count)))
+    });
+    let (app, page) = (app.clone(), page.clone());
+    glib::spawn_future_local(async move {
+        let started = Instant::now();
+        while page.completed_at().is_none() || page.column() == 0 {
+            give_up(started, "the document never finished its layout");
+            glib::timeout_future(Duration::from_millis(20)).await;
+        }
+        page.put_caret(0);
+
+        // Each word: from the call to the frame that shows its matches.
+        let mut first_ms = Vec::new();
+        let mut counts = Vec::new();
+        for word in FOUND {
+            page.set_find(None);
+            glib::timeout_future(Duration::from_millis(200)).await;
+            found.set(None);
+            let at = Instant::now();
+            page.set_find(Some((word.to_owned(), false)));
+            let shown = loop {
+                give_up(at, "a search never showed");
+                if let (Some((f, count)), Some(p)) = (found.get(), painted.get()) {
+                    if p > f && count > 0 {
+                        counts.push(count);
+                        break p;
+                    }
+                }
+                glib::timeout_future(Duration::from_millis(1)).await;
+            };
+            first_ms.push(ms(shown - at));
+        }
+
+        // Typing the search: how late a 4 ms timer runs meanwhile.
+        page.set_find(None);
+        glib::timeout_future(Duration::from_millis(200)).await;
+        let stalls: Rc<RefCell<Vec<f64>>> = Rc::default();
+        let last = Rc::new(Cell::new(Instant::now()));
+        let ticker = glib::timeout_add_local(TICK, {
+            let (stalls, last) = (stalls.clone(), last.clone());
+            move || {
+                let now = Instant::now();
+                let late = ms(now - last.replace(now)) - ms(TICK);
+                stalls.borrow_mut().push(late.max(0.0));
+                glib::ControlFlow::Continue
+            }
+        });
+        let mut call_ms = Vec::new();
+        let mut seed: u64 = 0x5EED;
+        for n in 1..=SEARCHED.len() {
+            let at = Instant::now();
+            page.set_find(Some((SEARCHED[..n].to_owned(), false)));
+            call_ms.push(ms(at.elapsed()));
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            glib::timeout_future(Duration::from_millis(80 + (seed >> 33) % 71)).await;
+        }
+        ticker.remove();
+        let stalls = stalls.borrow();
+        println!(
+            concat!(
+                r#"{{"words":{},"found":{},"first_match_ms":{},"#,
+                r#""typing":{{"keystrokes":{},"call_ms":{},"stall_ms":{}}}}}"#
+            ),
+            words,
+            counts.len(),
+            summary(&first_ms),
+            SEARCHED.len(),
+            summary(&call_ms),
+            summary(&stalls),
+        );
+        app.quit();
+    });
+}
+
+fn give_up(since: Instant, why: &str) {
+    if since.elapsed() > GIVE_UP {
+        println!(r#"{{"error":"{why}"}}"#);
+        std::process::exit(1);
     }
 }
 

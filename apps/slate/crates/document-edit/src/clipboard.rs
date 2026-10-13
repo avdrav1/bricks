@@ -248,6 +248,24 @@ pub struct BlocksEdit {
 }
 
 impl BlocksEdit {
+    /// Replacing top-level blocks from `start` on (`removed`, as they are) with
+    /// `inserted`; the caret goes to `caret`, and to `undo_caret` when undone.
+    pub(crate) fn new(
+        start: usize,
+        removed: Vec<Block>,
+        inserted: Vec<Block>,
+        caret: Pos,
+        undo_caret: Pos,
+    ) -> BlocksEdit {
+        BlocksEdit {
+            start,
+            removed,
+            inserted,
+            caret,
+            undo_caret,
+        }
+    }
+
     /// What applying (`forward`) or undoing changes.
     pub(crate) fn shape(&self, forward: bool) -> Change {
         let (removed, inserted, caret) = if forward {

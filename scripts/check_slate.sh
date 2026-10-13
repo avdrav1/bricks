@@ -96,6 +96,14 @@
 #      a Word document with the heading in Heading 1 and the line, titled plans.docx;
 #      Ctrl+N in a document window opens another Untitled window; reopened, plans.docx
 #      shows the line.
+#  23. find and replace in find.md ("A cat sat.", "The Cat and the cat.", a table with a
+#      "cat" cell, "Last cat."), the bar's count read through AT-SPI: Ctrl+F and "cat"
+#      count 1 of 5 from the caret; Enter selects it, then steps on into the table cell;
+#      Escape and a typed X replace the cell's match; Ctrl+F again counts 4 of 4 from the
+#      caret, Shift+Enter steps back twice; Match Case drops "Cat" (of 3); Ctrl+H, "dog"
+#      in the replace row, Enter twice replaces one match, Replace All the rest, leaving
+#      "Cat" and No matches; one undo takes back Replace All and the next Replace;
+#      closing the bar clears the count.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -709,6 +717,26 @@ print(\"line:\", \"First line\" in x)"
   keys -M ctrl n -m ctrl; sleep 3; titles | sed "s/^/another-/"; quit
   slate /tmp/docs/plans.docx >>/tmp/app.log 2>&1 & sleep 4
   a11y page plans.docx | grep -c "First line$" | sed "s/^/reopened plans: /"; quit
+  echo "== 23 find"
+  printf "A cat sat.\n\nThe Cat and the cat.\n\n| x | y |\n|---|---|\n| cat | dog |\n\nLast cat.\n" > /tmp/find.md
+  slate /tmp/find.md >>/tmp/app.log 2>&1 & sleep 4
+  count() { a11y dump | grep -E "^([0-9]+ of [0-9]+|No matches)$" | head -1 | sed "s/^/$1: /"; }
+  keys -M ctrl f -m ctrl; sleep 1; keys cat; sleep 1; count typed; shot find
+  keys -k Return; sleep 0.5; count enter-1
+  keys -k Return; sleep 0.5; count enter-2
+  keys -k Return -s 300 -k Return; sleep 0.5; count enter-4
+  keys -k Escape; sleep 0.5; keys X; sleep 1; a11y page find.md | sed "s/^/into-cell /"
+  keys -M ctrl f -m ctrl; sleep 1; count again
+  keys -M shift -k Return -m shift; sleep 0.5; count back-1
+  keys -M shift -k Return -m shift; sleep 0.5; count back-2
+  keys -k Tab -k space; sleep 1; count case
+  keys -M ctrl h -m ctrl; sleep 1; keys -k Tab -k Tab -k Tab -k Tab -k Tab; keys dog
+  keys -k Return; sleep 0.5; keys -k Return; sleep 1; a11y page find.md | sed "s/^/replaced-one /"
+  keys -k Tab -k Tab -k space; sleep 1; a11y page find.md | sed "s/^/replaced-all /"
+  count after-all; shot replace
+  keys -k Escape; sleep 0.5; keys -M ctrl z -m ctrl; sleep 1; a11y page find.md | sed "s/^/undo-all /"
+  keys -M ctrl z -m ctrl; sleep 1; a11y page find.md | sed "s/^/undo-one /"
+  a11y dump | grep -cE "^([0-9]+ of [0-9]+|No matches)$" | sed "s/^/counts after closing: /"; quit
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -867,6 +895,26 @@ check "22: a Word document with the heading" "22 new document" "^heading 1: True
 check "22: and the line" "22 new document" "^line: True$"
 check "22: Ctrl+N in a document opens another" "22 new document" "^another-titles: Untitled,plans.docx,$"
 check "22: reopened, it shows the line" "22 new document" "^reopened plans: 1$"
+check "23: Ctrl+F and typing count the matches, from the caret" "23 find" "^typed: 1 of 5$"
+check "23: Enter selects the current match first" "23 find" "^enter-1: 1 of 5$"
+check "23: Enter goes to the next match" "23 find" "^enter-2: 2 of 5$"
+check "23: and on into a table cell" "23 find" "^enter-4: 4 of 5$"
+check "23: Escape leaves the cell match selected on the page" "23 find" \
+  "^into-cell page: A cat sat\.\|The Cat and the cat\.\|x\|y\|X\|dog\|Last cat\.$"
+check "23: Ctrl+F again counts from the caret" "23 find" "^again: 4 of 4$"
+check "23: Shift+Enter goes to the match before the caret" "23 find" "^back-1: 3 of 4$"
+check "23: and the one before that" "23 find" "^back-2: 2 of 4$"
+check "23: Match Case leaves out Cat" "23 find" "^case: [0-9] of 3$"
+check "23: Replace selects the match, then replaces it" "23 find" \
+  "^replaced-one page: A cat sat\.\|The Cat and the dog\.\|x\|y\|X\|dog\|Last cat\.$"
+check "23: Replace All replaces the rest, keeping Cat" "23 find" \
+  "^replaced-all page: A dog sat\.\|The Cat and the dog\.\|x\|y\|X\|dog\|Last dog\.$"
+check "23: then nothing is left to find" "23 find" "^after-all: No matches$"
+check "23: one undo takes back Replace All" "23 find" \
+  "^undo-all page: A cat sat\.\|The Cat and the dog\.\|x\|y\|X\|dog\|Last cat\.$"
+check "23: the next takes back Replace" "23 find" \
+  "^undo-one page: A cat sat\.\|The Cat and the cat\.\|x\|y\|X\|dog\|Last cat\.$"
+check "23: closing the bar clears the count" "23 find" "^counts after closing: 0$"
 if [ $fail = 0 ]; then echo "SLATE OK"; else
   echo "SLATE CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

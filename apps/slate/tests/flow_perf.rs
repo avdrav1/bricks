@@ -1,7 +1,9 @@
 //! Performance acceptance on a 150,000-word document at Full in a 1600x1000 window:
 //! - SLATE-11: the visible text re-wraps within one frame, the whole document in under
 //!   500 ms, and scrolling keeps frame CPU p99 under 16 ms (`--bench-flow`);
-//! - SLATE-6: typing latency p99 is under 25 ms (`--bench-typing`).
+//! - SLATE-6: typing latency p99 is under 25 ms (`--bench-typing`);
+//! - SLATE-16: a search's first match shows in under 100 ms, and typing a search never
+//!   stalls the UI thread for a frame (`--bench-find`).
 //!
 //! Writes ADR 0007's spike document as Markdown (headings, two bullet levels, bold and
 //! italic words) and runs `slate FILE --bench-…` on it. Opens a real window, so it needs a
@@ -226,4 +228,28 @@ fn typing_in_a_150000_word_document_shows_each_key_in_time() {
     let p99 = field(&line, "latency_ms/p99");
     eprintln!("typing latency p99 {p99:.1} ms (target < 25)");
     assert!(p99 < 25.0, "typing latency p99 {p99:.1} ms");
+}
+
+#[test]
+#[ignore = "opens a window; run with --release --ignored"]
+fn finding_in_a_150000_word_document_shows_matches_in_time() {
+    let line = bench("--bench-find");
+    assert!(field(&line, "words") >= WORDS as f64, "{line}");
+    assert_eq!(field(&line, "found"), 5.0, "{line}");
+    assert_eq!(field(&line, "typing/keystrokes"), 10.0, "{line}");
+    if cfg!(debug_assertions) {
+        eprintln!("debug build: timing not checked; use --release");
+        return;
+    }
+    let first = field(&line, "first_match_ms/max");
+    let stall = field(&line, "typing/stall_ms/max");
+    eprintln!(
+        "first match shown in at most {first:.1} ms (target < 100); typing the search \
+         stalled the UI thread at most {stall:.1} ms (target < 16)"
+    );
+    assert!(first < 100.0, "the first match took {first:.1} ms");
+    assert!(
+        stall < 16.0,
+        "typing the search stalled the UI thread {stall:.1} ms"
+    );
 }

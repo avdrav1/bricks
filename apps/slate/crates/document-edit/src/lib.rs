@@ -17,10 +17,12 @@
 //! Toolkit-free: no GTK, no I/O.
 
 mod clipboard;
+mod find;
 mod looks;
 mod text;
 
 pub use clipboard::{copy, delete, paste, BlocksEdit, Fragment};
+pub use find::{find, replace_all, replace_one, Match};
 pub use looks::{indent, set_style, toggle_list, LooksEdit};
 pub use text::{join_backward, join_forward, look, replace, split, toggle, TextEdit};
 
