@@ -2,6 +2,12 @@
 
 Releases are added by the ship-it skill.
 
+## Slate v0.1.1 (2026-10-13)
+
+Start a new document: Ctrl+N (File → New) or New Document on the start window opens an Untitled Word document with the usual styles; the first save asks where, suggesting Untitled.docx in your Documents folder.
+
+- SLATE-18: Open a new blank document with Ctrl+N or New Document
+
 ## v0.3.0 (2026-10-12)
 
 Bricks is now Brick. The command is `brick`, the app is installed from brick.cronkite.cc, and installing it replaces Bricks (or the older Spreadsheet) with your recent files and unsaved-edit recovery kept. The old install command still works. Empty cells now fill the window past your data, as in Excel and Calc.
