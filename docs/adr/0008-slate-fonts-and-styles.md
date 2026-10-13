@@ -34,6 +34,14 @@ A word processor that opens Word documents has to show them in their fonts and s
    - Plain-text files have no formatting, so the bar hides.
    - It follows the pattern of Brick's format bar (STYLE-6). A shared `suite-ui` font list is a follow-up: Brick, Frame, and Slate would then all use it.
 
+## Run looks are direct formatting over the style (SLATE-19)
+
+- A run holds only its **direct formatting**, as overrides: `bold`, `italic`, `underline`, and `strike` as `Option<bool>`, and `font`, `size`, and `colour` as `Option`. A run with every field `None` looks exactly like its paragraph's style.
+- A character style named by a run (DOCX `rStyle`) is resolved into the run's overrides when the file is read.
+- The look drawn is the paragraph style's resolved look with the run's overrides on top, `StyleSheet::look(style, run)`. This is DOCX's own model, and Word's: choosing another style restyles the paragraph's text while keeping what was set by hand, and a save writes back exactly the direct formatting, nothing the style already gives.
+- Markdown's `**bold**` and `*italic*` read as direct `bold` and `italic`.
+- The alternative, keeping each run's fully resolved look as SL1 did, would make a style change rewrite every run and the save guess what was direct.
+
 ## Consequences
 
 - SL3 is planned as four stories:
