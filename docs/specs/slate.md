@@ -22,7 +22,7 @@ Anything else is refused with a message naming the format (`.doc`, `.odt`, `.rtf
 
 - `slate FILE` opens it; File → Open (Ctrl+O) opens a file dialog filtered to `.txt`, `.md`, `.docx`; dropping a file on the window opens it. Each file opens in its own window.
 - Reading runs off the UI thread; the window shows "Opening…" until it is done. A file that can't be read gives an alert naming the file and the reason, and the window closes.
-- The document shows as one pageless column (see Pageless) at the chosen text width, centred, read-only, with the text selectable by dragging and copyable as plain text (Ctrl+A, Ctrl+C). Text is in one document font, Liberation Sans (metric-compatible with Arial) or else the system's sans, whatever the desktop font (user decision, SLATE-11: variable desktop fonts such as Adwaita Sans lay out twice as slowly).
+- The document shows as one pageless column (see Pageless) at the chosen text width, centred, read-only, with the text selectable by dragging and copyable as plain text (Ctrl+A, Ctrl+C). Text is in one document font, Liberation Sans (metric-compatible with Arial) or else the system's sans, whatever the desktop font (user decision, SLATE-11: variable desktop fonts such as Adwaita Sans lay out twice as slowly). SL3 draws Word documents in their own fonts instead (ADR 0008); Markdown and plain text keep this font.
 - The window title is the file name; the status bar shows the format and the word count.
 - Accessibility: the document's text is exposed to screen readers.
 
@@ -47,6 +47,29 @@ Built (SLATE-6, SLATE-12, SLATE-13, SLATE-14, SLATE-15, SLATE-7, SLATE-8, SLATE-
 - New document (SLATE-18): Ctrl+N (File → New), or New Document on the window `slate` shows without a file, opens a window titled Untitled holding Slate's built-in blank Word document (`docx::blank()`: one empty paragraph; Normal, Title, Heading 1 to 6, Quote, and Hyperlink styles in Word's default look, Calibri 11 pt; no page setup, so Word and LibreOffice use the locale's default page). The first Ctrl+S asks where (Save As), in the Documents folder, suggesting Untitled.docx; saving it as .md or .txt works as for any document. Closing it with changes asks to save as other windows do.
 - Find and replace (SLATE-16): Ctrl+F opens a find bar over the page; matches across paragraphs and table cells highlight in the flow with a count; Enter and Shift+Enter step through them; Ctrl+H replaces one or all, replace all undoing as one step. Searching runs off the UI thread.
 - Crash recovery (SLATE-17): each window's unsaved edits are journaled off the UI thread; after a crash the next launch offers to restore them, and the file stays as it was until saved.
+
+## SL3: fonts and styles (planned)
+
+Word documents look like themselves, and their fonts and styles can be chosen ([ADR 0008](../adr/0008-slate-fonts-and-styles.md), user decisions).
+
+- **Fonts (SLATE-19, SLATE-20).**
+  - Each run is drawn in the family its document names: the run's, its style's, or the document defaults, with theme fonts resolved.
+  - Fontconfig substitutes a metric-compatible font when one isn't installed: Carlito for Calibri, Caladea for Cambria, Liberation for Arial, Times New Roman, and Courier New. Lines then break as in Word.
+  - Markdown and plain text keep Liberation Sans 11 pt.
+- **Styles (SLATE-19, SLATE-20).**
+  - A paragraph's style is one of its document's own: a `.docx`'s styles, custom ones included, each with its font, size, looks, alignment, space before and after, line spacing, and indents, inherited through the style it's based on.
+  - Markdown and plain text use Slate's built-in set: Normal, Title, Heading 1–6, Quote, and Code.
+- **Format bar (SLATE-21).**
+  - A slim bar over the page holds the paragraph style (the document's styles, each shown in its look), font family (searchable), size, bold, italic, underline, strikethrough, colour, and alignment.
+  - It shows the looks at the caret or across the selection, blank where the selection mixes them.
+  - A choice applies to the selection, or to what's typed next, as one undo step.
+  - Keys: Ctrl+U underline, Ctrl+L, Ctrl+E, Ctrl+R, and Ctrl+J to align left, centre, right, and justify, and Ctrl+] and Ctrl+[ to step the size. Ctrl+B, Ctrl+I, and Ctrl+0 to Ctrl+6 stay.
+  - Plain-text files have no formatting, so the bar hides.
+- **Saving (SLATE-22).** A `.docx` saves the chosen styles, fonts, sizes, colours, underline, strikethrough, and alignment, patching only the edited paragraphs. Markdown keeps headings and quotes and drops what it can't hold.
+- **Installing fonts.** Slate can't install fonts (no sudo). For Word documents to look as in Word, install the metric-compatible fonts:
+  - Arch: `ttf-carlito ttf-caladea ttf-liberation`
+  - Ubuntu and Debian: `fonts-crosextra-carlito fonts-crosextra-caladea fonts-liberation`
+  - Fedora: `google-carlito-fonts google-crosextra-caladea-fonts liberation-sans-fonts liberation-serif-fonts liberation-mono-fonts`
 
 ## Non-goals for now
 
