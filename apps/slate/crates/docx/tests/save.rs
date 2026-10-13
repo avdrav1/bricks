@@ -1,13 +1,16 @@
 //! SLATE-8: saving a Word document patches the package it was read from. An edited
 //! document keeps every part but `word/document.xml` byte for byte, and in it every
 //! paragraph and table not edited; it reads back with the edits. LibreOffice's reading of
-//! the saved document: the ignored test at the end.
+//! the saved document: the ignored tests. SLATE-22: the format bar's looks (a custom style,
+//! font, size, flags, colour, alignment) save as set, for Slate and for LibreOffice.
 
 use document_edit::{
-    delete, normalize, paste, replace, set_style, split, text_len, toggle, toggle_list, Container,
-    Edit, Flag, Fragment, History, Pos,
+    delete, format, normalize, paste, replace, set_align, set_style, split, text_len, toggle,
+    toggle_list, Container, Edit, Flag, Fragment, History, LookPatch, Pos, SizeChange,
 };
-use document_model::{Block, Document, ImageSource, ListKind, Paragraph, ParagraphStyle, RunStyle};
+use document_model::{
+    Align, Block, Document, ImageSource, ListKind, Paragraph, Rgb, Run, RunStyle, StyleSheet,
+};
 use docx::DocxSource;
 use quick_xml::events::Event;
 use std::io::{Read, Write};
@@ -147,27 +150,40 @@ fn body_children(xml: &str) -> Vec<String> {
     }
 }
 
-/// A copy of fixture.docx whose body is `body`.
-fn with_body(test: &str, body: &str) -> PathBuf {
-    let path = temp(test, "source.docx");
+/// A copy of fixture.docx named `name`, in test `test`'s directory, each part (by name)
+/// through `patch`.
+fn fixture_copy(test: &str, name: &str, patch: impl Fn(&str, Vec<u8>) -> Vec<u8>) -> PathBuf {
+    let path = temp(test, name);
     let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
     let options = zip::write::SimpleFileOptions::default();
     for (name, bytes) in parts(&data("fixture.docx")) {
         zip.start_file(&name, options).unwrap();
-        if name == "word/document.xml" {
-            let xml = format!(
-                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:document \
-                 xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" \
-                 xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">\
-                 <w:body>{body}</w:body></w:document>"
-            );
-            zip.write_all(xml.as_bytes()).unwrap();
-        } else {
-            zip.write_all(&bytes).unwrap();
-        }
+        zip.write_all(&patch(&name, bytes)).unwrap();
     }
     zip.finish().unwrap();
     path
+}
+
+/// A `word/document.xml` whose body is `body`.
+fn document(body: &str) -> Vec<u8> {
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:document \
+         xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" \
+         xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">\
+         <w:body>{body}</w:body></w:document>"
+    )
+    .into_bytes()
+}
+
+/// A copy of fixture.docx whose body is `body`.
+fn with_body(test: &str, body: &str) -> PathBuf {
+    fixture_copy(test, "source.docx", |name, bytes| {
+        if name == "word/document.xml" {
+            document(body)
+        } else {
+            bytes
+        }
+    })
 }
 
 #[test]
@@ -198,7 +214,7 @@ fn edited() -> (Document, DocxSource) {
     });
     let i = top(&doc, "A right-aligned paragraph.");
     apply(&mut doc, &mut h, |d| {
-        set_style(d, Container::Top, i..i + 1, ParagraphStyle::Heading(4))
+        set_style(d, Container::Top, i..i + 1, "Heading4")
     });
     let i = top(&doc, "First number");
     apply(&mut doc, &mut h, |d| {
@@ -267,18 +283,21 @@ fn edits_change_only_their_paragraphs() {
     assert_eq!(kept.len(), before.len() - edited.len());
 
     // It reads back as edited; the new heading looks as its style does.
-    let back = reread(&dest);
+    let back_doc = open(&dest).0;
+    let back = &back_doc.blocks;
     assert_eq!(back.len(), doc.blocks.len());
     let heading = top(&doc, "A right-aligned paragraph.");
-    for (i, (a, b)) in doc.blocks.iter().zip(&back).enumerate() {
+    for (i, (a, b)) in doc.blocks.iter().zip(back).enumerate() {
         if i == heading {
             let Block::Paragraph(p) = b else {
                 panic!("{b:?}")
             };
-            assert_eq!(p.style, ParagraphStyle::Heading(4));
+            assert_eq!(p.style, "Heading4");
+            assert_eq!(back_doc.styles.style_of(&p.style).name, "Heading 4");
             assert_eq!(p.align, document_model::Align::End);
             assert_eq!(p.text(), "A right-aligned paragraph.");
-            assert!(p.runs.iter().all(|r| r.style.bold), "{p:?}");
+            let bold = |r: &document_model::Run| back_doc.styles.look(&p.style, &r.style).bold;
+            assert!(p.runs.iter().all(bold), "{p:?}");
         } else {
             assert_eq!(a, b, "block {i}");
         }
@@ -347,6 +366,7 @@ fn every_paragraph_of_the_corpus_takes_an_edit() {
             let mut n = 0;
             Document {
                 blocks: blocks.to_vec(),
+                styles: StyleSheet::builtin(),
                 format: document_model::Format::Docx,
             }
             .visit_text(&mut |t| n += t.matches(" ✎").count());
@@ -458,19 +478,15 @@ fn new_links_and_pictures_get_relationships_and_parts() {
             ..document_edit::look(&doc, at)
         },
     );
-    let fragment = Fragment {
-        blocks: vec![Block::Paragraph(link)],
-    };
+    let fragment = Fragment::new(vec![Block::Paragraph(link)]);
     apply(&mut doc, &mut h, |d| paste(d, at, at, &fragment));
     let i = top(&doc, "A centred paragraph.");
     let at = end(&doc, i);
-    let fragment = Fragment {
-        blocks: vec![
-            Block::Paragraph(Paragraph::default()),
-            gif.clone(),
-            Block::Paragraph(Paragraph::default()),
-        ],
-    };
+    let fragment = Fragment::new(vec![
+        Block::Paragraph(Paragraph::default()),
+        gif.clone(),
+        Block::Paragraph(Paragraph::default()),
+    ]);
     apply(&mut doc, &mut h, |d| paste(d, at, at, &fragment));
     let dest = temp("links", "saved.docx");
     save(&dest, &path, &doc, &source);
@@ -531,37 +547,47 @@ fn libreoffice_reads_the_edits_and_everything_else_as_before() {
     let dest = temp("libreoffice", "saved.docx");
     save(&dest, &original, &doc, &source);
     let (before, after) = (lo_dump(&original, 2181), lo_dump(&dest, 2181));
-    // The dump of the original with the edits made by hand.
-    let para = |style: &str, list: &str, label: &str, text: &str| {
-        format!("para\t{style}\t{list}\t\"{label}\"\t\"{text}\"")
+    // The dump of the original with the edits made by hand: a line with its text (its
+    // last field), and for a `para` line its list label, or for a `run` its flags, set.
+    let with = |line: &str, field: Option<(usize, &str)>, text: &str| {
+        let mut f: Vec<String> = line.split('\t').map(str::to_owned).collect();
+        *f.last_mut().unwrap() = format!("\"{text}\"");
+        if let Some((i, v)) = field {
+            f[i] = v.to_owned();
+        }
+        f.join("\t")
     };
-    let normal = "Default Paragraph Style";
     let mut want: Vec<String> = Vec::new();
     let mut lines = before.lines().peekable();
     while let Some(line) = lines.next() {
         let text = |t: &str| line.ends_with(&format!("\"{t}\""));
         if line.starts_with("para\t") && text("A centred paragraph.") {
-            want.push(para(normal, "-", "", "A centred paragraph. Edited"));
-            want.push("run\t-\t\"A centred paragraph. Edited\"".into());
-            lines.next();
+            let edited = "A centred paragraph. Edited";
+            want.push(with(line, None, edited));
+            want.push(with(lines.next().unwrap(), None, edited));
         } else if line.starts_with("run\t") && text("A quotation from somebody wise.") {
-            want.push("run\t-\t\"A \"".into());
-            want.push("run\ti\t\"quotation\"".into());
-            want.push("run\t-\t\" from somebody wise.\"".into());
+            want.push(with(line, None, "A "));
+            want.push(with(line, Some((1, "i")), "quotation"));
+            want.push(with(line, None, " from somebody wise."));
         } else if line.starts_with("para\t") && text("A right-aligned paragraph.") {
-            want.push(para("Heading 4", "-", "", "A right-aligned paragraph."));
-            want.push("run\tb\t\"A right-aligned paragraph.\"".into());
-            lines.next();
+            // The heading style added in Word's look, based on the default style.
+            let text = "A right-aligned paragraph.";
+            want.push(format!(
+                "para\tHeading 4\t-\t\"\"\tend\t240\t120\tauto:100\t0\t0\t\"{text}\""
+            ));
+            let run = lines.next().unwrap();
+            let font = run.split('\t').nth(2).unwrap();
+            want.push(format!("run\tb\t{font}\t13\tauto\t\"{text}\""));
         } else if line.starts_with("para\t") && text("First number") {
-            want.push(para(normal, "0", "1.", "First"));
-            want.push("run\t-\t\"First\"".into());
-            want.push(para(normal, "0", "2.", " number"));
-            want.push("run\t-\t\" number\"".into());
-            lines.next();
+            let run = lines.next().unwrap();
+            want.push(with(line, Some((3, "\"1.\"")), "First"));
+            want.push(with(run, None, "First"));
+            want.push(with(line, Some((3, "\"2.\"")), " number"));
+            want.push(with(run, None, " number"));
         } else if line.starts_with("para\t") && text("Second number") {
-            want.push(para(normal, "0", "3.", "Second number"));
+            want.push(with(line, Some((3, "\"3.\"")), "Second number"));
         } else if line.starts_with("para\t") && text("Third number") {
-            want.push(para(normal, "0", "4.", "Third number"));
+            want.push(with(line, Some((3, "\"4.\"")), "Third number"));
         } else if text("Apples") {
             want.push(line.replace("Apples", "Pears"));
         } else if line.starts_with("para\t") && text("The table follows.") {
@@ -575,4 +601,382 @@ fn libreoffice_reads_the_edits_and_everything_else_as_before() {
         assert_eq!(w, g, "line {}", n + 1);
     }
     assert_eq!(want.len(), got.len());
+}
+
+/// A custom paragraph style, Fancy (its id isn't its name): Liberation Sans 13 pt in blue.
+const FANCY: &str = "<w:style w:type=\"paragraph\" w:customStyle=\"1\" w:styleId=\"FancyStyle\">\
+    <w:name w:val=\"Fancy\"/><w:basedOn w:val=\"Normal\"/><w:qFormat/><w:rPr>\
+    <w:rFonts w:ascii=\"Liberation Sans\" w:hAnsi=\"Liberation Sans\"/>\
+    <w:color w:val=\"2E74B5\"/><w:sz w:val=\"26\"/><w:szCs w:val=\"26\"/></w:rPr></w:style>";
+const FANCY_BLUE: Rgb = [0x2E, 0x74, 0xB5];
+const GREEN: Rgb = [0x1E, 0x90, 0x40];
+const LOOKS: &str =
+    "Plain, bold, italic, underlined, struck, big, red, and bold italic underlined.";
+const JUSTIFIED: &str = "A justified paragraph that is long enough to wrap onto a second line \
+    in a normal page width, so that the justification shows on its first line.";
+
+/// `word/styles.xml` with the custom style Fancy.
+fn with_fancy(styles: Vec<u8>) -> Vec<u8> {
+    let xml = String::from_utf8(styles).unwrap();
+    let at = xml.rfind("</w:styles>").unwrap();
+    format!("{}{FANCY}{}", &xml[..at], &xml[at..]).into_bytes()
+}
+
+/// A copy of fixture.docx with the custom style Fancy, and "After a page break." 16 pt by
+/// direct formatting.
+fn fancy_fixture(test: &str) -> PathBuf {
+    fixture_copy(test, "fancy.docx", |name, bytes| match name {
+        "word/styles.xml" => with_fancy(bytes),
+        "word/document.xml" => {
+            let xml = String::from_utf8(bytes).unwrap();
+            let plain = "<w:r><w:rPr></w:rPr><w:t>After a page break.</w:t></w:r>";
+            assert_eq!(xml.matches(plain).count(), 1);
+            xml.replace(
+                plain,
+                "<w:r><w:rPr><w:sz w:val=\"32\"/><w:szCs w:val=\"32\"/></w:rPr>\
+                 <w:t>After a page break.</w:t></w:r>",
+            )
+            .into_bytes()
+        }
+        _ => bytes,
+    })
+}
+
+/// A copy of fixture.docx with the custom style Fancy, whose body is a paragraph in Fancy
+/// of "Auto " (coloured automatic) and "red".
+fn auto_and_red(test: &str) -> PathBuf {
+    fixture_copy(test, "auto.docx", |name, bytes| {
+        match name {
+        "word/styles.xml" => with_fancy(bytes),
+        "word/document.xml" => document(
+            "<w:p><w:pPr><w:pStyle w:val=\"FancyStyle\"/></w:pPr>\
+             <w:r><w:rPr><w:color w:val=\"auto\"/></w:rPr><w:t xml:space=\"preserve\">Auto </w:t></w:r>\
+             <w:r><w:rPr><w:color w:val=\"C00000\"/></w:rPr><w:t>red</w:t></w:r></w:p>",
+        ),
+        _ => bytes,
+    }
+    })
+}
+
+/// [`auto_and_red`] with "red"'s colour cleared, saved; returns the file saved.
+fn auto_and_red_cleared(test: &str) -> PathBuf {
+    let original = auto_and_red(test);
+    let (mut doc, source) = open(&original);
+    let mut h = History::new();
+    let (a, b) = word(&doc, 0, "red");
+    let clear = LookPatch {
+        color: Some(None),
+        ..LookPatch::default()
+    };
+    apply(&mut doc, &mut h, |d| format(d, a, b, &clear));
+    let dest = temp(test, "saved.docx");
+    save(&dest, &original, &doc, &source);
+    dest
+}
+
+#[test]
+fn a_colour_cleared_in_a_coloured_style_is_the_styles() {
+    let dest = auto_and_red_cleared("auto");
+    // Slate reads an explicitly automatic colour as the style's: the paragraph is one run
+    // in Fancy's blue, and saves so, not copying the automatic colour.
+    let xml = part(&dest, "word/document.xml").unwrap();
+    let p = &body_children(&xml)[0];
+    assert!(!p.contains("<w:color"), "{p}");
+    let back = open(&dest).0;
+    let Block::Paragraph(p) = &back.blocks[0] else {
+        panic!("{:?}", back.blocks[0])
+    };
+    assert_eq!(p.text(), "Auto red");
+    assert_eq!(p.runs.len(), 1);
+    assert_eq!(
+        back.styles.look(&p.style, &p.runs[0].style).color,
+        Some(FANCY_BLUE)
+    );
+}
+
+/// The first `word` in top-level paragraph `block`, as a selection.
+fn word(doc: &Document, block: usize, word: &str) -> (Pos, Pos) {
+    let text = document_edit::text(doc, Container::Top, block).unwrap();
+    let at = text
+        .find(word)
+        .unwrap_or_else(|| panic!("no {word:?} in {text:?}"));
+    (Pos::new(block, at), Pos::new(block, at + word.len()))
+}
+
+/// The fancy fixture (its path), as opened and with what the format bar does applied
+/// through document-edit: Fancy on the paragraph of looks; there Liberation Mono on
+/// "Plain", strikethrough on "bold", underline on "italic", 20 pt on "big" (18 pt
+/// before), and "red"'s colour cleared to Fancy's blue; bold off on "Second" in a heading;
+/// "After a page break." back to its style's size; "end" green; the title (its style
+/// centres) aligned left, the right-aligned paragraph centred, and the justified one
+/// right-aligned.
+fn formatted(test: &str) -> (PathBuf, Document, Document, DocxSource) {
+    let original = fancy_fixture(test);
+    let (mut doc, source) = open(&original);
+    let opened = doc.clone();
+    let mut h = History::new();
+    let patch = |p: LookPatch| move |d: &Document, (a, b): (Pos, Pos)| format(d, a, b, &p);
+    let p = top(&doc, LOOKS);
+    apply(&mut doc, &mut h, |d| {
+        set_style(d, Container::Top, p..p + 1, "FancyStyle")
+    });
+    let font = patch(LookPatch {
+        font: Some(Some("Liberation Mono".into())),
+        ..LookPatch::default()
+    });
+    let at = word(&doc, p, "Plain");
+    apply(&mut doc, &mut h, |d| font(d, at));
+    let (a, b) = word(&doc, p, "bold");
+    apply(&mut doc, &mut h, |d| toggle(d, a, b, Flag::Strike));
+    let (a, b) = word(&doc, p, "italic");
+    apply(&mut doc, &mut h, |d| toggle(d, a, b, Flag::Underline));
+    let size = patch(LookPatch {
+        size: Some(SizeChange::Set(40)),
+        ..LookPatch::default()
+    });
+    let at = word(&doc, p, "big");
+    apply(&mut doc, &mut h, |d| size(d, at));
+    let clear = patch(LookPatch {
+        color: Some(None),
+        ..LookPatch::default()
+    });
+    let at = word(&doc, p, "red");
+    apply(&mut doc, &mut h, |d| clear(d, at));
+    let i = top(&doc, "Second heading");
+    let (a, b) = word(&doc, i, "Second");
+    apply(&mut doc, &mut h, |d| toggle(d, a, b, Flag::Bold));
+    let i = top(&doc, "After a page break.");
+    let unsize = patch(LookPatch {
+        size: Some(SizeChange::Clear),
+        ..LookPatch::default()
+    });
+    apply(&mut doc, &mut h, |d| unsize(d, (Pos::new(i, 0), end(d, i))));
+    let i = top(&doc, "The end.");
+    let green = patch(LookPatch {
+        color: Some(Some(GREEN)),
+        ..LookPatch::default()
+    });
+    let at = word(&doc, i, "end");
+    apply(&mut doc, &mut h, |d| green(d, at));
+    for (text, align) in [
+        ("Slate DOCX fixture", Align::Start),
+        ("A right-aligned paragraph.", Align::Center),
+        (JUSTIFIED, Align::End),
+    ] {
+        let i = top(&doc, text);
+        apply(&mut doc, &mut h, |d| {
+            set_align(d, Container::Top, i..i + 1, align)
+        });
+    }
+    (original, opened, doc, source)
+}
+
+/// The paragraphs [`formatted`] changes, by text.
+const FORMATTED: [&str; 7] = [
+    "Slate DOCX fixture",
+    LOOKS,
+    "Second heading",
+    "A right-aligned paragraph.",
+    JUSTIFIED,
+    "After a page break.",
+    "The end.",
+];
+
+#[test]
+fn the_format_bars_looks_save_and_read_back() {
+    let (original, opened, doc, source) = formatted("looks");
+    let dest = temp("looks", "saved.docx");
+    save(&dest, &original, &doc, &source);
+    // The style was the document's already: only document.xml changes.
+    untouched_but(&original, &dest, &["word/document.xml"], &[]);
+
+    // The edited paragraphs' markup.
+    let xml = part(&dest, "word/document.xml").unwrap();
+    let children = body_children(&xml);
+    let child = |text: &str| {
+        children
+            .iter()
+            .find(|c| c.contains(text))
+            .unwrap_or_else(|| panic!("no {text:?}"))
+            .as_str()
+    };
+    let has = |text: &str, markup: &[&str]| {
+        let c = child(text);
+        for m in markup {
+            assert!(c.contains(m), "{m} not in {c}");
+        }
+    };
+    has("Slate DOCX fixture", &["<w:jc w:val=\"left\"/>"]);
+    has(
+        "Plain",
+        &[
+            "<w:pStyle w:val=\"FancyStyle\"/>",
+            "<w:rFonts w:ascii=\"Liberation Mono\" w:hAnsi=\"Liberation Mono\"/>",
+            "<w:strike/>",
+            "<w:u w:val=\"single\"/>",
+            "<w:sz w:val=\"40\"/>",
+        ],
+    );
+    assert!(!child("Plain").contains("<w:color"), "{}", child("Plain"));
+    assert!(!child("Plain").contains("<w:jc"), "{}", child("Plain"));
+    has(">Second<", &["<w:b w:val=\"0\"/>"]);
+    has("A right-aligned", &["<w:jc w:val=\"center\"/>"]);
+    has("A justified", &["<w:jc w:val=\"right\"/>"]);
+    has(">end<", &["<w:color w:val=\"1E9040\"/>"]);
+    assert!(!child("After a page break.").contains("<w:sz"));
+
+    // Read back, every block is as edited, and every one not edited as it was.
+    let back = open(&dest).0;
+    assert_eq!(back.styles, opened.styles);
+    assert_eq!(back.blocks.len(), doc.blocks.len());
+    let changed: Vec<usize> = FORMATTED.iter().map(|t| top(&doc, t)).collect();
+    for (i, b) in back.blocks.iter().enumerate() {
+        assert_eq!(b, &doc.blocks[i], "block {i}");
+        if !changed.contains(&i) {
+            assert_eq!(b, &opened.blocks[i], "block {i}");
+        }
+    }
+
+    // Each look shows as set, the style's where cleared.
+    let para = |text: &str| match &back.blocks[top(&back, text)] {
+        Block::Paragraph(p) => p,
+        b => panic!("{b:?}"),
+    };
+    let run = |text: &str, run: &str| {
+        let p = para(text);
+        let r: &Run = p
+            .runs
+            .iter()
+            .find(|r| r.text == run)
+            .unwrap_or_else(|| panic!("no run {run:?} in {p:?}"));
+        (r.style.clone(), back.styles.look(&p.style, &r.style))
+    };
+    assert_eq!(para(LOOKS).style, "FancyStyle");
+    assert_eq!(back.styles.style_of("FancyStyle").name, "Fancy");
+    let (_, plain) = run(LOOKS, "Plain");
+    assert_eq!(
+        (plain.font.as_str(), plain.size, plain.color),
+        ("Liberation Mono", 26, Some(FANCY_BLUE))
+    );
+    let (_, bold) = run(LOOKS, "bold");
+    assert!(bold.bold && bold.strike && !bold.underline, "{bold:?}");
+    assert_eq!((bold.font.as_str(), bold.size), ("Liberation Sans", 26));
+    let (_, italic) = run(LOOKS, "italic");
+    assert!(italic.italic && italic.underline && !italic.strike);
+    let (big, big_look) = run(LOOKS, "big");
+    assert_eq!((big.size, big_look.size), (Some(40), 40));
+    let (red, red_look) = run(LOOKS, ", red, and ");
+    assert_eq!((red.color, red_look.color), (None, Some(FANCY_BLUE)));
+    let (second, second_look) = run("Second heading", "Second");
+    assert_eq!((second.bold, second_look.bold), (Some(false), false));
+    assert!(run("Second heading", " heading").1.bold);
+    let (page, page_look) = run("After a page break.", "After a page break.");
+    assert_eq!((page.size, page_look.size), (None, 24));
+    let Block::Paragraph(before) = &opened.blocks[top(&opened, "After a page break.")] else {
+        panic!()
+    };
+    assert_eq!(before.runs[0].style.size, Some(32));
+    assert_eq!(run("The end.", "end").1.color, Some(GREEN));
+    assert_eq!(run("The end.", "The ").1.color, None);
+    assert_eq!(para("Slate DOCX fixture").align, Align::Start);
+    assert_eq!(
+        back.styles
+            .style_of(&para("Slate DOCX fixture").style)
+            .para
+            .align,
+        Align::Center
+    );
+    assert_eq!(para("A right-aligned paragraph.").align, Align::Center);
+    assert_eq!(para(JUSTIFIED).align, Align::End);
+}
+
+#[test]
+#[ignore = "needs LibreOffice: cargo test -p docx --test save -- --ignored"]
+fn libreoffice_reads_the_format_bars_looks() {
+    let (original, _, doc, source) = formatted("libreoffice-looks");
+    let dest = temp("libreoffice-looks", "saved.docx");
+    save(&dest, &original, &doc, &source);
+    let (before, after) = (lo_dump(&original, 2182), lo_dump(&dest, 2182));
+    // A dump line with fields set, and its text (the last field) when given.
+    let with = |line: &str, fields: &[(usize, &str)], text: Option<&str>| {
+        let mut f: Vec<String> = line.split('\t').map(str::to_owned).collect();
+        for (i, v) in fields {
+            f[*i] = (*v).to_owned();
+        }
+        if let Some(text) = text {
+            *f.last_mut().unwrap() = format!("\"{text}\"");
+        }
+        f.join("\t")
+    };
+    let fancy = |flags: &str, font: &str, size: &str, text: &str| {
+        format!("run\t{flags}\t{font}\t{size}\t2E74B5\t\"{text}\"")
+    };
+    let sans = |flags: &str, text: &str| fancy(flags, "Liberation Sans", "13", text);
+    let mut want: Vec<String> = Vec::new();
+    let mut lines = before.lines().peekable();
+    while let Some(line) = lines.next() {
+        let para = |t: &str| line.starts_with("para\t") && line.ends_with(&format!("\"{t}\""));
+        if para("Slate DOCX fixture") {
+            want.push(with(line, &[(4, "start")], None));
+        } else if para(LOOKS) {
+            want.push(with(line, &[(1, "Fancy")], None));
+            while lines.peek().is_some_and(|l| l.starts_with("run\t")) {
+                lines.next();
+            }
+            want.extend([
+                fancy("-", "Liberation Mono", "13", "Plain"),
+                sans("-", ", "),
+                sans("bs", "bold"),
+                sans("-", ", "),
+                sans("iu", "italic"),
+                sans("-", ", "),
+                sans("u", "underlined"),
+                sans("-", ", "),
+                sans("s", "struck"),
+                sans("-", ", "),
+                fancy("-", "Liberation Sans", "20", "big"),
+                sans("-", ", red, and "),
+                sans("biu", "bold italic underlined"),
+                sans("-", "."),
+            ]);
+        } else if para("Second heading") {
+            want.push(line.to_owned());
+            let run = lines.next().unwrap();
+            want.push(with(run, &[(1, "-")], Some("Second")));
+            want.push(with(run, &[], Some(" heading")));
+        } else if para("A right-aligned paragraph.") {
+            want.push(with(line, &[(4, "center")], None));
+        } else if para(JUSTIFIED) {
+            want.push(with(line, &[(4, "end")], None));
+        } else if para("After a page break.") {
+            want.push(line.to_owned());
+            let run = lines.next().unwrap();
+            assert_eq!(run.split('\t').nth(3), Some("16"), "{run}");
+            want.push(with(run, &[(3, "12")], None));
+        } else if para("The end.") {
+            want.push(line.to_owned());
+            let run = lines.next().unwrap();
+            want.push(with(run, &[], Some("The ")));
+            want.push(with(run, &[(4, "1E9040")], Some("end")));
+            want.push(with(run, &[], Some(".")));
+        } else {
+            want.push(line.to_owned());
+        }
+    }
+    let got: Vec<&str> = after.lines().collect();
+    for (n, (w, g)) in want.iter().zip(&got).enumerate() {
+        assert_eq!(w, g, "line {}", n + 1);
+    }
+    assert_eq!(want.len(), got.len());
+}
+
+#[test]
+#[ignore = "needs LibreOffice: cargo test -p docx --test save -- --ignored"]
+fn libreoffice_shows_a_colour_cleared_in_a_coloured_style_as_the_styles() {
+    let dest = auto_and_red_cleared("libreoffice-auto");
+    assert_eq!(
+        lo_dump(&dest, 2183),
+        "para\tFancy\t-\t\"\"\tstart\t0\t0\tauto:100\t0\t0\t\"Auto red\"\n\
+         run\t-\tLiberation Sans\t13\t2E74B5\t\"Auto red\"\n"
+    );
 }

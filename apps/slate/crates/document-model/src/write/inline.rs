@@ -196,8 +196,9 @@ fn pieces(runs: &[Run], mode: Mode) -> Vec<Piece<'_>> {
     let mut pieces: Vec<Piece<'_>> = Vec::with_capacity(runs.len());
     for run in runs.iter().filter(|r| !r.text.is_empty()) {
         let s = &run.style;
+        let on = |v: Option<bool>| v == Some(true);
         let look = Look {
-            flags: [s.strike, s.bold, s.italic],
+            flags: [on(s.strike), on(s.bold), on(s.italic)],
             code: s.code,
             raw: s.raw && !s.code,
             link: s.link.as_deref(),

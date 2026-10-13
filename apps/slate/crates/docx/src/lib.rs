@@ -4,8 +4,11 @@
 //!
 //! `zip` opens the package and `quick-xml` streams `word/document.xml`. Paragraph and run
 //! looks resolve through `word/styles.xml` (document defaults, `basedOn` chains, the
-//! paragraph style's then the character style's properties, then direct formatting), list
-//! kinds, levels, and numbers through `word/numbering.xml`, and hyperlinks and pictures
+//! paragraph style's then the character style's properties, then direct formatting) and
+//! the theme's fonts (`word/theme/theme1.xml`): the document's paragraph styles become its
+//! [`StyleSheet`](document_model::StyleSheet), each paragraph names its style, and each
+//! run holds its character style's and its own formatting as overrides. List kinds,
+//! levels, and numbers resolve through `word/numbering.xml`, and hyperlinks and pictures
 //! through the part's relationships. Headers, footers, footnotes, comments, text boxes,
 //! and field codes are not read (field results are).
 
@@ -128,6 +131,7 @@ fn read_package<R: Read + Seek>(reader: R) -> Result<(Document, MainPart), DocxE
     let (blocks, body) = body::read(&xml, &styles, &numbering, &rels, &mut package)?;
     let doc = Document {
         blocks,
+        styles: styles.sheet(),
         format: Format::Docx,
     };
     let main = MainPart {
@@ -161,8 +165,9 @@ pub(crate) struct Package<R> {
 }
 
 impl<R: Read + Seek> Package<R> {
-    /// The styles and list numbering the main part's relationships `rels` name (else at
-    /// their usual names); empty when the package has none.
+    /// The styles (with the theme's fonts) and list numbering the main part's
+    /// relationships `rels` name (else at their usual names); empty when the package has
+    /// none.
     fn styles_and_numbering(
         &mut self,
         rels: &HashMap<String, Rel>,
@@ -172,9 +177,13 @@ impl<R: Read + Seek> Package<R> {
                 .find(|r| !r.external && rel_kind(r) == kind)
                 .map_or_else(|| default.to_owned(), |r| r.target.clone())
         };
+        let theme = match self.text(&part_of("theme", "word/theme/theme1.xml"))? {
+            Some(xml) => styles::Theme::parse(&xml)?,
+            None => styles::Theme::default(),
+        };
         let styles = match self.text(&part_of("styles", "word/styles.xml"))? {
-            Some(xml) => styles::Styles::parse(&xml)?,
-            None => styles::Styles::default(),
+            Some(xml) => styles::Styles::parse(&xml, theme)?,
+            None => styles::Styles::empty(theme),
         };
         let numbering = match self.text(&part_of("numbering", "word/numbering.xml"))? {
             Some(xml) => numbering::Numbering::parse(&xml, &styles)?,

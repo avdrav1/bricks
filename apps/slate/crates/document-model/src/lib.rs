@@ -3,18 +3,21 @@
 //!
 //! A [`Document`] is a flat list of [`Block`]s: paragraphs, list items, code blocks,
 //! tables (whose cells hold blocks), images, page breaks, rules, and [`Raw`] source Slate
-//! can't model. A paragraph holds [`Run`]s of text with one look each. Readers convert a
-//! file into the model: plain text ([`read_text`]) and Markdown ([`read_markdown`]) here,
+//! can't model; and its paragraph styles ([`StyleSheet`]). A paragraph names its style and
+//! holds [`Run`]s of text, each with its direct formatting over the style. Readers convert
+//! a file into the model: plain text ([`read_text`]) and Markdown ([`read_markdown`]) here,
 //! DOCX in the `docx` crate. Writers convert it back: plain text ([`write_text`]) and
 //! Markdown ([`write_markdown`]).
 
 mod markdown;
 mod matching;
+mod styles;
 mod text;
 mod write;
 
 pub use markdown::{load_linked_images, read_markdown, read_markdown_source, MarkdownSource};
 pub use matching::{match_blocks, match_blocks_by};
+pub use styles::{LineSpacing, Look, ParaLook, Style, StyleSheet};
 pub use text::{decode, read_text, Encoding, LineEnding, TextInfo};
 pub use write::{encode, write_markdown, write_text, Unencodable};
 
@@ -24,10 +27,11 @@ use std::sync::Arc;
 /// A colour as red, green, blue.
 pub type Rgb = [u8; 3];
 
-/// A document read from a file: its blocks, and what the file was.
+/// A document read from a file: its blocks, its paragraph styles, and what the file was.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Document {
     pub blocks: Vec<Block>,
+    pub styles: StyleSheet,
     pub format: Format,
 }
 
@@ -62,10 +66,12 @@ pub enum Block {
     Raw(Raw),
 }
 
-/// A paragraph: runs of text in one style.
+/// A paragraph: runs of text in one paragraph style.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Paragraph {
-    pub style: ParagraphStyle,
+    /// Its style's id in the document's [`StyleSheet`]; empty (or unknown) for the
+    /// document's default style.
+    pub style: String,
     pub align: Align,
     /// Nesting beyond the paragraph's own style: the list level a list item's further
     /// paragraphs continue (1 = inside a first-level item), or the quote depth beyond one.
@@ -74,9 +80,9 @@ pub struct Paragraph {
 }
 
 impl Paragraph {
-    pub fn new(style: ParagraphStyle) -> Self {
+    pub fn new(style: impl Into<String>) -> Self {
         Self {
-            style,
+            style: style.into(),
             ..Self::default()
         }
     }
@@ -118,16 +124,6 @@ impl Paragraph {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub enum ParagraphStyle {
-    #[default]
-    Normal,
-    Title,
-    /// Heading level 1 to 6.
-    Heading(u8),
-    Quote,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Align {
     #[default]
     Start,
@@ -143,17 +139,21 @@ pub struct Run {
     pub style: RunStyle,
 }
 
+/// A run's direct formatting: each look it sets over its paragraph's style (`None` leaves
+/// the style's); see [`StyleSheet::look`].
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct RunStyle {
-    pub bold: bool,
-    pub italic: bool,
-    pub underline: bool,
-    pub strike: bool,
+    pub bold: Option<bool>,
+    pub italic: Option<bool>,
+    pub underline: Option<bool>,
+    pub strike: Option<bool>,
     /// Inline code: shown in a monospace font.
     pub code: bool,
     /// Source Slate shows as written (Markdown's inline HTML).
     pub raw: bool,
-    /// Font size in half-points (DOCX's unit); `None` is the document's normal size.
+    /// The font family's name.
+    pub font: Option<String>,
+    /// Font size in half-points (DOCX's unit).
     pub size: Option<u16>,
     pub color: Option<Rgb>,
     /// The link's target URL.

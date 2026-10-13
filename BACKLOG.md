@@ -19,6 +19,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 - [x] SL0: slate opens the fixture .txt, .md, and .docx files and a real-world .docx and shows their paragraphs, headings, emphasis, lists, tables, links, and pictures as LibreOffice reads them (dump comparison), read-only, reading off the UI thread, in a pageless column at the text width the user picks
 - [x] SL1: slate edits and saves .txt, .md, and .docx with undo; LibreOffice reopens a saved .docx with the edits and everything else unchanged; an edited Markdown file changes only the edited blocks
 - [ ] SL2: slate finds and replaces text across paragraphs and table cells with undo, and after a crash offers back the unsaved edits of every open document without touching its file
+- [x] SL3: slate draws each .docx in its own fonts and paragraph styles (LibreOffice's dump matches), the format bar sets style, font, size, bold, italic, underline, strikethrough, colour, and alignment with undo, saved .docx files read back in LibreOffice with them, and re-wrap and typing stay within SL1's targets on a multi-font Word document
 - [x] FR0: frame opens the fixture .pptx files and a real-world PowerPoint deck and shows every slide's shapes, text, and pictures where LibreOffice reads them (dump comparison); F5 plays the deck full screen
 - [x] FR1: frame edits slide text on the slide and in the outline view, moves and resizes shapes with snapping, formats through the inspector, inserts text, shapes, pictures, and tables, and adds, deletes, and reorders slides, all with undo; File → New starts a deck; Save writes .pptx that LibreOffice reopens with the edits and everything else unchanged; the spec's reference task takes fewer input actions than in PowerPoint
 
@@ -135,6 +136,10 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | SLATE-16 | SL2 | P0 | done | SLATE-14 | Find and replace (Ctrl+F, Ctrl+H) across paragraphs and table cells | Ctrl+F shows a find bar whose matches (case toggle) are highlighted in the flow, with a count; Enter and Shift+Enter go to the next and previous match, through table cells; Ctrl+H replaces one or all, replace all undoing as one step; on a 150,000-word document the first match shows in under 100 ms and typing in the bar never blocks the UI thread |
 | SLATE-17 | SL2 | P0 | done | SLATE-7, SLATE-8 | Crash recovery: unsaved edits journaled and offered back | With unsaved edits in a .txt, a .md, and a .docx window, `kill -9` then relaunching offers to restore each; restoring shows the edits (title marked "• ") and leaves the files as they were until saved; discarding or a clean close leaves no recovery data; recovery data is written off the UI thread at most every few seconds |
 | SLATE-18 | SL2 | P0 | done | SLATE-8 | New blank document (Ctrl+N, New Document) | Ctrl+N and New Document open an Untitled window with an empty page; typing marks it; the first Ctrl+S asks where (Save As) and writes a .docx that Slate and LibreOffice read back with the text and its heading style |
+| SLATE-19 | SL3 | P0 | done | SLATE-18 | Style sheet and fonts in the model and the DOCX reader (ADR 0008) | Each paragraph of the .docx corpus names its style by id from `Document::styles` (custom styles included, based-on resolved), and its style name, alignment, spacing, and indents, and each run's font family, size, bold, italic, underline, strikethrough, and colour, match LibreOffice's dump (theme and default fonts resolved); Markdown and text read into the built-in sheet; `ParagraphStyle` is gone and every existing test passes |
+| SLATE-20 | SL3 | P0 | done | SLATE-19 | Draw the document's fonts and style looks | A .docx with paragraphs in Liberation Serif, Liberation Sans, and Liberation Mono draws each in its font: the screenshot's text widths match Pango's measure of that font within 2 px, and the three differ. Styles' space before and after, left and first-line indents, and line spacing (multiple, exact, at least) place each paragraph by their twips at 96 dpi (flow tests to the pixel; a screenshot within 2 px). Markdown and text look as before (check_slate's measures). On a generated 150,000-word .docx in three fonts, whole-document re-wrap stays under 500 ms and typing p99 under 25 ms |
+| SLATE-21 | SL3 | P0 | done | SLATE-20 | Format bar: style, font, size, B/I/U/S, colour, alignment | The bar shows the caret's style, font, size, and looks (blank when the selection mixes them); choosing each applies to the selection or what's typed next as one undo step; the style picker lists the document's styles in their looks; Ctrl+U, Ctrl+L/E/R/J, Ctrl+] and Ctrl+[ work; plain-text files hide the bar |
+| SLATE-22 | SL3 | P0 | done | SLATE-21 | Save fonts, styles, and looks in .docx | A .docx edited through the format bar (a custom style, a font, a size cleared and set, underline, strikethrough, colour, alignment) reopens in LibreOffice with exactly those, every other part unchanged; Markdown keeps headings and quotes and drops what it can't hold |
 | FRAME-1 | FR0 | P0 | done | - | Presentation model and PPTX package: slide order, size, shapes, placeholder inheritance | Slide count, order, size, and every shape's frame in the fixtures and a real-world deck match LibreOffice's dump within 1 EMU; placeholders without a frame take their layout's or master's |
 | FRAME-2 | FR0 | P0 | done | FRAME-1 | PPTX text: runs, fonts, sizes, colours, bullets, levels, alignment, inherited styles | Every paragraph's text, level, alignment, and every run's size, bold, italic, and colour match LibreOffice's dump; theme colours resolve with lumMod, lumOff, tint, and shade |
 | FRAME-3 | FR0 | P0 | done | FRAME-1 | PPTX pictures, fills, outlines, backgrounds, groups, and tables | Pictures carry their bytes; group children land where LibreOffice reads them; table cells carry text and fills; unsupported content becomes a labelled shape |
@@ -158,11 +163,128 @@ Story notes, decisions made mid-story, and follow-ups go here, newest first.
 - **2026-10-13 SLATE-17:** crash recovery. Brick's journal directory (owner lock per process, atomic journal writes, crashed sessions newest first) moved to `suite_file::recovery` now that two apps need it; Brick keeps its header reading (`recovery::crashed`) and journal format. Slate's journal (`$XDG_STATE_HOME/slate/recovery/<pid>-<n>.journal`) is a `SLATEJ1 ` line with a JSON header (path, the file's size and modification time when read or saved, time written) and the document's blocks as JSON (pictures' bytes as number arrays, so a document with pictures makes a big journal).
   - `saving::Saver` keeps the window's journal: 5 s after the first edit it doesn't hold (`recovery::WRITE_AFTER`), it clones the document on the UI thread and writes it with `gio::spawn_blocking`; the next write is scheduled once that one ends, so writes come at least 5 s apart. Nothing unsaved (saved, or every edit undone) removes it; so does closing the window, which happens only once its edits are saved or discarded. SIGTERM ends Slate without closing windows, so it leaves journals like a crash; `check_slate.sh`'s `quit` clears them between sections.
   - Restoring opens the file as it is and applies `document_edit::replace_document` (every block replaced, one undo step), so the title shows "• " and one undo gives the file's text back; the journal's pictures are decoded into the page's textures. A journal whose file changed size or time since it was read or saved isn't put onto it ("changed after the crash": Keep for Later, Discard). The start window stays open while it still lists sessions, so each can be restored in turn.
-  - Acceptance: `scripts/check_slate.sh` section 24 (24 checks, SLATE OK 156): .txt, .md, and .docx edits, kill -9, the start window offering the three, Restore from there and from the "Restore unsaved edits?" prompt, titles "• ", files unchanged until saved, no journal after a clean close or a discard; typing every half second for 20 s, the journal first appeared after 5.2 s and was rewritten 3 times, at least 5.17 s apart. `scripts/check_recovery.sh` (Brick, on the moved store). Unit tests: `suite-file` (2, moved from Brick), `brick` recovery (1), `slate` journal round trip (1), `document-edit` `replacing_the_document_is_one_step`.
+  - Acceptance: `scripts/check_slate.sh` section 27 (24 checks; SLATE OK, 209 checks, after merging SL3's main): .txt, .md, and .docx edits, kill -9, the start window offering the three, Restore from there and from the "Restore unsaved edits?" prompt, titles "• ", files unchanged until saved, no journal after a clean close or a discard; typing every half second for 20 s, the journal first appeared after 5.2 s and was rewritten 3 times, at least 5.17 s apart. The check's AT-SPI helper gains `choose` (a button in a row or a dialog) and `count`. `scripts/check_recovery.sh` RECOVERY OK (Brick, on the moved store). Unit tests: `suite-file` (2, moved from Brick), `brick` recovery (1), `slate` journal round trip (1), `document-edit` `replacing_the_document_is_one_step`.
+- **2026-10-13 SL3 gate:** approved by the user, with two caveats:
+  - The GUI check doesn't click the bar's Bold, Italic, and Strikethrough buttons. Those looks are covered by document-edit tests and by Ctrl+B and Ctrl+I in earlier sections.
+  - Performance was measured on GTK's cairo renderer, because this machine's GL and Vulkan renderers segfault in every GTK 4 app. One back-to-back run peaked at 594 ms; four solo runs gave 296-388 ms.
+  - Merging main brought in SLATE-16 (find and replace) and Slate v0.1.2. Seven files conflicted.
+    - The find code's unit tests moved to the direct-formatting model (`Some(true)`, a style sheet on the `Document`).
+    - The find bar sits above the format bar; it stays hidden until Ctrl+F.
+    - The find section of `check_slate.sh` is now 26.
+  - Merged build: `scripts/check_slate.sh` SLATE OK, 186 checks; the LibreOffice save tests pass. Find perf: first match 12.8 ms (target < 100), typing stall 4.3 ms (target < 16).
+- **2026-10-13 SLATE-22:** Slate saves the format bar's looks in .docx (ADR 0008). A subagent built the tests; it was integrated and verified here.
+  - One writer bug, found by a new test and fixed:
+    - A rewritten run copies another run's `w:rPr` when their direct formatting matches.
+    - Slate reads an explicit `<w:color w:val="auto"/>` as "no colour", meaning the style's. So a colour cleared in a coloured style could copy a neighbour's `w:color auto`, and LibreOffice showed black.
+    - `run()` now knows the paragraph style's colour. Such a run is written without `w:color`, so the style's colour shows.
+  - Already right, now proven: cleared properties are removed, not copied from the template; `jc` is written when it differs from the style's, left included; custom style ids go in verbatim; bold off is `w:b w:val="0"`.
+  - Follow-up (the reader, from SLATE-19): `RunStyle::color` can't tell an explicit automatic colour from "the style's".
+    - An automatic run in a coloured style shows the style's colour, where Word shows black.
+    - Once such a paragraph is rewritten, it saves that way too.
+    - A `Color::Auto` override would fix both.
+  - Acceptance:
+    - `cargo test -p docx --test save -- --include-ignored`, 12 tests passing against LibreOffice 26.8.1.1. The edits are made through document-edit on a fixture copy with a custom style Fancy (Liberation Sans 13, blue):
+      - Fancy on a paragraph.
+      - Liberation Mono, strikethrough, underline, and 20 pt on words.
+      - A colour cleared and another set to 1E9040.
+      - Bold off in Heading 2.
+      - A direct 16 pt cleared back to the style.
+      - Alignments: left on the centred Title, centre, and right.
+    - Only `word/document.xml` changes, and Slate reads every look back through `StyleSheet::look`.
+    - LibreOffice's dump equals the original's line by line except exactly those looks.
+    - A colour cleared in a coloured style reads as the style's in Slate and in LibreOffice.
+    - `document-edit` `markdown_keeps_headings_quotes_and_emphasis_and_drops_the_rest`: headings, quotes, bold, italic, and strikethrough are written as `##`, `>`, `**`, `*`, and `~~`; font, size, colour, underline, and alignment are dropped; it reads back with the same text and kept looks.
+    - `scripts/check_slate.sh` SLATE OK, 171 checks, 9 of them new in section 25. After the bar's edits on bar.docx and Ctrl+S, `document.xml` has Fancy's `pStyle`, `jc` center, `rFonts` Liberation Mono, `sz` 40, `u`, and the red colour, and the other paragraphs are as they were. Reopened, AT-SPI shows the same looks, the line centred, and the bar showing them.
+- **2026-10-13 SLATE-21:** Slate has a format bar (ADR 0008). A subagent built it; it was integrated and verified here.
+  - document-edit (`tests/format.rs`, 7 tests):
+    - `format(doc, from, to, &LookPatch)` sets font, size (set, clear, or step, 1 to 400 pt), bold, italic, underline, strike, and colour (set or clear) on a selection as one undoable edit, keeping the selection. Overrides equal to the style's are kept, so a save can't lose them.
+    - `set_align` sets the paragraphs a selection touches, list items included, as one looks edit.
+    - `looks(doc, from, to, typing)` summarises the style, font, size, flags, colour, and alignment, each `None` when mixed.
+    - `Flag` gains `Underline` and `Strike`. `formatted` gives the look typed next.
+  - Window (`format_bar.rs`), shown between the header bar and the page for .md and .docx in a horizontally scrolling strip (so a 640 px window still fits), and absent for plain text:
+    - Style: the document's styles in sheet order, each row in its own font, size (capped at 16 pt), bold, and italic.
+    - Font: searchable; installed Pango families plus any the document names.
+    - Size, Bold, Italic, Underline, Strikethrough, Colour (`ColorDialogButton` plus Automatic Colour), and four linked alignment toggles.
+    - Mixed values show blank. GTK 4.14's drop-down always keeps an item, so the bar draws the button label itself and catches clicks on the held row.
+    - Updates from the caret never apply anything, and refreshes coalesce into one idle. Each change is one undo step on the selection or the typing look (style and alignment on the caret's paragraph), and the keys go back to the page.
+  - Keys: Ctrl+U, Ctrl+L/E/R/J, Ctrl+] and Ctrl+[ (1 pt steps). The Format menu gains Underline, Strikethrough, and Alignment.
+  - Behaviour change: style, alignment, list, and indent commands given with a selection now keep that selection. They used to select the whole blocks they changed, which broke applying several looks to the same word in a row.
+  - `check_slate.sh`: the bar pushes the page down about 43 px. Screenshot measurements now start at a shared `TOP=96` (section 18's tabbed window at `TOP+25`), and each earlier section measures the same as before: heading height 200%, bold ink 174%, list shift 28 px.
+  - Acceptance: `scripts/check_slate.sh` SLATE OK, 162 checks, 36 of them in the new section 24, on fixture.docx and a generated bar.docx.
+    - The fixture's title shows Title, Liberation Sans, 28, Bold, and Centre in the bar. With the caret in Normal text it shows Normal, Liberation Sans, and 11.
+    - On "beta", read back through AT-SPI:
+      - Liberation Mono picked from the searched list.
+      - Size 20.
+      - Underline single.
+      - Red, as fg 224,27,36.
+      - Centre: the line's ink moves from 179 px left of the window's middle to 1 px.
+      - The custom style Fancy gives the rest of the line Liberation Serif 14 italic, keeps the word's own looks, and the bar shows Fancy.
+    - Six Ctrl+Z presses undo exactly one change each.
+    - Ctrl+U, Ctrl+] twice, and Ctrl+E give underline, 13, and centred. Ctrl+[ then gives 12.
+    - "plain bold" shows Bold off and the size blank. Selecting everything blanks style, font, and size, and Normal then makes it all Normal.
+    - w.txt has no Font control.
+- **2026-10-13 SLATE-20:** Slate draws each document's own fonts and paragraph looks (ADR 0008). A subagent built it; it was integrated and verified here.
+  - One look path for every format. The shaper starts each layout from the default style's font and lays each paragraph's style look over the whole paragraph, so an empty paragraph has its style's line height. Each run then adds only the overrides that differ from its style.
+    - The Markdown scale tables (`HEADING_SCALE`, `TITLE_SCALE`, `style_looks`) are gone: the built-in sheet's sizes draw Markdown.
+    - Code and raw text stay monospace; links, table header rows, and quotes keep their looks.
+    - Fontconfig substitutes faces, for example Calibri as Carlito. Slate has no substitution table.
+  - Paragraphs: space before and after come from the style's `ParaLook` at twips / 15 px, added and not collapsed, as Word does. So do the left indent and the first-line indent (Pango `set_indent`; a hanging line moves the box left).
+    - Line spacing:
+      - `Auto(1.0)` leaves Pango alone; a factor of 1 would be 1 px tighter.
+      - Other multiples use `set_line_spacing`.
+      - `Exact` and `AtLeast` use Pango's absolute line-height attribute, so `pango` now enables `v1_50` (Ubuntu 24.04 ships 1.52). Hit-testing and the caret come from Pango itself.
+    - The flow's heading, title, and quote spacing constants are gone. Lists, code, tables, and rules keep theirs.
+  - `flow::Look` is now a font, a size, and a weight. The flow asks the shaper for metrics once per look and estimates each box with its look's metrics and its line spacing.
+  - Visual change from SL1, from screenshots of every check section against the SLATE-19 binary:
+    - Markdown headings moved by a fraction of a point: the built-in sheet holds whole half-points, e.g. H3 at 15 pt instead of 14.85.
+    - Word documents now show their fonts: the fixture's body in Liberation Serif, its headings in Liberation Sans.
+    - Text and everything else is identical.
+  - `check_slate.sh` installs `ttf-liberation`, `ttf-carlito`, `ttf-caladea`, and `python-cairo`. With real Liberation Sans, word gaps are 6-7 px, so section 18's double-click word finder now splits on gaps over 4 px, not 6.
+  - Found on this machine, not in Slate: since about 11:00 every GTK 4 app segfaults in `gsk_renderer_render` with the GL, NGL, or Vulkan renderer: Slate, Frame built yesterday, and `~/.local/bin/strata` (core dumps 11:08). The cairo renderer works. NVIDIA 615.78.08; the earlier notes record a 615.71/615.78 kernel and userspace mismatch. A reboot is the likely fix. The performance numbers below were taken with `GSK_RENDERER=cairo`.
+  - Acceptance:
+    - `scripts/check_slate.sh` SLATE OK, 128 checks, 10 of them new in section 23, on a .docx built in the script:
+      - The same line in Liberation Serif, Sans, and Mono and in Calibri draws as wide as Pango measures it at 96 dpi: 273/274, 292/293, 392/393, and 267/267 px (Calibri as Carlito, and `fc-match` agrees). The widths differ.
+      - Space before 450 twips is 30 px and after 300 twips is 20 px; a left indent of 900 is 60 px; a 450 hanging line starts 30 px in and the next line at 60 px; exact 600-twip spacing gives four 40 px pitches.
+      - Every earlier section passes; they measure Markdown and text.
+    - Flow tests (fake shaper): before and after are summed; left, first-line, hanging, and nested-quote indents set their wrap widths, and list items ignore the style indent; exact, at-least, and multiple spacing match their estimates; metrics are asked once per font, size, and weight.
+    - Performance, `GSK_RENDERER=cairo cargo test --release -p slate --test flow_perf -- --ignored`. The new 150,000-word .docx has a Liberation Serif body, Liberation Sans headings, and Liberation Mono every 25th word, measured at Full 1853 px:
+      - Whole re-wrap max was 354, 296, 388, and 303 ms in four solo runs (p50 about 285; target < 500).
+      - The first run of a back-to-back sequence of four windows peaked at 594 ms (p50 346), an outlier recorded here.
+      - Visible re-wrap is one frame, max 12.6 ms. Scrolling p99 11.0 ms (target < 16). Typing p99 18.8 ms (target < 25).
+      - Markdown, at 898 px: re-wrap max 298 ms, typing p99 14.9 ms.
+      - This isn't the reference box.
+- **2026-10-13 SLATE-19:** Slate's model has style sheets and fonts (ADR 0008). A subagent built it against a fixed contract; it was integrated and verified here.
+  - document-model (`styles.rs`): `Document::styles`, a `StyleSheet` of `Style`s. Each style has an id, a name, based-on, next, outline level, title, a resolved `Look` (font, size, bold, italic, underline, strike, colour), and a `ParaLook` (alignment, space before and after, `LineSpacing`, left and first-line indent, in twips).
+    - `Paragraph.style` is a style id. `ParagraphStyle` is gone.
+    - `RunStyle` is the run's direct formatting: `Option` for every look, plus the new `font`. `StyleSheet::look(style, run)` gives what's drawn.
+    - `StyleSheet::builtin()` (Normal, Title, Heading 1-6, Quote) reproduces SL1's Markdown look, for Markdown and plain text.
+  - docx: the sheet is every paragraph style in styles.xml, custom ones included, resolved through docDefaults and based-on.
+    - It reads theme fonts (`theme1.xml` major and minor), `rFonts` (ascii over hAnsi, and the theme slots), `w:spacing`, `w:ind` (hanging included), `outlineLvl`, and `w:next`.
+    - A run's overrides are its character style plus its direct `rPr`.
+    - Writing: `pStyle` is the paragraph's id. Runs in rewritten paragraphs carry exactly their overrides (`w:val="0"` for `Some(false)`, Latin `rFonts`, `sz` and `szCs`). Unedited paragraphs stay byte for byte.
+  - Consumers moved to the sheet; drawing is unchanged on purpose, and SLATE-20 draws the fonts.
+    - Consumers: the flow, the shaper (sizes and colours from the resolved look), accessibility, document-edit (`set_style` by id; Enter after a heading takes the style's `next`; Ctrl+B and Ctrl+I write `Some(!all_on)`), and the clipboard (fragments carry style names, mapped by name on paste, else built-in ids, else the default).
+    - Changes from SL1:
+      - Heading levels come from `outlineLvl` before the "heading N" name, so a custom style based on a heading lays out as one.
+      - A .docx with no size anywhere draws at Word's default 10 pt.
+  - `scripts/lo_docx.py dump` now also gives each paragraph's alignment, its style's spacing, line spacing, and indents, and each run's font, size, and colour. All 7 recorded dumps were regenerated with LibreOffice 26.8.1.1, which reports start and end alignment as 5 and 6. `check_slate.sh` reads the paragraph text from the dump's last field.
+  - Deviations:
+    - A paragraph's own spacing and indents (direct `w:spacing` and `w:ind` on the paragraph) aren't modelled yet, only its style's. The dump reads the style's too.
+    - An edited run's `rStyle` is written as the direct formatting it resolves to.
+  - LibreOffice exceptions in the test, each narrow:
+    - Word's Normal and Body Text Indent show under LibreOffice's names.
+    - LibreOffice adds " (user)" to a style whose name clashes with one of its own.
+    - Lengths are compared within 1 twip, since LibreOffice stores 1/100 mm.
+  - Acceptance:
+    - `cargo test -p docx --test libreoffice`: fixture.docx and the 6 POI samples match LibreOffice's dump, 478 paragraphs and 393 runs. Each paragraph's style name (custom ones included), alignment, spacing, line spacing, and indents, and each run's font, size, bold, italic, underline, strikethrough, and colour, match.
+    - Live re-dumps of fixture, IllustrativeCases, and SampleDoc are byte-identical to the recordings.
+    - `cargo test -p docx --test save --test blank -- --include-ignored` passes against LibreOffice. `cargo test --workspace` passes, and `grep ParagraphStyle apps/slate` is empty.
+    - `scripts/check_slate.sh` SLATE OK, 118 checks: drawing is as before, with heading height, bold ink, and text widths measured.
+    - Performance, `cargo test --release -p slate --test flow_perf -- --ignored`: typing p99 18.2 ms (target < 25); whole-document re-wrap max 318 ms (target < 500); visible re-wrap in one frame, max 10.4 ms; scrolling frame CPU p99 9.8 ms (target < 16). The window was 1901x2100 on Hyprland, not the test's 1600x1000, so Full was 1853 px. This isn't the reference box.
 - **2026-10-12 SLATE-16:** find and replace. Ctrl+F (Edit → Find…) reveals a bar above the page (search entry, Match Case, count, previous, next, close); Ctrl+H (Edit → Replace…) adds a replace row (entry, Replace, Replace All). `document_edit::find` searches the editable blocks (top level and top-level tables' cells) in document order, case-folding by lowercase forms with byte offsets kept on the text's character boundaries; `replace_one` is a text edit in the match's first character's look, `replace_all` one blocks edit over the top-level range from the first match's block to the last's, so one undo takes it back.
   - The page clones the document on the UI thread (about 2 ms for 150,000 words) and searches the copy with `gio::spawn_blocking`; each keystroke cancels the previous search (an `AtomicBool` checked block by block) and only the newest result shows. Matches stay a sorted `Vec`; drawing a block finds its own by binary search, so showing a search costs nothing per match. A search keeps at most 100,000 matches ("100,000+").
   - Enter selects the current match when it isn't selected yet, else the next one; Shift+Enter the last before the caret, else the previous one. Replace does the same: the first press selects, the next replaces and selects the next match. Escape anywhere in the bar closes it and leaves the last match selected on the page.
-  - Acceptance: `cargo test --release -p slate --test flow_perf finding -- --ignored` on the 150,000-word document: the first match shows (call to the after-paint of the frame with the highlights) in at most 16.8 ms of five words (target < 100); typing "throughout" a letter at a time stalls a 4 ms UI timer at most 6.1 ms (target < 16), the call itself at most 2.4 ms. `scripts/check_slate.sh` section 23: count, Enter and Shift+Enter through a table cell, Match Case, Replace, Replace All, and one undo for Replace All (15 checks). `cargo test -p document-edit find` (5).
+  - Acceptance: `cargo test --release -p slate --test flow_perf finding -- --ignored` on the 150,000-word document: the first match shows (call to the after-paint of the frame with the highlights) in at most 16.8 ms of five words (target < 100); typing "throughout" a letter at a time stalls a 4 ms UI timer at most 6.1 ms (target < 16), the call itself at most 2.4 ms. `scripts/check_slate.sh` section 26 (built as 23; renumbered when SL3's sections 23 to 25 merged): count, Enter and Shift+Enter through a table cell, Match Case, Replace, Replace All, and one undo for Replace All (15 checks). `cargo test -p document-edit find` (5).
 - **2026-10-12 SLATE-18:** new documents (user decisions: build it; .docx is the default format). Ctrl+N (File → New), and a New Document button beside Open on the window `slate` shows without a file, open an Untitled window. Its document is Slate's built-in blank Word document (`docx::blank()`, written by `scripts/blank_docx.py` byte for byte the same each run: one empty paragraph; Normal, Title, Heading 1 to 6, Quote, and Hyperlink in Word's default look, Calibri 11 pt; no page setup), read from a private copy like any Word document, so the first save patches it and every style a heading or quote needs is already there.
   - The saver's path is optional: Save on an untitled document is Save As, suggesting Untitled.docx in the Documents folder (`XDG_DOCUMENTS_DIR`). Saving registers the window under its new file, so opening that file again brings the window forward.
   - `slate` without a file still shows the start window (as Brick does), now with New Document beside Open; it doesn't open a blank document by itself.

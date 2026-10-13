@@ -1123,6 +1123,7 @@ dependencies = [
  "docx",
  "flow",
  "gtk4",
+ "pango",
  "serde",
  "serde_json",
  "suite-core",

@@ -24,6 +24,9 @@ serde.workspace = true
 serde_json.workspace = true
 # UI toolkit: GTK 4 for the whole suite (docs/adr/0002-gtk4-for-the-suite.md).
 gtk.workspace = true
+# Only to turn on Pango 1.50's line-height attributes in GTK's Pango (`gtk::pango`), for
+# exact and least line spacing; Ubuntu 24.04 has Pango 1.52.
+pango = { version = "0.22", features = ["v1_50"] }
 
 [lints]
 workspace = true

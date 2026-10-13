@@ -7,7 +7,7 @@
 
 use document_model::{
     read_markdown, Align, Block, Encoding, Format, ImageFormat, ImageSource, ListKind, Paragraph,
-    ParagraphStyle, RawKind,
+    RawKind,
 };
 use std::path::Path;
 
@@ -23,9 +23,9 @@ fn runs(p: &Paragraph) -> String {
         let s = &r.style;
         let mut look = String::new();
         for (on, c) in [
-            (s.bold, 'b'),
-            (s.italic, 'i'),
-            (s.strike, 's'),
+            (s.bold == Some(true), 'b'),
+            (s.italic == Some(true), 'i'),
+            (s.strike == Some(true), 's'),
             (s.code, 'c'),
             (s.raw, 'r'),
         ] {
@@ -56,11 +56,10 @@ fn outline(blocks: &[Block], prefix: &str, out: &mut Vec<String>) {
     for b in blocks {
         let line = match b {
             Block::Paragraph(p) => {
-                let style = match p.style {
-                    ParagraphStyle::Normal => "P".to_owned(),
-                    ParagraphStyle::Title => "Title".to_owned(),
-                    ParagraphStyle::Heading(n) => format!("H{n}"),
-                    ParagraphStyle::Quote => "Quote".to_owned(),
+                let style = match p.style.as_str() {
+                    "Normal" => "P".to_owned(),
+                    "Quote" => "Quote".to_owned(),
+                    id => id.replace("Heading", "H"),
                 };
                 let indent = if p.indent > 0 {
                     format!(" indent {}", p.indent)

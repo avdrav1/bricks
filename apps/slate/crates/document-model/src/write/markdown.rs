@@ -39,19 +39,22 @@ use super::inline::{self, Mode};
 use super::{encode, ending, push_with_ending, Unencodable};
 use crate::markdown::MarkdownSource;
 use crate::{
-    match_blocks, Align, Block, CodeBlock, Image, ListItem, ListKind, Paragraph, ParagraphStyle,
-    RawKind, Table, TextInfo,
+    match_blocks, Align, Block, CodeBlock, Image, ListItem, ListKind, Paragraph, RawKind,
+    StyleSheet, Table, TextInfo,
 };
 
 const PAGE_BREAK: &str = "<div style=\"break-after: page\"></div>";
 
-/// A Markdown file of `blocks`, encoded per `info`. With `source`, every block equal to
-/// one of the source's (matched in order) is copied byte for byte from the source text,
-/// with the text between it and the next source block; only the others are written
-/// fresh, in the file's line ending. Also returns the source of the file written, for the
-/// next save (its blocks are `blocks`).
+/// A Markdown file of `blocks`, their paragraph styles in `styles`, encoded per `info`.
+/// Headings are the styles with an outline level (the title a level-1 heading), quotes
+/// the quote styles ([`Style::is_quote`](crate::Style::is_quote)). With `source`, every
+/// block equal to one of the source's (matched in order) is copied byte for byte from the
+/// source text, with the text between it and the next source block; only the others are
+/// written fresh, in the file's line ending. Also returns the source of the file written,
+/// for the next save (its blocks are `blocks`).
 pub fn write_markdown(
     blocks: &[Block],
+    styles: &StyleSheet,
     info: &TextInfo,
     source: Option<&MarkdownSource>,
 ) -> Result<(Vec<u8>, MarkdownSource), Unencodable> {
@@ -67,6 +70,7 @@ pub fn write_markdown(
     };
     let mut w = Writer {
         out: String::new(),
+        styles,
         lists: Vec::new(),
         last: None,
     };
@@ -300,10 +304,33 @@ enum Sep {
 
 struct Writer<'b> {
     out: String,
+    styles: &'b StyleSheet,
     /// The last item at each list level around the position written (outermost first).
     lists: Vec<ItemCtx>,
     /// The last block written.
     last: Option<&'b Block>,
+}
+
+/// How a paragraph's style is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Body,
+    Quote,
+    /// A heading of level 1 to 6.
+    Heading(usize),
+}
+
+fn kind(styles: &StyleSheet, p: &Paragraph) -> Kind {
+    let style = styles.style_of(&p.style);
+    if style.title {
+        Kind::Heading(1)
+    } else if let Some(n) = style.outline {
+        Kind::Heading(usize::from(n.clamp(1, 6)))
+    } else if style.is_quote() {
+        Kind::Quote
+    } else {
+        Kind::Body
+    }
 }
 
 impl<'b> Writer<'b> {
@@ -433,7 +460,7 @@ impl<'b> Writer<'b> {
     /// The list level `block` continues inside an item: its indent, or for a picture right
     /// after an empty item (its first block), that item's.
     fn nesting(&self, block: &Block) -> Option<u8> {
-        continuation(block).or_else(|| match (block, self.empty_item()) {
+        continuation(self.styles, block).or_else(|| match (block, self.empty_item()) {
             (Block::Image(_), Some(level)) => Some(level),
             _ => None,
         })
@@ -445,7 +472,7 @@ impl<'b> Writer<'b> {
         match self.last {
             Some(Block::ListItem(prev))
                 if prev.paragraph.runs.is_empty()
-                    && prev.paragraph.style == ParagraphStyle::Normal =>
+                    && kind(self.styles, &prev.paragraph) == Kind::Body =>
             {
                 Some(prev.level + 1)
             }
@@ -551,8 +578,8 @@ impl<'b> Writer<'b> {
     }
 
     fn paragraph(&self, p: &Paragraph) -> Option<String> {
-        match p.style {
-            ParagraphStyle::Normal => {
+        match kind(self.styles, p) {
+            Kind::Body => {
                 if p.runs.is_empty() {
                     return None;
                 }
@@ -563,7 +590,7 @@ impl<'b> Writer<'b> {
                     &prefix,
                 ))
             }
-            ParagraphStyle::Quote => {
+            Kind::Quote => {
                 if p.runs.is_empty() {
                     return None;
                 }
@@ -574,17 +601,18 @@ impl<'b> Writer<'b> {
                     &prefix,
                 ))
             }
-            ParagraphStyle::Heading(_) | ParagraphStyle::Title => Some(format!(
+            Kind::Heading(level) => Some(format!(
                 "{}{}",
                 " ".repeat(self.column(p.indent)),
-                heading(p)
+                heading(p, level)
             )),
         }
     }
 
     fn list_item(&self, item: &ListItem, ctx: &ItemCtx) -> String {
         let p = &item.paragraph;
-        let quote = if p.style == ParagraphStyle::Quote {
+        let kind = kind(self.styles, p);
+        let quote = if kind == Kind::Quote {
             "> ".repeat(usize::from(p.indent.saturating_sub(item.level)).max(1))
         } else {
             String::new()
@@ -600,8 +628,8 @@ impl<'b> Writer<'b> {
         if let ListKind::Task { checked } = item.kind {
             first.push_str(if checked { " [x]" } else { " [ ]" });
         }
-        let body = match p.style {
-            ParagraphStyle::Heading(_) | ParagraphStyle::Title => heading(p),
+        let body = match kind {
+            Kind::Heading(level) => heading(p, level),
             _ => inline::inline(&p.runs, Mode::Body),
         };
         if !body.is_empty() {
@@ -640,11 +668,7 @@ impl<'b> Writer<'b> {
 }
 
 /// A heading's line: `#` per level and its text.
-fn heading(p: &Paragraph) -> String {
-    let level = match p.style {
-        ParagraphStyle::Heading(n) => usize::from(n.clamp(1, 6)),
-        _ => 1,
-    };
+fn heading(p: &Paragraph, level: usize) -> String {
     let text = inline::inline(&p.runs, Mode::Heading);
     let hashes = "#".repeat(level);
     if text.is_empty() {
@@ -670,9 +694,9 @@ fn lines(text: &str, first: &str, rest: &str) -> String {
 }
 
 /// The list level a block continues inside an item (its indent), if it does.
-fn continuation(block: &Block) -> Option<u8> {
+fn continuation(styles: &StyleSheet, block: &Block) -> Option<u8> {
     let indent = match block {
-        Block::Paragraph(p) if p.style != ParagraphStyle::Quote => p.indent,
+        Block::Paragraph(p) if kind(styles, p) != Kind::Quote => p.indent,
         Block::CodeBlock(code) => code.indent,
         _ => 0,
     };

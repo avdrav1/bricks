@@ -2,19 +2,30 @@
 //! - SLATE-11: the visible text re-wraps within one frame, the whole document in under
 //!   500 ms, and scrolling keeps frame CPU p99 under 16 ms (`--bench-flow`);
 //! - SLATE-6: typing latency p99 is under 25 ms (`--bench-typing`);
+//! - SLATE-20: both again on the same text as a Word document in three fonts.
 //! - SLATE-16: a search's first match shows in under 100 ms, and typing a search never
 //!   stalls the UI thread for a frame (`--bench-find`).
 //!
 //! Writes ADR 0007's spike document as Markdown (headings, two bullet levels, bold and
-//! italic words) and runs `slate FILE --bench-…` on it. Opens a real window, so it needs a
-//! graphical session; on a tiling desktop make the window float at 1600x1000 or the
+//! italic words), and as a .docx (ADR 0008: body text in Liberation Serif, headings in
+//! Liberation Sans, every 25th word in Liberation Mono, saved through the docx crate onto
+//! its blank document), and runs `slate FILE --bench-…` on them. Opens a real window, so it
+//! needs a graphical session; on a tiling desktop make the window float at 1600x1000 or the
 //! numbers are for another size (the flow report says which). Timing is asserted only in
 //! optimized builds:
 //! `cargo test --release -p slate --test flow_perf -- --ignored --nocapture`
 
+use document_model::{Block, Paragraph};
+use std::path::Path;
 use std::process::Command;
+use std::sync::atomic::AtomicBool;
 
 const WORDS: usize = 150_000;
+/// The Word document's fonts, and how often a word is in the monospace one.
+const BODY_FONT: &str = "Liberation Serif";
+const HEADING_FONT: &str = "Liberation Sans";
+const MONO_FONT: &str = "Liberation Mono";
+const MONO_EVERY: usize = 25;
 
 const VOCAB: [&str; 48] = [
     "the",
@@ -162,15 +173,63 @@ fn field(json: &str, path: &str) -> f64 {
     rest[..end].parse().unwrap()
 }
 
-/// Run `slate FILE <flag>` on the generated document; its JSON report.
-fn bench(flag: &str) -> String {
+/// The spike's document as a Word document in three fonts, written at `path`: its
+/// headings' runs in [`HEADING_FONT`], other text in [`BODY_FONT`], and every
+/// [`MONO_EVERY`]th word in [`MONO_FONT`], saved by the docx crate onto its blank document.
+fn word_document(path: &Path) {
+    let blank = path.with_file_name("blank.docx");
+    std::fs::write(&blank, docx::blank()).unwrap();
+    let (_, source) = docx::read_source(&blank).unwrap();
+    let mut doc = document_model::read_markdown(document().as_bytes());
+    let mut words = 0;
+    for block in &mut doc.blocks {
+        let p = match block {
+            Block::Paragraph(p) => p,
+            Block::ListItem(item) => &mut item.paragraph,
+            _ => continue,
+        };
+        let heading = doc.styles.style_of(&p.style).is_heading();
+        let font = if heading { HEADING_FONT } else { BODY_FONT };
+        in_fonts(p, font, &mut words);
+    }
+    docx::save(path, &blank, &doc.blocks, &source, &AtomicBool::new(false)).unwrap();
+}
+
+/// Put `p`'s words in `font`, every [`MONO_EVERY`]th one (counting from `words` on) in
+/// [`MONO_FONT`].
+fn in_fonts(p: &mut Paragraph, font: &str, words: &mut usize) {
+    for run in std::mem::take(&mut p.runs) {
+        for word in run.text.split_inclusive(' ') {
+            *words += 1;
+            let mut style = run.style.clone();
+            let mono = words.is_multiple_of(MONO_EVERY);
+            style.font = Some(if mono { MONO_FONT } else { font }.to_owned());
+            p.push(word, &style);
+        }
+    }
+}
+
+/// One benchmark at a time: their windows would share the CPU.
+static WINDOW: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Run `slate FILE <flag>` on the generated document, as Markdown or (`word`) a Word
+/// document; its JSON report.
+fn bench(flag: &str, word: bool) -> String {
     if std::env::var_os("WAYLAND_DISPLAY").is_none() && std::env::var_os("DISPLAY").is_none() {
         panic!("needs a graphical session");
     }
-    let dir = std::env::temp_dir().join(format!("slate-perf-{flag}-{}", std::process::id()));
+    let _one = WINDOW.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = std::env::temp_dir().join(format!("slate-perf-{flag}-{word}-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("long.md");
-    std::fs::write(&path, document()).unwrap();
+    let path = if word {
+        let path = dir.join("long.docx");
+        word_document(&path);
+        path
+    } else {
+        let path = dir.join("long.md");
+        std::fs::write(&path, document()).unwrap();
+        path
+    };
     let out = Command::new(env!("CARGO_BIN_EXE_slate"))
         .arg(&path)
         .arg(flag)
@@ -183,26 +242,25 @@ fn bench(flag: &str) -> String {
         "{line}\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    eprintln!("{line}");
+    let name = if word { "docx" } else { "md" };
+    eprintln!("{name} {flag}: {line}");
     line
 }
 
-#[test]
-#[ignore = "opens a window; run with --release --ignored"]
-fn the_flow_rewraps_and_scrolls_a_150000_word_document_in_time() {
-    let line = bench("--bench-flow");
-    assert!(field(&line, "words") >= WORDS as f64, "{line}");
-    assert_eq!(field(&line, "switches"), 10.0, "{line}");
-    assert_eq!(field(&line, "unfinished"), 0.0, "{line}");
+/// `--bench-flow`'s report meets SLATE-11's targets.
+fn rewraps_and_scrolls_in_time(line: &str) {
+    assert!(field(line, "words") >= WORDS as f64, "{line}");
+    assert_eq!(field(line, "switches"), 10.0, "{line}");
+    assert_eq!(field(line, "unfinished"), 0.0, "{line}");
     // The frame after a width change shows the new column.
-    assert_eq!(field(&line, "first_frame/frames_max"), 1.0, "{line}");
+    assert_eq!(field(line, "first_frame/frames_max"), 1.0, "{line}");
     if cfg!(debug_assertions) {
         eprintln!("debug build: timing not checked; use --release");
         return;
     }
-    let first = field(&line, "first_frame/cpu_ms/max");
-    let whole = field(&line, "whole_ms/max");
-    let scroll = field(&line, "scroll/frame_cpu_ms/p99");
+    let first = field(line, "first_frame/cpu_ms/max");
+    let whole = field(line, "whole_ms/max");
+    let scroll = field(line, "scroll/frame_cpu_ms/p99");
     eprintln!(
         "re-wrap: visible text in one frame of at most {first:.1} ms, whole document at most \
          {whole:.0} ms (target < 500); scrolling frame CPU p99 {scroll:.1} ms (target < 16)"
@@ -215,25 +273,47 @@ fn the_flow_rewraps_and_scrolls_a_150000_word_document_in_time() {
     assert!(scroll < 16.0, "scrolling frames took {scroll:.1} ms p99");
 }
 
-#[test]
-#[ignore = "opens a window; run with --release --ignored"]
-fn typing_in_a_150000_word_document_shows_each_key_in_time() {
-    let line = bench("--bench-typing");
-    assert!(field(&line, "words") >= WORDS as f64, "{line}");
-    assert_eq!(field(&line, "keystrokes"), 100.0, "{line}");
+/// `--bench-typing`'s report meets SLATE-6's target.
+fn shows_each_key_in_time(line: &str) {
+    assert!(field(line, "words") >= WORDS as f64, "{line}");
+    assert_eq!(field(line, "keystrokes"), 100.0, "{line}");
     if cfg!(debug_assertions) {
         eprintln!("debug build: timing not checked; use --release");
         return;
     }
-    let p99 = field(&line, "latency_ms/p99");
+    let p99 = field(line, "latency_ms/p99");
     eprintln!("typing latency p99 {p99:.1} ms (target < 25)");
     assert!(p99 < 25.0, "typing latency p99 {p99:.1} ms");
 }
 
 #[test]
 #[ignore = "opens a window; run with --release --ignored"]
+fn the_flow_rewraps_and_scrolls_a_150000_word_document_in_time() {
+    rewraps_and_scrolls_in_time(&bench("--bench-flow", false));
+}
+
+#[test]
+#[ignore = "opens a window; run with --release --ignored"]
+fn typing_in_a_150000_word_document_shows_each_key_in_time() {
+    shows_each_key_in_time(&bench("--bench-typing", false));
+}
+
+#[test]
+#[ignore = "opens a window; run with --release --ignored"]
+fn the_flow_rewraps_and_scrolls_a_150000_word_document_in_three_fonts_in_time() {
+    rewraps_and_scrolls_in_time(&bench("--bench-flow", true));
+}
+
+#[test]
+#[ignore = "opens a window; run with --release --ignored"]
+fn typing_in_a_150000_word_document_in_three_fonts_shows_each_key_in_time() {
+    shows_each_key_in_time(&bench("--bench-typing", true));
+}
+
+#[test]
+#[ignore = "opens a window; run with --release --ignored"]
 fn finding_in_a_150000_word_document_shows_matches_in_time() {
-    let line = bench("--bench-find");
+    let line = bench("--bench-find", false);
     assert!(field(&line, "words") >= WORDS as f64, "{line}");
     assert_eq!(field(&line, "found"), 5.0, "{line}");
     assert_eq!(field(&line, "typing/keystrokes"), 10.0, "{line}");

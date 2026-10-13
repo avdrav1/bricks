@@ -10,10 +10,15 @@
 //!
 //! - A paragraph starts from the properties of the paragraph it replaces (or, when it
 //!   replaces none, of the paragraph copied next to it): its spacing, indents, and the
-//!   paragraph mark's look stay; its style, list numbering, and alignment are set where
-//!   they differ. A run starts from the run properties in that paragraph that come
-//!   closest to its look (fonts stay), with bold, italic, underline, strikethrough, size,
-//!   and colour set where they differ. A link is a `w:hyperlink` to the document's
+//!   paragraph mark's look stay; its style (by id: a built-in heading, title, or quote
+//!   the document lacks is added, any other unknown id is the default), list numbering,
+//!   and alignment are set where they differ. A run whose direct formatting is that of
+//!   a run in that paragraph takes its run properties as they are (but not an automatic
+//!   colour in a coloured style: the model reads it as the style's colour, and writes
+//!   that); any other run's are its direct formatting exactly (bold, italic, underline,
+//!   strikethrough with `w:val="0"` where turned off, font, size, colour; nothing its
+//!   style gives), over the closest run's properties the model doesn't hold (other
+//!   scripts' fonts, highlighting). A link is a `w:hyperlink` to the document's
 //!   relationship for its URL (or a new one), or to a bookmark.
 //! - A section break the replaced paragraph ended stays with the last paragraph written
 //!   for it, with the page break after it; a page break is a `w:br w:type="page"` at the
@@ -38,11 +43,11 @@
 
 use crate::body::{Container, Element, TableSpan};
 use crate::numbering::Numbering;
-use crate::styles::{canonical_name, ParaProps, RunProps, Styles};
+use crate::styles::{ParaProps, RunProps, Styles};
 use crate::{dir_of, rel_kind, rels_part, DocxError, MainPart, Package, Rel};
 use document_model::{
-    match_blocks_by, Align, Block, Image, ImageFormat, ImageSource, ListKind, Paragraph,
-    ParagraphStyle, Run, RunStyle, Table,
+    match_blocks_by, Align, Block, Image, ImageFormat, ImageSource, ListKind, Paragraph, Rgb, Run,
+    RunStyle, StyleSheet, Table,
 };
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -779,9 +784,8 @@ impl Props {
 struct Template<'a> {
     /// Its `w:pPr`.
     ppr: Option<&'a str>,
-    style: ParagraphStyle,
-    /// The run properties its paragraph style starts text from.
-    base: RunProps,
+    /// Its paragraph style's id (the default's when it names none).
+    style: String,
     list: bool,
     num: Option<u32>,
     /// Its runs' `w:rPr`s, each once, with their properties (`""`: a run without one).
@@ -891,8 +895,7 @@ impl<'a> Template<'a> {
         });
         Some(Template {
             ppr,
-            style: styles.paragraph_style(props.style.as_deref()),
-            base: styles.base_run(props.style.as_deref()),
+            style: styles.paragraph_id(props.style.as_deref()).to_owned(),
             list,
             num: e.num,
             runs: runs
@@ -928,16 +931,67 @@ impl Gap<'_> {
     }
 }
 
-/// A run's look as WordprocessingML run properties set it.
-fn same_look(a: &RunStyle, b: &RunStyle) -> [bool; 6] {
+/// How many of the looks the model keeps two runs' direct formatting sets the same, of
+/// [`LOOKS`] (links and Slate's own looks aside).
+fn agreeing(a: &RunStyle, b: &RunStyle) -> usize {
     [
         a.bold == b.bold,
         a.italic == b.italic,
         a.underline == b.underline,
         a.strike == b.strike,
+        a.font == b.font,
         a.size == b.size,
         a.color == b.color,
     ]
+    .iter()
+    .filter(|s| **s)
+    .count()
+}
+
+/// The looks [`agreeing`] compares.
+const LOOKS: usize = 7;
+
+/// `w:rPr` children the model's run looks write, and the character style (resolved into
+/// them when read).
+const RUN_LOOKS: &[&str] = &[
+    "rStyle", "b", "i", "u", "strike", "dstrike", "sz", "szCs", "color",
+];
+/// `w:rFonts` attributes the model's font writes.
+const FONT_SLOTS: &[&str] = &["ascii", "hAnsi", "asciiTheme", "hAnsiTheme"];
+
+/// A `w:rFonts` with its Latin font `font` (`None`: left to the style) over `fonts`, the
+/// one written before, whose other scripts' fonts stay; `None` when it names no font.
+fn latin_font(fonts: Option<&str>, font: Option<&str>) -> Option<String> {
+    let mut prefix = "w:".to_owned();
+    let mut attrs = String::new();
+    if let Some(fonts) = fonts {
+        if let Ok(Event::Empty(e) | Event::Start(e)) = Reader::from_str(fonts).read_event() {
+            let name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+            prefix = name.strip_suffix("rFonts").unwrap_or("w:").to_owned();
+            for a in e.attributes().flatten() {
+                let local = a.key.local_name();
+                if FONT_SLOTS.iter().any(|s| s.as_bytes() == local.as_ref()) {
+                    continue;
+                }
+                let value = String::from_utf8_lossy(&a.value).replace('"', "&quot;");
+                attrs.push_str(&format!(
+                    " {}=\"{value}\"",
+                    String::from_utf8_lossy(a.key.as_ref())
+                ));
+            }
+        }
+    }
+    let latin = font.map(|f| {
+        let f = escape(f);
+        format!(" {prefix}ascii=\"{f}\" {prefix}hAnsi=\"{f}\"")
+    });
+    if latin.is_none() && attrs.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "<{prefix}rFonts{}{attrs}/>",
+        latin.unwrap_or_default()
+    ))
 }
 
 struct Patcher<'a> {
@@ -1326,9 +1380,8 @@ impl<'a> Patcher<'a> {
         lead: &str,
         border: Option<&str>,
     ) -> String {
-        let (ppr, direct) = self.ppr(p.style, p.align, list, template, sect, border);
-        let base = self.styles.base_run(direct.style.as_deref());
-        let inherit = template.filter(|t| t.style != p.style).map(|t| &t.base);
+        let ppr = self.ppr(&p.style, p.align, list, template, sect, border);
+        let color = self.style_color(&self.written_style(&p.style));
         let mut s = format!("<w:p{}>{ppr}{lead}", self.w_decl);
         let mut i = 0;
         while i < p.runs.len() {
@@ -1345,7 +1398,7 @@ impl<'a> Patcher<'a> {
                 None => "",
             };
             for run in &p.runs[i..end] {
-                self.run(&mut s, run, &base, template, inherit);
+                self.run(&mut s, run, color, template);
             }
             s.push_str(close);
             i = end;
@@ -1353,24 +1406,25 @@ impl<'a> Patcher<'a> {
         s
     }
 
-    /// A paragraph's `w:pPr`, and the properties it sets.
+    /// A paragraph's `w:pPr`.
     fn ppr(
         &mut self,
-        style: ParagraphStyle,
+        style: &str,
         align: Align,
         list: Option<(bool, u8)>,
         template: Option<&Template<'a>>,
         sect: Option<&str>,
         border: Option<&str>,
-    ) -> (String, ParaProps) {
+    ) -> String {
         let mut props = template
             .and_then(|t| t.ppr)
             .map(Props::parse)
             .unwrap_or_default();
         props.remove(&["pageBreakBefore", "sectPr", "pPrChange"]);
-        if template.map(|t| t.style) != Some(style) {
+        let style = self.written_style(style);
+        if template.map(|t| t.style.as_str()) != Some(style.as_str()) {
             props.remove(&["pStyle"]);
-            if let Some(id) = self.style_id(style) {
+            if let Some(id) = self.style_id(&style) {
                 props.push("pStyle", format!("<w:pStyle w:val=\"{}\"/>", escape(&id)));
             }
         }
@@ -1436,56 +1490,83 @@ impl<'a> Patcher<'a> {
             props.push("sectPr", sect.to_owned());
         }
         props.sort(PPR_ORDER);
-        let direct = props.para_props();
-        (props.write("w:pPr"), direct)
+        props.write("w:pPr")
     }
 
-    /// The style id that is `style` in the model, adding the style when the document has
-    /// none; `None` for the document's normal paragraphs.
-    fn style_id(&mut self, style: ParagraphStyle) -> Option<String> {
-        if style == ParagraphStyle::Normal {
-            if self.styles.paragraph_style(None) == ParagraphStyle::Normal {
-                return None;
-            }
-            return self.styles.id_of(style).map(str::to_owned);
+    /// The style a paragraph in style `id` is written in: a paragraph style the document
+    /// has, a built-in heading, title, or quote it lacks (pasted from Markdown, or set by
+    /// Ctrl+N), else the document's default.
+    fn written_style(&self, id: &str) -> String {
+        if self.styles.paragraph_id(Some(id)) == id || StyleSheet::builtin_style(id).is_some() {
+            id.to_owned()
+        } else {
+            self.styles.paragraph_id(None).to_owned()
         }
-        if let Some(id) = self.styles.id_of(style) {
+    }
+
+    /// The colour paragraph style `id` gives its runs (`None`: automatic).
+    fn style_color(&self, id: &str) -> Option<Rgb> {
+        self.styles
+            .paragraph(Some(id))
+            .and_then(|s| s.rpr.color)
+            .or(self.styles.default_rpr.color)
+            .flatten()
+    }
+
+    /// Whether run properties `p`, with their character style, set the colour to
+    /// automatic.
+    fn automatic(&self, p: &RunProps) -> bool {
+        p.color
+            .or_else(|| {
+                self.styles
+                    .character(p.style.as_deref())
+                    .and_then(|s| s.rpr.color)
+            })
+            .is_some_and(|c| c.is_none())
+    }
+
+    /// The `w:pStyle` of a paragraph written in style `id` (see [`Patcher::written_style`]):
+    /// none for the default style; for a built-in style the document lacks, the document's
+    /// style of the same name, else the style added to `styles.xml` in Word's look.
+    fn style_id(&mut self, id: &str) -> Option<String> {
+        if id == self.styles.paragraph_id(None) {
+            return None;
+        }
+        if self.styles.paragraph_id(Some(id)) == id {
             return Some(id.to_owned());
         }
-        let styles_xml = self.styles_xml.as_ref()?;
-        let base = match style {
-            ParagraphStyle::Title => "Title".to_owned(),
-            ParagraphStyle::Heading(n) => format!("Heading{n}"),
-            ParagraphStyle::Quote => "Quote".to_owned(),
-            ParagraphStyle::Normal => unreachable!("handled above"),
+        let builtin = StyleSheet::builtin_style(id)?;
+        let name = match builtin.outline {
+            Some(n) => format!("heading {n}"),
+            None => builtin.name.clone(),
         };
-        let mut id = base.clone();
+        if let Some(found) = self.styles.paragraph_named(&name) {
+            return Some(found.to_owned());
+        }
+        let styles_xml = self.styles_xml.as_ref()?;
+        let mut new_id = id.to_owned();
         let mut n = 1;
-        while self.styles.has(&id) {
-            id = format!("{base}Slate{n}");
+        while self.styles.has(&new_id) {
+            new_id = format!("{id}Slate{n}");
             n += 1;
         }
-        let name = match style {
-            ParagraphStyle::Title => "Title".to_owned(),
-            ParagraphStyle::Quote => "Quote".to_owned(),
-            other => canonical_name(other),
-        };
-        let (ppr, rpr) = match style {
-            ParagraphStyle::Title => (
+        let (ppr, rpr) = match builtin.outline {
+            _ if builtin.title => (
                 "<w:spacing w:after=\"120\"/>".to_owned(),
                 "<w:sz w:val=\"56\"/>".to_owned(),
             ),
-            ParagraphStyle::Heading(n) => {
-                let size = [36, 32, 28, 26, 24, 22][(n.clamp(1, 6) - 1) as usize];
+            Some(n) => {
+                let n = n.clamp(1, 6);
+                let size = [36, 32, 28, 26, 24, 22][usize::from(n) - 1];
                 (
                     format!(
                         "<w:keepNext/><w:spacing w:before=\"240\" w:after=\"120\"/><w:outlineLvl w:val=\"{}\"/>",
-                        n.clamp(1, 6) - 1
+                        n - 1
                     ),
                     format!("<w:b/><w:sz w:val=\"{size}\"/>"),
                 )
             }
-            _ => (
+            None => (
                 "<w:ind w:left=\"720\" w:right=\"720\"/>".to_owned(),
                 "<w:i/>".to_owned(),
             ),
@@ -1499,14 +1580,14 @@ impl<'a> Patcher<'a> {
             })
             .unwrap_or_default();
         let def = format!(
-            "<w:style w:type=\"paragraph\" w:styleId=\"{id}\"{}><w:name w:val=\"{name}\"/>{based}<w:qFormat/><w:pPr>{ppr}</w:pPr><w:rPr>{rpr}</w:rPr></w:style>",
+            "<w:style w:type=\"paragraph\" w:styleId=\"{new_id}\"{}><w:name w:val=\"{name}\"/>{based}<w:qFormat/><w:pPr>{ppr}</w:pPr><w:rPr>{rpr}</w:rPr></w:style>",
             self.w_decl
         );
         let patched = insert_at_end(styles_xml, &def).ok()?;
-        self.styles = Styles::parse(&patched).ok()?;
+        self.styles = Styles::parse(&patched, self.styles.theme().clone()).ok()?;
         self.styles_xml = Some(patched);
         self.styles_changed = true;
-        Some(id)
+        Some(new_id)
     }
 
     /// The list instance a new list item of this kind and level joins: the list before it,
@@ -1581,107 +1662,90 @@ impl<'a> Patcher<'a> {
         num
     }
 
-    /// A run of `run`'s text, its properties from the template's run that comes closest.
-    /// With `inherit` (the run properties of the template's paragraph style, when the
-    /// paragraph's style changed), a look the run had from that style is left to the new
-    /// style.
+    /// A run of `run`'s text in a paragraph whose style's colour is `style_color`. A
+    /// template run whose direct formatting is the run's gives its `w:rPr` as it is; else
+    /// the closest one's `w:rPr` keeps what the model doesn't hold (other scripts' fonts,
+    /// highlighting, language) and the run's overrides are written exactly: what they set,
+    /// nothing the style gives.
     fn run(
         &mut self,
         out: &mut String,
         run: &Run,
-        base: &RunProps,
+        style_color: Option<Rgb>,
         template: Option<&Template<'_>>,
-        inherit: Option<&RunProps>,
     ) {
         let want = &run.style;
-        let satisfied = |p: &Patcher<'_>, props: &RunProps| {
-            let now = same_look(&p.styles.run_look(base, props), want);
-            let was = inherit.map(|old| same_look(&p.styles.run_look(old, props), want));
-            std::array::from_fn::<bool, 6, _>(|k| now[k] || was.is_some_and(|w| w[k]))
-        };
+        let none = RunProps::default();
         let candidates = template
             .map(|t| t.runs.as_slice())
             .unwrap_or_default()
             .iter()
-            .map(|(x, p)| (*x, p.clone()))
-            .chain(std::iter::once(("", RunProps::default())));
-        let (xml, props) = candidates
-            .min_by_key(|(_, p)| satisfied(self, p).iter().filter(|s| !**s).count())
+            .map(|(x, p)| (*x, p))
+            .chain(std::iter::once(("", &none)));
+        let (xml, agree) = candidates
+            .map(|(x, p)| {
+                let mut agree = agreeing(&self.styles.overrides(p), want);
+                // The model reads an automatic colour as the style's: in a coloured style
+                // it isn't the style's colour a run without its own wants.
+                if want.color.is_none() && style_color.is_some() && self.automatic(p) {
+                    agree -= 1;
+                }
+                (x, agree)
+            })
+            .min_by_key(|(_, agree)| LOOKS - agree)
             .expect("one candidate at least");
-        let mut rpr = if xml.is_empty() {
-            Props::default()
-        } else {
-            Props::parse(xml)
-        };
-        let same = satisfied(self, &props);
-        if same.iter().all(|s| *s) && !want.code {
-            out.push_str("<w:r>");
+        out.push_str("<w:r>");
+        if agree == LOOKS && !want.code {
             out.push_str(xml);
         } else {
-            let names: [&[&str]; 6] = [
-                &["b"],
-                &["i"],
-                &["u"],
-                &["strike", "dstrike"],
-                &["sz"],
-                &["color"],
-            ];
-            for (n, same) in names.iter().zip(same) {
-                if !same {
-                    rpr.remove(n);
-                }
-            }
-            let look = self.styles.run_look(base, &rpr.run_props());
-            let look = RunStyle {
-                bold: if same[0] { want.bold } else { look.bold },
-                italic: if same[1] { want.italic } else { look.italic },
-                underline: if same[2] {
-                    want.underline
-                } else {
-                    look.underline
-                },
-                strike: if same[3] { want.strike } else { look.strike },
-                size: if same[4] { want.size } else { look.size },
-                color: if same[5] { want.color } else { look.color },
-                ..look
+            let mut rpr = if xml.is_empty() {
+                Props::default()
+            } else {
+                Props::parse(xml)
             };
-            let on = |v: bool| if v { "" } else { " w:val=\"0\"" };
-            if look.bold != want.bold {
-                rpr.push("b", format!("<w:b{}/>", on(want.bold)));
-            }
-            if look.italic != want.italic {
-                rpr.push("i", format!("<w:i{}/>", on(want.italic)));
-            }
-            if look.underline != want.underline {
-                let v = if want.underline { "single" } else { "none" };
-                rpr.push("u", format!("<w:u w:val=\"{v}\"/>"));
-            }
-            if look.strike != want.strike {
-                rpr.push("strike", format!("<w:strike{}/>", on(want.strike)));
-            }
-            if look.size != want.size {
-                if let Some(size) = want.size {
-                    rpr.push("sz", format!("<w:sz w:val=\"{size}\"/>"));
-                }
-            }
-            if look.color != want.color {
-                let v = want.color.map_or_else(
-                    || "auto".to_owned(),
-                    |[r, g, b]| format!("{r:02X}{g:02X}{b:02X}"),
-                );
-                rpr.push("color", format!("<w:color w:val=\"{v}\"/>"));
-            }
+            let fonts = rpr
+                .children
+                .iter()
+                .find(|(n, _)| n == "rFonts")
+                .map(|(_, x)| x.clone());
+            rpr.remove(RUN_LOOKS);
+            rpr.remove(&["rFonts"]);
             if want.code {
-                rpr.remove(&["rFonts"]);
                 rpr.push(
                     "rFonts",
                     format!(
                         "<w:rFonts w:ascii=\"{MONOSPACE}\" w:hAnsi=\"{MONOSPACE}\" w:cs=\"{MONOSPACE}\"/>"
                     ),
                 );
+            } else if let Some(fonts) = latin_font(fonts.as_deref(), want.font.as_deref()) {
+                rpr.push("rFonts", fonts);
+            }
+            let on = |v: bool| if v { "" } else { " w:val=\"0\"" };
+            if let Some(b) = want.bold {
+                rpr.push("b", format!("<w:b{}/>", on(b)));
+            }
+            if let Some(i) = want.italic {
+                rpr.push("i", format!("<w:i{}/>", on(i)));
+            }
+            if let Some(s) = want.strike {
+                rpr.push("strike", format!("<w:strike{}/>", on(s)));
+            }
+            if let Some(color) = want.color {
+                let [r, g, b] = color;
+                rpr.push(
+                    "color",
+                    format!("<w:color w:val=\"{r:02X}{g:02X}{b:02X}\"/>"),
+                );
+            }
+            if let Some(size) = want.size {
+                rpr.push("sz", format!("<w:sz w:val=\"{size}\"/>"));
+                rpr.push("szCs", format!("<w:szCs w:val=\"{size}\"/>"));
+            }
+            if let Some(u) = want.underline {
+                let v = if u { "single" } else { "none" };
+                rpr.push("u", format!("<w:u w:val=\"{v}\"/>"));
             }
             rpr.sort(RPR_ORDER);
-            out.push_str("<w:r>");
             out.push_str(&rpr.write("w:rPr"));
         }
         push_text(out, &run.text);

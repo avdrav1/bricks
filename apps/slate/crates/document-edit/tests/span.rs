@@ -6,7 +6,7 @@ use document_edit::{
     copy, delete, indent, join_backward, join_forward, look, normalize, paste, replace, set_style,
     split, text, toggle, toggle_list, Change, Container, Edit, Flag, History, Pos,
 };
-use document_model::{read_markdown, Block, Document, ParagraphStyle};
+use document_model::{read_markdown, Block, Document};
 use std::ops::Range;
 use Container::Top;
 
@@ -118,7 +118,7 @@ fn spans_match_the_changes_of_a_mixed_session() {
 
     // Looks: bold, a heading, a numbered list taking in the intro, a deeper item.
     s.apply(|d| toggle(d, pos(0, 0), pos(0, 5), Flag::Bold));
-    s.apply(|d| set_style(d, Top, 0..1, ParagraphStyle::Heading(2)));
+    s.apply(|d| set_style(d, Top, 0..1, "Heading2"));
     s.apply(|d| toggle_list(d, Top, 0..1, true));
     s.apply(|d| indent(d, Top, 2..3, 1));
     s.apply(|d| indent(d, Top, 2..3, -1));

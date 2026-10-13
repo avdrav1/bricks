@@ -3,7 +3,7 @@
 //! reads, with the text and its styles (the ignored test).
 
 use document_edit::{normalize, replace, set_style, split, text_len, Container, History, Pos};
-use document_model::{Block, Document, ParagraphStyle};
+use document_model::{Block, Document};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
@@ -32,7 +32,8 @@ fn typed(mut doc: Document) -> Document {
     let at = Pos::new(0, 0);
     let edit = replace(&doc, at, at, "Plans", &document_edit::look(&doc, at)).unwrap();
     apply(&mut doc, edit);
-    let edit = set_style(&doc, Container::Top, 0..1, ParagraphStyle::Heading(1)).unwrap();
+    let heading = doc.styles.heading(1).expect("a Heading 1").id.clone();
+    let edit = set_style(&doc, Container::Top, 0..1, &heading).unwrap();
     apply(&mut doc, edit);
     let end = Pos::new(0, text_len(&doc, Container::Top, 0).unwrap());
     let edit = split(&doc, end, end).unwrap();
@@ -43,11 +44,12 @@ fn typed(mut doc: Document) -> Document {
     doc
 }
 
-fn texts(blocks: &[Block]) -> Vec<(ParagraphStyle, String)> {
-    blocks
+/// Each paragraph's style name and text.
+fn texts(doc: &Document) -> Vec<(String, String)> {
+    doc.blocks
         .iter()
         .filter_map(|b| match b {
-            Block::Paragraph(p) => Some((p.style, p.text())),
+            Block::Paragraph(p) => Some((doc.styles.style_of(&p.style).name.clone(), p.text())),
             _ => None,
         })
         .collect()
@@ -56,10 +58,7 @@ fn texts(blocks: &[Block]) -> Vec<(ParagraphStyle, String)> {
 #[test]
 fn the_blank_document_is_one_empty_normal_paragraph() {
     let (_, doc, _) = open_blank("empty");
-    assert_eq!(
-        texts(&doc.blocks),
-        [(ParagraphStyle::Normal, String::new())]
-    );
+    assert_eq!(texts(&doc), [("Normal".to_owned(), String::new())]);
     assert_eq!(doc.blocks.len(), 1);
 }
 
@@ -78,10 +77,10 @@ fn typing_into_it_saves_a_word_document() {
     .unwrap();
     let back = docx::read(&dest).unwrap();
     assert_eq!(
-        texts(&back.blocks),
+        texts(&back),
         [
-            (ParagraphStyle::Heading(1), "Plans".to_owned()),
-            (ParagraphStyle::Normal, "First line".to_owned()),
+            ("Heading 1".to_owned(), "Plans".to_owned()),
+            ("Normal".to_owned(), "First line".to_owned()),
         ]
     );
 }
@@ -118,7 +117,15 @@ fn libreoffice_reads_a_saved_new_document() {
     )
     .unwrap();
     let dump = lo_dump(&dest, 2183);
-    let paras: Vec<&str> = dump.lines().filter(|l| l.starts_with("para\t")).collect();
+    // Each paragraph's style, list level, label, and text.
+    let paras: Vec<String> = dump
+        .lines()
+        .filter(|l| l.starts_with("para\t"))
+        .map(|l| {
+            let f: Vec<&str> = l.split('\t').collect();
+            [&f[..4], &f[f.len() - 1..]].concat().join("\t")
+        })
+        .collect();
     assert_eq!(
         paras,
         [

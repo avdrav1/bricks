@@ -6,9 +6,10 @@ use document_edit::{
     History, Pos,
 };
 use document_model::{
-    read_markdown, Block, Document, Image, ImageFormat, ImageSource, ListKind, Paragraph,
-    ParagraphStyle, Raw, RawKind, Run, RunStyle,
+    read_markdown, read_text, Block, Document, Image, ImageFormat, ImageSource, ListKind,
+    Paragraph, Raw, RawKind, Run, RunStyle, Style, StyleSheet,
 };
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 /// 0 paragraph, 1-2 list items, 3 a table (A B / c d), 4-5 paragraphs.
@@ -35,6 +36,7 @@ fn cell(row: usize, cell: usize, offset: usize) -> Pos {
     Pos::in_cell(3, row, cell, 0, offset)
 }
 
+/// Each run's text, and whether it sets bold and italic on.
 fn runs(block: &Block) -> Vec<(String, bool, bool)> {
     let p = match block {
         Block::Paragraph(p) => p,
@@ -43,7 +45,10 @@ fn runs(block: &Block) -> Vec<(String, bool, bool)> {
     };
     p.runs
         .iter()
-        .map(|r| (r.text.clone(), r.style.bold, r.style.italic))
+        .map(|r| {
+            let on = |v: Option<bool>| v == Some(true);
+            (r.text.clone(), on(r.style.bold), on(r.style.italic))
+        })
         .collect()
 }
 
@@ -96,7 +101,8 @@ fn copy_within_a_paragraph_keeps_runs_and_looks() {
     let [Block::Paragraph(p)] = &fragment.blocks[..] else {
         panic!("one paragraph: {fragment:?}");
     };
-    assert_eq!(p.style, ParagraphStyle::Heading(1));
+    assert_eq!(p.style, "Heading1");
+    assert_eq!(fragment.names["Heading1"], "Heading 1");
     assert_eq!(
         runs(&fragment.blocks[0]),
         [plain("g "), run("bold", true, false), plain(" ")]
@@ -232,26 +238,24 @@ fn copy_within_a_cell_stays_in_it() {
 
 #[test]
 fn json_keeps_pictures_and_raw_source() {
-    let fragment = Fragment {
-        blocks: vec![
-            blank(),
-            Block::Image(Image {
-                alt: "a cat".to_owned(),
-                source: ImageSource::Embedded {
-                    format: ImageFormat::Png,
-                    bytes: Arc::from(&b"\x89PNG\r\n\x1a\n"[..]),
-                },
-                size: Some((12.5, 3.0)),
-            }),
-            Block::Rule,
-            Block::PageBreak,
-            Block::Raw(Raw {
-                kind: RawKind::Html,
-                source: "<b>hi</b>\n".to_owned(),
-            }),
-            blank(),
-        ],
-    };
+    let fragment = Fragment::new(vec![
+        blank(),
+        Block::Image(Image {
+            alt: "a cat".to_owned(),
+            source: ImageSource::Embedded {
+                format: ImageFormat::Png,
+                bytes: Arc::from(&b"\x89PNG\r\n\x1a\n"[..]),
+            },
+            size: Some((12.5, 3.0)),
+        }),
+        Block::Rule,
+        Block::PageBreak,
+        Block::Raw(Raw {
+            kind: RawKind::Html,
+            source: "<b>hi</b>\n".to_owned(),
+        }),
+        blank(),
+    ]);
     round_trip(&fragment);
     assert_eq!(fragment.plain_text(), "\na cat\n<b>hi</b>\n");
     assert_eq!(Fragment::from_json("not json"), None);
@@ -265,7 +269,7 @@ fn paste_into_a_paragraphs_middle_keeps_its_looks_and_joins_the_tail() {
     let fragment = copy(&doc, pos(0, 6), pos(2, 2)).expect("a fragment");
     let change = checked(&mut doc, |d| paste(d, pos(5, 2), pos(5, 2), &fragment));
     assert_eq!(doc.blocks.len(), 8);
-    assert!(matches!(&doc.blocks[5], Block::Paragraph(p) if p.style == ParagraphStyle::Normal));
+    assert!(matches!(&doc.blocks[5], Block::Paragraph(p) if p.style == "Normal"));
     assert_eq!(
         runs(&doc.blocks[5]),
         [plain("La"), run("bold", true, false), plain(" text")]
@@ -363,7 +367,7 @@ fn paste_replaces_a_selection() {
 #[test]
 fn plain_text_pastes_a_paragraph_per_line() {
     let bold = RunStyle {
-        bold: true,
+        bold: Some(true),
         ..RunStyle::default()
     };
     let fragment = Fragment::from_plain("a\r\nb\nc", &bold);
@@ -372,7 +376,7 @@ fn plain_text_pastes_a_paragraph_per_line() {
         let Block::Paragraph(p) = block else {
             panic!("a paragraph: {block:?}");
         };
-        assert_eq!(p.style, ParagraphStyle::Normal);
+        assert_eq!(p.style, "", "names no style");
         assert_eq!(
             p.runs,
             [Run {
@@ -388,6 +392,7 @@ fn plain_text_pastes_a_paragraph_per_line() {
     assert_eq!(doc.blocks.len(), 4);
     assert_eq!(runs(&doc.blocks[0]), [plain("one"), run("a", true, false)]);
     assert_eq!(runs(&doc.blocks[2]), [run("c", true, false)]);
+    assert!(matches!(&doc.blocks[1], Block::Paragraph(p) if p.style == "Normal"));
 }
 
 #[test]
@@ -398,6 +403,56 @@ fn paste_into_a_code_block_is_plain_text() {
     assert_eq!(doc.blocks.len(), 1);
     assert_eq!(txt(&doc, Container::Top, 0), "coa\nbde");
     assert_eq!(change.caret, pos(0, 5));
+}
+
+/// The paragraph styles of a document of paragraphs.
+fn styles(doc: &Document) -> Vec<&str> {
+    doc.blocks
+        .iter()
+        .map(|b| match b {
+            Block::Paragraph(p) => p.style.as_str(),
+            other => panic!("a paragraph: {other:?}"),
+        })
+        .collect()
+}
+
+#[test]
+fn a_paste_maps_styles_by_name_else_the_default() {
+    // A heading and a quote copied from Markdown, through the clipboard.
+    let source = md("end\n\n# Head\n\n> Said");
+    let fragment = copy(&source, pos(0, 0), pos(2, 4)).expect("a fragment");
+    let fragment = Fragment::from_json(&fragment.to_json()).unwrap();
+    // Into a document whose `Heading 1` has another id, with no quote style.
+    let mut doc = read_text(b"one\n");
+    let builtin = StyleSheet::builtin();
+    let normal = builtin.get("Normal").unwrap().clone();
+    let other = |id: &str, name: &str| Style {
+        id: id.into(),
+        name: name.into(),
+        ..normal.clone()
+    };
+    doc.styles = StyleSheet::new(
+        vec![
+            normal.clone(),
+            other("Kop1", "Heading 1"),
+            other("Other", "Other"),
+        ],
+        "Normal",
+    );
+    let mut pasted = doc.clone();
+    checked(&mut pasted, |d| paste(d, pos(0, 3), pos(0, 3), &fragment));
+    // The quote keeps the built-in id the document draws (and a Word save adds).
+    assert_eq!(styles(&pasted), ["Normal", "Kop1", "Quote"]);
+
+    // A name the document lacks, not a built-in style's, gives the default.
+    let mut renamed = fragment.clone();
+    renamed.names = BTreeMap::from([
+        ("Normal".to_owned(), "Normal".to_owned()),
+        ("Heading1".to_owned(), "Other".to_owned()),
+        ("Quote".to_owned(), "Fancy".to_owned()),
+    ]);
+    checked(&mut doc, |d| paste(d, pos(0, 3), pos(0, 3), &renamed));
+    assert_eq!(styles(&doc), ["Normal", "Other", "Normal"]);
 }
 
 #[test]

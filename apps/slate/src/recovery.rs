@@ -331,7 +331,7 @@ mod tests {
         p.push(
             "words",
             &RunStyle {
-                bold: true,
+                bold: Some(true),
                 ..RunStyle::default()
             },
         );

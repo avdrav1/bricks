@@ -1,16 +1,20 @@
 //! The flow's [`Shaper`] on Pango: one `pango::Layout` per leaf, kept in a cache capped by
 //! the text it holds (the least recently used go first; heights stay in the flow), styled
-//! with the viewer's looks.
+//! with the document's looks.
 //!
-//! Markdown and plain text take their looks from the paragraph style (headings larger and
-//! bold, quotes italic and grey, a table's header row bold); a DOCX file's runs already carry
-//! the sizes and weights its styles give them, so its paragraphs get only the runs' looks.
+//! Every run is drawn in its look: its paragraph style's with its own direct formatting
+//! on top ([`StyleSheet::look`](document_model::StyleSheet::look)), family and size
+//! included, whatever the format (Markdown and plain text have Slate's built-in sheet).
+//! Pango resolves the family through fontconfig, so Calibri draws as Carlito where that
+//! is installed. A paragraph's style also gives its first-line indent and line spacing
+//! (its space and left indent are the flow's). Slate's own looks go on top: code and raw
+//! source in monospace, links in the link colour, a table's header row bold.
 
 use super::{texture_key, Textures};
 use document_model::{
-    Align, Format, Image, ImageSource, ListKind, Paragraph, ParagraphStyle, RunStyle,
+    Align, Image, ImageSource, LineSpacing, ListKind, Look as RunLook, RunStyle, StyleSheet,
 };
-use flow::{Content, Hit, LayoutKey, Look, Metrics, Shaper};
+use flow::{Content, Hit, LayoutKey, Look, Metrics, Shaper, MONOSPACE, TWIPS_PER_PX};
 use gtk::pango;
 use gtk::prelude::*;
 use std::collections::HashMap;
@@ -18,12 +22,7 @@ use std::collections::HashMap;
 /// The cache's cap, in bytes of text laid out: room for every layout of a document of about
 /// 300 pages, so a width change re-wraps them in place instead of shaping them again.
 const CACHE_BYTES: usize = 2 << 20;
-/// Heading sizes relative to body text, levels 1 to 6; and the title's.
-const HEADING_SCALE: [f64; 6] = [2.0, 1.6, 1.35, 1.2, 1.1, 1.0];
-const TITLE_SCALE: f64 = 2.4;
-const MONO: &str = "monospace";
 /// Colours as 0xRRGGBB.
-const QUOTE: u32 = 0x5E5C64;
 const CODE_BACKGROUND: u32 = 0xEDEDED;
 const RAW: u32 = 0x77767B;
 const LINK: u32 = 0x1A5FB4;
@@ -53,8 +52,11 @@ struct Preedit {
 /// Pango layouts for a document's leaves.
 pub struct PangoShaper {
     context: pango::Context,
-    /// Looks come from paragraph styles (Markdown, plain text), not from the runs (DOCX).
-    style_looks: bool,
+    /// The document's default style's font: every layout's, before its runs' looks.
+    base: pango::FontDescription,
+    /// Its family and size (half-points), which runs leave unset in their attributes.
+    base_font: String,
+    base_size: u16,
     textures: Textures,
     cache: HashMap<LayoutKey, Entry>,
     cached_bytes: usize,
@@ -64,10 +66,16 @@ pub struct PangoShaper {
 }
 
 impl PangoShaper {
-    pub fn new(context: pango::Context, format: &Format, textures: Textures) -> Self {
+    pub fn new(context: pango::Context, styles: &StyleSheet, textures: Textures) -> Self {
+        let run = &styles.default_style().run;
+        let mut base = pango::FontDescription::new();
+        base.set_family(&run.font);
+        base.set_size(half_points(run.size));
         PangoShaper {
             context,
-            style_looks: !matches!(format, Format::Docx),
+            base,
+            base_font: run.font.clone(),
+            base_size: run.size,
             textures,
             cache: HashMap::new(),
             cached_bytes: 0,
@@ -77,9 +85,9 @@ impl PangoShaper {
         }
     }
 
-    /// The page's font: the family and size text has before its looks.
+    /// The document's font: the family and size text has before its looks.
     pub fn font(&self) -> pango::FontDescription {
-        self.context.font_description().unwrap_or_default()
+        self.base.clone()
     }
 
     /// The decoded picture of `image`, if it has one.
@@ -208,9 +216,10 @@ impl PangoShaper {
             ListKind::Task { checked: true } => "☑",
             ListKind::Task { checked: false } => "☐",
         };
-        let context = &self.context;
+        let (context, base) = (&self.context, &self.base);
         self.markers.entry(text.to_owned()).or_insert_with(|| {
             let layout = pango::Layout::new(context);
+            layout.set_font_description(Some(base));
             layout.set_text(text);
             layout
         })
@@ -218,19 +227,30 @@ impl PangoShaper {
 
     fn make(&self, content: Content<'_>) -> pango::Layout {
         let layout = pango::Layout::new(&self.context);
+        layout.set_font_description(Some(&self.base));
         layout.set_wrap(pango::WrapMode::WordChar);
         let attrs = pango::AttrList::new();
         let text = content.text();
         layout.set_text(&text);
+        let all = |a: pango::Attribute| insert(&attrs, a, 0, u32::MAX);
         match content {
             Content::Paragraph {
-                paragraph, header, ..
+                paragraph,
+                styles,
+                header,
+                ..
             } => {
-                self.paragraph_looks(paragraph, header, &attrs);
+                // The style's look over the whole paragraph (an empty one's line too), then
+                // each run's overrides.
+                let style = &styles.style_of(&paragraph.style).run;
+                self.style_looks(style, &all);
+                if header {
+                    all(pango::AttrInt::new_weight(pango::Weight::Bold).into());
+                }
                 let mut start = 0;
                 for run in &paragraph.runs {
                     let end = start + run.text.len();
-                    run_looks(&run.style, start as u32, end as u32, &attrs);
+                    run_looks(style, &run.style, start as u32, end as u32, &attrs);
                     start = end;
                 }
                 match paragraph.align {
@@ -239,48 +259,76 @@ impl PangoShaper {
                     Align::End => layout.set_alignment(pango::Alignment::Right),
                     Align::Justify => layout.set_justify(true),
                 }
+                line_spacing(&layout, content.line_spacing(), &all);
+                let first = content.first_indent();
+                if first != 0 {
+                    layout.set_indent(first * pango::SCALE);
+                }
             }
-            Content::Code(_) => insert(&attrs, pango::AttrString::new_family(MONO), 0, u32::MAX),
+            Content::Code(_) => all(pango::AttrString::new_family(MONOSPACE).into()),
             Content::Raw(_) => {
-                insert(&attrs, pango::AttrString::new_family(MONO), 0, u32::MAX);
-                insert(&attrs, foreground(RAW), 0, u32::MAX);
+                all(pango::AttrString::new_family(MONOSPACE).into());
+                all(foreground(RAW));
             }
-            Content::PictureLabel(_) => insert(
-                &attrs,
-                pango::AttrInt::new_foreground_alpha((DIM * 65535.0) as u16),
-                0,
-                u32::MAX,
-            ),
+            Content::PictureLabel(_) => {
+                all(pango::AttrInt::new_foreground_alpha((DIM * 65535.0) as u16).into())
+            }
         }
         layout.set_attributes(Some(&attrs));
         layout
     }
 
-    fn paragraph_looks(&self, p: &Paragraph, header: bool, attrs: &pango::AttrList) {
-        if !self.style_looks {
-            return;
+    /// A paragraph style's run look `look`, through `all`: its family and size where they
+    /// aren't the document's font's, and what it turns on.
+    fn style_looks(&self, look: &RunLook, all: &impl Fn(pango::Attribute)) {
+        if look.font != self.base_font {
+            all(pango::AttrString::new_family(&look.font).into());
         }
-        let all = |a: pango::Attribute| insert(attrs, a, 0, u32::MAX);
-        match p.style {
-            ParagraphStyle::Heading(n) => {
-                all(
-                    pango::AttrFloat::new_scale(HEADING_SCALE[usize::from(n.clamp(1, 6)) - 1])
-                        .into(),
-                );
-                all(pango::AttrInt::new_weight(pango::Weight::Bold).into());
-            }
-            ParagraphStyle::Title => {
-                all(pango::AttrFloat::new_scale(TITLE_SCALE).into());
-                all(pango::AttrInt::new_weight(pango::Weight::Bold).into());
-            }
-            ParagraphStyle::Quote => {
-                all(pango::AttrInt::new_style(pango::Style::Italic).into());
-                all(foreground(QUOTE));
-            }
-            ParagraphStyle::Normal => {}
+        if look.size != self.base_size {
+            all(pango::AttrSize::new(half_points(look.size)).into());
         }
-        if header {
+        if look.bold {
             all(pango::AttrInt::new_weight(pango::Weight::Bold).into());
+        }
+        if look.italic {
+            all(pango::AttrInt::new_style(pango::Style::Italic).into());
+        }
+        if look.underline {
+            all(pango::AttrInt::new_underline(pango::Underline::Single).into());
+        }
+        if look.strike {
+            all(pango::AttrInt::new_strikethrough(true).into());
+        }
+        if let Some(rgb) = look.color {
+            all(foreground(hex(rgb)));
+        }
+    }
+}
+
+/// `half` half-points in Pango units of points.
+fn half_points(half: u16) -> i32 {
+    i32::from(half) * pango::SCALE / 2
+}
+
+/// `twips` in Pango units of pixels at 96 dpi.
+fn twips(twips: u32) -> i32 {
+    (f64::from(twips) / TWIPS_PER_PX * f64::from(pango::SCALE)).round() as i32
+}
+
+/// Space `layout`'s lines as `line` says: a multiple of single spacing through Pango's line
+/// spacing; an exact or least line height through the line-height attributes (`all`), so
+/// every line, the first and last too, is that tall.
+fn line_spacing(layout: &pango::Layout, line: LineSpacing, all: &impl Fn(pango::Attribute)) {
+    match line {
+        // Pango's own line height is single spacing (a factor of 1 would take the font's
+        // height instead, a pixel less).
+        LineSpacing::Auto(m) if (m - 1.0).abs() < 1e-3 => {}
+        LineSpacing::Auto(m) => layout.set_line_spacing(m),
+        LineSpacing::Exact(t) => all(pango::AttrInt::new_line_height_absolute(twips(t)).into()),
+        // The larger of the absolute height and the font's own (a factor of 1).
+        LineSpacing::AtLeast(t) => {
+            all(pango::AttrFloat::new_line_height(1.0).into());
+            all(pango::AttrInt::new_line_height_absolute(twips(t)).into());
         }
     }
 }
@@ -297,42 +345,66 @@ fn channels(hex: u32) -> (u16, u16, u16) {
     (c(16), c(8), c(0))
 }
 
+fn hex([r, g, b]: [u8; 3]) -> u32 {
+    u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b)
+}
+
 fn foreground(hex: u32) -> pango::Attribute {
     let (r, g, b) = channels(hex);
     pango::AttrColor::new_foreground(r, g, b).into()
 }
 
-/// A run's looks over bytes `start..end`.
-fn run_looks(s: &RunStyle, start: u32, end: u32, attrs: &pango::AttrList) {
+/// A run's looks over bytes `start..end`, over its paragraph style's look `style` (set on
+/// the whole paragraph): the overrides `s` that differ from it (as
+/// [`StyleSheet::look`] puts them on top), and Slate's own looks (code, raw source,
+/// links).
+fn run_looks(style: &RunLook, s: &RunStyle, start: u32, end: u32, attrs: &pango::AttrList) {
     let add = |a: pango::Attribute| insert(attrs, a, start, end);
-    if s.bold {
-        add(pango::AttrInt::new_weight(pango::Weight::Bold).into());
+    let changed = |set: Option<bool>, styled: bool| set.filter(|&on| on != styled);
+    if let Some(font) = s.font.as_deref().filter(|&f| f != style.font) {
+        add(pango::AttrString::new_family(font).into());
     }
-    if s.italic {
-        add(pango::AttrInt::new_style(pango::Style::Italic).into());
+    if let Some(size) = s.size.filter(|&h| h != style.size) {
+        add(pango::AttrSize::new(half_points(size)).into());
     }
-    if s.underline {
-        add(pango::AttrInt::new_underline(pango::Underline::Single).into());
+    if let Some(on) = changed(s.bold, style.bold) {
+        let weight = if on {
+            pango::Weight::Bold
+        } else {
+            pango::Weight::Normal
+        };
+        add(pango::AttrInt::new_weight(weight).into());
     }
-    if s.strike {
-        add(pango::AttrInt::new_strikethrough(true).into());
+    if let Some(on) = changed(s.italic, style.italic) {
+        let slant = if on {
+            pango::Style::Italic
+        } else {
+            pango::Style::Normal
+        };
+        add(pango::AttrInt::new_style(slant).into());
+    }
+    if let Some(on) = changed(s.underline, style.underline) {
+        let line = if on {
+            pango::Underline::Single
+        } else {
+            pango::Underline::None
+        };
+        add(pango::AttrInt::new_underline(line).into());
+    }
+    if let Some(on) = changed(s.strike, style.strike) {
+        add(pango::AttrInt::new_strikethrough(on).into());
     }
     if s.code {
-        add(pango::AttrString::new_family(MONO).into());
+        add(pango::AttrString::new_family(MONOSPACE).into());
         let (r, g, b) = channels(CODE_BACKGROUND);
         add(pango::AttrColor::new_background(r, g, b).into());
     }
     if s.raw {
-        add(pango::AttrString::new_family(MONO).into());
+        add(pango::AttrString::new_family(MONOSPACE).into());
         add(foreground(RAW));
     }
-    if let Some(half) = s.size {
-        add(pango::AttrSize::new(i32::from(half) * pango::SCALE / 2).into());
-    }
-    if let Some([r, g, b]) = s.color {
-        add(foreground(
-            u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b),
-        ));
+    if let Some(rgb) = s.color {
+        add(foreground(hex(rgb)));
     }
     if s.link.is_some() {
         add(foreground(LINK));
@@ -341,19 +413,12 @@ fn run_looks(s: &RunStyle, start: u32, end: u32, attrs: &pango::AttrList) {
 }
 
 impl Shaper for PangoShaper {
-    fn metrics(&mut self, look: Look) -> Metrics {
-        let mut font = self.context.font_description().unwrap_or_default();
-        let scale = match look {
-            Look::Title if self.style_looks => TITLE_SCALE,
-            Look::Heading(n) if self.style_looks => HEADING_SCALE[usize::from(n.clamp(1, 6)) - 1],
-            _ => 1.0,
-        };
-        if scale != 1.0 {
+    fn metrics(&mut self, look: &Look) -> Metrics {
+        let mut font = self.base.clone();
+        font.set_family(&look.font);
+        font.set_size(half_points(look.size));
+        if look.bold {
             font.set_weight(pango::Weight::Bold);
-            font.set_size((f64::from(font.size()) * scale).round() as i32);
-        }
-        if look == Look::Mono {
-            font.set_family(MONO);
         }
         let m = self.context.metrics(Some(&font), None);
         Metrics {

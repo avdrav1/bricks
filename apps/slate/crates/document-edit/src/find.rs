@@ -239,7 +239,7 @@ fn replace_in(block: &mut Block, matches: &[Match], with: &str) -> Option<()> {
 mod tests {
     use super::*;
     use crate::{normalize, History};
-    use document_model::{CodeBlock, Format, Paragraph, Table, TableCell, TableRow};
+    use document_model::{CodeBlock, Format, Paragraph, StyleSheet, Table, TableCell, TableRow};
 
     fn para(runs: &[(&str, bool)]) -> Block {
         let mut p = Paragraph::default();
@@ -247,7 +247,7 @@ mod tests {
             p.push(
                 text,
                 &RunStyle {
-                    bold: *bold,
+                    bold: bold.then_some(true),
                     ..RunStyle::default()
                 },
             );
@@ -259,6 +259,7 @@ mod tests {
         let mut d = Document {
             blocks,
             format: Format::Docx,
+            styles: StyleSheet::builtin(),
         };
         normalize(&mut d);
         d
@@ -357,7 +358,10 @@ mod tests {
             panic!()
         };
         assert_eq!(p.text(), "The dog sat on the dog mat.");
-        assert!(p.runs.iter().any(|r| r.text == "the dog" && r.style.bold));
+        assert!(p
+            .runs
+            .iter()
+            .any(|r| r.text == "the dog" && r.style.bold == Some(true)));
         let Block::CodeBlock(c) = &d.blocks[2] else {
             panic!()
         };
@@ -406,6 +410,9 @@ mod tests {
             panic!()
         };
         assert_eq!(p.text(), "The cat sat on the dog mat.");
-        assert!(p.runs.iter().any(|r| r.text == "the dog" && r.style.bold));
+        assert!(p
+            .runs
+            .iter()
+            .any(|r| r.text == "the dog" && r.style.bold == Some(true)));
     }
 }

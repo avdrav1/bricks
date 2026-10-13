@@ -17,6 +17,7 @@
 
 mod bench;
 mod find_bar;
+mod format_bar;
 mod open;
 mod recovery;
 mod saving;
@@ -37,10 +38,10 @@ const USAGE: &str =
     "usage: slate [FILE.txt|FILE.md|FILE.docx]... [--version] [--bench-flow|--bench-typing|--bench-find]";
 const START_WINDOW: &str = "start";
 
-/// The page's text is one document font whatever the desktop's: Liberation Sans (metric-
-/// compatible with Arial), else the system's sans, at 11 pt. Variable desktop fonts such as
-/// Adwaita Sans take twice as long to lay out (SLATE-11). A page break's dashed line has
-/// room above and below it (`flow::PAGE_BREAK_HEIGHT` in all).
+/// The page's own font, for what it shows outside the document: Liberation Sans, else the
+/// system's sans, at 11 pt. A document's text is drawn in its own fonts, from its style
+/// sheet (ADR 0008; Markdown and plain text in Slate's built-in Liberation Sans 11 pt). A
+/// page break's dashed line has room above and below it (`flow::PAGE_BREAK_HEIGHT` in all).
 const CSS: &str = "
 slatepage { font-family: \"Liberation Sans\", sans-serif; font-size: 11pt; }
 separator.page-break {
@@ -263,11 +264,20 @@ fn edit_menu() -> gio::Menu {
     menu
 }
 
-/// Format: bold, italic, the paragraph's style, and lists; the window's page does them.
+/// Format: bold, italic, underline, strikethrough, alignment, the paragraph's style, and
+/// lists; the window's page does them.
 fn format_menu() -> gio::Menu {
     let menu = gio::Menu::new();
     menu.append_item(&item("Bold", "win.bold", "<Control>b"));
     menu.append_item(&item("Italic", "win.italic", "<Control>i"));
+    menu.append_item(&item("Underline", "win.underline", "<Control>u"));
+    menu.append(Some("Strikethrough"), Some("win.strike"));
+    let aligns = gio::Menu::new();
+    aligns.append_item(&item("Align Left", "win.align-left", "<Control>l"));
+    aligns.append_item(&item("Centre", "win.align-center", "<Control>e"));
+    aligns.append_item(&item("Align Right", "win.align-right", "<Control>r"));
+    aligns.append_item(&item("Justify", "win.justify", "<Control>j"));
+    menu.append_submenu(Some("Alignment"), &aligns);
     let styles = gio::Menu::new();
     for level in 0..=6u8 {
         let label = if level == 0 {
@@ -287,6 +297,7 @@ fn format_menu() -> gio::Menu {
 
 /// The window's Edit and Format actions, done by `page`.
 fn add_page_actions(window: &gtk::ApplicationWindow, page: &view::Page) {
+    use document_model::Align;
     use view::Command;
     let simple = |name: &str, command: Command| {
         let page = page.downgrade();
@@ -316,6 +327,12 @@ fn add_page_actions(window: &gtk::ApplicationWindow, page: &view::Page) {
         simple("redo", Command::Redo),
         simple("bold", Command::Bold),
         simple("italic", Command::Italic),
+        simple("underline", Command::Underline),
+        simple("strike", Command::Strike),
+        simple("align-left", Command::Align(Align::Start)),
+        simple("align-center", Command::Align(Align::Center)),
+        simple("align-right", Command::Align(Align::End)),
+        simple("justify", Command::Align(Align::Justify)),
         simple("bullets", Command::Bullets),
         simple("numbers", Command::Numbers),
         simple("cut", Command::Cut),
@@ -685,14 +702,36 @@ fn show(
     } else {
         text_width(app)
     };
+    let plain = matches!(opened.doc.format, document_model::Format::Text(_));
     let page = view::Page::new(opened.doc, opened.textures, setting);
     PAGES.with_borrow_mut(|pages| pages.push(page.downgrade()));
     page.update_property(&[gtk::accessible::Property::Label(name)]);
     let scrolled = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
+        .vexpand(true)
         .child(&page)
         .build();
-    stack.add_named(&scrolled, Some("document"));
+    // The format bar over the page, for documents with formatting (SLATE-21).
+    let document = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    if !plain {
+        let bar = format_bar::FormatBar::new(&page);
+        // A window narrower than the bar scrolls it rather than growing to fit it.
+        let holder = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Automatic)
+            .vscrollbar_policy(gtk::PolicyType::Never)
+            .propagate_natural_height(true)
+            .child(bar.root())
+            .build();
+        document.append(&holder);
+        document.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+        // The bar lives as long as its widgets.
+        let root = bar.root().clone();
+        root.connect_destroy(move |_| {
+            let _ = &bar;
+        });
+    }
+    document.append(&scrolled);
+    stack.add_named(&document, Some("document"));
     stack.set_visible_child_name("document");
     if let Some(window) = stack.root().and_downcast::<gtk::ApplicationWindow>() {
         add_page_actions(&window, &page);

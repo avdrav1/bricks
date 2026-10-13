@@ -1,11 +1,11 @@
-//! Looks edits: paragraph style, list kind, list level, and ordered labels of whole
-//! blocks, each holding the blocks' looks (without their text) before and after.
+//! Looks edits: paragraph style, alignment, list kind, list level, and ordered labels of
+//! whole blocks, each holding the blocks' looks (without their text) before and after.
 
 use crate::{
-    bare, block_len, blocks, blocks_mut, paragraph, set_runs, shell, take_runs, Change, Container,
-    Edit, Pos,
+    bare, block_len, blocks, blocks_mut, paragraph, paragraph_mut, set_runs, shell, take_runs,
+    Change, Container, Edit, Pos,
 };
-use document_model::{Block, Document, ListItem, ListKind, Paragraph, ParagraphStyle};
+use document_model::{Align, Block, Document, ListItem, ListKind, Paragraph};
 use std::ops::Range;
 
 /// Changing the looks of whole blocks of a container: each block's index, its looks
@@ -142,14 +142,9 @@ fn clamp(doc: &Document, at: Container, range: Range<usize>) -> Option<(&[Block]
     Some((blocks, range.start.min(n)..range.end.min(n)))
 }
 
-/// Give the paragraphs in `blocks` of `at` `style`; list items there become paragraphs
-/// in it.
-pub fn set_style(
-    doc: &Document,
-    at: Container,
-    blocks: Range<usize>,
-    style: ParagraphStyle,
-) -> Option<Edit> {
+/// Give the paragraphs in `blocks` of `at` the paragraph style with id `style`; list items
+/// there become paragraphs in it.
+pub fn set_style(doc: &Document, at: Container, blocks: Range<usize>, style: &str) -> Option<Edit> {
     let (blocks, range) = clamp(doc, at, blocks)?;
     let mut out = Vec::new();
     for i in range {
@@ -159,8 +154,33 @@ pub fn set_style(
             Block::ListItem(item) => &item.paragraph,
             _ => continue,
         };
-        let after = Block::Paragraph(Paragraph { style, ..bare(p) });
+        let after = Block::Paragraph(Paragraph {
+            style: style.to_owned(),
+            ..bare(p)
+        });
         out.push((i, shell(block), after));
+    }
+    edit(at, out)
+}
+
+/// Align the paragraphs and list items in `blocks` of `at` to `align`.
+pub fn set_align(
+    doc: &Document,
+    at: Container,
+    blocks: Range<usize>,
+    align: Align,
+) -> Option<Edit> {
+    let (blocks, range) = clamp(doc, at, blocks)?;
+    let mut out = Vec::new();
+    for i in range {
+        let block = &blocks[i];
+        if paragraph(block).is_some_and(|p| p.align != align) {
+            let mut after = shell(block);
+            if let Some(p) = paragraph_mut(&mut after) {
+                p.align = align;
+            }
+            out.push((i, shell(block), after));
+        }
     }
     edit(at, out)
 }
@@ -193,6 +213,7 @@ pub fn toggle_list(
     ordered: bool,
 ) -> Option<Edit> {
     let (blocks, range) = clamp(doc, at, blocks)?;
+    let normal = || doc.styles.default_id().to_owned();
     let texts = || range.clone().filter(|&i| paragraph(&blocks[i]).is_some());
     texts().next()?;
     let off = texts()
@@ -202,7 +223,7 @@ pub fn toggle_list(
         let block = &blocks[i];
         let after = match block {
             Block::ListItem(item) if off => Block::Paragraph(Paragraph {
-                style: ParagraphStyle::Normal,
+                style: normal(),
                 ..bare(&item.paragraph)
             }),
             Block::ListItem(item) if same_kind(&item.kind, ordered) => continue,
@@ -210,7 +231,7 @@ pub fn toggle_list(
                 kind: new_kind(ordered),
                 level: item.level,
                 paragraph: Paragraph {
-                    style: ParagraphStyle::Normal,
+                    style: normal(),
                     ..bare(&item.paragraph)
                 },
             }),
@@ -218,7 +239,7 @@ pub fn toggle_list(
                 kind: new_kind(ordered),
                 level: 0,
                 paragraph: Paragraph {
-                    style: ParagraphStyle::Normal,
+                    style: normal(),
                     ..bare(p)
                 },
             }),

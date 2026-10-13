@@ -605,8 +605,10 @@ fn write(doc: &Document, dest: &Path, target: Target, save_as: bool) -> Result<T
     }
     let made = |target: &Target| match target {
         Target::Text(info) => write_text(&doc.blocks, info).map(|bytes| (bytes, None)),
-        Target::Markdown(info, source) => write_markdown(&doc.blocks, info, source.as_ref())
-            .map(|(bytes, source)| (bytes, Some(source))),
+        Target::Markdown(info, source) => {
+            write_markdown(&doc.blocks, &doc.styles, info, source.as_ref())
+                .map(|(bytes, source)| (bytes, Some(source)))
+        }
         Target::Docx(_) => unreachable!("Word documents are saved above"),
     };
     let (bytes, source, target) = match made(&target) {
