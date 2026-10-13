@@ -1,12 +1,16 @@
 //! The format bar's commands (SLATE-21): run looks over a selection and on the look typed
 //! next, paragraph alignment, underline and strikethrough toggles, and the looks the bar
-//! shows at the caret and across a selection.
+//! shows at the caret and across a selection. Saved as Markdown (SLATE-22): what Markdown
+//! has stays, the rest is dropped.
 
 use document_edit::{
-    format, formatted, look, looks, normalize, set_align, toggle, toggled, Container, Edit, Flag,
-    History, LookPatch, Looks, Pos, SizeChange,
+    format, formatted, look, looks, normalize, set_align, set_style, toggle, toggled, Container,
+    Edit, Flag, History, LookPatch, Looks, Pos, SizeChange,
 };
-use document_model::{read_markdown, Align, Block, Document, Paragraph, RunStyle};
+use document_model::{
+    read_markdown, read_markdown_source, write_markdown, Align, Block, Document, Format, Paragraph,
+    RunStyle,
+};
 use Container::Top;
 
 fn md(source: &str) -> Document {
@@ -237,4 +241,121 @@ fn the_bar_shows_mixed_looks_as_none() {
     // A caret outside text shows nothing.
     let code = md("```\ncode\n```");
     assert_eq!(looks(&code, pos(0, 1), pos(0, 1), None), Looks::default());
+}
+
+#[test]
+fn markdown_keeps_headings_quotes_and_emphasis_and_drops_the_rest() {
+    let source = "# Was a heading\n\nBecomes a heading\n\nBecomes a quote\n\n\
+                  Plain bold italic struck words\n\nMono big red underlined centred\n";
+    let (mut doc, src) = read_markdown_source(source.as_bytes());
+    normalize(&mut doc);
+    let Format::Markdown(info) = doc.format else {
+        panic!("{:?}", doc.format)
+    };
+    let mut history = History::new();
+    let mut apply = |doc: &mut Document, make: &dyn Fn(&Document) -> Option<Edit>| {
+        let edit = make(doc).expect("an edit");
+        history.apply(doc, edit);
+    };
+    let word = |doc: &Document, block: usize, word: &str| {
+        let text = para(doc, block).text();
+        let at = text.find(word).unwrap();
+        (pos(block, at), pos(block, at + word.len()))
+    };
+    apply(&mut doc, &|d| set_style(d, Top, 0..1, "Normal"));
+    apply(&mut doc, &|d| set_style(d, Top, 1..2, "Heading2"));
+    apply(&mut doc, &|d| set_style(d, Top, 2..3, "Quote"));
+    for (w, flag) in [
+        ("bold", Flag::Bold),
+        ("italic", Flag::Italic),
+        ("struck", Flag::Strike),
+    ] {
+        let (a, b) = word(&doc, 3, w);
+        apply(&mut doc, &|d| toggle(d, a, b, flag));
+    }
+    for (w, patch) in [
+        (
+            "Mono",
+            LookPatch {
+                font: Some(Some("Liberation Mono".into())),
+                ..LookPatch::default()
+            },
+        ),
+        (
+            "big",
+            LookPatch {
+                size: Some(SizeChange::Set(40)),
+                ..LookPatch::default()
+            },
+        ),
+        (
+            "red",
+            LookPatch {
+                color: Some(Some([0xC0, 0, 0])),
+                ..LookPatch::default()
+            },
+        ),
+        (
+            "underlined",
+            LookPatch {
+                underline: Some(true),
+                ..LookPatch::default()
+            },
+        ),
+    ] {
+        let (a, b) = word(&doc, 4, w);
+        apply(&mut doc, &|d| format(d, a, b, &patch));
+    }
+    apply(&mut doc, &|d| set_align(d, Top, 4..5, Align::Center));
+    assert_eq!(para(&doc, 4).runs.len(), 8, "{:?}", para(&doc, 4));
+
+    let (out, _) = write_markdown(&doc.blocks, &doc.styles, &info, Some(&src)).unwrap();
+    let out = String::from_utf8(out).unwrap();
+    assert_eq!(
+        out,
+        "Was a heading\n\n## Becomes a heading\n\n> Becomes a quote\n\n\
+         Plain **bold** *italic* ~~struck~~ words\n\nMono big red underlined centred\n"
+    );
+
+    // Read back: the same text, styles, and emphasis; the dropped looks gone.
+    let back = md(&out);
+    assert_eq!(back.blocks.len(), doc.blocks.len());
+    let style = |d: &Document, i: usize| d.styles.style_of(&para(d, i).style).id.clone();
+    for i in 0..doc.blocks.len() {
+        assert_eq!(para(&back, i).text(), para(&doc, i).text());
+        assert_eq!(style(&back, i), style(&doc, i), "block {i}");
+    }
+    assert_eq!(
+        (style(&back, 0), style(&back, 1), style(&back, 2)),
+        ("Normal".into(), "Heading2".into(), "Quote".into())
+    );
+    assert_eq!(runs(&back, 3), runs(&doc, 3));
+    let flagged = |set: fn(&mut RunStyle)| {
+        let mut s = RunStyle::default();
+        set(&mut s);
+        s
+    };
+    assert_eq!(
+        runs(&back, 3)
+            .into_iter()
+            .map(|(_, s)| s)
+            .collect::<Vec<_>>(),
+        [
+            RunStyle::default(),
+            flagged(|s| s.bold = Some(true)),
+            RunStyle::default(),
+            flagged(|s| s.italic = Some(true)),
+            RunStyle::default(),
+            flagged(|s| s.strike = Some(true)),
+            RunStyle::default(),
+        ]
+    );
+    assert_eq!(
+        runs(&back, 4),
+        [(
+            "Mono big red underlined centred".to_owned(),
+            RunStyle::default()
+        )]
+    );
+    assert_eq!(para(&back, 4).align, Align::Start);
 }

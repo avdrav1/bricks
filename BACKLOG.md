@@ -139,7 +139,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | SLATE-19 | SL3 | P0 | done | SLATE-18 | Style sheet and fonts in the model and the DOCX reader (ADR 0008) | Each paragraph of the .docx corpus names its style by id from `Document::styles` (custom styles included, based-on resolved), and its style name, alignment, spacing, and indents, and each run's font family, size, bold, italic, underline, strikethrough, and colour, match LibreOffice's dump (theme and default fonts resolved); Markdown and text read into the built-in sheet; `ParagraphStyle` is gone and every existing test passes |
 | SLATE-20 | SL3 | P0 | done | SLATE-19 | Draw the document's fonts and style looks | A .docx with paragraphs in Liberation Serif, Liberation Sans, and Liberation Mono draws each in its font: the screenshot's text widths match Pango's measure of that font within 2 px, and the three differ. Styles' space before and after, left and first-line indents, and line spacing (multiple, exact, at least) place each paragraph by their twips at 96 dpi (flow tests to the pixel; a screenshot within 2 px). Markdown and text look as before (check_slate's measures). On a generated 150,000-word .docx in three fonts, whole-document re-wrap stays under 500 ms and typing p99 under 25 ms |
 | SLATE-21 | SL3 | P0 | done | SLATE-20 | Format bar: style, font, size, B/I/U/S, colour, alignment | The bar shows the caret's style, font, size, and looks (blank when the selection mixes them); choosing each applies to the selection or what's typed next as one undo step; the style picker lists the document's styles in their looks; Ctrl+U, Ctrl+L/E/R/J, Ctrl+] and Ctrl+[ work; plain-text files hide the bar |
-| SLATE-22 | SL3 | P0 | todo | SLATE-21 | Save fonts, styles, and looks in .docx | A .docx edited through the format bar (a custom style, a font, a size cleared and set, underline, strikethrough, colour, alignment) reopens in LibreOffice with exactly those, every other part unchanged; Markdown keeps headings and quotes and drops what it can't hold |
+| SLATE-22 | SL3 | P0 | done | SLATE-21 | Save fonts, styles, and looks in .docx | A .docx edited through the format bar (a custom style, a font, a size cleared and set, underline, strikethrough, colour, alignment) reopens in LibreOffice with exactly those, every other part unchanged; Markdown keeps headings and quotes and drops what it can't hold |
 | FRAME-1 | FR0 | P0 | done | - | Presentation model and PPTX package: slide order, size, shapes, placeholder inheritance | Slide count, order, size, and every shape's frame in the fixtures and a real-world deck match LibreOffice's dump within 1 EMU; placeholders without a frame take their layout's or master's |
 | FRAME-2 | FR0 | P0 | done | FRAME-1 | PPTX text: runs, fonts, sizes, colours, bullets, levels, alignment, inherited styles | Every paragraph's text, level, alignment, and every run's size, bold, italic, and colour match LibreOffice's dump; theme colours resolve with lumMod, lumOff, tint, and shade |
 | FRAME-3 | FR0 | P0 | done | FRAME-1 | PPTX pictures, fills, outlines, backgrounds, groups, and tables | Pictures carry their bytes; group children land where LibreOffice reads them; table cells carry text and fills; unsupported content becomes a labelled shape |
@@ -160,6 +160,29 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-13 SLATE-22:** Slate saves the format bar's looks in .docx (ADR 0008). A subagent built the tests; it was integrated and verified here.
+  - One writer bug, found by a new test and fixed:
+    - A rewritten run copies another run's `w:rPr` when their direct formatting matches.
+    - Slate reads an explicit `<w:color w:val="auto"/>` as "no colour", meaning the style's. So a colour cleared in a coloured style could copy a neighbour's `w:color auto`, and LibreOffice showed black.
+    - `run()` now knows the paragraph style's colour. Such a run is written without `w:color`, so the style's colour shows.
+  - Already right, now proven: cleared properties are removed, not copied from the template; `jc` is written when it differs from the style's, left included; custom style ids go in verbatim; bold off is `w:b w:val="0"`.
+  - Follow-up (the reader, from SLATE-19): `RunStyle::color` can't tell an explicit automatic colour from "the style's".
+    - An automatic run in a coloured style shows the style's colour, where Word shows black.
+    - Once such a paragraph is rewritten, it saves that way too.
+    - A `Color::Auto` override would fix both.
+  - Acceptance:
+    - `cargo test -p docx --test save -- --include-ignored`, 12 tests passing against LibreOffice 26.8.1.1. The edits are made through document-edit on a fixture copy with a custom style Fancy (Liberation Sans 13, blue):
+      - Fancy on a paragraph.
+      - Liberation Mono, strikethrough, underline, and 20 pt on words.
+      - A colour cleared and another set to 1E9040.
+      - Bold off in Heading 2.
+      - A direct 16 pt cleared back to the style.
+      - Alignments: left on the centred Title, centre, and right.
+    - Only `word/document.xml` changes, and Slate reads every look back through `StyleSheet::look`.
+    - LibreOffice's dump equals the original's line by line except exactly those looks.
+    - A colour cleared in a coloured style reads as the style's in Slate and in LibreOffice.
+    - `document-edit` `markdown_keeps_headings_quotes_and_emphasis_and_drops_the_rest`: headings, quotes, bold, italic, and strikethrough are written as `##`, `>`, `**`, `*`, and `~~`; font, size, colour, underline, and alignment are dropped; it reads back with the same text and kept looks.
+    - `scripts/check_slate.sh` SLATE OK, 171 checks, 9 of them new in section 25. After the bar's edits on bar.docx and Ctrl+S, `document.xml` has Fancy's `pStyle`, `jc` center, `rFonts` Liberation Mono, `sz` 40, `u`, and the red colour, and the other paragraphs are as they were. Reopened, AT-SPI shows the same looks, the line centred, and the bar showing them.
 - **2026-10-13 SLATE-21:** Slate has a format bar (ADR 0008). A subagent built it; it was integrated and verified here.
   - document-edit (`tests/format.rs`, 7 tests):
     - `format(doc, from, to, &LookPatch)` sets font, size (set, clear, or step, 1 to 400 pt), bold, italic, underline, strike, and colour (set or clear) on a selection as one undoable edit, keeping the selection. Overrides equal to the style's are kept, so a save can't lose them.

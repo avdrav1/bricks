@@ -48,7 +48,7 @@ Built (SLATE-6, SLATE-12, SLATE-13, SLATE-14, SLATE-15, SLATE-7, SLATE-8, SLATE-
 - Find and replace (SLATE-16): Ctrl+F opens a find bar over the page; matches across paragraphs and table cells highlight in the flow with a count; Enter and Shift+Enter step through them; Ctrl+H replaces one or all, replace all undoing as one step. Searching runs off the UI thread.
 - Crash recovery (SLATE-17): each window's unsaved edits are journaled off the UI thread; after a crash the next launch offers to restore them, and the file stays as it was until saved.
 
-## SL3: fonts and styles (planned)
+## SL3: fonts and styles
 
 Word documents look like themselves, and their fonts and styles can be chosen ([ADR 0008](../adr/0008-slate-fonts-and-styles.md), user decisions).
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# SLATE-4, SLATE-10, SLATE-11, SLATE-6, SLATE-12, SLATE-13, SLATE-20, and SLATE-21
-# acceptance: the window opens, shows, and refuses documents, its pageless column follows
-# View → Text Width, its text selects and copies, it edits with undo, table cells
+# SLATE-4, SLATE-10, SLATE-11, SLATE-6, SLATE-12, SLATE-13, SLATE-20, SLATE-21, and
+# SLATE-22 acceptance: the window opens, shows, and refuses documents, its pageless column
+# follows View → Text Width, its text selects and copies, it edits with undo, table cells
 # included, it composes through an input method, it draws a Word document's fonts and
-# paragraph looks, and its format bar sets them.
+# paragraph looks, its format bar sets them, and they save.
 #
 #   scripts/check_slate.sh [BINARY]   (default target/release/slate)
 #
@@ -118,6 +118,13 @@
 #      line, and Ctrl+[ makes it 12 pt; a selection of plain 11 pt and bold 14 pt text
 #      shows Bold off and the size blank, the bold word alone Bold on and 14; a .txt
 #      window has no format bar (no control named Font).
+#  25. saving the format bar's looks: in a copy of bar.docx, "beta" given Liberation Mono,
+#      20 pt, underline, Red, centred, and Fancy through the bar as in 24, then Ctrl+S:
+#      the saved document.xml gives the paragraph w:pStyle Fancy and w:jc center and the
+#      word w:rFonts Liberation Mono, w:sz 40, w:u single, and w:color E01B24, and keeps
+#      the other paragraphs as they were; reopened, AT-SPI reads the word's looks and the
+#      rest of the line's (Fancy's) as before the save, the line's ink centres, and the bar
+#      shows Fancy, the font, the size, Underline, and Centre.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -679,6 +686,7 @@ PY
 # SLATE-21: `make PATH` writes bar.docx (styles Normal, Heading 2, and a custom Fancy);
 # `line PNG` measures the first line of text below the format bar in a screenshot: the
 # left and right edges of its ink and how far its middle is from the middle of the window.
+# SLATE-22: `saved PATH ORIGINAL` reads the looks a saved bar.docx gives "beta".
 cat > /tmp/bar.py <<"PY"
 import os
 import sys
@@ -750,7 +758,32 @@ def line(png):
     else:
         print(f"line {left}-{right} off centre {(left + right) // 2 - w // 2}")
 
-make(sys.argv[2]) if sys.argv[1] == "make" else line(sys.argv[2])
+def saved(path, original):
+    """SLATE-22: the looks of the saved paragraph holding "beta" and of the word, and
+    whether the other paragraphs are as they were."""
+    import re
+    def paras(p):
+        x = zipfile.ZipFile(p).read("word/document.xml").decode()
+        return re.findall(r"<w:p[ >].*?</w:p>", x, re.S)
+    def val(xml, tag, attr="val"):
+        m = re.search(r"<w:" + tag + r"\b[^>]*?w:" + attr + r"=\"([^\"]*)\"", xml)
+        return m.group(1) if m else "-"
+    new, old = paras(path), paras(original)
+    p = next(p for p in new if ">beta<" in p)
+    r = next(r for r in re.findall(r"<w:r>.*?</w:r>", p, re.S) if ">beta<" in r)
+    style, jc = val(p, "pStyle"), val(p, "jc")
+    print(f"saved paragraph: style={style} jc={jc}")
+    font, size, u, colour = val(r, "rFonts", "ascii"), val(r, "sz"), val(r, "u"), val(r, "color")
+    print(f"saved beta: font={font} size={size} underline={u} colour={colour}")
+    same = [q for q in new if q is not p] == [q for q in old if "Alpha beta gamma" not in q]
+    print("saved others as they were: " + ("yes" if same else "no"))
+
+if sys.argv[1] == "make":
+    make(sys.argv[2])
+elif sys.argv[1] == "saved":
+    saved(sys.argv[2], sys.argv[3])
+else:
+    line(sys.argv[2])
 PY
 cat > /tmp/copied.py <<"PY"
 import subprocess, sys
@@ -1078,6 +1111,24 @@ print(\"line:\", \"First line\" in x)"
   click Style; sleep 1; click Normal 0.5 label; sleep 1; bar restyled; attrs restyled 29; quit
   # Plain text has no format bar.
   slate /tmp/w.txt >>/tmp/app.log 2>&1 & sleep 4; bar txt; shot bar-txt; quit
+  echo "== 25 save looks"
+  cp /tmp/bar.docx /tmp/save/bar.docx
+  slate /tmp/save/bar.docx >>/tmp/app.log 2>&1 & sleep 4
+  # The bar edits of section 24 on "beta": font, size, underline, colour, centre, Fancy.
+  beta; click Font; keys "Liberation Mono"; sleep 1; click "Liberation Mono" 0.5 label
+  click Size 0.2; keys -M ctrl a -m ctrl "20" -k Return; sleep 1
+  python3 /tmp/a11y.py press Underline; sleep 1
+  click Colour; sleep 2; python3 /tmp/a11y.py press Red; sleep 1
+  python3 /tmp/a11y.py press Select 2>/dev/null; sleep 1
+  python3 /tmp/a11y.py press Centre; sleep 1
+  click Style; sleep 1; click Fancy 0.5 label; attrs edited
+  keys -M ctrl s -m ctrl; sleep 1; saved; titles | sed "s/^/looks-saved-/"
+  python3 /tmp/bar.py saved /tmp/save/bar.docx /tmp/bar.docx; quit
+  slate /tmp/save/bar.docx >>/tmp/app.log 2>&1 & sleep 4
+  attrs reopened; attrs reopened-rest 1
+  keys -M ctrl -k End -m ctrl; sleep 1; shot looks-reopened
+  python3 /tmp/bar.py line /shots/looks-reopened.png | sed "s/^/reopened /"
+  beta; bar reopened; quit
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -1293,6 +1344,20 @@ check "24: Normal picked there, the item the list still held, makes everything N
   "^restyled attrs [0-9]+-[0-9]+: $word Sans size=11 weight=400 style=normal "
 check "24: ... and the bar shows Normal" "$s24" "^restyled bar: fonts=[0-9]+ style=Normal "
 check "24: a .txt window has no format bar" "$s24" "^txt bar: fonts=0 "
+s25="25 save looks"
+check "25: the bar's looks on the word before saving" "$s25" \
+  "^edited attrs 6-10: $word Mono size=20 weight=400 style=italic underline=single strikethrough=false fg-color=224,27,36$"
+check "25: Ctrl+S saves bar.docx" "$s25" "^looks-saved-titles: bar.docx,$"
+check "25: the saved paragraph is in Fancy, centred" "$s25" "^saved paragraph: style=Fancy jc=center$"
+check "25: the saved word is Liberation Mono 20 pt, underlined, red" "$s25" \
+  "^saved beta: font=Liberation Mono size=40 underline=single colour=E01B24$"
+check "25: the other paragraphs are saved as they were" "$s25" "^saved others as they were: yes$"
+check "25: reopened, the word shows its looks" "$s25" \
+  "^reopened attrs 6-10: $word Mono size=20 weight=400 style=italic underline=single strikethrough=false fg-color=224,27,36$"
+check "25: ... the rest of the line Fancy's" "$s25" "^reopened-rest attrs 0-6: $word Serif size=14 weight=400 style=italic "
+check "25: ... the line centred" "$s25" "^reopened line .* off centre -?[0-2]$"
+check "25: ... and the bar shows them" "$s25" \
+  "^reopened bar: fonts=[0-9]+ style=Fancy font=Liberation Mono size=20 .* underline=on .* centre=on "
 if [ $fail = 0 ]; then echo "SLATE OK"; else
   echo "SLATE CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

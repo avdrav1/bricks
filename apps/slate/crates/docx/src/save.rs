@@ -13,12 +13,13 @@
 //!   paragraph mark's look stay; its style (by id: a built-in heading, title, or quote
 //!   the document lacks is added, any other unknown id is the default), list numbering,
 //!   and alignment are set where they differ. A run whose direct formatting is that of
-//!   a run in that paragraph takes its run properties as they are; any other run's are
-//!   its direct formatting exactly (bold, italic, underline, strikethrough with `w:val="0"`
-//!   where turned off, font, size, colour; nothing its style gives), over the closest
-//!   run's properties the model doesn't hold (other scripts' fonts, highlighting). A
-//!   link is a `w:hyperlink` to the document's relationship for its URL (or a new one),
-//!   or to a bookmark.
+//!   a run in that paragraph takes its run properties as they are (but not an automatic
+//!   colour in a coloured style: the model reads it as the style's colour, and writes
+//!   that); any other run's are its direct formatting exactly (bold, italic, underline,
+//!   strikethrough with `w:val="0"` where turned off, font, size, colour; nothing its
+//!   style gives), over the closest run's properties the model doesn't hold (other
+//!   scripts' fonts, highlighting). A link is a `w:hyperlink` to the document's
+//!   relationship for its URL (or a new one), or to a bookmark.
 //! - A section break the replaced paragraph ended stays with the last paragraph written
 //!   for it, with the page break after it; a page break is a `w:br w:type="page"` at the
 //!   start of the paragraph after it or the end of the one before, else a section break
@@ -45,7 +46,7 @@ use crate::numbering::Numbering;
 use crate::styles::{ParaProps, RunProps, Styles};
 use crate::{dir_of, rel_kind, rels_part, DocxError, MainPart, Package, Rel};
 use document_model::{
-    match_blocks_by, Align, Block, Image, ImageFormat, ImageSource, ListKind, Paragraph, Run,
+    match_blocks_by, Align, Block, Image, ImageFormat, ImageSource, ListKind, Paragraph, Rgb, Run,
     RunStyle, StyleSheet, Table,
 };
 use quick_xml::events::Event;
@@ -1380,6 +1381,7 @@ impl<'a> Patcher<'a> {
         border: Option<&str>,
     ) -> String {
         let ppr = self.ppr(&p.style, p.align, list, template, sect, border);
+        let color = self.style_color(&self.written_style(&p.style));
         let mut s = format!("<w:p{}>{ppr}{lead}", self.w_decl);
         let mut i = 0;
         while i < p.runs.len() {
@@ -1396,7 +1398,7 @@ impl<'a> Patcher<'a> {
                 None => "",
             };
             for run in &p.runs[i..end] {
-                self.run(&mut s, run, template);
+                self.run(&mut s, run, color, template);
             }
             s.push_str(close);
             i = end;
@@ -1500,6 +1502,27 @@ impl<'a> Patcher<'a> {
         } else {
             self.styles.paragraph_id(None).to_owned()
         }
+    }
+
+    /// The colour paragraph style `id` gives its runs (`None`: automatic).
+    fn style_color(&self, id: &str) -> Option<Rgb> {
+        self.styles
+            .paragraph(Some(id))
+            .and_then(|s| s.rpr.color)
+            .or(self.styles.default_rpr.color)
+            .flatten()
+    }
+
+    /// Whether run properties `p`, with their character style, set the colour to
+    /// automatic.
+    fn automatic(&self, p: &RunProps) -> bool {
+        p.color
+            .or_else(|| {
+                self.styles
+                    .character(p.style.as_deref())
+                    .and_then(|s| s.rpr.color)
+            })
+            .is_some_and(|c| c.is_none())
     }
 
     /// The `w:pStyle` of a paragraph written in style `id` (see [`Patcher::written_style`]):
@@ -1639,11 +1662,18 @@ impl<'a> Patcher<'a> {
         num
     }
 
-    /// A run of `run`'s text. A template run whose direct formatting is the run's gives
-    /// its `w:rPr` as it is; else the closest one's `w:rPr` keeps what the model doesn't
-    /// hold (other scripts' fonts, highlighting, language) and the run's overrides are
-    /// written exactly: what they set, nothing the style gives.
-    fn run(&mut self, out: &mut String, run: &Run, template: Option<&Template<'_>>) {
+    /// A run of `run`'s text in a paragraph whose style's colour is `style_color`. A
+    /// template run whose direct formatting is the run's gives its `w:rPr` as it is; else
+    /// the closest one's `w:rPr` keeps what the model doesn't hold (other scripts' fonts,
+    /// highlighting, language) and the run's overrides are written exactly: what they set,
+    /// nothing the style gives.
+    fn run(
+        &mut self,
+        out: &mut String,
+        run: &Run,
+        style_color: Option<Rgb>,
+        template: Option<&Template<'_>>,
+    ) {
         let want = &run.style;
         let none = RunProps::default();
         let candidates = template
@@ -1653,7 +1683,15 @@ impl<'a> Patcher<'a> {
             .map(|(x, p)| (*x, p))
             .chain(std::iter::once(("", &none)));
         let (xml, agree) = candidates
-            .map(|(x, p)| (x, agreeing(&self.styles.overrides(p), want)))
+            .map(|(x, p)| {
+                let mut agree = agreeing(&self.styles.overrides(p), want);
+                // The model reads an automatic colour as the style's: in a coloured style
+                // it isn't the style's colour a run without its own wants.
+                if want.color.is_none() && style_color.is_some() && self.automatic(p) {
+                    agree -= 1;
+                }
+                (x, agree)
+            })
             .min_by_key(|(_, agree)| LOOKS - agree)
             .expect("one candidate at least");
         out.push_str("<w:r>");
