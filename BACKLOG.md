@@ -19,7 +19,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 - [x] SL0: slate opens the fixture .txt, .md, and .docx files and a real-world .docx and shows their paragraphs, headings, emphasis, lists, tables, links, and pictures as LibreOffice reads them (dump comparison), read-only, reading off the UI thread, in a pageless column at the text width the user picks
 - [x] SL1: slate edits and saves .txt, .md, and .docx with undo; LibreOffice reopens a saved .docx with the edits and everything else unchanged; an edited Markdown file changes only the edited blocks
 - [ ] SL2: slate finds and replaces text across paragraphs and table cells with undo, and after a crash offers back the unsaved edits of every open document without touching its file
-- [ ] SL3: slate draws each .docx in its own fonts and paragraph styles (LibreOffice's dump matches), the format bar sets style, font, size, bold, italic, underline, strikethrough, colour, and alignment with undo, saved .docx files read back in LibreOffice with them, and re-wrap and typing stay within SL1's targets on a multi-font Word document
+- [x] SL3: slate draws each .docx in its own fonts and paragraph styles (LibreOffice's dump matches), the format bar sets style, font, size, bold, italic, underline, strikethrough, colour, and alignment with undo, saved .docx files read back in LibreOffice with them, and re-wrap and typing stay within SL1's targets on a multi-font Word document
 - [x] FR0: frame opens the fixture .pptx files and a real-world PowerPoint deck and shows every slide's shapes, text, and pictures where LibreOffice reads them (dump comparison); F5 plays the deck full screen
 - [x] FR1: frame edits slide text on the slide and in the outline view, moves and resizes shapes with snapping, formats through the inspector, inserts text, shapes, pictures, and tables, and adds, deletes, and reorders slides, all with undo; File → New starts a deck; Save writes .pptx that LibreOffice reopens with the edits and everything else unchanged; the spec's reference task takes fewer input actions than in PowerPoint
 
@@ -160,6 +160,14 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-13 SL3 gate:** approved by the user, with two caveats:
+  - The GUI check doesn't click the bar's Bold, Italic, and Strikethrough buttons. Those looks are covered by document-edit tests and by Ctrl+B and Ctrl+I in earlier sections.
+  - Performance was measured on GTK's cairo renderer, because this machine's GL and Vulkan renderers segfault in every GTK 4 app. One back-to-back run peaked at 594 ms; four solo runs gave 296-388 ms.
+  - Merging main brought in SLATE-16 (find and replace) and Slate v0.1.2. Seven files conflicted.
+    - The find code's unit tests moved to the direct-formatting model (`Some(true)`, a style sheet on the `Document`).
+    - The find bar sits above the format bar; it stays hidden until Ctrl+F.
+    - The find section of `check_slate.sh` is now 26.
+  - Merged build: `scripts/check_slate.sh` SLATE OK, 186 checks; the LibreOffice save tests pass. Find perf: first match 12.8 ms (target < 100), typing stall 4.3 ms (target < 16).
 - **2026-10-13 SLATE-22:** Slate saves the format bar's looks in .docx (ADR 0008). A subagent built the tests; it was integrated and verified here.
   - One writer bug, found by a new test and fixed:
     - A rewritten run copies another run's `w:rPr` when their direct formatting matches.
