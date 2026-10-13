@@ -1,5 +1,6 @@
-//! Text edits: typing, deleting, Enter, joining paragraphs, and bold and italic, each a
-//! replacement of a stretch of the document's text by other text.
+//! Text edits: typing, deleting, Enter, joining paragraphs, and run looks (bold, italic,
+//! underline, strikethrough, font, size, colour), each a replacement of a stretch of the
+//! document's text by other text.
 
 use crate::looks::LooksEdit;
 use crate::{
@@ -7,6 +8,7 @@ use crate::{
     set_runs, shell, take_runs, Change, Edit, Flag, Fragment, Pos,
 };
 use document_model::{Block, Document, ListItem, ListKind, Paragraph, Run, RunStyle};
+use std::ops::Range;
 
 /// Split `runs` at byte `at` of their joined text: `runs` keeps what's before, the
 /// returned runs hold what's after.
@@ -449,10 +451,12 @@ fn next_style(doc: &Document, id: &str) -> String {
         .clone()
 }
 
-fn flag(style: &mut RunStyle, flag: Flag) -> &mut Option<bool> {
+pub(crate) fn flag(style: &mut RunStyle, flag: Flag) -> &mut Option<bool> {
     match flag {
         Flag::Bold => &mut style.bold,
         Flag::Italic => &mut style.italic,
+        Flag::Underline => &mut style.underline,
+        Flag::Strike => &mut style.strike,
     }
 }
 
@@ -463,40 +467,79 @@ fn shows(doc: &Document, style: &str, run: &RunStyle, which: Flag) -> bool {
     match which {
         Flag::Bold => look.bold,
         Flag::Italic => look.italic,
+        Flag::Underline => look.underline,
+        Flag::Strike => look.strike,
     }
 }
 
-/// Bold or italic over `from..to` of paragraphs' and list items' text: turned off when
-/// every character already shows it (its own or its style's), else on everywhere, as the
-/// runs' direct formatting. The range stays selected.
+/// Bold, italic, underline, or strikethrough over `from..to` of paragraphs' and list
+/// items' text: turned off when every character already shows it (its own or its style's),
+/// else on everywhere, as the runs' direct formatting. The range stays selected.
 pub fn toggle(doc: &Document, from: Pos, to: Pos, which: Flag) -> Option<Edit> {
+    let (blocks, start, end) = range(doc, from, to)?;
+    let (mut any, mut all) = (false, true);
+    for (p, within) in paragraphs_in(blocks, start, end) {
+        for run in runs_within(p, within) {
+            any = true;
+            all &= shows(doc, &p.style, &run.style, which);
+        }
+    }
+    if !any {
+        return None;
+    }
+    restyle(doc, from, to, |_, style| *flag(style, which) = Some(!all))
+}
+
+/// The paragraphs and list items `from..to` (in order, in `blocks`) touches, each with the
+/// bytes of its text inside the range.
+pub(crate) fn paragraphs_in(
+    blocks: &[Block],
+    from: Pos,
+    to: Pos,
+) -> impl Iterator<Item = (&Paragraph, Range<usize>)> {
+    (from.block..=to.block).filter_map(move |i| {
+        let p = paragraph(blocks.get(i)?)?;
+        let start = if i == from.block { from.offset } else { 0 };
+        let end = if i == to.block { to.offset } else { usize::MAX };
+        Some((p, start..end))
+    })
+}
+
+/// The runs of `p` with text inside `within`, bytes of its text.
+pub(crate) fn runs_within(p: &Paragraph, within: Range<usize>) -> impl Iterator<Item = &Run> {
+    let mut start = 0;
+    p.runs.iter().filter(move |r| {
+        let end = start + r.text.len();
+        let inside = start.max(within.start) < end.min(within.end);
+        start = end;
+        inside
+    })
+}
+
+/// Restyle the text of paragraphs and list items in `from..to`: `each` changes every run's
+/// direct formatting, given its paragraph's style id. `None` when the range is empty or
+/// nothing changes; the range stays selected.
+pub(crate) fn restyle(
+    doc: &Document,
+    from: Pos,
+    to: Pos,
+    mut each: impl FnMut(&str, &mut RunStyle),
+) -> Option<Edit> {
     let (blocks, from, to) = range(doc, from, to)?;
     if from == to {
         return None;
     }
     let removed = Fragment::copy(blocks, from, to);
     let mut inserted = removed.clone();
-    let (mut any, mut all) = (false, true);
-    for block in &inserted.blocks {
-        if let Some(p) = paragraph(block) {
-            for run in &p.runs {
-                any = true;
-                all &= shows(doc, &p.style, &run.style, which);
-            }
-        }
-    }
-    if !any {
-        return None;
-    }
     for block in &mut inserted.blocks {
         if let Some(p) = paragraph_mut(block) {
             for run in &mut p.runs {
-                *flag(&mut run.style, which) = Some(!all);
+                each(&p.style, &mut run.style);
             }
             p.merge_runs();
         }
     }
-    Some(
+    (inserted != removed).then(|| {
         TextEdit {
             at: from,
             removed,
@@ -504,19 +547,24 @@ pub fn toggle(doc: &Document, from: Pos, to: Pos, which: Flag) -> Option<Edit> {
             typed: false,
             select: true,
         }
-        .into(),
-    )
+        .into()
+    })
 }
 
-/// The look typed text takes after Ctrl+B or Ctrl+I with no selection at `at`: `look`
-/// (what typing there would take) with `which` turned off if it shows there, else on.
-pub fn toggled(doc: &Document, at: Pos, look: &RunStyle, which: Flag) -> RunStyle {
-    let style = blocks(doc, at.at)
+/// The paragraph style id at `at` ("" outside a paragraph or list item).
+pub(crate) fn style_at(doc: &Document, at: Pos) -> &str {
+    blocks(doc, at.at)
         .and_then(|b| b.get(at.block))
         .and_then(paragraph)
-        .map_or("", |p| p.style.as_str());
+        .map_or("", |p| p.style.as_str())
+}
+
+/// The look typed text takes after a toggle (Ctrl+B, Ctrl+I, Ctrl+U) with no selection at
+/// `at`: `look` (what typing there would take) with `which` turned off if it shows there,
+/// else on.
+pub fn toggled(doc: &Document, at: Pos, look: &RunStyle, which: Flag) -> RunStyle {
     let mut look = look.clone();
-    let on = shows(doc, style, &look, which);
+    let on = shows(doc, style_at(doc, at), &look, which);
     *flag(&mut look, which) = Some(!on);
     look
 }

@@ -138,7 +138,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | SLATE-18 | SL2 | P0 | done | SLATE-8 | New blank document (Ctrl+N, New Document) | Ctrl+N and New Document open an Untitled window with an empty page; typing marks it; the first Ctrl+S asks where (Save As) and writes a .docx that Slate and LibreOffice read back with the text and its heading style |
 | SLATE-19 | SL3 | P0 | done | SLATE-18 | Style sheet and fonts in the model and the DOCX reader (ADR 0008) | Each paragraph of the .docx corpus names its style by id from `Document::styles` (custom styles included, based-on resolved), and its style name, alignment, spacing, and indents, and each run's font family, size, bold, italic, underline, strikethrough, and colour, match LibreOffice's dump (theme and default fonts resolved); Markdown and text read into the built-in sheet; `ParagraphStyle` is gone and every existing test passes |
 | SLATE-20 | SL3 | P0 | done | SLATE-19 | Draw the document's fonts and style looks | A .docx with paragraphs in Liberation Serif, Liberation Sans, and Liberation Mono draws each in its font: the screenshot's text widths match Pango's measure of that font within 2 px, and the three differ. Styles' space before and after, left and first-line indents, and line spacing (multiple, exact, at least) place each paragraph by their twips at 96 dpi (flow tests to the pixel; a screenshot within 2 px). Markdown and text look as before (check_slate's measures). On a generated 150,000-word .docx in three fonts, whole-document re-wrap stays under 500 ms and typing p99 under 25 ms |
-| SLATE-21 | SL3 | P0 | todo | SLATE-20 | Format bar: style, font, size, B/I/U/S, colour, alignment | The bar shows the caret's style, font, size, and looks (blank when the selection mixes them); choosing each applies to the selection or what's typed next as one undo step; the style picker lists the document's styles in their looks; Ctrl+U, Ctrl+L/E/R/J, Ctrl+] and Ctrl+[ work; plain-text files hide the bar |
+| SLATE-21 | SL3 | P0 | done | SLATE-20 | Format bar: style, font, size, B/I/U/S, colour, alignment | The bar shows the caret's style, font, size, and looks (blank when the selection mixes them); choosing each applies to the selection or what's typed next as one undo step; the style picker lists the document's styles in their looks; Ctrl+U, Ctrl+L/E/R/J, Ctrl+] and Ctrl+[ work; plain-text files hide the bar |
 | SLATE-22 | SL3 | P0 | todo | SLATE-21 | Save fonts, styles, and looks in .docx | A .docx edited through the format bar (a custom style, a font, a size cleared and set, underline, strikethrough, colour, alignment) reopens in LibreOffice with exactly those, every other part unchanged; Markdown keeps headings and quotes and drops what it can't hold |
 | FRAME-1 | FR0 | P0 | done | - | Presentation model and PPTX package: slide order, size, shapes, placeholder inheritance | Slide count, order, size, and every shape's frame in the fixtures and a real-world deck match LibreOffice's dump within 1 EMU; placeholders without a frame take their layout's or master's |
 | FRAME-2 | FR0 | P0 | done | FRAME-1 | PPTX text: runs, fonts, sizes, colours, bullets, levels, alignment, inherited styles | Every paragraph's text, level, alignment, and every run's size, bold, italic, and colour match LibreOffice's dump; theme colours resolve with lumMod, lumOff, tint, and shade |
@@ -160,6 +160,34 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-13 SLATE-21:** Slate has a format bar (ADR 0008). A subagent built it; it was integrated and verified here.
+  - document-edit (`tests/format.rs`, 7 tests):
+    - `format(doc, from, to, &LookPatch)` sets font, size (set, clear, or step, 1 to 400 pt), bold, italic, underline, strike, and colour (set or clear) on a selection as one undoable edit, keeping the selection. Overrides equal to the style's are kept, so a save can't lose them.
+    - `set_align` sets the paragraphs a selection touches, list items included, as one looks edit.
+    - `looks(doc, from, to, typing)` summarises the style, font, size, flags, colour, and alignment, each `None` when mixed.
+    - `Flag` gains `Underline` and `Strike`. `formatted` gives the look typed next.
+  - Window (`format_bar.rs`), shown between the header bar and the page for .md and .docx in a horizontally scrolling strip (so a 640 px window still fits), and absent for plain text:
+    - Style: the document's styles in sheet order, each row in its own font, size (capped at 16 pt), bold, and italic.
+    - Font: searchable; installed Pango families plus any the document names.
+    - Size, Bold, Italic, Underline, Strikethrough, Colour (`ColorDialogButton` plus Automatic Colour), and four linked alignment toggles.
+    - Mixed values show blank. GTK 4.14's drop-down always keeps an item, so the bar draws the button label itself and catches clicks on the held row.
+    - Updates from the caret never apply anything, and refreshes coalesce into one idle. Each change is one undo step on the selection or the typing look (style and alignment on the caret's paragraph), and the keys go back to the page.
+  - Keys: Ctrl+U, Ctrl+L/E/R/J, Ctrl+] and Ctrl+[ (1 pt steps). The Format menu gains Underline, Strikethrough, and Alignment.
+  - Behaviour change: style, alignment, list, and indent commands given with a selection now keep that selection. They used to select the whole blocks they changed, which broke applying several looks to the same word in a row.
+  - `check_slate.sh`: the bar pushes the page down about 43 px. Screenshot measurements now start at a shared `TOP=96` (section 18's tabbed window at `TOP+25`), and each earlier section measures the same as before: heading height 200%, bold ink 174%, list shift 28 px.
+  - Acceptance: `scripts/check_slate.sh` SLATE OK, 162 checks, 36 of them in the new section 24, on fixture.docx and a generated bar.docx.
+    - The fixture's title shows Title, Liberation Sans, 28, Bold, and Centre in the bar. With the caret in Normal text it shows Normal, Liberation Sans, and 11.
+    - On "beta", read back through AT-SPI:
+      - Liberation Mono picked from the searched list.
+      - Size 20.
+      - Underline single.
+      - Red, as fg 224,27,36.
+      - Centre: the line's ink moves from 179 px left of the window's middle to 1 px.
+      - The custom style Fancy gives the rest of the line Liberation Serif 14 italic, keeps the word's own looks, and the bar shows Fancy.
+    - Six Ctrl+Z presses undo exactly one change each.
+    - Ctrl+U, Ctrl+] twice, and Ctrl+E give underline, 13, and centred. Ctrl+[ then gives 12.
+    - "plain bold" shows Bold off and the size blank. Selecting everything blanks style, font, and size, and Normal then makes it all Normal.
+    - w.txt has no Font control.
 - **2026-10-13 SLATE-20:** Slate draws each document's own fonts and paragraph looks (ADR 0008). A subagent built it; it was integrated and verified here.
   - One look path for every format. The shaper starts each layout from the default style's font and lays each paragraph's style look over the whole paragraph, so an empty paragraph has its style's line height. Each run then adds only the overrides that differ from its style.
     - The Markdown scale tables (`HEADING_SCALE`, `TITLE_SCALE`, `style_looks`) are gone: the built-in sheet's sizes draw Markdown.

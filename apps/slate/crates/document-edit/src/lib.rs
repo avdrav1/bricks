@@ -1,8 +1,10 @@
 //! Slate's edits: every change to a document is a command that stores the operation and
 //! what undoes it, never a snapshot of the document. A text edit replaces a stretch of
-//! text with other text and holds both; a looks edit changes the looks of whole blocks
-//! (paragraph style, list membership, list level, list labels) and holds each block's
-//! looks before and after. [`History`] keeps the steps for undo and redo.
+//! text with other text and holds both (typing, deleting, and run looks: bold, italic,
+//! underline, strikethrough, font, size, colour); a looks edit changes the looks of whole
+//! blocks (paragraph style, alignment, list membership, list level, list labels) and holds
+//! each block's looks before and after. [`History`] keeps the steps for undo and redo.
+//! [`looks()`] summarises the looks at the caret or across a selection for the format bar.
 //!
 //! Edits work in a [`Container`]: the document's blocks, or a table cell's. An edit stays
 //! inside its container, and undo and redo act on the same one.
@@ -17,11 +19,13 @@
 //! Toolkit-free: no GTK, no I/O.
 
 mod clipboard;
+mod format;
 mod looks;
 mod text;
 
 pub use clipboard::{copy, delete, paste, BlocksEdit, Fragment};
-pub use looks::{indent, set_style, toggle_list, LooksEdit};
+pub use format::{format, formatted, looks, LookPatch, Looks, SizeChange, MAX_SIZE, MIN_SIZE};
+pub use looks::{indent, set_align, set_style, toggle_list, LooksEdit};
 pub use text::{join_backward, join_forward, look, replace, split, toggle, toggled, TextEdit};
 
 use document_model::{Block, CodeBlock, Document, ListItem, Paragraph, Run};
@@ -199,6 +203,8 @@ pub(crate) fn normalize_blocks(blocks: &mut [Block]) {
 pub enum Flag {
     Bold,
     Italic,
+    Underline,
+    Strike,
 }
 
 /// What applying, undoing, or redoing changed: blocks `[start, start+removed)` of
@@ -242,9 +248,9 @@ impl Change {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Edit {
     /// A stretch of text replaced by other text: typing, deleting, Enter, joining
-    /// paragraphs, bold and italic.
+    /// paragraphs, run looks (bold, italic, underline, strikethrough, font, size, colour).
     Text(TextEdit),
-    /// The looks of whole blocks: paragraph style, list kind and level.
+    /// The looks of whole blocks: paragraph style, alignment, list kind and level.
     Looks(LooksEdit),
     /// Whole top-level blocks replaced: a selection reaching into or out of a table cell
     /// deleted or pasted over.

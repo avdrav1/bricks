@@ -11,7 +11,9 @@
 //! every key that changes the document makes a `document_edit` command, kept in the page's
 //! history for undo and redo. The caret moves by character, word, line, and block. An edit
 //! rebuilds only the blocks it changed ([`Flow::edit`]). The page's `Command`s are the
-//! formatting, list, and undo commands its keys and the window's menu share.
+//! formatting, list, and undo commands its keys and the window's menu share; the format
+//! bar (SLATE-21) reads the looks at the caret ([`Page::looks`]) and sets them
+//! ([`Page::format`], [`Page::set_style`], `Command::Align`).
 //!
 //! The text selects by dragging, and Ctrl+A and Ctrl+C copy it as plain text. Ctrl+click
 //! opens a link. Screen readers read the text through `GtkAccessibleText`; page breaks are
@@ -22,8 +24,10 @@ mod caret;
 mod shaper;
 
 use crate::settings::TextWidth;
-use document_edit::{Change, Container, Edit, Flag, Fragment, History, Pos};
-use document_model::RunStyle;
+use document_edit::{
+    Change, Container, Edit, Flag, Fragment, History, LookPatch, Looks, Pos, SizeChange,
+};
+use document_model::{Align, RunStyle};
 use flow::{Flow, Located, Paint, Splice, LEVEL_INDENT};
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
@@ -105,6 +109,12 @@ pub enum Command {
     Redo,
     Bold,
     Italic,
+    Underline,
+    Strike,
+    /// The font size one point larger (`true`) or smaller.
+    Size(bool),
+    /// Align the paragraphs.
+    Align(Align),
     /// Normal text (0) or a heading level (1 to 6).
     Style(u8),
     Bullets,
@@ -124,7 +134,8 @@ struct State {
     caret: Option<Pos>,
     /// Where Up and Down aim, in pixels from the column's left edge.
     goal: Option<f64>,
-    /// The look the next typed text takes when Ctrl+B or Ctrl+I changed it at the caret.
+    /// The look the next typed text takes when a format command (Ctrl+B, the format bar)
+    /// changed it at the caret.
     typing: Option<RunStyle>,
     /// Plain text: no formatting, lists, or headings.
     plain: bool,
@@ -182,6 +193,9 @@ mod imp {
         removal: RefCell<Option<(usize, String)>>,
         /// Called after every edit, undo, and redo has been shown.
         pub(super) edited: RefCell<Option<Box<dyn Fn()>>>,
+        /// Called when the looks at the caret may have changed: the caret or the selection
+        /// moved, an edit was shown, or the look typed next changed.
+        pub(super) on_looks: RefCell<Option<Box<dyn Fn()>>>,
     }
 
     #[glib::object_subclass]
@@ -641,6 +655,7 @@ mod imp {
             obj.queue_draw();
             obj.update_selection_bound();
             obj.update_caret_position();
+            self.looks_changed();
         }
 
         /// Extend the selection being dragged to the widget point (`x`, `y`); the caret
@@ -805,6 +820,13 @@ mod imp {
                     K::y | K::Y => Some(Command::Redo),
                     K::b | K::B => Some(Command::Bold),
                     K::i | K::I => Some(Command::Italic),
+                    K::u | K::U => Some(Command::Underline),
+                    K::l | K::L => Some(Command::Align(Align::Start)),
+                    K::e | K::E => Some(Command::Align(Align::Center)),
+                    K::r | K::R => Some(Command::Align(Align::End)),
+                    K::j | K::J => Some(Command::Align(Align::Justify)),
+                    K::bracketright => Some(Command::Size(true)),
+                    K::bracketleft => Some(Command::Size(false)),
                     K::asterisk | K::_8 if shift => Some(Command::Bullets),
                     K::ampersand | K::_7 if shift => Some(Command::Numbers),
                     K::a | K::A => Some(Command::SelectAll),
@@ -1026,22 +1048,22 @@ mod imp {
             obj.queue_draw();
             obj.update_caret_position();
             obj.update_selection_bound();
+            self.looks_changed();
         }
 
         /// Make the edit `make` builds from the state, apply it, and show the result.
-        /// `keep_caret`: a paragraph command given at the caret, not a selection, leaves
-        /// the caret where it was rather than selecting what it changed.
-        fn edit_with(&self, keep_caret: bool, make: impl FnOnce(&mut State) -> Option<Edit>) {
+        /// `keep`: a paragraph command (style, alignment, lists) leaves the caret, and the
+        /// selection if there is one, where they were rather than selecting what it changed.
+        fn edit_with(&self, keep: bool, make: impl FnOnce(&mut State) -> Option<Edit>) {
             let (change, text) = {
                 let mut state = self.state.borrow_mut();
                 let Some(st) = state.as_mut() else {
                     return;
                 };
-                let kept = if keep_caret && caret::selection(st).is_none() {
-                    st.caret
-                } else {
-                    None
-                };
+                let kept = st.caret.filter(|_| keep).map(|c| {
+                    let anchor = caret::selection(st).map(|(s, e)| if c == s { e } else { s });
+                    (c, anchor)
+                });
                 let Some(edit) = make(st) else {
                     return;
                 };
@@ -1057,9 +1079,9 @@ mod imp {
                     (change, splice(change))
                 });
                 let change = match kept {
-                    Some(caret) => Change {
+                    Some((caret, anchor)) => Change {
                         caret,
-                        anchor: None,
+                        anchor,
                         ..change
                     },
                     None => change,
@@ -1357,11 +1379,12 @@ mod imp {
             match command {
                 Command::Undo => self.step(false),
                 Command::Redo => self.step(true),
-                Command::Bold | Command::Italic => {
-                    let flag = if command == Command::Bold {
-                        Flag::Bold
-                    } else {
-                        Flag::Italic
+                Command::Bold | Command::Italic | Command::Underline | Command::Strike => {
+                    let flag = match command {
+                        Command::Bold => Flag::Bold,
+                        Command::Italic => Flag::Italic,
+                        Command::Underline => Flag::Underline,
+                        _ => Flag::Strike,
                     };
                     self.edit_with(false, |st| {
                         if st.plain {
@@ -1380,22 +1403,33 @@ mod imp {
                         st.typing = Some(document_edit::toggled(doc, c, &look, flag));
                         None
                     });
+                    self.looks_changed();
                 }
-                Command::Style(level) => self.edit_with(true, |st| {
-                    let (at, blocks) = caret::blocks(st).filter(|_| !st.plain)?;
-                    let doc = st.flow.document();
-                    let styles = &doc.styles;
-                    let style = match level {
-                        0 => styles.default_id().to_owned(),
-                        n => {
-                            let n = n.min(6);
-                            styles
-                                .heading(n)
-                                .map_or_else(|| format!("Heading{n}"), |s| s.id.clone())
-                        }
-                    };
-                    document_edit::set_style(doc, at, blocks, &style)
+                Command::Size(up) => self.format(&LookPatch {
+                    size: Some(SizeChange::Step(if up { 2 } else { -2 })),
+                    ..LookPatch::default()
                 }),
+                Command::Align(align) => self.edit_with(true, |st| {
+                    let (at, blocks) = caret::blocks(st).filter(|_| !st.plain)?;
+                    document_edit::set_align(st.flow.document(), at, blocks, align)
+                }),
+                Command::Style(level) => {
+                    let style = self.state.borrow().as_ref().map(|st| {
+                        let styles = &st.flow.document().styles;
+                        match level {
+                            0 => styles.default_id().to_owned(),
+                            n => {
+                                let n = n.min(6);
+                                styles
+                                    .heading(n)
+                                    .map_or_else(|| format!("Heading{n}"), |s| s.id.clone())
+                            }
+                        }
+                    });
+                    if let Some(style) = style {
+                        self.set_style(&style);
+                    }
+                }
                 Command::Bullets | Command::Numbers => self.edit_with(true, |st| {
                     let (at, blocks) = caret::blocks(st).filter(|_| !st.plain)?;
                     document_edit::toggle_list(
@@ -1411,6 +1445,58 @@ mod imp {
                 }
                 Command::Paste => self.paste(),
                 Command::SelectAll => self.select_all(),
+            }
+        }
+
+        /// Give the paragraphs the selection touches, else the caret's, the paragraph style
+        /// with id `style`, as one step.
+        pub(super) fn set_style(&self, style: &str) {
+            self.edit_with(true, |st| {
+                let (at, blocks) = caret::blocks(st).filter(|_| !st.plain)?;
+                document_edit::set_style(st.flow.document(), at, blocks, style)
+            });
+        }
+
+        /// Set `patch`'s run looks on the selection as one step; with none, on the look
+        /// typed next at the caret.
+        pub(super) fn format(&self, patch: &LookPatch) {
+            self.edit_with(false, |st| {
+                if st.plain {
+                    return None;
+                }
+                if let Some((s, e)) = caret::selection(st) {
+                    return document_edit::format(st.flow.document(), s, e, patch);
+                }
+                let c = st.caret?;
+                let doc = st.flow.document();
+                let look = st
+                    .typing
+                    .clone()
+                    .unwrap_or_else(|| document_edit::look(doc, c));
+                st.typing = Some(document_edit::formatted(doc, c, &look, patch));
+                None
+            });
+            self.looks_changed();
+        }
+
+        /// The looks at the caret or across the selection; `None` for plain text or
+        /// without a caret.
+        pub(super) fn looks(&self) -> Option<Looks> {
+            let state = self.state.borrow();
+            let st = state.as_ref().filter(|st| !st.plain)?;
+            let (from, to) = caret::selection(st).or_else(|| st.caret.map(|c| (c, c)))?;
+            Some(document_edit::looks(
+                st.flow.document(),
+                from,
+                to,
+                st.typing.as_ref(),
+            ))
+        }
+
+        /// Tell the format bar the looks at the caret may have changed.
+        fn looks_changed(&self) {
+            if let Some(f) = self.on_looks.borrow().as_ref() {
+                f();
             }
         }
     }
@@ -1501,6 +1587,71 @@ impl Page {
     /// Call `f` after every edit, undo, and redo is shown.
     pub fn connect_edited(&self, f: impl Fn() + 'static) {
         self.imp().edited.replace(Some(Box::new(f)));
+    }
+
+    /// Call `f` when the looks at the caret may have changed (see [`Page::looks`]).
+    pub fn connect_looks_changed(&self, f: impl Fn() + 'static) {
+        self.imp().on_looks.replace(Some(Box::new(f)));
+    }
+
+    /// The looks at the caret, or across the selection (each `None` where it mixes
+    /// them); `None` for plain text.
+    pub fn looks(&self) -> Option<Looks> {
+        self.imp().looks()
+    }
+
+    /// Set run looks on the selection, else on what's typed next, as one undo step.
+    pub fn format(&self, patch: &LookPatch) {
+        self.imp().format(patch);
+    }
+
+    /// Give the paragraphs of the selection, else the caret's, the paragraph style with
+    /// id `style`, as one undo step.
+    pub fn set_style(&self, style: &str) {
+        self.imp().set_style(style);
+    }
+
+    /// The document's paragraph styles.
+    pub fn styles(&self) -> document_model::StyleSheet {
+        let state = self.imp().state.borrow();
+        let st = state.as_ref().expect("a page has its document");
+        st.flow.document().styles.clone()
+    }
+
+    /// The font families the document names: its styles' and its runs' own.
+    pub fn fonts(&self) -> Vec<String> {
+        fn walk(blocks: &[document_model::Block], out: &mut Vec<String>) {
+            use document_model::Block;
+            for block in blocks {
+                let runs = match block {
+                    Block::Paragraph(p) => &p.runs,
+                    Block::ListItem(item) => &item.paragraph.runs,
+                    Block::Table(t) => {
+                        for cell in t.rows.iter().flat_map(|r| &r.cells) {
+                            walk(&cell.blocks, out);
+                        }
+                        continue;
+                    }
+                    _ => continue,
+                };
+                for font in runs.iter().filter_map(|r| r.style.font.as_ref()) {
+                    if !out.contains(font) {
+                        out.push(font.clone());
+                    }
+                }
+            }
+        }
+        let state = self.imp().state.borrow();
+        let st = state.as_ref().expect("a page has its document");
+        let doc = st.flow.document();
+        let mut out = Vec::new();
+        for style in doc.styles.styles() {
+            if !out.contains(&style.run.font) {
+                out.push(style.run.font.clone());
+            }
+        }
+        walk(&doc.blocks, &mut out);
+        out
     }
 
     /// How many top-level blocks the document has.

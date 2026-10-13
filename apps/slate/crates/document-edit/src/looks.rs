@@ -1,11 +1,11 @@
-//! Looks edits: paragraph style, list kind, list level, and ordered labels of whole
-//! blocks, each holding the blocks' looks (without their text) before and after.
+//! Looks edits: paragraph style, alignment, list kind, list level, and ordered labels of
+//! whole blocks, each holding the blocks' looks (without their text) before and after.
 
 use crate::{
-    bare, block_len, blocks, blocks_mut, paragraph, set_runs, shell, take_runs, Change, Container,
-    Edit, Pos,
+    bare, block_len, blocks, blocks_mut, paragraph, paragraph_mut, set_runs, shell, take_runs,
+    Change, Container, Edit, Pos,
 };
-use document_model::{Block, Document, ListItem, ListKind, Paragraph};
+use document_model::{Align, Block, Document, ListItem, ListKind, Paragraph};
 use std::ops::Range;
 
 /// Changing the looks of whole blocks of a container: each block's index, its looks
@@ -159,6 +159,28 @@ pub fn set_style(doc: &Document, at: Container, blocks: Range<usize>, style: &st
             ..bare(p)
         });
         out.push((i, shell(block), after));
+    }
+    edit(at, out)
+}
+
+/// Align the paragraphs and list items in `blocks` of `at` to `align`.
+pub fn set_align(
+    doc: &Document,
+    at: Container,
+    blocks: Range<usize>,
+    align: Align,
+) -> Option<Edit> {
+    let (blocks, range) = clamp(doc, at, blocks)?;
+    let mut out = Vec::new();
+    for i in range {
+        let block = &blocks[i];
+        if paragraph(block).is_some_and(|p| p.align != align) {
+            let mut after = shell(block);
+            if let Some(p) = paragraph_mut(&mut after) {
+                p.align = align;
+            }
+            out.push((i, shell(block), after));
+        }
     }
     edit(at, out)
 }

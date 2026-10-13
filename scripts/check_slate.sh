@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# SLATE-4, SLATE-10, SLATE-11, SLATE-6, SLATE-12, SLATE-13, and SLATE-20 acceptance: the
-# window opens, shows, and refuses documents, its pageless column follows View → Text
-# Width, its text selects and copies, it edits with undo, table cells included, it composes
-# through an input method, and it draws a Word document's fonts and paragraph looks.
+# SLATE-4, SLATE-10, SLATE-11, SLATE-6, SLATE-12, SLATE-13, SLATE-20, and SLATE-21
+# acceptance: the window opens, shows, and refuses documents, its pageless column follows
+# View → Text Width, its text selects and copies, it edits with undo, table cells
+# included, it composes through an input method, it draws a Word document's fonts and
+# paragraph looks, and its format bar sets them.
 #
 #   scripts/check_slate.sh [BINARY]   (default target/release/slate)
 #
@@ -105,6 +106,18 @@
 #      indented 900 with a 450 hanging first line, and one with lines exactly 600 apart;
 #      their ink tops and left edges are 30 and 20 px further apart than plain lines, 60 px
 #      in, the first line 30 px in and the next 60, and lines 40 px apart, each within 2 px.
+#  24. the format bar (screenshots measure text below it, from row TOP): fixture.docx
+#      shows it; in bar.docx (written by /tmp/bar.py: "Alpha beta gamma", "plain " and a
+#      bold 14 pt "bold", a paragraph in the custom style Fancy, "Z"), with "beta"
+#      selected, the bar picks Liberation Mono from the font list (searched), types 20 in
+#      the size field, presses Underline, picks Red in the colour dialog, presses Centre,
+#      and picks Fancy from the style list: AT-SPI reads each on the word (family, size,
+#      underline, fg-color), the line's ink centres in the window, and the bar shows the
+#      style, font, size, and toggles; one Ctrl+Z per change undoes just it, newest first;
+#      Ctrl+U, Ctrl+] twice, and Ctrl+E underline the word, make it 13 pt, and centre the
+#      line, and Ctrl+[ makes it 12 pt; a selection of plain 11 pt and bold 14 pt text
+#      shows Bold off and the size blank, the bold word alone Bold on and 14; a .txt
+#      window has no format bar (no control named Font).
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -200,14 +213,14 @@ found = b.read("word/document.xml").decode().count(text)
 print(f"document.xml has the edit: {found}")
 PY
 cat > /tmp/words.py <<"PY"
-import sys
+import os, sys
 import gi
 gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import GdkPixbuf
 p = GdkPixbuf.Pixbuf.new_from_file(sys.argv[1])
 w, h, rs, n, px = p.get_width(), p.get_height(), p.get_rowstride(), p.get_n_channels(), p.get_pixels()
 dark = lambda x, y: px[y * rs + x * n] + px[y * rs + x * n + 1] + px[y * rs + x * n + 2] < 300
-rows = [y for y in range(60, h - 40) if any(dark(x, y) for x in range(w))]
+rows = [y for y in range(int(os.environ["TOP"]), h - 40) if any(dark(x, y) for x in range(w))]
 y0 = rows[0]
 y1 = y0
 while y1 + 1 in rows:
@@ -223,7 +236,7 @@ words.append((start + last) // 2)
 print("words: " + str((y0 + y1) // 2) + " " + " ".join(map(str, words)))
 PY
 cat > /tmp/preedit.py <<"PY"
-import sys
+import os, sys
 import gi
 gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import GdkPixbuf
@@ -231,10 +244,11 @@ def load(name):
     p = GdkPixbuf.Pixbuf.new_from_file(f"/shots/{name}.png")
     w, h, rs, n, px = p.get_width(), p.get_height(), p.get_rowstride(), p.get_n_channels(), p.get_pixels()
     return lambda x, y: px[y * rs + x * n] + px[y * rs + x * n + 1] + px[y * rs + x * n + 2] < 450, w // 2, h
-# The document window is the left half; its text lines are the bands of ink below the header.
+# The document window is the left half; its text lines are the bands of ink below the
+# header and the format bar.
 dark, w, h = load("ime-before")
 bands, cur = [], None
-for y in range(60, h - 40):
+for y in range(int(os.environ["TOP"]), h - 40):
     if any(dark(x, y) for x in range(w)):
         cur = [y, y] if cur is None else [cur[0], y]
     elif cur is not None:
@@ -255,6 +269,9 @@ print(f"underline: {longest}")
 PY
 export PYTHONPATH=/tmp/proto XDG_RUNTIME_DIR=/tmp/rt GDK_DEBUG=no-portals XDG_STATE_HOME=/tmp/state GDK_BACKEND=wayland
 export XDG_CONFIG_HOME=/tmp/config
+# Screenshots measure text from this row down: below the header bar and the format bar
+# (whose bottom edge is at 90).
+export TOP=96
 printf "output HEADLESS-1 resolution 1280x720 position 0 0\ndefault_border none\n" > /tmp/sway.conf
 cp /model/windows1252-cr.txt /tmp/w.txt
 cp /model/fixture.md /model/picture.png /tmp/md/
@@ -337,6 +354,76 @@ def texts():
     return out
 
 cmd = sys.argv[1]
+
+def named(name):
+    # Widgets named NAME in every slate process, depth first; a drop-down is named by the
+    # item it shows, so one described as NAME too.
+    return [n for a in apps() for n in walk(a) if name in (n.get_name(), n.get_description())]
+
+def shown(node):
+    # What a drop-down shows: the label inside it that shows (with nothing chosen none
+    # does, though the drop-down may still be named by the last item).
+    for n in walk(node):
+        if n is not node and n.get_role_name() == "label":
+            if n.get_state_set().contains(Atspi.StateType.SHOWING):
+                return n.get_name() or ""
+    return ""
+
+def on(node):
+    s = node.get_state_set()
+    return "on" if s.contains(Atspi.StateType.CHECKED) or s.contains(Atspi.StateType.PRESSED) else "off"
+
+if cmd == "press":
+    # Activate the widget named argv[2] (its first action): a button, a toggle button, a
+    # colour swatch.
+    for n in named(sys.argv[2]):
+        if n.get_action_iface() and Atspi.Action.get_n_actions(n.get_action_iface()) > 0:
+            Atspi.Action.do_action(n.get_action_iface(), 0)
+            sys.exit(0)
+    sys.exit(f"no button {sys.argv[2]!r}")
+elif cmd == "where":
+    # A point to click on the first widget named argv[2] that shows (of role argv[4], if
+    # given): its middle, or at fraction argv[3] of its width.
+    fx = float(sys.argv[3]) if len(sys.argv) > 3 else 0.5
+    role = sys.argv[4] if len(sys.argv) > 4 else None
+    for n in named(sys.argv[2]):
+        if role is not None and n.get_role_name() != role:
+            continue
+        c = n.get_component_iface()
+        e = c.get_extents(Atspi.CoordType.WINDOW) if c else None
+        if e is not None and e.width > 0:
+            print(e.x + int(e.width * fx), e.y + e.height // 2)
+            sys.exit(0)
+    sys.exit(f"nothing named {sys.argv[2]!r}")
+elif cmd == "bar":
+    # The format bar as it shows: the style and font named, the size field, the toggles.
+    out = ["fonts=%d" % len(named("Font"))]
+    for label, name in (("style", "Style"), ("font", "Font")):
+        nodes = named(name)
+        out.append(label + "=" + (shown(nodes[0]) if nodes else "-"))
+    sizes = named("Size")
+    size = "-"
+    for n in (walk(sizes[0]) if sizes else ()):
+        ti = n.get_text_iface()
+        if ti is not None:
+            size = Atspi.Text.get_text(ti, 0, -1)
+            break
+    out.append(f"size={size}")
+    for label, name in (("bold", "Bold"), ("italic", "Italic"), ("underline", "Underline"),
+                        ("strike", "Strikethrough"), ("left", "Align Left"), ("centre", "Centre"),
+                        ("right", "Align Right"), ("justify", "Justify")):
+        nodes = [n for n in named(name) if n.get_role() == Atspi.Role.TOGGLE_BUTTON]
+        out.append(label + "=" + (on(nodes[0]) if nodes else "-"))
+    print("bar: " + " ".join(out))
+    sys.exit(0)
+elif cmd == "attrs":
+    # The run attributes at character argv[3] of the page named argv[2].
+    pages = (n for a in apps() for n in walk(a) if n.get_role_name() == "text" and n.get_name() == sys.argv[2])
+    t = next(pages).get_text_iface()
+    attrs, start, end = Atspi.Text.get_attribute_run(t, int(sys.argv[3]), True)
+    keys = ("family-name", "size", "weight", "style", "underline", "strikethrough", "fg-color")
+    print(f"attrs {start}-{end}: " + " ".join(f"{k}={attrs.get(k)}" for k in keys))
+    sys.exit(0)
 all_texts = texts()
 if cmd == "dump":
     for t in all_texts:
@@ -363,6 +450,7 @@ elif cmd == "page":
             break
 PY
 cat > /tmp/fmt.py <<"PY"
+import os
 import gi
 gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import GdkPixbuf
@@ -370,7 +458,7 @@ def bands(name):
     p = GdkPixbuf.Pixbuf.new_from_file(f"/shots/{name}.png")
     w, h, rs, n, px = p.get_width(), p.get_height(), p.get_rowstride(), p.get_n_channels(), p.get_pixels()
     out, cur = [], None
-    for y in range(70, h - 50):
+    for y in range(int(os.environ["TOP"]), h - 50):
         xs = [x for x in range(w) if px[y * rs + x * n] + px[y * rs + x * n + 1] + px[y * rs + x * n + 2] < 300]
         if xs:
             if cur is None:
@@ -392,14 +480,14 @@ print("undo restores: " + ("yes" if undone[:3] == before[:3] else "no"))
 print("redo restores: " + ("yes" if redone[:3] == after[:3] else "no"))
 PY
 cat > /tmp/px.py <<"PY"
-import sys
+import os, sys
 import gi
 gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import GdkPixbuf
 p = GdkPixbuf.Pixbuf.new_from_file(sys.argv[1] if len(sys.argv) > 1 else "/shots/looks.png")
 w, h, rs, n, px = p.get_width(), p.get_height(), p.get_rowstride(), p.get_n_channels(), p.get_pixels()
 bands, cur = [], None
-for y in range(70, h - 50):
+for y in range(int(os.environ["TOP"]), h - 50):
     ink = 0
     for x in range(w):
         i = y * rs + x * n
@@ -453,6 +541,7 @@ PY
 # band of ink (a line of text) and its left and right edges, against Pango at 96 dpi and
 # the twips of the styles.
 cat > /tmp/fonts.py <<"PY"
+import os
 import sys
 import zipfile
 
@@ -522,7 +611,7 @@ def measure(png):
     w, h, rs, n, px = p.get_width(), p.get_height(), p.get_rowstride(), p.get_n_channels(), p.get_pixels()
     # Bands of rows with ink (anything darker than the paper), each [top, bottom, left, right].
     bands, cur = [], None
-    for y in range(70, h - 10):
+    for y in range(int(os.environ["TOP"]), h - 10):
         row = px[y * rs:y * rs + w * n]
         xs = [x for x in range(40, w - 40) if row[x * n] + row[x * n + 1] + row[x * n + 2] < 600]
         if xs:
@@ -586,6 +675,82 @@ def measure(png):
     report("exact line", worst, EXACT // 15)
 
 make(sys.argv[2]) if sys.argv[1] == "make" else measure(sys.argv[2])
+PY
+# SLATE-21: `make PATH` writes bar.docx (styles Normal, Heading 2, and a custom Fancy);
+# `line PNG` measures the first line of text below the format bar in a screenshot: the
+# left and right edges of its ink and how far its middle is from the middle of the window.
+cat > /tmp/bar.py <<"PY"
+import os
+import sys
+import zipfile
+
+W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+PKG = "http://schemas.openxmlformats.org/package/2006/relationships"
+CT = "http://schemas.openxmlformats.org/package/2006/content-types"
+OOXML = "application/vnd.openxmlformats-officedocument.wordprocessingml"
+HEAD = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"""
+
+def run(text, rpr=""):
+    return f"""<w:r><w:rPr>{rpr}</w:rPr><w:t xml:space="preserve">{text}</w:t></w:r>"""
+
+def para(sid, *runs):
+    return f"""<w:p><w:pPr><w:pStyle w:val="{sid}"/></w:pPr>{"".join(runs)}</w:p>"""
+
+def make(path):
+    styles = (
+        """<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Liberation Sans" w:hAnsi="Liberation Sans"/>"""
+        """<w:sz w:val="22"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:before="0" w:after="120"/>"""
+        """</w:pPr></w:pPrDefault></w:docDefaults>"""
+        """<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>"""
+        """<w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/>"""
+        """<w:pPr><w:outlineLvl w:val="1"/></w:pPr><w:rPr><w:b/><w:sz w:val="32"/></w:rPr></w:style>"""
+        """<w:style w:type="paragraph" w:customStyle="1" w:styleId="Fancy"><w:name w:val="Fancy"/>"""
+        """<w:basedOn w:val="Normal"/><w:rPr><w:rFonts w:ascii="Liberation Serif" w:hAnsi="Liberation Serif"/>"""
+        """<w:i/><w:sz w:val="28"/></w:rPr></w:style>"""
+    )
+    paras = [
+        para("Normal", run("Alpha beta gamma")),
+        para("Normal", run("plain "), run("bold", """<w:b/><w:sz w:val="28"/>""")),
+        para("Fancy", run("Fancy words")),
+        para("Normal", run("Z")),
+    ]
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("[Content_Types].xml", HEAD + f"""<Types xmlns="{CT}">"""
+                   """<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"""
+                   """<Default Extension="xml" ContentType="application/xml"/>"""
+                   f"""<Override PartName="/word/document.xml" ContentType="{OOXML}.document.main+xml"/>"""
+                   f"""<Override PartName="/word/styles.xml" ContentType="{OOXML}.styles+xml"/></Types>""")
+        z.writestr("_rels/.rels", HEAD + f"""<Relationships xmlns="{PKG}"><Relationship Id="rId1" """
+                   f"""Type="{REL}/officeDocument" Target="word/document.xml"/></Relationships>""")
+        z.writestr("word/_rels/document.xml.rels", HEAD + f"""<Relationships xmlns="{PKG}">"""
+                   f"""<Relationship Id="rId1" Type="{REL}/styles" Target="styles.xml"/></Relationships>""")
+        z.writestr("word/styles.xml", HEAD + f"""<w:styles xmlns:w="{W}">{styles}</w:styles>""")
+        z.writestr("word/document.xml", HEAD + f"""<w:document xmlns:w="{W}"><w:body>"""
+                   + "".join(paras) + "</w:body></w:document>")
+
+def line(png):
+    import gi
+    gi.require_version("GdkPixbuf", "2.0")
+    from gi.repository import GdkPixbuf
+    p = GdkPixbuf.Pixbuf.new_from_file(png)
+    w, h, rs, n, px = p.get_width(), p.get_height(), p.get_rowstride(), p.get_n_channels(), p.get_pixels()
+    top = int(os.environ["TOP"])
+    left, right = None, None
+    for y in range(top, h - 50):
+        row = px[y * rs:y * rs + w * n]
+        xs = [x for x in range(w) if row[x * n] + row[x * n + 1] + row[x * n + 2] < 450]
+        if xs:
+            left = xs[0] if left is None else min(left, xs[0])
+            right = xs[-1] if right is None else max(right, xs[-1])
+        elif left is not None:
+            break
+    if left is None:
+        print("line none")
+    else:
+        print(f"line {left}-{right} off centre {(left + right) // 2 - w // 2}")
+
+make(sys.argv[2]) if sys.argv[1] == "make" else line(sys.argv[2])
 PY
 cat > /tmp/copied.py <<"PY"
 import subprocess, sys
@@ -785,7 +950,8 @@ session() {
   swaymsg "[title=target.md] focus, layout tabbed" >/dev/null; sleep 1
   keys -M ctrl -k End -m ctrl -s 200 -k Return -s 200 -M ctrl v -m ctrl; sleep 2
   a11y page target.md | sed "s/^/rich-pasted /"; shot rich
-  python3 /tmp/px.py /shots/rich.png | sed -n "s/^third ink: /rich bold ink: /p"
+  # Tabbed: the tab bar of sway moves the window content 25 px down.
+  TOP=$((TOP + 25)) python3 /tmp/px.py /shots/rich.png | sed -n "s/^third ink: /rich bold ink: /p"
   wl-copy "plain one
 plain two" & sleep 1
   keys -M ctrl v -m ctrl; sleep 2; a11y page target.md | sed "s/^/plain-pasted /"
@@ -864,6 +1030,54 @@ print(\"line:\", \"First line\" in x)"
   # The caret on the last line, Z, which the measurements leave out.
   keys -M ctrl -k End -m ctrl; sleep 1; shot fonts
   python3 /tmp/fonts.py measure /shots/fonts.png 2>&1; quit
+  echo "== 24 format bar"
+  python3 /tmp/bar.py make /tmp/bar.docx
+  bar() { python3 /tmp/a11y.py bar 2>&1 | sed "s/^/$1 /"; }
+  attrs() { python3 /tmp/a11y.py attrs bar.docx ${2:-7} 2>&1 | sed "s/^/$1 /"; }
+  # A click at the widget named $1 (of role $3, if given), at fraction $2 of its width.
+  click() { read -r x y <<<"$(python3 /tmp/a11y.py where "$1" ${2:-0.5} ${3:-})"; python /dnd.py click "$x" "$y"; sleep 1; }
+  # Select "beta" in "Alpha beta gamma".
+  beta() {
+    keys -M ctrl -k Home -m ctrl -s 200 -M ctrl -k Right -m ctrl -s 200 -k Right -s 200 \
+      -M shift -M ctrl -k Right -m ctrl -m shift; sleep 1
+  }
+  slate /tmp/fixture.docx >>/tmp/app.log 2>&1 & sleep 4; bar fixture; shot bar-fixture; quit
+  slate /tmp/bar.docx >>/tmp/app.log 2>&1 & sleep 4
+  keys -M ctrl -k End -m ctrl; sleep 1; bar caret; shot bar-start
+  python3 /tmp/bar.py line /shots/bar-start.png | sed "s/^/start /"
+  beta; bar word; attrs plain
+  click Font; keys "Liberation Mono"; sleep 1; shot font-list; click "Liberation Mono" 0.5 label
+  bar font; attrs font
+  click Size 0.2; keys -M ctrl a -m ctrl "20" -k Return; sleep 1; bar size; attrs size
+  python3 /tmp/a11y.py press Underline; sleep 1; bar underline; attrs underline
+  # The dialog is a window of its own: its swatch and button are pressed through AT-SPI.
+  click Colour; sleep 2; shot colour-dialog; python3 /tmp/a11y.py press Red; sleep 1
+  python3 /tmp/a11y.py press Select 2>/dev/null; sleep 1
+  bar colour; attrs colour
+  python3 /tmp/a11y.py press Centre; sleep 1; bar centre; shot bar-centred
+  python3 /tmp/bar.py line /shots/bar-centred.png | sed "s/^/centred /"
+  click Style; sleep 1; shot style-list; click Fancy 0.5 label; bar style; attrs style; attrs style-rest 1
+  shot bar-styled
+  # One Ctrl+Z for each change, newest first.
+  for step in style centre colour underline size font; do
+    keys -M ctrl z -m ctrl; sleep 1; bar undo-$step; attrs undo-$step
+  done
+  shot bar-undone; python3 /tmp/bar.py line /shots/bar-undone.png | sed "s/^/undone /"
+  # The keys: Ctrl+U, Ctrl+] (twice), and Ctrl+E on "beta".
+  beta; keys -M ctrl u -m ctrl -s 200 -M ctrl "]]" -m ctrl -s 200 -M ctrl e -m ctrl; sleep 1
+  bar keys; attrs keys; shot bar-keys; python3 /tmp/bar.py line /shots/bar-keys.png | sed "s/^/keys /"
+  keys -M ctrl "[" -m ctrl; sleep 1; attrs smaller
+  # A selection of plain text and bold text at 14 pt; then the bold word alone.
+  keys -M ctrl -k Home -m ctrl -s 200 -k Down -s 200 -k Home -s 200 -M shift -k End -m shift; sleep 1
+  bar mixed
+  keys -k End -s 200 -M shift -M ctrl -k Left -m ctrl -m shift; sleep 1; bar bold-word
+  # Everything: two styles, two fonts.
+  keys -M ctrl -k Home -m ctrl -s 200 -M shift -M ctrl -k End -m ctrl -m shift; sleep 1
+  bar all; shot bar-mixed
+  # Normal, the item the style list still holds though it shows none, makes all Normal.
+  click Style; sleep 1; click Normal 0.5 label; sleep 1; bar restyled; attrs restyled 29; quit
+  # Plain text has no format bar.
+  slate /tmp/w.txt >>/tmp/app.log 2>&1 & sleep 4; bar txt; shot bar-txt; quit
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -1033,6 +1247,52 @@ check "23: a left indent moves the text in" "23 fonts" "^left indent: .* ok$"
 check "23: a hanging first line starts left of the indent" "23 fonts" "^hanging first line: .* ok$"
 check "23: the hanging paragraph's next line starts at the indent" "23 fonts" "^hanging next line: .* ok$"
 check "23: exact line spacing sets every line's pitch" "23 fonts" "^exact line: .* ok$"
+s24="24 format bar"
+word="family-name=Liberation"
+check "24: a .docx window has the format bar" "$s24" "^fixture bar: fonts=[1-9]"
+check "24: the bar shows the caret's style, font, size, and looks" "$s24" \
+  "^caret bar: fonts=[0-9]+ style=Normal font=Liberation Sans size=11 bold=off italic=off underline=off strike=off left=on "
+check "24: the font list picks Liberation Mono for the word" "$s24" \
+  "^font attrs 6-10: $word Mono size=11 weight=400 style=normal underline=none strikethrough=false fg-color=30,30,30$"
+check "24: ... and the bar shows it" "$s24" "^font bar: .* font=Liberation Mono size=11 "
+check "24: the size field sets 20 pt" "$s24" "^size attrs 6-10: $word Mono size=20 .* underline=none "
+check "24: ... and shows it" "$s24" "^size bar: .* size=20 "
+check "24: Underline underlines the word" "$s24" "^underline attrs 6-10: $word Mono size=20 .* underline=single "
+check "24: ... and shows on" "$s24" "^underline bar: .* underline=on "
+check "24: the colour dialog colours the word red" "$s24" \
+  "^colour attrs 6-10: $word Mono size=20 .* underline=single strikethrough=false fg-color=224,27,36$"
+check "24: Centre centres the line" "$s24" "^centred line .* off centre -?[0-2]$"
+check "24: ... which was at the left" "$s24" "^start line .* off centre -[0-9]{3}$"
+check "24: ... and shows on" "$s24" "^centre bar: .* left=off centre=on "
+check "24: the style list gives the paragraph the custom style Fancy" "$s24" \
+  "^style-rest attrs 0-6: $word Serif size=14 weight=400 style=italic "
+check "24: ... the word keeps its own looks" "$s24" \
+  "^style attrs 6-10: $word Mono size=20 weight=400 style=italic underline=single strikethrough=false fg-color=224,27,36$"
+check "24: ... and the bar shows Fancy" "$s24" "^style bar: fonts=[0-9]+ style=Fancy "
+check "24: Ctrl+Z undoes the style alone" "$s24" "^undo-style bar: fonts=[0-9]+ style=Normal .* centre=on "
+check "24: ... the word as it was" "$s24" \
+  "^undo-style attrs 6-10: $word Mono size=20 weight=400 style=normal underline=single strikethrough=false fg-color=224,27,36$"
+check "24: the next undoes the centring alone" "$s24" "^undo-centre bar: .* left=on centre=off "
+check "24: ... the word as it was" "$s24" "^undo-centre attrs 6-10: $word Mono size=20 .* fg-color=224,27,36$"
+check "24: the next undoes the colour alone" "$s24" \
+  "^undo-colour attrs 6-10: $word Mono size=20 .* underline=single strikethrough=false fg-color=30,30,30$"
+check "24: the next undoes the underline alone" "$s24" "^undo-underline attrs 6-10: $word Mono size=20 .* underline=none "
+check "24: the next undoes the size alone" "$s24" "^undo-size attrs 6-10: $word Mono size=11 "
+check "24: the next undoes the font: the line is as opened" "$s24" \
+  "^undo-font attrs 0-16: $word Sans size=11 weight=400 style=normal underline=none strikethrough=false fg-color=30,30,30$"
+check "24: ... at the left" "$s24" "^undone line .* off centre -[0-9]{3}$"
+check "24: Ctrl+U underlines and Ctrl+] twice makes 13 pt" "$s24" "^keys attrs 6-10: $word Sans size=13 .* underline=single "
+check "24: Ctrl+E centres" "$s24" "^keys line .* off centre -?[0-2]$"
+check "24: ... and the bar shows them" "$s24" "^keys bar: .* size=13 .* underline=on .* centre=on "
+check "24: Ctrl+[ makes 12 pt" "$s24" "^smaller attrs 6-10: $word Sans size=12 "
+check "24: plain and bold text at two sizes shows Bold off and the size blank" "$s24" "^mixed bar: .* size= bold=off "
+check "24: the bold word alone shows Bold on and its size" "$s24" "^bold-word bar: .* size=14 bold=on "
+check "24: a selection over two styles and fonts shows the style, font, and size blank" "$s24" \
+  "^all bar: fonts=[0-9]+ style= font= size= "
+check "24: Normal picked there, the item the list still held, makes everything Normal" "$s24" \
+  "^restyled attrs [0-9]+-[0-9]+: $word Sans size=11 weight=400 style=normal "
+check "24: ... and the bar shows Normal" "$s24" "^restyled bar: fonts=[0-9]+ style=Normal "
+check "24: a .txt window has no format bar" "$s24" "^txt bar: fonts=0 "
 if [ $fail = 0 ]; then echo "SLATE OK"; else
   echo "SLATE CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1
