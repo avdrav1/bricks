@@ -6,7 +6,9 @@ use document_edit::{
     blocks, indent, join_backward, join_forward, look, normalize, replace, set_style, split, text,
     text_len, toggle, toggle_list, Change, Container, Edit, Flag, History, Pos,
 };
-use document_model::{read_markdown, Block, Document, ListKind, ParagraphStyle, RunStyle, Table};
+use document_model::{
+    read_markdown, Block, Document, ListKind, RunStyle, Style, StyleSheet, Table,
+};
 use Container::Top;
 
 fn md(source: &str) -> Document {
@@ -46,9 +48,9 @@ fn end(doc: &Document, block: usize) -> Pos {
     pos(block, text_len(doc, Top, block).expect("an editable block"))
 }
 
-fn style(doc: &Document, block: usize) -> ParagraphStyle {
+fn style(doc: &Document, block: usize) -> &str {
     match &doc.blocks[block] {
-        Block::Paragraph(p) => p.style,
+        Block::Paragraph(p) => &p.style,
         other => panic!("not a paragraph: {other:?}"),
     }
 }
@@ -67,6 +69,7 @@ fn label(doc: &Document, block: usize) -> (u64, String) {
     }
 }
 
+/// Each run's text, and whether it sets bold and italic on.
 fn runs(doc: &Document, block: usize) -> Vec<(String, bool, bool)> {
     let p = match &doc.blocks[block] {
         Block::Paragraph(p) => p,
@@ -75,7 +78,10 @@ fn runs(doc: &Document, block: usize) -> Vec<(String, bool, bool)> {
     };
     p.runs
         .iter()
-        .map(|r| (r.text.clone(), r.style.bold, r.style.italic))
+        .map(|r| {
+            let on = |v: Option<bool>| v == Some(true);
+            (r.text.clone(), on(r.style.bold), on(r.style.italic))
+        })
         .collect()
 }
 
@@ -113,7 +119,7 @@ fn typing_takes_the_look_of_the_character_before() {
 
     // Inside the bold run.
     let at = pos(0, 8);
-    assert!(look(&doc, at).bold);
+    assert_eq!(look(&doc, at).bold, Some(true));
     act(&mut history, &mut doc, |d| {
         replace(d, at, at, "X", &look(d, at))
     });
@@ -128,7 +134,7 @@ fn typing_takes_the_look_of_the_character_before() {
 
     // At the start of the bold run the character before is plain.
     let at = pos(0, 6);
-    assert!(!look(&doc, at).bold);
+    assert_eq!(look(&doc, at).bold, None);
     history.seal();
     act(&mut history, &mut doc, |d| {
         replace(d, at, at, "Y", &look(d, at))
@@ -138,7 +144,7 @@ fn typing_takes_the_look_of_the_character_before() {
     // At the end of the bold run the character before is bold.
     let at = pos(0, 12);
     assert_eq!(&txt(&doc, 0)[..12], "plain YboXld");
-    assert!(look(&doc, at).bold);
+    assert_eq!(look(&doc, at).bold, Some(true));
     history.seal();
     act(&mut history, &mut doc, |d| {
         replace(d, at, at, "Z", &look(d, at))
@@ -147,7 +153,7 @@ fn typing_takes_the_look_of_the_character_before() {
 
     // At a paragraph's start: its first character's look.
     let doc = md("**bold** plain");
-    assert!(look(&doc, pos(0, 0)).bold);
+    assert_eq!(look(&doc, pos(0, 0)).bold, Some(true));
     // Links don't carry over to typed text.
     let doc = md("[link](https://example.com)");
     assert_eq!(look(&doc, pos(0, 4)).link, None);
@@ -162,7 +168,7 @@ fn replacing_across_paragraphs_keeps_the_first_blocks_looks() {
     let edit = replace(&doc, pos(1, 7), pos(0, 5), "X", &look(&doc, pos(0, 5))).unwrap();
     let change = history.apply(&mut doc, edit);
     assert_eq!(doc.blocks.len(), 1);
-    assert_eq!(style(&doc, 0), ParagraphStyle::Heading(1));
+    assert_eq!(style(&doc, 0), "Heading1");
     assert_eq!(
         runs(&doc, 0),
         [
@@ -192,20 +198,51 @@ fn enter_after_a_heading_gives_a_normal_paragraph() {
     let mut history = History::new();
     let change = act(&mut history, &mut doc, |d| split(d, pos(0, 5), pos(0, 5)));
     assert_eq!(change.caret, pos(1, 0));
-    assert_eq!(style(&doc, 0), ParagraphStyle::Heading(1));
-    assert_eq!(style(&doc, 1), ParagraphStyle::Normal);
+    assert_eq!(style(&doc, 0), "Heading1");
+    assert_eq!(style(&doc, 1), "Normal");
     assert_eq!(txt(&doc, 1), "");
 
     // In the middle both halves stay headings.
     let mut doc = md("# Title\n\nbody");
     apply_checked(&mut doc, |d| split(d, pos(0, 2), pos(0, 2)));
     assert_eq!((txt(&doc, 0), txt(&doc, 1)), ("Ti".into(), "tle".into()));
-    assert_eq!(style(&doc, 1), ParagraphStyle::Heading(1));
+    assert_eq!(style(&doc, 1), "Heading1");
 
     // Paragraphs keep their style.
     let mut doc = md("> quoted");
     apply_checked(&mut doc, |d| split(d, pos(0, 6), pos(0, 6)));
-    assert_eq!(style(&doc, 1), ParagraphStyle::Quote);
+    assert_eq!(style(&doc, 1), "Quote");
+}
+
+#[test]
+fn enter_after_a_heading_gives_its_next_style() {
+    // A sheet whose heading is followed by a style of its own; an unknown next is the
+    // default.
+    let mut doc = md("# Title\n\n## Sub");
+    let mut styles: Vec<Style> = doc.styles.styles().to_vec();
+    let body = Style {
+        id: "Body".into(),
+        name: "Body Text".into(),
+        outline: None,
+        ..styles[0].clone()
+    };
+    for s in &mut styles {
+        match s.id.as_str() {
+            "Heading1" => s.next = Some("Body".into()),
+            "Heading2" => s.next = Some("Missing".into()),
+            _ => {}
+        }
+    }
+    styles.push(body);
+    doc.styles = StyleSheet::new(styles, "Normal");
+    apply_checked(&mut doc, |d| split(d, pos(0, 5), pos(0, 5)));
+    assert_eq!(style(&doc, 1), "Body");
+    // Enter at the end of the new body paragraph keeps its style.
+    apply_checked(&mut doc, |d| split(d, pos(1, 0), pos(1, 0)));
+    assert_eq!(style(&doc, 2), "Body");
+    let sub = doc.blocks.len() - 1;
+    apply_checked(&mut doc, |d| split(d, end(d, sub), end(d, sub)));
+    assert_eq!(style(&doc, sub + 1), "Normal");
 }
 
 #[test]
@@ -277,7 +314,7 @@ fn enter_on_an_empty_item_leaves_the_list() {
     let before = doc.clone();
     let change = act(&mut history, &mut doc, |d| split(d, pos(1, 0), pos(1, 0)));
     assert_eq!(doc.blocks.len(), 3);
-    assert_eq!(style(&doc, 1), ParagraphStyle::Normal);
+    assert_eq!(style(&doc, 1), "Normal");
     assert_eq!(change.caret, pos(1, 0));
     assert_eq!(change.anchor, None);
     history.undo(&mut doc);
@@ -290,7 +327,7 @@ fn backspace_at_a_blocks_start() {
     let mut doc = md("1. a\n2. b\n3. c");
     let mut history = History::new();
     let change = act(&mut history, &mut doc, |d| join_backward(d, pos(1, 0)));
-    assert_eq!(style(&doc, 1), ParagraphStyle::Normal);
+    assert_eq!(style(&doc, 1), "Normal");
     assert_eq!(txt(&doc, 1), "b");
     assert_eq!(change.caret, pos(1, 0));
     assert_eq!(label(&doc, 2), (3, "3.".into()));
@@ -398,22 +435,40 @@ fn bold_and_italic_set_and_clear() {
 }
 
 #[test]
+fn bold_toggles_over_what_the_text_shows() {
+    // A heading's text is bold through its style: bold turns off, as direct formatting.
+    let mut doc = md("# Head\n\nplain **bold**");
+    apply_checked(&mut doc, |d| toggle(d, pos(0, 0), pos(0, 4), Flag::Bold));
+    let Block::Paragraph(p) = &doc.blocks[0] else {
+        panic!("a heading")
+    };
+    assert_eq!(p.runs[0].style.bold, Some(false));
+    assert!(!doc.styles.look(&p.style, &p.runs[0].style).bold);
+    // Across the heading (now plain) and mixed text: on everywhere.
+    apply_checked(&mut doc, |d| toggle(d, pos(0, 2), pos(1, 7), Flag::Bold));
+    assert_eq!(runs(&doc, 1), [run("plain bold", true, false)]);
+    let Block::Paragraph(p) = &doc.blocks[0] else {
+        panic!("a heading")
+    };
+    let bold: Vec<Option<bool>> = p.runs.iter().map(|r| r.style.bold).collect();
+    assert_eq!(bold, [Some(false), Some(true)]);
+}
+
+#[test]
 fn paragraph_styles() {
     let mut doc = md("a\n\n- b\n\n---");
     let mut history = History::new();
     let change = act(&mut history, &mut doc, |d| {
-        set_style(d, Top, 0..3, ParagraphStyle::Heading(2))
+        set_style(d, Top, 0..3, "Heading2")
     });
-    assert_eq!(style(&doc, 0), ParagraphStyle::Heading(2));
-    assert_eq!(style(&doc, 1), ParagraphStyle::Heading(2));
+    assert_eq!(style(&doc, 0), "Heading2");
+    assert_eq!(style(&doc, 1), "Heading2");
     assert_eq!(txt(&doc, 1), "b");
     assert!(matches!(doc.blocks[2], Block::Rule));
     assert_eq!((change.anchor, change.caret), (Some(pos(0, 0)), pos(1, 1)));
-    apply_checked(&mut doc, |d| {
-        set_style(d, Top, 0..2, ParagraphStyle::Normal)
-    });
-    assert_eq!(style(&doc, 0), ParagraphStyle::Normal);
-    assert!(set_style(&doc, Top, 0..3, ParagraphStyle::Normal).is_none());
+    apply_checked(&mut doc, |d| set_style(d, Top, 0..2, "Normal"));
+    assert_eq!(style(&doc, 0), "Normal");
+    assert!(set_style(&doc, Top, 0..3, "Normal").is_none());
     history.undo(&mut doc);
 }
 
@@ -427,8 +482,8 @@ fn lists_on_and_off() {
     assert_eq!(label(&doc, 1), (2, "2.".into()));
     assert_eq!(item(&doc, 1).1, 0);
     act(&mut history, &mut doc, |d| toggle_list(d, Top, 0..2, true));
-    assert_eq!(style(&doc, 0), ParagraphStyle::Normal);
-    assert_eq!(style(&doc, 1), ParagraphStyle::Normal);
+    assert_eq!(style(&doc, 0), "Normal");
+    assert_eq!(style(&doc, 1), "Normal");
     assert_eq!(txt(&doc, 1), "b");
     history.undo(&mut doc);
     history.undo(&mut doc);
@@ -500,7 +555,7 @@ fn every_undo_and_redo_gives_back_the_fixture_exactly() {
         }),
         Box::new(|d| {
             let a = find(d, "A paragraph with");
-            set_style(d, Top, a..a + 1, ParagraphStyle::Heading(3))
+            set_style(d, Top, a..a + 1, "Heading3")
         }),
         Box::new(|d| {
             let a = find(d, "A list that starts");
@@ -800,7 +855,7 @@ fn every_undo_and_redo_gives_back_a_document_with_a_table_exactly() {
             )
         }),
         // A heading in another cell.
-        Box::new(|d| set_style(d, cell(1, 0, 0), 0..1, ParagraphStyle::Heading(2))),
+        Box::new(|d| set_style(d, cell(1, 0, 0), 0..1, "Heading2")),
         // Enter at the top level after the table.
         Box::new(|d| split(d, pos(2, 2), pos(2, 2))),
         // Delete across the cell's blocks.

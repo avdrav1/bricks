@@ -2,8 +2,8 @@
 //! every character is 10 px wide, every line 20 px tall, and text wraps at any character.
 
 use document_model::{
-    Block, Document, Format, Image, ImageFormat, ImageSource, Paragraph, ParagraphStyle, Run,
-    RunStyle, Table, TableCell, TableRow,
+    Block, Document, Format, Image, ImageFormat, ImageSource, Paragraph, Run, RunStyle, StyleSheet,
+    Table, TableCell, TableRow,
 };
 use flow::{
     Content, Flow, Hit, LayoutKey, LeafId, Look, Metrics, Paint, Position, Shaper, Splice,
@@ -101,7 +101,7 @@ impl Shaper for Fake {
 }
 
 fn para(text: &str) -> Block {
-    let mut p = Paragraph::new(ParagraphStyle::Normal);
+    let mut p = Paragraph::new("Normal");
     p.push(text, &RunStyle::default());
     Block::Paragraph(p)
 }
@@ -109,6 +109,7 @@ fn para(text: &str) -> Block {
 fn doc(blocks: Vec<Block>) -> Document {
     Document {
         blocks,
+        styles: StyleSheet::builtin(),
         format: Format::Docx,
     }
 }
@@ -665,7 +666,7 @@ fn the_selection_copies_as_plain_text_in_document_order() {
 
 #[test]
 fn links_are_found_by_position() {
-    let mut p = Paragraph::new(ParagraphStyle::Normal);
+    let mut p = Paragraph::new("Normal");
     p.push("see ", &RunStyle::default());
     p.runs.push(Run {
         text: "here".into(),

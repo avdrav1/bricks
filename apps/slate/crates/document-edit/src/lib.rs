@@ -22,7 +22,7 @@ mod text;
 
 pub use clipboard::{copy, delete, paste, BlocksEdit, Fragment};
 pub use looks::{indent, set_style, toggle_list, LooksEdit};
-pub use text::{join_backward, join_forward, look, replace, split, toggle, TextEdit};
+pub use text::{join_backward, join_forward, look, replace, split, toggle, toggled, TextEdit};
 
 use document_model::{Block, CodeBlock, Document, ListItem, Paragraph, Run};
 use std::borrow::Cow;
@@ -501,7 +501,7 @@ pub(crate) fn code_text(text: &str) -> &str {
 /// `p`'s looks without its runs.
 pub(crate) fn bare(p: &Paragraph) -> Paragraph {
     Paragraph {
-        style: p.style,
+        style: p.style.clone(),
         align: p.align,
         indent: p.indent,
         runs: Vec::new(),

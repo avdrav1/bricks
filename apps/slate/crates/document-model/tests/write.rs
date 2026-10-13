@@ -4,7 +4,7 @@
 use document_model::{
     encode, load_linked_images, read_markdown, read_markdown_source, read_text, write_markdown,
     write_text, Block, Encoding, Format, ImageSource, LineEnding, ListItem, ListKind,
-    MarkdownSource, Paragraph, Run, RunStyle, TextInfo, Unencodable,
+    MarkdownSource, Paragraph, Run, RunStyle, StyleSheet, TextInfo, Unencodable,
 };
 use std::path::{Path, PathBuf};
 
@@ -44,7 +44,9 @@ fn fixture() -> Vec<u8> {
 }
 
 fn write(blocks: &[Block], info: &TextInfo, source: Option<&MarkdownSource>) -> Vec<u8> {
-    write_markdown(blocks, info, source).unwrap().0
+    write_markdown(blocks, &StyleSheet::builtin(), info, source)
+        .unwrap()
+        .0
 }
 
 fn paragraph(text: &str) -> Block {
@@ -53,7 +55,7 @@ fn paragraph(text: &str) -> Block {
             text: text.into(),
             style: RunStyle::default(),
         }],
-        ..Paragraph::default()
+        ..Paragraph::new("Normal")
     })
 }
 
@@ -202,7 +204,13 @@ fn text_an_encoding_cant_hold_is_an_error_and_utf16_has_its_mark() {
     assert_eq!(read_text(&le).blocks, blocks);
     assert_eq!(read_text(&be).blocks, blocks);
     // Markdown goes through the same encoder.
-    let md = write_markdown(&blocks, &info(Encoding::Windows1252), None).unwrap_err();
+    let md = write_markdown(
+        &blocks,
+        &StyleSheet::builtin(),
+        &info(Encoding::Windows1252),
+        None,
+    )
+    .unwrap_err();
     assert_eq!(md.ch, '仮');
 }
 
@@ -233,7 +241,8 @@ fn markdown_cases() -> Vec<(String, Vec<u8>)> {
 fn every_markdown_fixture_writes_back_unchanged() {
     for (name, bytes) in markdown_cases() {
         let (blocks, info, source) = markdown(&bytes);
-        let (out, written) = write_markdown(&blocks, &info, Some(&source)).unwrap();
+        let (out, written) =
+            write_markdown(&blocks, &StyleSheet::builtin(), &info, Some(&source)).unwrap();
         assert_eq!(
             String::from_utf8_lossy(&out),
             String::from_utf8_lossy(&bytes),
@@ -595,9 +604,9 @@ fn run(text: &str, look: &str) -> Run {
     Run {
         text: text.into(),
         style: RunStyle {
-            bold: look.contains('b'),
-            italic: look.contains('i'),
-            strike: look.contains('s'),
+            bold: look.contains('b').then_some(true),
+            italic: look.contains('i').then_some(true),
+            strike: look.contains('s').then_some(true),
             code: look.contains('c'),
             raw: look.contains('r'),
             ..RunStyle::default()
@@ -822,7 +831,8 @@ fn random_edits_read_back_wherever_fresh_writing_does() {
                 continue;
             }
             tried += 1;
-            let (out, written) = write_markdown(&edited, &info, Some(&source)).unwrap();
+            let (out, written) =
+                write_markdown(&edited, &StyleSheet::builtin(), &info, Some(&source)).unwrap();
             assert_blocks(&read_markdown(&out).blocks, &edited, &out);
             assert_eq!(write(&edited, &info, Some(&written)), out);
             let mut again = edited.clone();

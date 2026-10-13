@@ -282,7 +282,7 @@ import json
 for line in open("/docx/fixture-libreoffice.txt", encoding="utf-8"):
     f = line.rstrip("\n").split("\t")
     if f[0] == "para":
-        for part in json.loads(f[4]).split("\n"):
+        for part in json.loads(f[-1]).split("\n"):
             if part.strip():
                 print(part)
 PY
@@ -747,7 +747,7 @@ n = 0
 for line in open("apps/slate/crates/docx/tests/data/fixture-libreoffice.txt", encoding="utf-8"):
     f = line.rstrip("\n").split("\t")
     if f[0] == "para":
-        n += sum(1 for p in json.loads(f[4]).split("\n") if p.strip())
+        n += sum(1 for p in json.loads(f[-1]).split("\n") if p.strip())
 print(n)')
 check "3: every paragraph LibreOffice reads is in the accessible text" "3 docx" "^found $expected of $expected$"
 at_least "4: a heading draws taller than body text (percent)" "4 looks" "heading height" 150

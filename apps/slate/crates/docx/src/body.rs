@@ -233,7 +233,7 @@ impl<R: Read + Seek> Body<'_, '_, R> {
                     _ => xml::skip(&mut self.r, &e)?,
                 },
                 Event::Empty(e) if xml::local(&e) == b"p" => {
-                    let (p, _) = self.paragraph_of(&ParaProps::default());
+                    let p = self.paragraph_of(&ParaProps::default());
                     out.push(Block::Paragraph(p));
                     container.elements.push(Element {
                         span: before..self.pos(),
@@ -336,29 +336,26 @@ impl<R: Read + Seek> Body<'_, '_, R> {
         }
     }
 
-    /// An empty paragraph with the look `direct` and the styles give it, and the run
-    /// properties its text starts from.
-    fn paragraph_of(&self, direct: &ParaProps) -> (Paragraph, RunProps) {
+    /// An empty paragraph in the style `direct` names, with the alignment it and the
+    /// styles give it.
+    fn paragraph_of(&self, direct: &ParaProps) -> Paragraph {
         let ppr = self.styles.paragraph_props(direct);
-        let mut p = Paragraph::new(self.styles.paragraph_style(direct.style.as_deref()));
+        let mut p = Paragraph::new(self.styles.paragraph_id(direct.style.as_deref()));
         p.align = ppr.align.unwrap_or_default();
-        (p, self.styles.base_run(direct.style.as_deref()))
+        p
     }
 
     fn paragraph(&mut self, out: &mut Vec<Block>) -> Result<(), DocxError> {
         let mut direct = ParaProps::default();
         let mut items = Vec::new();
         let mut links: Vec<Option<String>> = Vec::new();
-        let mut base: Option<RunProps> = None;
         loop {
             match self.r.read_event()? {
                 Event::Start(e) => match xml::local(&e) {
                     b"pPr" => direct = ParaProps::read(&mut self.r)?,
                     b"r" => {
-                        let base = base.get_or_insert_with(|| self.paragraph_of(&direct).1);
                         let link = links.iter().rev().find_map(|l| l.clone());
-                        let base = base.clone();
-                        self.run(&base, link, &mut items)?;
+                        self.run(link, &mut items)?;
                     }
                     b"hyperlink" => links.push(self.hyperlink(&e)),
                     b"fldSimple" => {
@@ -385,7 +382,7 @@ impl<R: Read + Seek> Body<'_, '_, R> {
 
     /// Turn a paragraph's items into blocks (see the module comment).
     fn emit_paragraph(&mut self, direct: &ParaProps, items: Vec<Item>, out: &mut Vec<Block>) {
-        let (template, _) = self.paragraph_of(direct);
+        let template = self.paragraph_of(direct);
         let numbered = self.numbering.list_of(self.styles, direct);
         self.num = numbered.map(|(num, _)| num);
         let mut list = numbered.and_then(|(num, level)| {
@@ -475,12 +472,7 @@ impl<R: Read + Seek> Body<'_, '_, R> {
         self.fields.iter().all(|f| f.result)
     }
 
-    fn run(
-        &mut self,
-        base: &RunProps,
-        link: Option<String>,
-        items: &mut Vec<Item>,
-    ) -> Result<(), DocxError> {
+    fn run(&mut self, link: Option<String>, items: &mut Vec<Item>) -> Result<(), DocxError> {
         let mut direct = RunProps::default();
         let mut style: Option<RunStyle> = None;
         loop {
@@ -498,7 +490,7 @@ impl<R: Read + Seek> Body<'_, '_, R> {
                         continue;
                     }
                     let look = style
-                        .get_or_insert_with(|| self.run_style(base, &direct, link.clone()))
+                        .get_or_insert_with(|| self.run_style(&direct, link.clone()))
                         .clone();
                     match name {
                         b"t" if !empty => {
@@ -567,13 +559,13 @@ impl<R: Read + Seek> Body<'_, '_, R> {
         }
     }
 
-    /// A run's look: document defaults, paragraph style, character style, direct
-    /// formatting, each over the one before.
-    fn run_style(&self, base: &RunProps, direct: &RunProps, link: Option<String>) -> RunStyle {
+    /// A run's direct formatting over its paragraph's style: its character style's, then
+    /// its own; and its link.
+    fn run_style(&self, direct: &RunProps, link: Option<String>) -> RunStyle {
         let field_link = self.fields.iter().rev().find_map(|f| f.link.clone());
         RunStyle {
             link: link.or(field_link),
-            ..self.styles.run_look(base, direct)
+            ..self.styles.overrides(direct)
         }
     }
 

@@ -58,7 +58,7 @@ Word documents look like themselves, and their fonts and styles can be chosen ([
   - Markdown and plain text keep Liberation Sans 11 pt.
 - **Styles (SLATE-19, SLATE-20).**
   - A paragraph's style is one of its document's own: a `.docx`'s styles, custom ones included, each with its font, size, looks, alignment, space before and after, line spacing, and indents, inherited through the style it's based on.
-  - Markdown and plain text use Slate's built-in set: Normal, Title, Heading 1–6, Quote, and Code.
+  - Markdown and plain text use Slate's built-in set: Normal, Title, Heading 1–6, and Quote.
 - **Format bar (SLATE-21).**
   - A slim bar over the page holds the paragraph style (the document's styles, each shown in its look), font family (searchable), size, bold, italic, underline, strikethrough, colour, and alignment.
   - It shows the looks at the caret or across the selection, blank where the selection mixes them.

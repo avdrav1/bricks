@@ -6,9 +6,7 @@ use crate::{
     bare, block_len, block_text, blocks, blocks_mut, paragraph, paragraph_mut, runs_len, runs_of,
     set_runs, shell, take_runs, Change, Edit, Flag, Fragment, Pos,
 };
-use document_model::{
-    Block, Document, ListItem, ListKind, Paragraph, ParagraphStyle, Run, RunStyle,
-};
+use document_model::{Block, Document, ListItem, ListKind, Paragraph, Run, RunStyle};
 
 /// Split `runs` at byte `at` of their joined text: `runs` keeps what's before, the
 /// returned runs hold what's after.
@@ -78,14 +76,15 @@ impl Fragment {
     pub(crate) fn copy(blocks: &[Block], from: Pos, to: Pos) -> Fragment {
         let (a, b) = (&blocks[from.block], &blocks[to.block]);
         if from.block == to.block {
-            return Fragment {
-                blocks: vec![with_runs(a, slice(&runs_of(a), from.offset, to.offset))],
-            };
+            return Fragment::new(vec![with_runs(
+                a,
+                slice(&runs_of(a), from.offset, to.offset),
+            )]);
         }
         let mut out = vec![with_runs(a, slice(&runs_of(a), from.offset, usize::MAX))];
         out.extend(blocks[from.block + 1..to.block].iter().cloned());
         out.push(with_runs(b, slice(&runs_of(b), 0, to.offset)));
-        Fragment { blocks: out }
+        Fragment::new(out)
     }
 }
 
@@ -202,7 +201,7 @@ pub struct TextEdit {
 impl TextEdit {
     /// Replacing `from..to` of `blocks`, their container's, with `inserted`.
     fn new(blocks: &[Block], from: Pos, to: Pos, inserted: Vec<Block>, typed: bool) -> TextEdit {
-        TextEdit::paste(blocks, from, to, Fragment { blocks: inserted }, typed)
+        TextEdit::paste(blocks, from, to, Fragment::new(inserted), typed)
     }
 
     /// Replacing `from..to` of `blocks`, their container's, with `inserted`, whose first
@@ -360,7 +359,7 @@ pub fn split(doc: &Document, from: Pos, to: Pos) -> Option<Edit> {
         }
         Block::ListItem(item) if from == to && runs_len(&item.paragraph.runs) == 0 => {
             let after = Block::Paragraph(Paragraph {
-                style: ParagraphStyle::Normal,
+                style: doc.styles.default_id().to_owned(),
                 ..bare(&item.paragraph)
             });
             let looks = vec![(from.block, shell(block), after)];
@@ -376,11 +375,11 @@ pub fn split(doc: &Document, from: Pos, to: Pos) -> Option<Edit> {
         }),
         Block::Paragraph(p) => {
             let at_end = Some(to.offset) == block_len(&blocks[to.block]);
-            let style = match p.style {
-                ParagraphStyle::Heading(_) | ParagraphStyle::Title if at_end => {
-                    ParagraphStyle::Normal
-                }
-                style => style,
+            let style = doc.styles.style_of(&p.style);
+            let style = if at_end && style.is_heading() {
+                next_style(doc, &p.style)
+            } else {
+                p.style.clone()
             };
             Block::Paragraph(Paragraph { style, ..bare(p) })
         }
@@ -436,15 +435,40 @@ pub fn join_forward(doc: &Document, at: Pos) -> Option<Edit> {
     Some(TextEdit::new(blocks, at, to, vec![first], false).into())
 }
 
-fn flag(style: &mut RunStyle, flag: Flag) -> &mut bool {
+/// The style of the paragraph Enter starts after the end of one in style `id`: the style's
+/// next style, else the default.
+fn next_style(doc: &Document, id: &str) -> String {
+    let styles = &doc.styles;
+    styles
+        .style_of(id)
+        .next
+        .as_deref()
+        .and_then(|next| styles.get(next))
+        .unwrap_or_else(|| styles.default_style())
+        .id
+        .clone()
+}
+
+fn flag(style: &mut RunStyle, flag: Flag) -> &mut Option<bool> {
     match flag {
         Flag::Bold => &mut style.bold,
         Flag::Italic => &mut style.italic,
     }
 }
 
-/// Bold or italic over `from..to` of paragraphs' and list items' text: cleared when every
-/// character already has it, else set everywhere. The range stays selected.
+/// Whether text with direct formatting `run` in a paragraph of style `style` shows
+/// `which`.
+fn shows(doc: &Document, style: &str, run: &RunStyle, which: Flag) -> bool {
+    let look = doc.styles.look(style, run);
+    match which {
+        Flag::Bold => look.bold,
+        Flag::Italic => look.italic,
+    }
+}
+
+/// Bold or italic over `from..to` of paragraphs' and list items' text: turned off when
+/// every character already shows it (its own or its style's), else on everywhere, as the
+/// runs' direct formatting. The range stays selected.
 pub fn toggle(doc: &Document, from: Pos, to: Pos, which: Flag) -> Option<Edit> {
     let (blocks, from, to) = range(doc, from, to)?;
     if from == to {
@@ -453,10 +477,12 @@ pub fn toggle(doc: &Document, from: Pos, to: Pos, which: Flag) -> Option<Edit> {
     let removed = Fragment::copy(blocks, from, to);
     let mut inserted = removed.clone();
     let (mut any, mut all) = (false, true);
-    for block in &mut inserted.blocks {
-        for run in paragraph_mut(block).into_iter().flat_map(|p| &mut p.runs) {
-            any = true;
-            all &= *flag(&mut run.style, which);
+    for block in &inserted.blocks {
+        if let Some(p) = paragraph(block) {
+            for run in &p.runs {
+                any = true;
+                all &= shows(doc, &p.style, &run.style, which);
+            }
         }
     }
     if !any {
@@ -465,7 +491,7 @@ pub fn toggle(doc: &Document, from: Pos, to: Pos, which: Flag) -> Option<Edit> {
     for block in &mut inserted.blocks {
         if let Some(p) = paragraph_mut(block) {
             for run in &mut p.runs {
-                *flag(&mut run.style, which) = !all;
+                *flag(&mut run.style, which) = Some(!all);
             }
             p.merge_runs();
         }
@@ -480,4 +506,17 @@ pub fn toggle(doc: &Document, from: Pos, to: Pos, which: Flag) -> Option<Edit> {
         }
         .into(),
     )
+}
+
+/// The look typed text takes after Ctrl+B or Ctrl+I with no selection at `at`: `look`
+/// (what typing there would take) with `which` turned off if it shows there, else on.
+pub fn toggled(doc: &Document, at: Pos, look: &RunStyle, which: Flag) -> RunStyle {
+    let style = blocks(doc, at.at)
+        .and_then(|b| b.get(at.block))
+        .and_then(paragraph)
+        .map_or("", |p| p.style.as_str());
+    let mut look = look.clone();
+    let on = shows(doc, style, &look, which);
+    *flag(&mut look, which) = Some(!on);
+    look
 }

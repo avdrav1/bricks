@@ -25,7 +25,7 @@ A word processor that opens Word documents has to show them in their fonts and s
    - The model gains a style sheet, `Document::styles`. Each style has an id, a name, the style it's based on, the style that follows it, an outline level, a run look (font, size, bold, italic, underline, strikethrough, colour), and a paragraph look (alignment, space before and after, line spacing, left and first-line indent).
    - A paragraph names its style by id, replacing the `ParagraphStyle` enum.
    - A DOCX's style sheet is its `styles.xml`, custom styles included, with based-on chains resolved.
-   - Markdown and plain text get Slate's built-in sheet: Normal, Title, Heading 1–6, Quote, and Code, in today's looks. So the Markdown writer still maps headings and quotes by outline level and name.
+   - Markdown and plain text get Slate's built-in sheet: Normal, Title, Heading 1–6, and Quote, in today's looks (code blocks stay a block of their own). So the Markdown writer still maps headings and quotes by outline level and name.
 3. **A format bar over the page.**
    - It holds a style picker (the document's styles, each shown in its look), font family (searchable: the installed families plus any the document names), size, bold, italic, underline, strikethrough, colour, and alignment.
    - It shows the looks at the caret or across the selection; a look that varies across the selection shows blank.

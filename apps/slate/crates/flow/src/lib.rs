@@ -267,13 +267,19 @@ pub struct Flow {
 impl Flow {
     /// The flow of `doc`, not laid out yet: [`Flow::set_width`] lays it out.
     pub fn new(doc: Document) -> Self {
-        let mut builder = Builder::new(&doc.format, 0, 0);
+        let mut builder = Builder::new(&doc, 0, 0);
         let tops = builder.tops(&doc.blocks, 0..doc.blocks.len());
         let chars = Fenwick::build(builder.leaves.iter().map(leaf_chars));
+        let (leaves, page_breaks, break_tops, next_key) = (
+            builder.leaves,
+            builder.page_breaks,
+            builder.break_tops,
+            builder.keys,
+        );
         Flow {
             heights: Fenwick::build(tops.iter().map(|n| i64::from(n.height))),
             doc,
-            leaves: builder.leaves,
+            leaves,
             tops,
             chars,
             width: 0,
@@ -284,9 +290,9 @@ impl Flow {
                 offset: -f64::from(TOP_MARGIN),
             },
             metrics: None,
-            page_breaks: builder.page_breaks,
-            break_tops: builder.break_tops,
-            next_key: builder.keys,
+            page_breaks,
+            break_tops,
+            next_key,
             selection: None,
         }
     }
@@ -626,7 +632,7 @@ impl Flow {
             .count();
         let had_breaks = self.page_breaks > 0;
 
-        let mut builder = Builder::new(&self.doc.format, first, self.next_key);
+        let mut builder = Builder::new(&self.doc, first, self.next_key);
         let mut nodes = builder.tops(&self.doc.blocks, s.start..new_end);
         self.next_key = builder.keys;
         let new_breaks = builder.page_breaks > 0;

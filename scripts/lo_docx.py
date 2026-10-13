@@ -6,18 +6,28 @@ Usage: python3 scripts/lo_docx.py fixture OUT   (store the fixture document at O
        python3 scripts/lo_docx.py dump FILE     (print FILE's paragraphs and tables)
 
 `dump` prints the body in document order, one line per item, tab-separated:
-  para<TAB>STYLE<TAB>LIST<TAB>LABEL<TAB>TEXT
+  para<TAB>STYLE<TAB>LIST<TAB>LABEL<TAB>ALIGN<TAB>BEFORE<TAB>AFTER<TAB>LINE<TAB>LEFT<TAB>FIRST<TAB>TEXT
                                      a paragraph: its paragraph style's display name, its
                                      list level (0-based) or `-` outside lists, its list
-                                     label (`"2."`; LibreOffice gives `""` for bullets), and
-                                     its text, both as JSON strings
-  run<TAB>FLAGS<TAB>TEXT             the paragraph's text in runs of one look: FLAGS is
+                                     label (`"2."`; LibreOffice gives `""` for bullets), its
+                                     alignment (`start`, `center`, `end`, `justify`), then
+                                     its paragraph style's space before and after, line
+                                     spacing (`auto:PERCENT`, `exact:TWIPS`, or
+                                     `atLeast:TWIPS`), and left and first-line indent (in
+                                     twips, rounded; a hanging indent is negative), and its
+                                     text; label and text as JSON strings
+  run<TAB>FLAGS<TAB>FONT<TAB>SIZE<TAB>COLOR<TAB>TEXT
+                                     the paragraph's text in runs of one look: FLAGS is
                                      `b`, `i`, `u`, `s` (bold, italic, underline,
-                                     strikethrough) or `-`; adjacent portions with the
-                                     same flags are joined
+                                     strikethrough) or `-`, FONT the font's name, SIZE in
+                                     points, COLOR `RRGGBB` or `auto`; adjacent portions
+                                     with the same look are joined
   table / row / cell / end           a table, its rows and cells (in cell-name order), and
                                      its end; a cell's paragraphs and nested tables follow
                                      its `cell` line
+Spacing and indents are the paragraph style's (inherited through its parents and the
+document defaults), not the paragraph's own: Slate's model holds a paragraph's style and
+its alignment.
 The fixture (apps/slate/crates/docx/tests/data/fixture.docx) has a title, headings 1-3,
 runs that are bold, italic, underlined, struck, sized, coloured, and in the Strong and
 Emphasis character styles (also inside a heading), centred, right-aligned, and justified
@@ -233,6 +243,37 @@ def flags(portion):
     return f or "-"
 
 
+def look(portion):
+    """A portion's look: flags, font, size in points, and colour."""
+    color = portion.CharColor
+    color = "auto" if color < 0 else f"{color & 0xFFFFFF:06X}"
+    size = f"{portion.CharHeight:g}"
+    return (flags(portion), portion.CharFontName, size, color)
+
+
+# com.sun.star.style.ParagraphAdjust as the dump names it: LEFT, RIGHT, BLOCK, CENTER,
+# STRETCH, START, END.
+ALIGN = ["start", "end", "justify", "center", "justify", "start", "end"]
+# com.sun.star.style.LineSpacingMode: PROP, MINIMUM, LEADING, FIX.
+LINE = {0: "auto", 1: "atLeast", 3: "exact"}
+
+
+def twips(hundredths_mm):
+    return str(round(hundredths_mm * 1440 / 2540))
+
+
+def para_look(p):
+    """A paragraph's alignment, and its style's spacing, line spacing, and indents."""
+    adjust = p.ParaAdjust
+    align = ALIGN[adjust] if 0 <= adjust < len(ALIGN) else f"adjust{adjust}"
+    style = STYLES.getByName(p.ParaStyleName)
+    line = style.ParaLineSpacing
+    mode = LINE.get(line.Mode, f"mode{line.Mode}")
+    value = str(line.Height) if line.Mode == 0 else twips(line.Height)
+    return [align, twips(style.ParaTopMargin), twips(style.ParaBottomMargin),
+            f"{mode}:{value}", twips(style.ParaLeftMargin), twips(style.ParaFirstLineIndent)]
+
+
 def dump_text(text, out):
     paras = text.createEnumeration()
     while paras.hasMoreElements():
@@ -253,19 +294,19 @@ def dump_text(text, out):
         level = str(p.NumberingLevel) if listed else "-"
         label = p.getPropertyValue("ListLabelString") or "" if listed else ""
         out.append("\t".join(["para", display_name(p), level, json.dumps(label, ensure_ascii=False),
-                              json.dumps(p.getString(), ensure_ascii=False)]))
+                              *para_look(p), json.dumps(p.getString(), ensure_ascii=False)]))
         runs = []
         for portion in portions(p):
             s = portion.getString()
             if not s:
                 continue
-            f = flags(portion)
+            f = look(portion)
             if runs and runs[-1][0] == f:
                 runs[-1][1] += s
             else:
                 runs.append([f, s])
         for f, s in runs:
-            out.append("\t".join(["run", f, json.dumps(s, ensure_ascii=False)]))
+            out.append("\t".join(["run", *f, json.dumps(s, ensure_ascii=False)]))
 
 
 def portions(container):

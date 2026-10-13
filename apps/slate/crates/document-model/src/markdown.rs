@@ -14,7 +14,7 @@
 use crate::text::{decode, split_lines};
 use crate::{
     Align, Block, CodeBlock, Document, Format, Image, ImageFormat, ImageSource, ListItem, ListKind,
-    Paragraph, ParagraphStyle, Raw, RawKind, RunStyle, Table, TableCell, TableRow, TextInfo,
+    Paragraph, Raw, RawKind, RunStyle, StyleSheet, Table, TableCell, TableRow, TextInfo,
 };
 use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use std::ops::Range;
@@ -90,6 +90,7 @@ fn read(bytes: &[u8]) -> Read {
     let (blocks, starts, images) = parse(&text);
     let doc = Document {
         blocks,
+        styles: StyleSheet::builtin(),
         format: Format::Markdown(TextInfo {
             encoding,
             line_ending,
@@ -204,8 +205,8 @@ struct Builder<'t> {
     open: Vec<Open>,
     /// The paragraph being filled, and where it started.
     para: Option<(Paragraph, usize)>,
-    /// Paragraph style for the next text: a heading's, or `None` for the context's.
-    heading: Option<ParagraphStyle>,
+    /// The heading level of the next text, or `None` for the context's paragraph style.
+    heading: Option<u8>,
     bold: u32,
     italic: u32,
     strike: u32,
@@ -250,10 +251,11 @@ impl<'t> Builder<'t> {
     }
 
     fn style(&self) -> RunStyle {
+        let on = |n: u32| (n > 0).then_some(true);
         RunStyle {
-            bold: self.bold > 0,
-            italic: self.italic > 0,
-            strike: self.strike > 0,
+            bold: on(self.bold),
+            italic: on(self.italic),
+            strike: on(self.strike),
             link: self.links.last().cloned(),
             ..RunStyle::default()
         }
@@ -288,7 +290,7 @@ impl<'t> Builder<'t> {
                 let marker = Block::ListItem(ListItem {
                     kind,
                     level,
-                    paragraph: Paragraph::default(),
+                    paragraph: Paragraph::new("Normal"),
                 });
                 self.push(marker, at);
                 (other, start)
@@ -316,9 +318,9 @@ impl<'t> Builder<'t> {
             let quotes = self.quote_depth();
             let items = self.item_depth();
             let style = match self.heading {
-                Some(style) => style,
-                None if quotes > 0 => ParagraphStyle::Quote,
-                None => ParagraphStyle::Normal,
+                Some(n) => format!("Heading{n}"),
+                None if quotes > 0 => "Quote".to_owned(),
+                None => "Normal".to_owned(),
             };
             let mut p = Paragraph::new(style);
             p.indent = items + quotes.saturating_sub(1);
@@ -436,7 +438,7 @@ impl<'t> Builder<'t> {
             Tag::Paragraph => self.flush(),
             Tag::Heading { level, .. } => {
                 self.flush();
-                self.heading = Some(ParagraphStyle::Heading(heading_level(level)));
+                self.heading = Some(heading_level(level));
             }
             Tag::BlockQuote(_) => {
                 self.flush();
@@ -582,7 +584,7 @@ impl<'t> Builder<'t> {
                         Block::ListItem(ListItem {
                             kind,
                             level,
-                            paragraph: Paragraph::default(),
+                            paragraph: Paragraph::new("Normal"),
                         }),
                         start,
                     );

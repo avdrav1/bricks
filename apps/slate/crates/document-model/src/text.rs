@@ -4,7 +4,7 @@
 //! that are valid UTF-8 are UTF-8, and anything else is Windows-1252 (what files called
 //! "Latin-1" almost always are; it decodes every byte). CRLF, CR, and LF each end a line.
 
-use crate::{Block, Document, Format, Paragraph, ParagraphStyle, Run, RunStyle};
+use crate::{Block, Document, Format, Paragraph, Run, RunStyle, StyleSheet};
 use encoding_rs::{UTF_16BE, UTF_16LE, WINDOWS_1252};
 
 /// The character encoding a text file was read in.
@@ -117,7 +117,7 @@ pub fn read_text(bytes: &[u8]) -> Document {
     let blocks = lines
         .into_iter()
         .map(|line| {
-            let mut p = Paragraph::new(ParagraphStyle::Normal);
+            let mut p = Paragraph::new("Normal");
             if !line.is_empty() {
                 p.runs.push(Run {
                     text: line.to_owned(),
@@ -129,6 +129,7 @@ pub fn read_text(bytes: &[u8]) -> Document {
         .collect();
     Document {
         blocks,
+        styles: StyleSheet::builtin(),
         format: Format::Text(TextInfo {
             encoding,
             line_ending,

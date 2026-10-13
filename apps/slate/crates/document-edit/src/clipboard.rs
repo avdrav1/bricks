@@ -11,8 +11,9 @@ use crate::{
     block_text, blocks, blocks_mut, is_editable, normalize_blocks, replace, runs_of, Change,
     Container, Edit, Pos,
 };
-use document_model::{Block, Document, Paragraph, RunStyle};
+use document_model::{Block, Document, Paragraph, RunStyle, StyleSheet};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// Text cut or copied from a document, as a paste puts it in: the first block's runs join the
 /// paragraph pasted into, each later block is a block of its own, and the last one's runs are
@@ -23,11 +24,23 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Fragment {
     pub blocks: Vec<Block>,
+    /// The names of the paragraph styles its paragraphs name, by id: a paste maps them to
+    /// the styles of those names in the document pasted into. Empty in an edit's own
+    /// fragments, whose ids are the document's.
+    pub names: BTreeMap<String, String>,
 }
 
 impl Fragment {
     /// The clipboard type Slate offers a fragment as, beside plain text.
     pub const MIME: &'static str = "application/x-slate-fragment";
+
+    /// A fragment of `blocks`, whose paragraphs name the document's styles.
+    pub fn new(blocks: Vec<Block>) -> Fragment {
+        Fragment {
+            blocks,
+            names: BTreeMap::new(),
+        }
+    }
 
     pub fn to_json(&self) -> String {
         serde_json::to_string(self).expect("a fragment serializes")
@@ -37,6 +50,41 @@ impl Fragment {
     pub fn from_json(s: &str) -> Option<Fragment> {
         let fragment: Fragment = serde_json::from_str(s).ok()?;
         (!fragment.blocks.is_empty()).then_some(fragment)
+    }
+
+    /// The fragment with the names of its paragraphs' styles in `styles`.
+    fn named(mut self, styles: &StyleSheet) -> Fragment {
+        let mut names = BTreeMap::new();
+        visit_paragraphs(&mut self.blocks, &mut |p| {
+            names
+                .entry(p.style.clone())
+                .or_insert_with(|| styles.style_of(&p.style).name.clone());
+        });
+        self.names = names;
+        self
+    }
+
+    /// Give `blocks` (this fragment's) the styles of `styles` its paragraphs' style names
+    /// name: the style of that name, else for a built-in heading, title, or quote its
+    /// built-in id (which the document draws, and a Word document's save adds), else the
+    /// default. Without names (plain text), a paragraph naming no style gets the default.
+    fn restyle(&self, blocks: &mut [Block], styles: &StyleSheet) {
+        visit_paragraphs(blocks, &mut |p| {
+            let Some(name) = self.names.get(&p.style) else {
+                if self.names.is_empty() && !p.style.is_empty() {
+                    return;
+                }
+                p.style = styles.default_id().to_owned();
+                return;
+            };
+            p.style = match styles.by_name(name) {
+                Some(s) => s.id.clone(),
+                None => match StyleSheet::builtin_style(&p.style) {
+                    Some(b) if b.name.eq_ignore_ascii_case(name) => b.id.clone(),
+                    _ => styles.default_id().to_owned(),
+                },
+            };
+        });
     }
 
     /// Plain text for other apps: each paragraph's text on its own line ("\n" between
@@ -60,8 +108,8 @@ impl Fragment {
         lines.join("\n")
     }
 
-    /// Plain text pasted from another app: one Normal paragraph per line (split on \n,
-    /// \r\n), every run in `style`.
+    /// Plain text pasted from another app: one paragraph per line (split on \n, \r\n),
+    /// naming no style (a paste gives it the document's default), every run in `style`.
     pub fn from_plain(text: &str, style: &RunStyle) -> Fragment {
         let blocks = text
             .split('\n')
@@ -71,19 +119,17 @@ impl Fragment {
                 Block::Paragraph(p)
             })
             .collect();
-        Fragment { blocks }
+        Fragment::new(blocks)
     }
 
     /// The fragment as a paste into `dest`, a block of `at`, puts it in: into a code block
     /// its plain text; into a cell with tables flattened into their cells' blocks; with
     /// text-holding blocks at both ends and runs normalized.
-    fn ready(&self, at: Container, dest: &Block) -> Fragment {
+    fn ready(&self, styles: &StyleSheet, at: Container, dest: &Block) -> Fragment {
         if matches!(dest, Block::CodeBlock(_)) {
             let mut p = Paragraph::default();
             p.push(&self.plain_text(), &RunStyle::default());
-            return Fragment {
-                blocks: vec![Block::Paragraph(p)],
-            };
+            return Fragment::new(vec![Block::Paragraph(p)]);
         }
         let mut blocks = match at {
             Container::Top => self.blocks.clone(),
@@ -101,12 +147,29 @@ impl Fragment {
         if blocks.len() > 1 && !holds_tail {
             blocks.push(Block::Paragraph(Paragraph::default()));
         }
+        self.restyle(&mut blocks, styles);
         normalize_blocks(&mut blocks);
-        Fragment { blocks }
+        Fragment::new(blocks)
     }
 }
 
-/// An empty Normal paragraph, as a fragment has around a table at its ends.
+/// Call `f` with every paragraph of `blocks`, list items' and table cells' included.
+fn visit_paragraphs(blocks: &mut [Block], f: &mut dyn FnMut(&mut Paragraph)) {
+    for block in blocks {
+        match block {
+            Block::Paragraph(p) => f(p),
+            Block::ListItem(item) => f(&mut item.paragraph),
+            Block::Table(t) => {
+                for cell in t.rows.iter_mut().flat_map(|r| &mut r.cells) {
+                    visit_paragraphs(&mut cell.blocks, f);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// An empty paragraph naming no style, as a fragment has around a table at its ends.
 fn is_blank(block: &Block) -> bool {
     matches!(block, Block::Paragraph(p) if *p == Paragraph::default())
 }
@@ -200,7 +263,7 @@ impl Span {
         } else {
             out.push(blank());
         }
-        Fragment { blocks: out }
+        Fragment::new(out)
     }
 
     /// What's left of blocks `start..=end` once the selection goes, one block, and where
@@ -296,15 +359,17 @@ fn ordered(from: Pos, to: Pos) -> Option<(Pos, Pos)> {
     (from != to).then(|| (from.min(to), from.max(to)))
 }
 
-/// The fragment from `from` to `to` (either order); `None` when they're equal or not in
-/// text.
+/// The fragment from `from` to `to` (either order), with its paragraphs' style names;
+/// `None` when they're equal or not in text.
 pub fn copy(doc: &Document, from: Pos, to: Pos) -> Option<Fragment> {
     let (s, e) = ordered(from, to)?;
-    if s.at == e.at {
+    let fragment = if s.at == e.at {
         let (blocks, s, e) = range(doc, s, e)?;
-        return Some(Fragment::copy(blocks, s, e));
-    }
-    Some(Span::new(doc, s, e)?.copy(doc))
+        Fragment::copy(blocks, s, e)
+    } else {
+        Span::new(doc, s, e)?.copy(doc)
+    };
+    Some(fragment.named(&doc.styles))
 }
 
 /// Delete from `from` to `to` (either order) as one undoable step.
@@ -319,12 +384,13 @@ pub fn delete(doc: &Document, from: Pos, to: Pos) -> Option<Edit> {
 }
 
 /// Replace `from..to` (either order; equal for a caret) with `fragment`, as one undoable
-/// step. The caret goes to the end of the pasted text.
+/// step: its paragraphs take the document's styles of their styles' names. The caret goes
+/// to the end of the pasted text.
 pub fn paste(doc: &Document, from: Pos, to: Pos, fragment: &Fragment) -> Option<Edit> {
     let (s, e) = (from.min(to), from.max(to));
     if s.at == e.at {
         let (blocks, s, e) = range(doc, s, e)?;
-        let fragment = fragment.ready(s.at, &blocks[s.block]);
+        let fragment = fragment.ready(&doc.styles, s.at, &blocks[s.block]);
         if s == e && fragment.is_empty() {
             return None;
         }
@@ -332,7 +398,7 @@ pub fn paste(doc: &Document, from: Pos, to: Pos, fragment: &Fragment) -> Option<
     }
     let span = Span::new(doc, s, e)?;
     let (kept, offset) = span.kept(doc);
-    let fragment = fragment.ready(Container::Top, &kept);
+    let fragment = fragment.ready(&doc.styles, Container::Top, &kept);
     let mut inserted = vec![kept];
     let end = paste_into(&mut inserted, Pos::new(0, offset), &fragment);
     let caret = Pos::new(span.start + end.block, end.offset);

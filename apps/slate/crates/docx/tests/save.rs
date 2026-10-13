@@ -7,7 +7,7 @@ use document_edit::{
     delete, normalize, paste, replace, set_style, split, text_len, toggle, toggle_list, Container,
     Edit, Flag, Fragment, History, Pos,
 };
-use document_model::{Block, Document, ImageSource, ListKind, Paragraph, ParagraphStyle, RunStyle};
+use document_model::{Block, Document, ImageSource, ListKind, Paragraph, RunStyle, StyleSheet};
 use docx::DocxSource;
 use quick_xml::events::Event;
 use std::io::{Read, Write};
@@ -198,7 +198,7 @@ fn edited() -> (Document, DocxSource) {
     });
     let i = top(&doc, "A right-aligned paragraph.");
     apply(&mut doc, &mut h, |d| {
-        set_style(d, Container::Top, i..i + 1, ParagraphStyle::Heading(4))
+        set_style(d, Container::Top, i..i + 1, "Heading4")
     });
     let i = top(&doc, "First number");
     apply(&mut doc, &mut h, |d| {
@@ -267,18 +267,21 @@ fn edits_change_only_their_paragraphs() {
     assert_eq!(kept.len(), before.len() - edited.len());
 
     // It reads back as edited; the new heading looks as its style does.
-    let back = reread(&dest);
+    let back_doc = open(&dest).0;
+    let back = &back_doc.blocks;
     assert_eq!(back.len(), doc.blocks.len());
     let heading = top(&doc, "A right-aligned paragraph.");
-    for (i, (a, b)) in doc.blocks.iter().zip(&back).enumerate() {
+    for (i, (a, b)) in doc.blocks.iter().zip(back).enumerate() {
         if i == heading {
             let Block::Paragraph(p) = b else {
                 panic!("{b:?}")
             };
-            assert_eq!(p.style, ParagraphStyle::Heading(4));
+            assert_eq!(p.style, "Heading4");
+            assert_eq!(back_doc.styles.style_of(&p.style).name, "Heading 4");
             assert_eq!(p.align, document_model::Align::End);
             assert_eq!(p.text(), "A right-aligned paragraph.");
-            assert!(p.runs.iter().all(|r| r.style.bold), "{p:?}");
+            let bold = |r: &document_model::Run| back_doc.styles.look(&p.style, &r.style).bold;
+            assert!(p.runs.iter().all(bold), "{p:?}");
         } else {
             assert_eq!(a, b, "block {i}");
         }
@@ -347,6 +350,7 @@ fn every_paragraph_of_the_corpus_takes_an_edit() {
             let mut n = 0;
             Document {
                 blocks: blocks.to_vec(),
+                styles: StyleSheet::builtin(),
                 format: document_model::Format::Docx,
             }
             .visit_text(&mut |t| n += t.matches(" ✎").count());
@@ -458,19 +462,15 @@ fn new_links_and_pictures_get_relationships_and_parts() {
             ..document_edit::look(&doc, at)
         },
     );
-    let fragment = Fragment {
-        blocks: vec![Block::Paragraph(link)],
-    };
+    let fragment = Fragment::new(vec![Block::Paragraph(link)]);
     apply(&mut doc, &mut h, |d| paste(d, at, at, &fragment));
     let i = top(&doc, "A centred paragraph.");
     let at = end(&doc, i);
-    let fragment = Fragment {
-        blocks: vec![
-            Block::Paragraph(Paragraph::default()),
-            gif.clone(),
-            Block::Paragraph(Paragraph::default()),
-        ],
-    };
+    let fragment = Fragment::new(vec![
+        Block::Paragraph(Paragraph::default()),
+        gif.clone(),
+        Block::Paragraph(Paragraph::default()),
+    ]);
     apply(&mut doc, &mut h, |d| paste(d, at, at, &fragment));
     let dest = temp("links", "saved.docx");
     save(&dest, &path, &doc, &source);
@@ -531,37 +531,47 @@ fn libreoffice_reads_the_edits_and_everything_else_as_before() {
     let dest = temp("libreoffice", "saved.docx");
     save(&dest, &original, &doc, &source);
     let (before, after) = (lo_dump(&original, 2181), lo_dump(&dest, 2181));
-    // The dump of the original with the edits made by hand.
-    let para = |style: &str, list: &str, label: &str, text: &str| {
-        format!("para\t{style}\t{list}\t\"{label}\"\t\"{text}\"")
+    // The dump of the original with the edits made by hand: a line with its text (its
+    // last field), and for a `para` line its list label, or for a `run` its flags, set.
+    let with = |line: &str, field: Option<(usize, &str)>, text: &str| {
+        let mut f: Vec<String> = line.split('\t').map(str::to_owned).collect();
+        *f.last_mut().unwrap() = format!("\"{text}\"");
+        if let Some((i, v)) = field {
+            f[i] = v.to_owned();
+        }
+        f.join("\t")
     };
-    let normal = "Default Paragraph Style";
     let mut want: Vec<String> = Vec::new();
     let mut lines = before.lines().peekable();
     while let Some(line) = lines.next() {
         let text = |t: &str| line.ends_with(&format!("\"{t}\""));
         if line.starts_with("para\t") && text("A centred paragraph.") {
-            want.push(para(normal, "-", "", "A centred paragraph. Edited"));
-            want.push("run\t-\t\"A centred paragraph. Edited\"".into());
-            lines.next();
+            let edited = "A centred paragraph. Edited";
+            want.push(with(line, None, edited));
+            want.push(with(lines.next().unwrap(), None, edited));
         } else if line.starts_with("run\t") && text("A quotation from somebody wise.") {
-            want.push("run\t-\t\"A \"".into());
-            want.push("run\ti\t\"quotation\"".into());
-            want.push("run\t-\t\" from somebody wise.\"".into());
+            want.push(with(line, None, "A "));
+            want.push(with(line, Some((1, "i")), "quotation"));
+            want.push(with(line, None, " from somebody wise."));
         } else if line.starts_with("para\t") && text("A right-aligned paragraph.") {
-            want.push(para("Heading 4", "-", "", "A right-aligned paragraph."));
-            want.push("run\tb\t\"A right-aligned paragraph.\"".into());
-            lines.next();
+            // The heading style added in Word's look, based on the default style.
+            let text = "A right-aligned paragraph.";
+            want.push(format!(
+                "para\tHeading 4\t-\t\"\"\tend\t240\t120\tauto:100\t0\t0\t\"{text}\""
+            ));
+            let run = lines.next().unwrap();
+            let font = run.split('\t').nth(2).unwrap();
+            want.push(format!("run\tb\t{font}\t13\tauto\t\"{text}\""));
         } else if line.starts_with("para\t") && text("First number") {
-            want.push(para(normal, "0", "1.", "First"));
-            want.push("run\t-\t\"First\"".into());
-            want.push(para(normal, "0", "2.", " number"));
-            want.push("run\t-\t\" number\"".into());
-            lines.next();
+            let run = lines.next().unwrap();
+            want.push(with(line, Some((3, "\"1.\"")), "First"));
+            want.push(with(run, None, "First"));
+            want.push(with(line, Some((3, "\"2.\"")), " number"));
+            want.push(with(run, None, " number"));
         } else if line.starts_with("para\t") && text("Second number") {
-            want.push(para(normal, "0", "3.", "Second number"));
+            want.push(with(line, Some((3, "\"3.\"")), "Second number"));
         } else if line.starts_with("para\t") && text("Third number") {
-            want.push(para(normal, "0", "4.", "Third number"));
+            want.push(with(line, Some((3, "\"4.\"")), "Third number"));
         } else if text("Apples") {
             want.push(line.replace("Apples", "Pears"));
         } else if line.starts_with("para\t") && text("The table follows.") {

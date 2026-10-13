@@ -23,7 +23,7 @@ mod shaper;
 
 use crate::settings::TextWidth;
 use document_edit::{Change, Container, Edit, Flag, Fragment, History, Pos};
-use document_model::{ParagraphStyle, RunStyle};
+use document_model::RunStyle;
 use flow::{Flow, Located, Paint, Splice, LEVEL_INDENT};
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
@@ -1372,25 +1372,29 @@ mod imp {
                         }
                         // No selection: what is typed next takes the look.
                         let c = st.caret?;
-                        let mut look = st
+                        let doc = st.flow.document();
+                        let look = st
                             .typing
                             .clone()
-                            .unwrap_or_else(|| document_edit::look(st.flow.document(), c));
-                        match flag {
-                            Flag::Bold => look.bold = !look.bold,
-                            Flag::Italic => look.italic = !look.italic,
-                        }
-                        st.typing = Some(look);
+                            .unwrap_or_else(|| document_edit::look(doc, c));
+                        st.typing = Some(document_edit::toggled(doc, c, &look, flag));
                         None
                     });
                 }
                 Command::Style(level) => self.edit_with(true, |st| {
-                    let style = match level {
-                        0 => ParagraphStyle::Normal,
-                        n => ParagraphStyle::Heading(n.min(6)),
-                    };
                     let (at, blocks) = caret::blocks(st).filter(|_| !st.plain)?;
-                    document_edit::set_style(st.flow.document(), at, blocks, style)
+                    let doc = st.flow.document();
+                    let styles = &doc.styles;
+                    let style = match level {
+                        0 => styles.default_id().to_owned(),
+                        n => {
+                            let n = n.min(6);
+                            styles
+                                .heading(n)
+                                .map_or_else(|| format!("Heading{n}"), |s| s.id.clone())
+                        }
+                    };
+                    document_edit::set_style(doc, at, blocks, &style)
                 }),
                 Command::Bullets | Command::Numbers => self.edit_with(true, |st| {
                     let (at, blocks) = caret::blocks(st).filter(|_| !st.plain)?;

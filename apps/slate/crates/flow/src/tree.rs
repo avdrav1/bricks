@@ -4,7 +4,7 @@
 
 use crate::content::{code_text, floor_boundary, Content};
 use crate::{LayoutKey, LeafId, Located, Look, Metrics, Paint, Position, Shaper};
-use document_model::{Block, Document, Format, Image, ParagraphStyle};
+use document_model::{Block, Document, Format, Image, Paragraph, StyleSheet};
 use std::ops::Range;
 
 /// How far each list or quote level indents.
@@ -164,25 +164,30 @@ impl Node {
 }
 
 /// Builds the tree and the leaves of a document, or of a stretch of its top-level blocks.
-pub(crate) struct Builder {
+pub(crate) struct Builder<'a> {
     pub leaves: Vec<Leaf>,
     pub page_breaks: usize,
     /// Top-level blocks holding a page break, in order.
     pub break_tops: Vec<usize>,
+    styles: &'a StyleSheet,
     plain: bool,
+    /// A Word document: its runs' sizes are its own, not the page font's scaled by style.
+    docx: bool,
     /// The first leaf's number: leaves before the stretch built.
     base: u32,
     /// The next layout key.
     pub keys: u64,
 }
 
-impl Builder {
-    pub fn new(format: &Format, base: usize, keys: u64) -> Self {
+impl<'a> Builder<'a> {
+    pub fn new(doc: &'a Document, base: usize, keys: u64) -> Self {
         Builder {
             leaves: Vec::new(),
             page_breaks: 0,
             break_tops: Vec::new(),
-            plain: matches!(format, Format::Text(_)),
+            styles: &doc.styles,
+            plain: matches!(doc.format, Format::Text(_)),
+            docx: matches!(doc.format, Format::Docx),
             base: base as u32,
             keys,
         }
@@ -238,36 +243,37 @@ impl Builder {
             Block::Paragraph(p) => {
                 let content = Content::Paragraph {
                     paragraph: p,
+                    styles: self.styles,
                     list: None,
                     header,
                 };
                 let leaf = self.leaf(path, Some(&content.text()));
-                let mut b = TextBox::new(leaf, Look::Body, scale(p));
+                let mut b = TextBox::new(leaf, Look::Body, self.scale(p));
                 b.below = space;
                 b.indent = i32::from(p.indent) * LEVEL_INDENT;
-                match p.style {
-                    ParagraphStyle::Heading(n) => {
-                        b.above = HEADING_ABOVE[usize::from(n.clamp(1, 6)) - 1];
-                        b.below = HEADING_BELOW;
-                        b.look = Look::Heading(n.clamp(1, 6));
-                    }
-                    ParagraphStyle::Title => {
-                        b.below = TITLE_BELOW;
-                        b.look = Look::Title;
-                    }
-                    ParagraphStyle::Quote => b.indent += LEVEL_INDENT,
-                    ParagraphStyle::Normal => {}
+                let style = self.styles.style_of(&p.style);
+                if style.title {
+                    b.below = TITLE_BELOW;
+                    b.look = Look::Title;
+                } else if let Some(n) = style.outline {
+                    let n = n.clamp(1, 6);
+                    b.above = HEADING_ABOVE[usize::from(n) - 1];
+                    b.below = HEADING_BELOW;
+                    b.look = Look::Heading(n);
+                } else if style.is_quote() {
+                    b.indent += LEVEL_INDENT;
                 }
                 Kind::Text(b)
             }
             Block::ListItem(item) => {
                 let content = Content::Paragraph {
                     paragraph: &item.paragraph,
+                    styles: self.styles,
                     list: Some(item),
                     header,
                 };
                 let leaf = self.leaf(path, Some(&content.text()));
-                let mut b = TextBox::new(leaf, Look::Body, scale(&item.paragraph));
+                let mut b = TextBox::new(leaf, Look::Body, self.scale(&item.paragraph));
                 b.below = self.item_below(next);
                 b.indent = i32::from(item.level) * LEVEL_INDENT + LEVEL_INDENT;
                 b.marker = true;
@@ -345,6 +351,24 @@ impl Builder {
             }
         };
         Node::new(kind)
+    }
+
+    /// The first run's size relative to the normal size (11 pt, 22 half-points): a Word
+    /// document's as its style and the run give it; elsewhere the run's own (the style's
+    /// size is in the look's metrics).
+    fn scale(&self, p: &Paragraph) -> f64 {
+        let size = p.runs.first().and_then(|r| {
+            if self.docx {
+                Some(
+                    r.style
+                        .size
+                        .unwrap_or(self.styles.style_of(&p.style).run.size),
+                )
+            } else {
+                r.style.size
+            }
+        });
+        size.map_or(1.0, |half| f64::from(half) / 22.0)
     }
 
     fn space(&self) -> i32 {
@@ -486,14 +510,6 @@ pub(crate) fn unlay(node: &mut Node, leaf: LeafId) -> bool {
     found
 }
 
-/// The first run's size relative to the normal size (11 pt, 22 half-points).
-fn scale(p: &document_model::Paragraph) -> f64 {
-    p.runs
-        .first()
-        .and_then(|r| r.style.size)
-        .map_or(1.0, |half| f64::from(half) / 22.0)
-}
-
 impl TextBox {
     fn new(leaf: LeafId, look: Look, scale: f64) -> Self {
         TextBox {
@@ -539,11 +555,13 @@ pub(crate) fn content_at<'a>(doc: &'a Document, path: &[u32]) -> Option<Content<
     match block_at(doc, path) {
         (Block::Paragraph(p), header) => Some(Content::Paragraph {
             paragraph: p,
+            styles: &doc.styles,
             list: None,
             header,
         }),
         (Block::ListItem(item), header) => Some(Content::Paragraph {
             paragraph: &item.paragraph,
+            styles: &doc.styles,
             list: Some(item),
             header,
         }),

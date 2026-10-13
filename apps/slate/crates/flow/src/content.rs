@@ -1,15 +1,16 @@
 //! What a shaper lays out, and the text a leaf holds.
 
-use document_model::{CodeBlock, Image, ListItem, Paragraph, Raw};
+use document_model::{CodeBlock, Image, ListItem, Paragraph, Raw, StyleSheet};
 use std::borrow::Cow;
 
 /// A text-bearing leaf as a shaper lays it out.
 #[derive(Debug, Clone, Copy)]
 pub enum Content<'a> {
-    /// A paragraph, or a list item's paragraph (`list`, whose marker hangs in the indent).
-    /// `header`: the paragraph is in a table's header row.
+    /// A paragraph, or a list item's paragraph (`list`, whose marker hangs in the indent),
+    /// with the document's styles. `header`: the paragraph is in a table's header row.
     Paragraph {
         paragraph: &'a Paragraph,
+        styles: &'a StyleSheet,
         list: Option<&'a ListItem>,
         header: bool,
     },

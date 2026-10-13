@@ -2,13 +2,15 @@
 //! the text it holds (the least recently used go first; heights stay in the flow), styled
 //! with the viewer's looks.
 //!
-//! Markdown and plain text take their looks from the paragraph style (headings larger and
-//! bold, quotes italic and grey, a table's header row bold); a DOCX file's runs already carry
-//! the sizes and weights its styles give them, so its paragraphs get only the runs' looks.
+//! Markdown and plain text take their paragraph looks from the paragraph style (headings
+//! larger and bold, quotes italic and grey, a table's header row bold); a DOCX file's
+//! styles give its runs their sizes and colours. Every run is drawn in its style's look
+//! with its own overrides on top (weight, slant, underline, strikethrough); the page's
+//! font family stays.
 
 use super::{texture_key, Textures};
 use document_model::{
-    Align, Format, Image, ImageSource, ListKind, Paragraph, ParagraphStyle, RunStyle,
+    Align, Format, Image, ImageSource, ListKind, Look as RunLook, Paragraph, RunStyle, StyleSheet,
 };
 use flow::{Content, Hit, LayoutKey, Look, Metrics, Shaper};
 use gtk::pango;
@@ -53,7 +55,8 @@ struct Preedit {
 /// Pango layouts for a document's leaves.
 pub struct PangoShaper {
     context: pango::Context,
-    /// Looks come from paragraph styles (Markdown, plain text), not from the runs (DOCX).
+    /// Paragraph looks scale the page font by the paragraph's kind of style (Markdown,
+    /// plain text); a Word document's runs take their sizes from its styles.
     style_looks: bool,
     textures: Textures,
     cache: HashMap<LayoutKey, Entry>,
@@ -224,13 +227,18 @@ impl PangoShaper {
         layout.set_text(&text);
         match content {
             Content::Paragraph {
-                paragraph, header, ..
+                paragraph,
+                styles,
+                header,
+                ..
             } => {
-                self.paragraph_looks(paragraph, header, &attrs);
+                self.paragraph_looks(paragraph, styles, header, &attrs);
+                let style = &styles.style_of(&paragraph.style).run;
+                let sized = !self.style_looks;
                 let mut start = 0;
                 for run in &paragraph.runs {
                     let end = start + run.text.len();
-                    run_looks(&run.style, start as u32, end as u32, &attrs);
+                    run_looks(style, &run.style, sized, start as u32, end as u32, &attrs);
                     start = end;
                 }
                 match paragraph.align {
@@ -256,28 +264,27 @@ impl PangoShaper {
         layout
     }
 
-    fn paragraph_looks(&self, p: &Paragraph, header: bool, attrs: &pango::AttrList) {
+    fn paragraph_looks(
+        &self,
+        p: &Paragraph,
+        styles: &StyleSheet,
+        header: bool,
+        attrs: &pango::AttrList,
+    ) {
         if !self.style_looks {
             return;
         }
         let all = |a: pango::Attribute| insert(attrs, a, 0, u32::MAX);
-        match p.style {
-            ParagraphStyle::Heading(n) => {
-                all(
-                    pango::AttrFloat::new_scale(HEADING_SCALE[usize::from(n.clamp(1, 6)) - 1])
-                        .into(),
-                );
-                all(pango::AttrInt::new_weight(pango::Weight::Bold).into());
-            }
-            ParagraphStyle::Title => {
-                all(pango::AttrFloat::new_scale(TITLE_SCALE).into());
-                all(pango::AttrInt::new_weight(pango::Weight::Bold).into());
-            }
-            ParagraphStyle::Quote => {
-                all(pango::AttrInt::new_style(pango::Style::Italic).into());
-                all(foreground(QUOTE));
-            }
-            ParagraphStyle::Normal => {}
+        let style = styles.style_of(&p.style);
+        if style.title {
+            all(pango::AttrFloat::new_scale(TITLE_SCALE).into());
+            all(pango::AttrInt::new_weight(pango::Weight::Bold).into());
+        } else if let Some(n) = style.outline {
+            all(pango::AttrFloat::new_scale(HEADING_SCALE[usize::from(n.clamp(1, 6)) - 1]).into());
+            all(pango::AttrInt::new_weight(pango::Weight::Bold).into());
+        } else if style.is_quote() {
+            all(pango::AttrInt::new_style(pango::Style::Italic).into());
+            all(foreground(QUOTE));
         }
         if header {
             all(pango::AttrInt::new_weight(pango::Weight::Bold).into());
@@ -302,19 +309,29 @@ fn foreground(hex: u32) -> pango::Attribute {
     pango::AttrColor::new_foreground(r, g, b).into()
 }
 
-/// A run's looks over bytes `start..end`.
-fn run_looks(s: &RunStyle, start: u32, end: u32, attrs: &pango::AttrList) {
+/// A run's looks over bytes `start..end`: its style's look `style` with its overrides `s`
+/// on top (as [`StyleSheet::look`]), its size only when `sized` (a Word document's;
+/// elsewhere the paragraph's scale sizes it), and Slate's own looks (code, raw source,
+/// links).
+fn run_looks(
+    style: &RunLook,
+    s: &RunStyle,
+    sized: bool,
+    start: u32,
+    end: u32,
+    attrs: &pango::AttrList,
+) {
     let add = |a: pango::Attribute| insert(attrs, a, start, end);
-    if s.bold {
+    if s.bold.unwrap_or(style.bold) {
         add(pango::AttrInt::new_weight(pango::Weight::Bold).into());
     }
-    if s.italic {
+    if s.italic.unwrap_or(style.italic) {
         add(pango::AttrInt::new_style(pango::Style::Italic).into());
     }
-    if s.underline {
+    if s.underline.unwrap_or(style.underline) {
         add(pango::AttrInt::new_underline(pango::Underline::Single).into());
     }
-    if s.strike {
+    if s.strike.unwrap_or(style.strike) {
         add(pango::AttrInt::new_strikethrough(true).into());
     }
     if s.code {
@@ -326,10 +343,11 @@ fn run_looks(s: &RunStyle, start: u32, end: u32, attrs: &pango::AttrList) {
         add(pango::AttrString::new_family(MONO).into());
         add(foreground(RAW));
     }
-    if let Some(half) = s.size {
+    if sized {
+        let half = s.size.unwrap_or(style.size);
         add(pango::AttrSize::new(i32::from(half) * pango::SCALE / 2).into());
     }
-    if let Some([r, g, b]) = s.color {
+    if let Some([r, g, b]) = s.color.or(style.color) {
         add(foreground(
             u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b),
         ));
