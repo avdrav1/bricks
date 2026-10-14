@@ -4,14 +4,20 @@ They're native apps. No browser tab, no subscription, no account. Each one insta
 Brick is the spreadsheet. It's built for the files other spreadsheets give up on. This one has nineteen million rows, and scrolling stays smooth.
 Sorting all nineteen million rows takes under a second. Search runs in the background, so the window never freezes.
 Your data stays your data. Zero zero one two three stays zero zero one two three. Brick never quietly turns it into a number. And every save is atomic: a crash can't leave you with half a file.
+Past your data, the sheet keeps going, like Excel and Calc. Type anywhere, and the rows are there.
 It opens Excel workbooks too, with formulas, multiple sheets, and cell styles. When you save, Brick patches the original file rather than rewriting it, so charts, comments, and conditional formatting come through untouched.
-Slate is the word processor. You'll notice there are no pages. Slate gives you one endless page, so you write instead of fighting margins.
+Slate is the word processor. You'll notice there are no pages. Slate gives you one endless page, so you write instead of fighting margins. And Word documents look like themselves, in their own fonts and styles.
 Choose how wide you want the column. That's a setting for you; it doesn't change the document. Typing, headings, lists, tables, and copy and paste all work as you'd expect, with full undo.
+When you want more, a slim format bar holds the document's own styles, fonts, sizes, and colours. No ribbon.
+Find and replace reaches into tables, and Replace All undoes in one step. Control N starts a new Word document.
+And if Slate ever crashes, your unsaved edits are waiting when you come back. Brick does the same.
 Here's the part we care most about. When Slate saves a Word document, it changes only what you edited. Everything else in the file, the parts Slate doesn't even show you, stays exactly as it was.
 Markdown and plain text too. Edit one paragraph of a Markdown file, and only that paragraph changes on disk. Your version control will thank you.
-Frame is for presentations, and it's coming next. It opens PowerPoint decks, and you edit right on the slide.
+Frame is for presentations. It opens PowerPoint decks, or starts a new one, and you edit right on the slide.
+Drop in a picture, and it lands where the layout wants it. Too much text shrinks to fit.
 Shapes snap into line as you drag them. Every formatting option lives in one inspector. There are no dialogs to dig through.
-Or skip the slides entirely and just type an outline. Frame builds the slides for you. In our test, building the same four-slide deck took about a quarter fewer clicks and keystrokes than PowerPoint.
+Or skip the slides entirely and just type an outline. Frame builds the slides for you.
+In our test, building the same four-slide deck took about a quarter fewer clicks and keystrokes than PowerPoint. And like Slate, saving changes only what you edited.
 Getting started takes one command per app. It installs for your user only. No sudo, no package manager, and the download is checked before anything is installed.
 After that, your files just open in the right app.
-Cronkite. Fast, native, and open source. Brick and Slate are available today, and Frame is coming soon, at cronkite dot c c.
+Cronkite. Fast, native, and open source. Brick, Slate, and Frame are all available today, at cronkite dot c c.

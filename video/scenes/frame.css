@@ -1,0 +1,133 @@
+/* Frame: the GTK 4 window (apps/frame/src), its slides, and the scenes' extras.
+   Sizes inside .win are GTK pixels; the window's zoom makes them 125%. */
+
+.frame-cam, .frame-back { position: absolute; inset: 0; }
+
+/* ---- window layout ---- */
+.frame-win .win-body { overflow: hidden; }
+.frame-main { flex: 1; min-height: 0; display: flex; }
+.frame-list { flex: none; position: relative; overflow: hidden; background: #fff; }
+.frame-rows { padding-top: 6px; }
+.frame-row { display: flex; align-items: flex-start; gap: 8px; margin: 0 6px 2px; padding: 6px 8px 6px 4px; border-radius: 6px; }
+.frame-row.sel { background: rgba(0, 0, 6, 0.1); }
+.frame-num { flex: none; width: 27px; text-align: right; font-variant-numeric: tabular-nums; line-height: 18px; }
+.frame-thumb { flex: none; position: relative; width: 176px; height: 99px; overflow: hidden; box-shadow: 0 0 0 1px rgba(0, 0, 6, 0.18); background: #fff; }
+.frame-scale { position: absolute; left: 0; top: 0; width: 960px; height: 540px; transform-origin: 0 0; }
+.frame-panesep { flex: none; width: 1px; background: rgba(0, 0, 6, 0.15); }
+.frame-page { flex: none; display: flex; min-height: 0; position: relative; }
+.frame-canvas { flex: none; position: relative; overflow: hidden; background: #e0e0e1; }
+.frame-stage { position: absolute; box-shadow: 0 0 0 1px rgba(0, 0, 6, 0.35); overflow: hidden; }
+.frame-cs { position: absolute; left: 0; top: 0; width: 960px; height: 540px; transform-origin: 0 0; }
+.frame-ov { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.frame-isep { flex: none; width: 1px; background: rgba(0, 0, 6, 0.12); }
+.frame-status { flex: none; height: 27px; padding: 4px 10px; line-height: 19px; white-space: nowrap; }
+.frame-pop { position: absolute; left: 0; top: 0; z-index: 10; }
+.frame-insert svg { margin-left: -2px; }
+
+/* ---- the inspector (inspector.rs: VBox spacing 18, margins 12; sections spacing 10) ---- */
+.frame-insp { flex: none; overflow: hidden; padding: 12px; display: flex; flex-direction: column; gap: 18px; background: #fff; }
+.frame-sec { display: flex; flex-direction: column; gap: 10px; }
+.frame-h { height: 20px; line-height: 20px; font-weight: 700; }
+.frame-irow { display: flex; flex-direction: column; gap: 4px; }
+.frame-lab { height: 20px; line-height: 20px; }
+.frame-from { height: 16px; line-height: 16px; margin-top: -2px; }
+.frame-dd { width: 100%; min-width: 0; }
+.frame-dd .frame-ddl { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.frame-dd:has(.frame-lt) { height: 46px; justify-content: flex-start; gap: 10px; padding-left: 6px; }
+.frame-lt { flex: none; position: relative; width: 64px; height: 36px; background: #fff; box-shadow: 0 0 0 1px rgba(0, 0, 6, 0.2); }
+.frame-lt i { position: absolute; left: 7px; height: 3px; border-radius: 1px; background: #9a9996; }
+.frame-lt i:nth-child(1) { top: 7px; width: 36px; height: 5px; background: #5e5c64; }
+.frame-lt i:nth-child(2) { top: 17px; width: 46px; }
+.frame-lt i:nth-child(3) { top: 24px; width: 30px; }
+.frame-spin { display: flex; align-items: stretch; height: 34px; border-radius: 6px; background: rgba(0, 0, 6, 0.06); overflow: hidden; }
+.frame-spin span { flex: 1; padding: 0 9px; line-height: 34px; font-variant-numeric: tabular-nums; }
+.frame-spin b { flex: none; width: 34px; text-align: center; line-height: 33px; font-weight: 400; font-size: 18px; border-left: 1px solid rgba(0, 0, 6, 0.08); }
+.frame-spin.narrow { flex: none; width: 100px; }
+.frame-spin.narrow b { width: 28px; }
+.frame-spin.narrow span { padding: 0 6px; }
+.frame-oline { display: flex; gap: 8px; }
+.frame-oline .frame-swatch { flex: 1; min-width: 0; }
+.frame-swatch { justify-content: flex-start; gap: 8px; width: 100%; padding: 0 8px; }
+.frame-swatch span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.frame-chip { flex: none; display: block; width: 18px; height: 18px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.4); }
+.frame-chip.none { background: linear-gradient(to top right, #fff calc(50% - 0.8px), #cc1a1a calc(50% - 0.6px), #cc1a1a calc(50% + 0.6px), #fff calc(50% + 0.8px)); }
+.frame-lk { display: flex; }
+.frame-lk .hb-btn { min-width: 36px; font-family: var(--ui); font-size: 14.67px; }
+.frame-lk .hb-btn b { font-weight: 800; }
+.frame-lk .hb-btn i { font-family: Caladea, serif; font-weight: 700; font-size: 16px; }
+.frame-para { display: flex; gap: 8px; }
+.frame-fact { display: flex; gap: 8px; height: 20px; line-height: 20px; }
+.frame-fact .v { flex: 1; text-align: right; }
+
+/* the swatch popover: No fill, then 4 rows of 5 flat chip buttons */
+.frame-swpop { position: absolute; width: 210px; padding: 6px; background: #fff; border-radius: 12px; box-shadow: 0 1px 2px rgba(0,0,0,.2), 0 6px 22px rgba(0,0,0,.24), 0 0 0 1px rgba(0,0,0,.08); }
+.frame-nofill { height: 34px; line-height: 34px; text-align: center; border-radius: 6px; }
+.frame-pal { display: grid; grid-template-columns: repeat(5, 38px); gap: 2px; margin-top: 6px; }
+.frame-pb { height: 28px; display: grid; place-items: center; border-radius: 6px; }
+.frame-pb.hot { background: rgba(0, 0, 6, 0.1); }
+.frame-arrow { position: absolute; left: 50%; bottom: -7px; width: 14px; height: 14px; margin-left: -7px; background: #fff; transform: rotate(45deg); box-shadow: 1px 1px 0 rgba(0,0,0,.1); }
+.frame-tip { position: absolute; white-space: nowrap; padding: 5px 10px; border-radius: 6px; background: rgba(0, 0, 0, 0.82); color: #fff; font-size: 13.5px; }
+
+/* ---- the outline (outline.rs: margins 16; titles bold at 1.25, 12px above) ---- */
+.frame-outline { position: relative; flex: 1; overflow: hidden; background: #fff; }
+.frame-otext { padding: 16px; }
+.frame-ol { white-space: pre; }
+.frame-ol.t { height: 26px; margin-top: 12px; line-height: 26px; font-size: 18.33px; font-weight: 700; padding-left: 0; }
+.frame-ol.t:first-child { margin-top: 0; }
+.frame-ol.b, .frame-ol.o { height: 20px; margin-top: 2px; line-height: 20px; }
+.frame-ol.o { padding-left: 44px; font-style: italic; color: #808080; }
+.frame-ol .pre { color: #808080; }
+.frame-ocaret { display: inline-block; width: 1px; height: 1.15em; margin-right: -1px; vertical-align: -0.2em; background: #000; }
+.frame-ocaret.off { visibility: hidden; }
+
+/* ---- slides: 960 × 540 points ---- */
+.frame-slide { position: absolute; left: 0; top: 0; width: 960px; height: 540px; overflow: hidden; font-family: Carlito, Calibri, sans-serif; color: #1f2a37; }
+.frame-sh { position: absolute; }
+.frame-k-oval { border-radius: 50%; }
+.frame-sh.round { border-radius: 18px; }
+.frame-tx { position: absolute; inset: 0; padding: 3.6px 7.2px; display: flex; flex-direction: column; justify-content: flex-start; --fit: 1; --lr: 0; }
+.frame-p { margin: 0; position: relative; }
+.frame-caret { display: inline-block; width: 2px; height: 1.05em; margin-right: -2px; vertical-align: -0.12em; background: currentColor; }
+.frame-caret.off { visibility: hidden; }
+.frame-pic, .frame-pic svg, .frame-photo { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+.frame-t1 .frame-tx { justify-content: flex-end; font-size: 60px; line-height: 1; font-weight: 700; color: #fff; letter-spacing: -0.01em; }
+.frame-s1 .frame-tx { font-size: 24px; color: #bfe3df; }
+.frame-title .frame-tx { justify-content: center; font-size: 36px; line-height: 1.05; font-weight: 700; }
+.frame-t3 .frame-tx { justify-content: flex-end; font-size: 32px; }
+.frame-cap .frame-tx { font-size: 18px; line-height: 1.25; color: #4b5866; }
+.frame-foot .frame-tx { font-size: 12px; color: #8a949e; justify-content: center; }
+.frame-body .frame-tx { font-size: calc(32px * var(--fit)); line-height: calc(1.2 * (1 - var(--lr))); color: #33414e; }
+.frame-body .frame-p { padding-left: 1.1em; }
+.frame-body .frame-p + .frame-p { margin-top: calc(10px * var(--fit) * (1 - var(--lr))); }
+.frame-bu { position: absolute; left: 0.15em; color: #127c7c; }
+.frame-boxtx .frame-tx { justify-content: center; text-align: center; font-size: 20px; font-weight: 700; color: #fff; }
+.frame-ctr .frame-tx { justify-content: flex-end; text-align: center; font-size: 60px; line-height: 0.9; color: #000; }
+.frame-sub .frame-tx { text-align: center; font-size: 24px; color: #000; }
+
+/* ---- Files' thumbnail of photo.jpg, and its drag icon ---- */
+.frame-fthumb { position: relative; display: block; overflow: hidden; margin: 6px 0 2px; border-radius: 2px; box-shadow: 0 0 0 1px rgba(0,0,0,.12), 0 1px 3px rgba(0,0,0,.25); }
+.frame-ghost { position: absolute; left: 0; top: 0; z-index: 30; opacity: 0.85; pointer-events: none; }
+.frame-ghost .frame-fthumb { margin: 0; box-shadow: 0 2px 8px rgba(0,0,0,.4); }
+
+/* ---- frame-count: the card and the slideshow ---- */
+.frame-card p { margin: 0; }
+.frame-card-label { font: 500 44px var(--brand); color: var(--muted); letter-spacing: 0.01em; }
+.frame-card { position: absolute; inset: 0; z-index: 20; background: var(--paper); color: var(--ink); font-family: var(--brand); display: flex; flex-direction: column; align-items: center; justify-content: center; padding-bottom: 170px; }
+.frame-card-big { margin-top: 28px !important; font: 700 84px/1.05 var(--brand); letter-spacing: -0.02em; white-space: nowrap; }
+.frame-card-big .frame-n { font-weight: 800; color: #b5532d; }
+.frame-card-big .frame-n.pp { color: #5b6b62; }
+.frame-card-big .frame-vs { font-weight: 500; color: var(--muted); margin: 0 0.15em; }
+.frame-bars { margin-top: 84px; width: 1120px; display: flex; flex-direction: column; gap: 26px; }
+.frame-barrow { display: grid; grid-template-columns: 250px 1fr 90px; align-items: center; gap: 24px; font: 600 38px var(--brand); }
+.frame-barrow span { text-align: right; color: var(--muted); }
+.frame-barrow b { font-weight: 800; font-size: 46px; }
+.frame-bar { height: 52px; }
+.frame-bar i { display: block; height: 100%; width: 0; border-radius: 8px; }
+.frame-bar.fr { width: calc(100% * 15 / 21); }
+.frame-bar.fr i { background: #d9683a; }
+.frame-bar.pp i { background: #9aa8a0; }
+
+.frame-show { position: absolute; inset: 0; z-index: 40; background: #000; }
+.frame-showslides { position: absolute; left: 0; top: 0; width: 960px; height: 540px; transform: scale(2); transform-origin: 0 0; }
+.frame-ss { position: absolute; inset: 0; }

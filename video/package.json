@@ -1,0 +1,12 @@
+{
+  "name": "cronkite-explainer-video",
+  "private": true,
+  "type": "module",
+  "description": "The Cronkite explainer video (docs/video/explainer-script.md) as HTML scenes, rendered to MP4",
+  "scripts": {
+    "render": "node render.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.64.0"
+  }
+}

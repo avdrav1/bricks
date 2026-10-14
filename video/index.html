@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cronkite: the explainer video</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="scenes/brick.css">
+<link rel="stylesheet" href="scenes/slate.css">
+<link rel="stylesheet" href="scenes/frame.css">
+</head>
+<body>
+<div id="viewport"><div id="stage"></div></div>
+<div id="controls" hidden>
+  <button id="play" type="button">Play</button>
+  <input id="scrub" type="range" min="0" step="0.0333">
+  <span id="clock">0:00.0</span>
+  <select id="jump"></select>
+</div>
+
+<script src="engine.js"></script>
+<script src="components.js"></script>
+<script src="scenes/intro.js"></script>
+<script src="scenes/brick.js"></script>
+<script src="scenes/slate.js"></script>
+<script src="scenes/frame.js"></script>
+<script src="scenes/outro.js"></script>
+<script src="edit.js"></script>
+<script src="soundtrack.js"></script>
+<script>
+  // Scenes measure text while they build, so the fonts load first.
+  // ?render: the renderer drives seek() itself. Otherwise this is a preview
+  // player: space plays and pauses, arrows step, ?t=SECONDS starts there.
+  const params = new URLSearchParams(location.search);
+  window.ready = Promise.all([...document.fonts].map((f) => f.load())).then(() => {
+    window.video = V.init();
+    if (params.has("render")) document.body.classList.add("render");
+    else preview();
+    return V.settled().then(() => window.video);
+  });
+
+  function preview() {
+    const controls = document.getElementById("controls");
+    const play = document.getElementById("play");
+    const scrub = document.getElementById("scrub");
+    const clock = document.getElementById("clock");
+    const jump = document.getElementById("jump");
+    controls.hidden = false;
+    scrub.max = video.duration;
+    for (const s of V.list()) jump.add(new Option(`${s.id} (${s.start.toFixed(1)} s)`, s.start));
+    let t = Number(params.get("t") || 0), playing = false, last = 0;
+    const fit = () => {
+      const k = Math.min(innerWidth / V.W, (innerHeight - 48) / V.H);
+      document.getElementById("stage").style.transform = `scale(${k})`;
+    };
+    const draw = () => {
+      V.seek(t);
+      scrub.value = t;
+      clock.textContent = `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, "0")} / ${Math.floor(video.duration / 60)}:${(video.duration % 60).toFixed(0).padStart(2, "0")}`;
+      const current = V.list().filter((s) => s.start <= t).pop();
+      if (current) jump.value = current.start;
+    };
+    // The soundtrack renders on the first Play (a few seconds); from then on
+    // the audio clock drives the picture.
+    let actx = null, music = null, src = null, startT = 0, startedAt = 0;
+    const stopMusic = () => {
+      src?.stop();
+      src = null;
+    };
+    const startMusic = async () => {
+      actx ??= new AudioContext();
+      music ??= V.soundtrack();
+      const buffer = await music;
+      if (!playing) return;
+      stopMusic();
+      src = actx.createBufferSource();
+      src.buffer = buffer;
+      src.connect(actx.destination);
+      [startT, startedAt] = [t, actx.currentTime];
+      src.start(0, t);
+    };
+    const setPlaying = (on) => {
+      playing = on;
+      if (on) startMusic();
+      else stopMusic();
+    };
+    const seekTo = (x) => {
+      t = Math.max(0, Math.min(video.duration, x));
+      if (playing) startMusic();
+    };
+    const loop = (now) => {
+      if (playing) {
+        t = src ? startT + actx.currentTime - startedAt : Math.min(video.duration, t + (now - last) / 1000);
+        if (t >= video.duration) setPlaying(false);
+      }
+      last = now;
+      draw();
+      play.textContent = playing ? "Pause" : "Play";
+      requestAnimationFrame(loop);
+    };
+    play.onclick = () => setPlaying(!playing);
+    scrub.oninput = () => seekTo(Number(scrub.value));
+    jump.onchange = () => seekTo(Number(jump.value));
+    addEventListener("keydown", (e) => {
+      if (e.key === " ") { setPlaying(!playing); e.preventDefault(); }
+      if (e.key === "ArrowRight") seekTo(t + (e.shiftKey ? 5 : 1 / V.FPS));
+      if (e.key === "ArrowLeft") seekTo(t - (e.shiftKey ? 5 : 1 / V.FPS));
+    });
+    addEventListener("resize", fit);
+    fit();
+    requestAnimationFrame(loop);
+  }
+</script>
+</body>
+</html>

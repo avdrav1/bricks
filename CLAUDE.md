@@ -103,6 +103,7 @@ scripts/check_frame.sh [BINARY]          # Frame in a container: decks, drawing,
 python3 -m unittest discover -s scripts  # script tests (corpus generator, backlog helper)
 cargo bench                              # prints the apps/brick/docs/BENCHMARKS.md table (needs corpus/)
 python3 scripts/backlog.py next [brick|slate|frame]|status   # backlog helper; one milestone chain per app
+(cd video && npm ci && node render.mjs)   # the explainer video (docs/video/explainer-script.md) from HTML scenes, with a synthesised techno soundtrack (video/soundtrack.js) -> dist/video/; --serve previews, --still SCENE@SEC checks a frame, --audio VO.wav adds a voiceover
 ```
 
 ## Performance
