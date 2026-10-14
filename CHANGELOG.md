@@ -2,6 +2,16 @@
 
 Releases are added by the ship-it skill.
 
+## Slate v0.2.0 (2026-10-14)
+
+Word documents look like themselves. Slate draws each one in its own fonts and paragraph styles (custom styles included), with their spacing, indents, and line spacing. A metric-compatible font stands in when one isn't installed: Carlito for Calibri, Caladea for Cambria, Liberation for Arial, Times New Roman, and Courier New. A format bar over the page sets the paragraph style, font, size, bold, italic, underline, strikethrough, colour, and alignment, and saving a .docx keeps them. After a crash, Slate offers back the unsaved edits of every open document.
+
+- SLATE-19: Read each document's style sheet and fonts from the .docx
+- SLATE-20: Draw each document's own fonts, paragraph spacing, indents, and line spacing
+- SLATE-21: Add a format bar for style, font, size, looks, colour, and alignment
+- SLATE-22: Save the format bar's fonts, styles, and looks in .docx
+- SLATE-17: Journal unsaved edits and offer them back after a crash
+
 ## Slate v0.1.2 (2026-10-13)
 
 Find and replace: Ctrl+F opens a find bar that highlights every match in the document, table cells included, and counts them; Enter and Shift+Enter step through them, and Match Case makes case matter. Ctrl+H adds Replace and Replace All, and one undo takes back a Replace All.
