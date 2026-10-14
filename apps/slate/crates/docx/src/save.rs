@@ -12,14 +12,14 @@
 //!   replaces none, of the paragraph copied next to it): its spacing, indents, and the
 //!   paragraph mark's look stay; its style (by id: a built-in heading, title, or quote
 //!   the document lacks is added, any other unknown id is the default), list numbering,
-//!   and alignment are set where they differ. A run whose direct formatting is that of
-//!   a run in that paragraph takes its run properties as they are (but not an automatic
-//!   colour in a coloured style: the model reads it as the style's colour, and writes
-//!   that); any other run's are its direct formatting exactly (bold, italic, underline,
-//!   strikethrough with `w:val="0"` where turned off, font, size, colour; nothing its
-//!   style gives), over the closest run's properties the model doesn't hold (other
-//!   scripts' fonts, highlighting). A link is a `w:hyperlink` to the document's
-//!   relationship for its URL (or a new one), or to a bookmark.
+//!   alignment, and own tab stops (`w:tabs`, ADR 0009) are set where they differ. A run
+//!   whose direct formatting is that of a run in that paragraph takes its run properties
+//!   as they are (but not an automatic colour in a coloured style: the model reads it as
+//!   the style's colour, and writes that); any other run's are its direct formatting
+//!   exactly (bold, italic, underline, strikethrough with `w:val="0"` where turned off,
+//!   font, size, colour; nothing its style gives), over the closest run's properties the
+//!   model doesn't hold (other scripts' fonts, highlighting). A link is a `w:hyperlink`
+//!   to the document's relationship for its URL (or a new one), or to a bookmark.
 //! - A section break the replaced paragraph ended stays with the last paragraph written
 //!   for it, with the page break after it; a page break is a `w:br w:type="page"` at the
 //!   start of the paragraph after it or the end of the one before, else a section break
@@ -47,7 +47,7 @@ use crate::styles::{ParaProps, RunProps, Styles};
 use crate::{dir_of, rel_kind, rels_part, DocxError, MainPart, Package, Rel};
 use document_model::{
     match_blocks_by, Align, Block, Image, ImageFormat, ImageSource, ListKind, Paragraph, Rgb, Run,
-    RunStyle, StyleSheet, Table,
+    RunStyle, StyleSheet, TabAlign, TabLeader, TabStop, Table,
 };
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -1380,7 +1380,7 @@ impl<'a> Patcher<'a> {
         lead: &str,
         border: Option<&str>,
     ) -> String {
-        let ppr = self.ppr(&p.style, p.align, list, template, sect, border);
+        let ppr = self.ppr(&p.style, p.align, &p.tabs, list, template, sect, border);
         let color = self.style_color(&self.written_style(&p.style));
         let mut s = format!("<w:p{}>{ppr}{lead}", self.w_decl);
         let mut i = 0;
@@ -1406,11 +1406,14 @@ impl<'a> Patcher<'a> {
         s
     }
 
-    /// A paragraph's `w:pPr`.
+    /// A paragraph's `w:pPr`: its template's, with its style, alignment, own tab stops,
+    /// list, border, and section as the model has them.
+    #[allow(clippy::too_many_arguments)]
     fn ppr(
         &mut self,
         style: &str,
         align: Align,
+        tabs: &[TabStop],
         list: Option<(bool, u8)>,
         template: Option<&Template<'a>>,
         sect: Option<&str>,
@@ -1481,6 +1484,15 @@ impl<'a> Patcher<'a> {
                 Align::Justify => "both",
             };
             props.push("jc", format!("<w:jc w:val=\"{jc}\"/>"));
+        }
+        // Stops aren't edited yet (ADR 0009): a paragraph keeps its template's `w:tabs`
+        // (bar stops, which the model leaves out, included) unless the model's differ, as
+        // a paragraph pasted from elsewhere's do.
+        if props.para_props().tabs != tabs {
+            props.remove(&["tabs"]);
+            if !tabs.is_empty() {
+                props.push("tabs", tabs_xml(tabs));
+            }
         }
         if let Some(border) = border {
             props.remove(&["pBdr"]);
@@ -2089,6 +2101,34 @@ fn push_text(out: &mut String, text: &str) {
         out.push_str(special);
     }
     flush(out, &mut plain);
+}
+
+/// Tab stops as a `w:tabs`.
+fn tabs_xml(tabs: &[TabStop]) -> String {
+    let mut s = String::from("<w:tabs>");
+    for t in tabs {
+        let val = match t.align {
+            TabAlign::Left => "left",
+            TabAlign::Center => "center",
+            TabAlign::Right => "right",
+            TabAlign::Decimal => "decimal",
+            TabAlign::Clear => "clear",
+        };
+        let leader = match t.leader {
+            TabLeader::None => "",
+            TabLeader::Dot => " w:leader=\"dot\"",
+            TabLeader::Hyphen => " w:leader=\"hyphen\"",
+            TabLeader::Underscore => " w:leader=\"underscore\"",
+            TabLeader::Heavy => " w:leader=\"heavy\"",
+            TabLeader::MiddleDot => " w:leader=\"middleDot\"",
+        };
+        s.push_str(&format!(
+            "<w:tab w:val=\"{val}\"{leader} w:pos=\"{}\"/>",
+            t.position
+        ));
+    }
+    s.push_str("</w:tabs>");
+    s
 }
 
 /// A new media part's extension and content type, from its first bytes.

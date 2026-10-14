@@ -7,7 +7,7 @@
 //! top ([`StyleSheet::look`]). Markdown and plain text get Slate's built-in sheet
 //! ([`StyleSheet::builtin`]); a DOCX file's is its `styles.xml`.
 
-use crate::{Align, Rgb, RunStyle};
+use crate::{effective_tabs, Align, Paragraph, Rgb, RunStyle, TabStop};
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
@@ -44,7 +44,7 @@ impl Default for LineSpacing {
 }
 
 /// A paragraph's resolved look. Distances are in twips (1/20 pt, 1/1440 in).
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct ParaLook {
     pub align: Align,
     pub space_before: u32,
@@ -53,6 +53,8 @@ pub struct ParaLook {
     pub indent_left: i32,
     /// The first line's indent from `indent_left`; negative is a hanging indent.
     pub indent_first: i32,
+    /// Its tab stops, in position order, without clears (ADR 0009).
+    pub tabs: Vec<TabStop>,
 }
 
 /// A paragraph style.
@@ -164,7 +166,7 @@ impl StyleSheet {
             outline: None,
             title: false,
             run: normal.clone(),
-            para,
+            para: para.clone(),
         };
         let mut styles = vec![Style {
             based_on: None,
@@ -180,7 +182,7 @@ impl StyleSheet {
             },
             para: ParaLook {
                 space_after: TITLE_BELOW * TWIPS_PER_PX,
-                ..para
+                ..para.clone()
             },
             ..derived("Title", "Title")
         });
@@ -196,7 +198,7 @@ impl StyleSheet {
                 para: ParaLook {
                     space_before: HEADING_ABOVE[i] * TWIPS_PER_PX,
                     space_after: HEADING_BELOW * TWIPS_PER_PX,
-                    ..para
+                    ..para.clone()
                 },
                 ..derived(&format!("Heading{n}"), &format!("Heading {n}"))
             });
@@ -209,7 +211,7 @@ impl StyleSheet {
             },
             para: ParaLook {
                 indent_left: LEVEL_INDENT * TWIPS_PER_PX as i32,
-                ..para
+                ..para.clone()
             },
             ..derived("Quote", "Quote")
         });
@@ -297,6 +299,12 @@ impl StyleSheet {
             look.color = run.color;
         }
         look
+    }
+
+    /// The stops paragraph `p`'s tabs advance to: its style's with its own on top, in
+    /// position order (ADR 0009).
+    pub fn tab_stops(&self, p: &Paragraph) -> Vec<TabStop> {
+        effective_tabs(&self.style_of(&p.style).para.tabs, &p.tabs)
     }
 }
 

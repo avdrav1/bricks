@@ -3,12 +3,13 @@
 //! spacing says), and text wraps at any character.
 
 use document_model::{
-    Block, Document, Format, Image, ImageFormat, ImageSource, LineSpacing, ParaLook, Paragraph,
-    Run, RunStyle, Style, StyleSheet, Table, TableCell, TableRow,
+    Block, Document, DocxInfo, Format, Image, ImageFormat, ImageSource, LineSpacing, ParaLook,
+    Paragraph, Run, RunStyle, Style, StyleSheet, TabAlign, TabLeader, TabStop, Table, TableCell,
+    TableRow,
 };
 use flow::{
-    Content, Flow, Hit, LayoutKey, LeafId, Look, Metrics, Paint, Position, Shaper, Splice,
-    BOTTOM_MARGIN, CELL_BORDER, CELL_PADDING, LEVEL_INDENT, PAGE_BREAK_HEIGHT, TABLE_MARGIN,
+    Content, Flow, Hit, LayoutKey, LeafId, Look, Metrics, Paint, Position, Shaper, Splice, Tab,
+    Tabs, BOTTOM_MARGIN, CELL_BORDER, CELL_PADDING, LEVEL_INDENT, PAGE_BREAK_HEIGHT, TABLE_MARGIN,
     TOP_MARGIN,
 };
 use std::collections::HashSet;
@@ -31,6 +32,8 @@ struct Fake {
     extra: std::collections::HashMap<LayoutKey, i32>,
     /// Every look the flow asked metrics for, in order.
     asked: Vec<Look>,
+    /// The tabs each layout was measured with.
+    tabs: std::collections::HashMap<LayoutKey, Option<Tabs>>,
 }
 
 /// Lines of `text` wrapped `width` px wide: (byte start, byte end) of each.
@@ -65,6 +68,7 @@ impl Shaper for Fake {
 
     fn shape(&mut self, key: LayoutKey, content: Content<'_>, width: i32) -> i32 {
         self.shaped += 1;
+        self.tabs.insert(key, content.tabs());
         let line = match content.line_spacing() {
             LineSpacing::Auto(m) => f64::from(LINE) * f64::from(m),
             LineSpacing::Exact(t) => f64::from(t) / 15.0,
@@ -882,4 +886,162 @@ fn estimates_ask_each_font_size_and_weight_once() {
     });
     assert_eq!(fake.asked.len(), 5);
     assert_eq!(fake.asked[4], look("Liberation Sans", 35, true));
+}
+
+fn tab(x: f64, align: TabAlign, leader: TabLeader) -> Tab {
+    Tab { x, align, leader }
+}
+
+fn left_tab(x: f64) -> Tab {
+    tab(x, TabAlign::Left, TabLeader::None)
+}
+
+fn stop(position: i32, align: TabAlign, leader: TabLeader) -> TabStop {
+    TabStop {
+        position,
+        align,
+        leader,
+    }
+}
+
+/// Every text leaf's tabs as painted, after checking the shaper measured it with the same.
+fn painted_tabs(flow: &Flow, fake: &Fake) -> Vec<Option<Tabs>> {
+    let mut out = Vec::new();
+    flow.paint(0.0, 1e9, &mut |p| {
+        if let Paint::Text { key, content, .. } = p {
+            let tabs = content.tabs();
+            assert_eq!(fake.tabs.get(&key), Some(&tabs), "measured as painted");
+            out.push(tabs);
+        }
+    });
+    out
+}
+
+#[test]
+fn a_word_paragraphs_tabs_go_to_its_stops_then_the_default_stops() {
+    // `S` is indented 40 px (600 twips), with a stop left of that (dropped) and one at
+    // 1440 that the paragraph clears; the paragraph adds a centre stop and a right one
+    // with a dot leader. The default stop is 360 twips (24 px).
+    let styles = sheet(ParaLook {
+        indent_left: 600,
+        tabs: vec![
+            stop(300, TabAlign::Left, TabLeader::None),
+            stop(1440, TabAlign::Left, TabLeader::None),
+        ],
+        ..ParaLook::default()
+    });
+    let mut own = styled("S", "Name\tCentre\tEnd");
+    own.tabs = vec![
+        stop(1440, TabAlign::Clear, TabLeader::None),
+        stop(5400, TabAlign::Center, TabLeader::None),
+        stop(10800, TabAlign::Right, TabLeader::Dot),
+    ];
+    let mut decimal = styled("Normal", "1.5\t2.25");
+    decimal.tabs = vec![stop(3000, TabAlign::Decimal, TabLeader::None)];
+    let blocks = vec![
+        Block::Paragraph(styled("Normal", "a\tb")),
+        Block::Paragraph(own),
+        Block::Paragraph(decimal),
+        // A table's cell: stops from the cell's text edge.
+        table(vec![vec![cell(vec![Block::Paragraph(styled(
+            "Normal", "c\td",
+        ))])]]),
+    ];
+    let mut fake = Fake::default();
+    let mut flow = Flow::new(Document {
+        blocks,
+        styles,
+        format: Format::Docx(DocxInfo {
+            default_tab: 360,
+            ..DocxInfo::default()
+        }),
+    });
+    flow.set_width(800, &mut fake);
+    flow.layout_slice(&mut fake, &mut || true);
+    let defaults = |from: f64| Some(Tabs::Stops(vec![left_tab(from), left_tab(from + 24.0)]));
+    assert_eq!(
+        painted_tabs(&flow, &fake),
+        vec![
+            defaults(24.0),
+            Some(Tabs::Stops(vec![
+                tab(360.0 - 40.0, TabAlign::Center, TabLeader::None),
+                tab(720.0 - 40.0, TabAlign::Right, TabLeader::Dot),
+                // The first default stop past 10800 twips is 11160 (744 px).
+                left_tab(744.0 - 40.0),
+                left_tab(768.0 - 40.0),
+            ])),
+            Some(Tabs::Stops(vec![
+                tab(200.0, TabAlign::Decimal, TabLeader::None),
+                left_tab(216.0),
+                left_tab(240.0),
+            ])),
+            defaults(24.0),
+        ]
+    );
+}
+
+#[test]
+fn default_stops_start_past_a_paragraphs_indent() {
+    // 50 px in (750 twips): the default stops right of it are at 1440 and 2160 twips.
+    let styles = sheet(ParaLook {
+        indent_left: 750,
+        ..ParaLook::default()
+    });
+    let item = Block::ListItem(document_model::ListItem {
+        kind: document_model::ListKind::Bullet,
+        level: 0,
+        paragraph: styled("Normal", "item\tx"),
+    });
+    let mut fake = Fake::default();
+    let flow = flow_of(
+        styles,
+        vec![Block::Paragraph(styled("S", "a\tb")), item],
+        400,
+        &mut fake,
+    );
+    assert_eq!(
+        painted_tabs(&flow, &fake),
+        vec![
+            Some(Tabs::Stops(vec![
+                left_tab(96.0 - 50.0),
+                left_tab(144.0 - 50.0)
+            ])),
+            // A list item's text starts at its marker's indent.
+            Some(Tabs::Stops(vec![
+                left_tab(48.0 - f64::from(LEVEL_INDENT)),
+                left_tab(96.0 - f64::from(LEVEL_INDENT))
+            ])),
+        ]
+    );
+}
+
+#[test]
+fn markdown_and_text_tabs_are_four_spaces_and_code_keeps_the_shapers() {
+    for format in [
+        document_model::read_markdown(b"x\n").format,
+        document_model::read_text(b"x\n").format,
+    ] {
+        let blocks = vec![
+            para("a\tb"),
+            Block::CodeBlock(document_model::CodeBlock {
+                language: None,
+                text: "\tcode\n".into(),
+                indent: 0,
+            }),
+        ];
+        let mut fake = Fake::default();
+        let mut flow = Flow::new(Document {
+            blocks,
+            styles: StyleSheet::builtin(),
+            format,
+        });
+        flow.set_width(400, &mut fake);
+        flow.layout_slice(&mut fake, &mut || true);
+        assert_eq!(
+            painted_tabs(&flow, &fake),
+            vec![Some(Tabs::Spaces(flow::TAB_SPACES)), None],
+            "{format:?}"
+        );
+        assert_eq!(flow::TAB_SPACES, 4);
+    }
 }

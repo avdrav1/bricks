@@ -7,14 +7,17 @@
 //! included, whatever the format (Markdown and plain text have Slate's built-in sheet).
 //! Pango resolves the family through fontconfig, so Calibri draws as Carlito where that
 //! is installed. A paragraph's style also gives its first-line indent and line spacing
-//! (its space and left indent are the flow's). Slate's own looks go on top: code and raw
-//! source in monospace, links in the link colour, a table's header row bold.
+//! (its space and left indent are the flow's), and its tab stops with the paragraph's own
+//! ([`Content::tabs`]); Pango draws no leaders, so [`PangoShaper::leaders`] lays them out.
+//! Slate's own looks go on top: code and raw source in monospace, links in the link
+//! colour, a table's header row bold.
 
 use super::{texture_key, Textures};
 use document_model::{
     Align, Image, ImageSource, LineSpacing, ListKind, Look as RunLook, RunStyle, StyleSheet,
+    TabAlign, TabLeader,
 };
-use flow::{Content, Hit, LayoutKey, Look, Metrics, Shaper, MONOSPACE, TWIPS_PER_PX};
+use flow::{Content, Hit, LayoutKey, Look, Metrics, Shaper, Tabs, MONOSPACE, TWIPS_PER_PX};
 use gtk::pango;
 use gtk::prelude::*;
 use std::collections::HashMap;
@@ -28,6 +31,16 @@ const RAW: u32 = 0x77767B;
 const LINK: u32 = 0x1A5FB4;
 /// A label's text is dimmed to this opacity (GTK's `dim-label`).
 const DIM: f64 = 0.55;
+
+/// A tab's leader laid out: its characters, where its top left goes in its paragraph's
+/// layout (pixels; its baseline on the line's), and its run's colour (`None`: the page's
+/// ink).
+pub struct Leader {
+    pub layout: pango::Layout,
+    pub x: f32,
+    pub y: f32,
+    pub color: Option<u32>,
+}
 
 struct Entry {
     layout: pango::Layout,
@@ -264,6 +277,12 @@ impl PangoShaper {
                 if first != 0 {
                     layout.set_indent(first * pango::SCALE);
                 }
+                // Only text with a tab needs its stops; the rest stays as cheap to shape.
+                if text.contains('\t') {
+                    if let Some(tabs) = content.tabs() {
+                        layout.set_tabs(Some(&self.tab_array(&tabs, style)));
+                    }
+                }
             }
             Content::Code(_) => all(pango::AttrString::new_family(MONOSPACE).into()),
             Content::Raw(_) => {
@@ -302,6 +321,124 @@ impl PangoShaper {
         if let Some(rgb) = look.color {
             all(foreground(hex(rgb)));
         }
+    }
+
+    /// `tabs` as Pango's tab array, in Pango units; spaces measured in `look`'s font.
+    fn tab_array(&self, tabs: &Tabs, look: &RunLook) -> pango::TabArray {
+        let scale = f64::from(pango::SCALE);
+        match tabs {
+            Tabs::Spaces(n) => {
+                let spaces = pango::Layout::new(&self.context);
+                spaces.set_font_description(Some(&self.font_of(look)));
+                spaces.set_text(&" ".repeat(*n as usize));
+                let width = spaces.size().0.max(1);
+                let mut array = pango::TabArray::new(1, false);
+                array.set_tab(0, pango::TabAlign::Left, width);
+                array
+            }
+            Tabs::Stops(stops) => {
+                let mut array = pango::TabArray::new(stops.len() as i32, false);
+                for (i, stop) in stops.iter().enumerate() {
+                    let i = i as i32;
+                    let align = match stop.align {
+                        TabAlign::Left | TabAlign::Clear => pango::TabAlign::Left,
+                        TabAlign::Center => pango::TabAlign::Center,
+                        TabAlign::Right => pango::TabAlign::Right,
+                        TabAlign::Decimal => pango::TabAlign::Decimal,
+                    };
+                    array.set_tab(i, align, (stop.x * scale).round() as i32);
+                    if align == pango::TabAlign::Decimal {
+                        array.set_decimal_point(i, '.');
+                    }
+                }
+                array
+            }
+        }
+    }
+
+    /// The font of a run look: its family, size, weight, and style.
+    fn font_of(&self, look: &RunLook) -> pango::FontDescription {
+        let mut font = self.base.clone();
+        font.set_family(&look.font);
+        font.set_size(half_points(look.size));
+        if look.bold {
+            font.set_weight(pango::Weight::Bold);
+        }
+        if look.italic {
+            font.set_style(pango::Style::Italic);
+        }
+        font
+    }
+
+    /// The leaders of `content`'s tabs in its `layout` (ADR 0009): each tab whose stop has
+    /// a leader fills its gap, less half a leader character at each end, with the leader
+    /// character in its run's font, on its line's baseline.
+    pub fn leaders(&self, layout: &pango::Layout, content: Content<'_>) -> Vec<Leader> {
+        let Content::Paragraph {
+            paragraph, styles, ..
+        } = content
+        else {
+            return Vec::new();
+        };
+        if !paragraph.runs.iter().any(|r| r.text.contains('\t')) {
+            return Vec::new();
+        }
+        let Some(Tabs::Stops(stops)) = content.tabs() else {
+            return Vec::new();
+        };
+        if stops.iter().all(|s| s.leader == TabLeader::None) {
+            return Vec::new();
+        }
+        let scale = f64::from(pango::SCALE);
+        let mut out = Vec::new();
+        let mut start = 0;
+        for run in &paragraph.runs {
+            for (i, _) in run.text.match_indices('\t') {
+                let index = (start + i) as i32;
+                let rect = layout.index_to_pos(index);
+                let (x0, width) = (
+                    f64::from(rect.x().min(rect.x() + rect.width())),
+                    f64::from(rect.width().abs()),
+                );
+                // The stop the tab went to: the first at least a unit past where it starts,
+                // as Pango picks it.
+                let Some(stop) = stops.iter().find(|s| s.x * scale >= x0 + 1.0) else {
+                    continue;
+                };
+                let text = match stop.leader {
+                    TabLeader::None => continue,
+                    TabLeader::Dot => ".",
+                    TabLeader::MiddleDot => "·",
+                    TabLeader::Hyphen => "-",
+                    TabLeader::Underscore | TabLeader::Heavy => "_",
+                };
+                let mut look = styles.look(&paragraph.style, &run.style);
+                look.bold |= stop.leader == TabLeader::Heavy;
+                let leader = pango::Layout::new(&self.context);
+                leader.set_font_description(Some(&self.font_of(&look)));
+                leader.set_text(text);
+                let one = f64::from(leader.size().0.max(1));
+                let count = ((width - one) / one).floor();
+                if count < 1.0 {
+                    continue;
+                }
+                leader.set_text(&text.repeat(count as usize));
+                let (line, _) = layout.index_to_line_x(index, false);
+                let mut lines = layout.iter();
+                for _ in 0..line {
+                    lines.next_line();
+                }
+                let top = f64::from(lines.baseline()) - f64::from(leader.baseline());
+                out.push(Leader {
+                    x: ((x0 + width - one / 2.0 - count * one) / scale) as f32,
+                    y: (top / scale) as f32,
+                    layout: leader,
+                    color: look.color.map(hex),
+                });
+            }
+            start += run.text.len();
+        }
+        out
     }
 }
 

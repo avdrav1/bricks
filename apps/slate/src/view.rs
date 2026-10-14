@@ -2065,7 +2065,7 @@ fn draw(
                     snapshot.restore();
                 }
             }
-            let layout = shaper.layout(key, content, width);
+            let layout = shaper.layout(key, content, width).clone();
             snapshot.save();
             snapshot.translate(&graphene::Point::new(x, y));
             if let Some((found, flow)) = found {
@@ -2075,13 +2075,19 @@ fn draw(
                     } else {
                         FOUND
                     };
-                    highlight(snapshot, layout, m.from.offset..m.to.offset, colour);
+                    highlight(snapshot, &layout, m.from.offset..m.to.offset, colour);
                 }
             }
             if let Some(range) = selected {
-                highlight(snapshot, layout, range, SELECTION);
+                highlight(snapshot, &layout, range, SELECTION);
             }
-            snapshot.append_layout(layout, &rgba(INK));
+            snapshot.append_layout(&layout, &rgba(INK));
+            for leader in shaper.leaders(&layout, content) {
+                snapshot.save();
+                snapshot.translate(&graphene::Point::new(leader.x, leader.y));
+                snapshot.append_layout(&leader.layout, &rgba(leader.color.unwrap_or(INK)));
+                snapshot.restore();
+            }
             snapshot.restore();
         }
         Paint::Band {

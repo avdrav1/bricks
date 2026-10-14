@@ -31,7 +31,7 @@ mod content;
 mod fenwick;
 mod tree;
 
-pub use content::Content;
+pub use content::{Content, Tab, Tabs, TAB_SPACES};
 pub use tree::{
     px, CELL_BORDER, CELL_PADDING, CODE_INSET, LEVEL_INDENT, PAGE_BREAK_HEIGHT, RULE_HEIGHT,
     RULE_MARGIN, TABLE_MARGIN, TWIPS_PER_PX,

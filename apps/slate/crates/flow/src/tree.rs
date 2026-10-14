@@ -214,6 +214,8 @@ pub(crate) struct Builder<'a> {
     pub break_tops: Vec<usize>,
     styles: &'a StyleSheet,
     plain: bool,
+    /// The document's default tab stop ([`Content::Paragraph`]'s `default_tab`).
+    default_tab: Option<u32>,
     /// The first leaf's number: leaves before the stretch built.
     base: u32,
     /// The next layout key.
@@ -228,6 +230,7 @@ impl<'a> Builder<'a> {
             break_tops: Vec::new(),
             styles: &doc.styles,
             plain: matches!(doc.format, Format::Text(_)),
+            default_tab: doc.format.default_tab(),
             base: base as u32,
             keys,
         }
@@ -298,6 +301,7 @@ impl<'a> Builder<'a> {
                     styles: self.styles,
                     list: None,
                     header,
+                    default_tab: self.default_tab,
                 };
                 let leaf = self.leaf(path, Some(&content.text()));
                 let style = self.styles.style_of(&p.style);
@@ -308,8 +312,7 @@ impl<'a> Builder<'a> {
                     b.above = px(i64::from(para.space_before));
                     b.below = px(i64::from(para.space_after));
                 }
-                let left = i32::from(p.indent) * LEVEL_INDENT + px(i64::from(para.indent_left));
-                b.indent = (left + content.first_indent().min(0)).max(0);
+                b.indent = content.text_left();
                 Kind::Text(b)
             }
             Block::ListItem(item) => {
@@ -318,12 +321,13 @@ impl<'a> Builder<'a> {
                     styles: self.styles,
                     list: Some(item),
                     header,
+                    default_tab: self.default_tab,
                 };
                 let leaf = self.leaf(path, Some(&content.text()));
                 let style = self.styles.style_of(&item.paragraph.style);
                 let mut b = TextBox::paragraph(leaf, looks, &item.paragraph, style, header);
                 b.below = self.item_below(next);
-                b.indent = i32::from(item.level) * LEVEL_INDENT + LEVEL_INDENT;
+                b.indent = content.text_left();
                 b.marker = true;
                 Kind::Text(b)
             }
@@ -615,18 +619,21 @@ pub(crate) fn block_at<'a>(doc: &'a Document, path: &[u32]) -> (&'a Block, bool)
 /// The leaf at `path` as a shaper lays it out; `None` for a page break or rule, and for a
 /// picture (which is shown, or labelled through [`Content::PictureLabel`]).
 pub(crate) fn content_at<'a>(doc: &'a Document, path: &[u32]) -> Option<Content<'a>> {
+    let default_tab = doc.format.default_tab();
     match block_at(doc, path) {
         (Block::Paragraph(p), header) => Some(Content::Paragraph {
             paragraph: p,
             styles: &doc.styles,
             list: None,
             header,
+            default_tab,
         }),
         (Block::ListItem(item), header) => Some(Content::Paragraph {
             paragraph: &item.paragraph,
             styles: &doc.styles,
             list: Some(item),
             header,
+            default_tab,
         }),
         (Block::CodeBlock(code), _) => Some(Content::Code(code)),
         (Block::Raw(raw), _) => Some(Content::Raw(raw)),

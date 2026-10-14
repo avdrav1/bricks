@@ -5,7 +5,10 @@
 
 use crate::xml::{self, XmlReader};
 use crate::DocxError;
-use document_model::{Align, LineSpacing, Look, ParaLook, Rgb, RunStyle, Style, StyleSheet};
+use document_model::{
+    effective_tabs, merge_tabs, Align, LineSpacing, Look, ParaLook, Rgb, RunStyle, Style,
+    StyleSheet, TabAlign, TabLeader, TabStop,
+};
 use quick_xml::events::{BytesStart, Event};
 use std::collections::HashMap;
 
@@ -190,6 +193,9 @@ pub(crate) struct ParaProps {
     pub page_break_before: Option<bool>,
     /// The paragraph ends a section (`w:pPr/w:sectPr`).
     pub section: Option<Section>,
+    /// `w:tabs`: the stops this level sets, clears included, in position order; applying
+    /// a level merges its stops over these ([`merge_tabs`]).
+    pub tabs: Vec<TabStop>,
 }
 
 impl ParaProps {
@@ -214,6 +220,7 @@ impl ParaProps {
         }
         set(&mut self.page_break_before, &over.page_break_before);
         set(&mut self.section, &over.section);
+        merge_tabs(&mut self.tabs, &over.tabs);
     }
 
     /// Read the children of a `w:pPr` just started, up to its end. The paragraph mark's
@@ -226,6 +233,7 @@ impl ParaProps {
                 Event::Start(e) => match xml::local(&e) {
                     b"numPr" => p.numbering(r)?,
                     b"sectPr" => p.section = Some(Section::read(r)?),
+                    b"tabs" => p.tabs = read_tabs(r)?,
                     _ => {
                         p.property(&e);
                         xml::skip(r, &e)?;
@@ -305,6 +313,55 @@ impl ParaProps {
             _ => {}
         }
     }
+}
+
+/// The stops of a `w:tabs` just started, up to its end, in position order: `start` and
+/// `end` read as left and right, as Word reads them, and a list's `num` stop as left; bar
+/// stops (a vertical line, not a stop) are left out.
+pub(crate) fn read_tabs(r: &mut XmlReader<'_>) -> Result<Vec<TabStop>, DocxError> {
+    let mut tabs = Vec::new();
+    loop {
+        match r.read_event()? {
+            Event::Empty(e) if xml::local(&e) == b"tab" => tabs.extend(tab_stop(&e)),
+            Event::Start(e) => {
+                if xml::local(&e) == b"tab" {
+                    tabs.extend(tab_stop(&e));
+                }
+                xml::skip(r, &e)?;
+            }
+            Event::End(e) if e.local_name().as_ref() == b"tabs" => break,
+            Event::Eof => return Err(DocxError::Xml("unclosed w:tabs".into())),
+            _ => {}
+        }
+    }
+    let mut stops = Vec::with_capacity(tabs.len());
+    merge_tabs(&mut stops, &tabs);
+    Ok(stops)
+}
+
+/// A `w:tab`'s stop; `None` for a bar stop or one without a position.
+fn tab_stop(e: &BytesStart<'_>) -> Option<TabStop> {
+    let align = match xml::val(e).as_deref() {
+        Some("left" | "start" | "num") => TabAlign::Left,
+        Some("center") => TabAlign::Center,
+        Some("right" | "end") => TabAlign::Right,
+        Some("decimal") => TabAlign::Decimal,
+        Some("clear") => TabAlign::Clear,
+        _ => return None,
+    };
+    let leader = match xml::attr(e, b"leader").as_deref() {
+        Some("dot") => TabLeader::Dot,
+        Some("hyphen") => TabLeader::Hyphen,
+        Some("underscore") => TabLeader::Underscore,
+        Some("heavy") => TabLeader::Heavy,
+        Some("middleDot") => TabLeader::MiddleDot,
+        _ => TabLeader::None,
+    };
+    Some(TabStop {
+        position: xml::num::<i64>(e, b"pos")?.clamp(-31_680, 31_680) as i32,
+        align,
+        leader,
+    })
 }
 
 /// A section's properties (`w:sectPr`), as far as Slate uses them.
@@ -607,6 +664,7 @@ impl Styles {
                 line: ppr.line.unwrap_or_default(),
                 indent_left: ppr.indent_left.unwrap_or(0),
                 indent_first: ppr.indent_first.unwrap_or(0),
+                tabs: effective_tabs(&ppr.tabs, &[]),
             },
         }
     }

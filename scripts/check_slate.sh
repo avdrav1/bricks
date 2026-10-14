@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # SLATE-4, SLATE-10, SLATE-11, SLATE-6, SLATE-12, SLATE-13, SLATE-20, SLATE-21, SLATE-22,
-# and SLATE-23 acceptance: the window opens, shows, and refuses documents, its pageless
-# column follows View → Text Width and a Word document's page, its text selects and
-# copies, it edits with undo, table cells included, it composes through an input method,
-# it draws a Word document's fonts and paragraph looks, its format bar sets them, and they
-# save.
+# SLATE-23, and SLATE-24 acceptance: the window opens, shows, and refuses documents, its
+# pageless column follows View → Text Width and a Word document's page, its text selects
+# and copies, it edits with undo, table cells included, it composes through an input
+# method, it draws a Word document's fonts, paragraph looks, and tab stops, its format bar
+# sets them, and they save.
 #
 #   scripts/check_slate.sh [BINARY]   (default target/release/slate)
 #
@@ -151,6 +151,15 @@
 #      same without w:sectPr), tabbed, measure as col.py measures in 8: 720 px (7.5″ at 96
 #      dpi) and 624 (Letter with 1″ margins); Medium from the menu makes page-75 624, and
 #      Page again 720; the settings file says page, and col-a.md opened then measures 624.
+#  29. tab stops: tabs.docx (written by /tmp/tabs.py: Letter with 0.5″ margins, Liberation
+#      Serif 11 pt, w:defaultTabStop 720, and a one-cell table whose border is the column)
+#      measured in a screenshot: "NAVA", a tab, and "Remote" with a right stop at 10800
+#      twips ends Remote's ink at the column's right edge; "Lead Product Manager" and three
+#      default tabs start "X" at the third multiple of 48 px past the first text's ink; a
+#      centre stop at 5400 centres "Middle" 360 px in; and a right stop at 7200 with a dot
+#      leader ends "42" 480 px in, with dots along the gap after "Contents" on the baseline
+#      and no ink above it; each within 2 px. tab.md, a Markdown line with a tab, opens and
+#      reads as written.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -626,6 +635,136 @@ with zipfile.ZipFile(path, "w") as z:
     z.writestr("_rels/.rels", HEAD + f"""<Relationships xmlns="{PKG}"><Relationship Id="rId1" """
                f"""Type="{REL}/officeDocument" Target="word/document.xml"/></Relationships>""")
     z.writestr("word/document.xml", HEAD + f"""<w:document xmlns:w="{W}"><w:body>{body}</w:body></w:document>""")
+PY
+# SLATE-24: `make PATH` writes tabs.docx: Letter with 0.5″ margins (a 720 px column),
+# Liberation Serif 11 pt, w:defaultTabStop 720 in its settings, four tabbed lines (see
+# section 29), a one-cell table (its border the column exactly), and "Z"; `measure PNG`
+# measures the lines above the table in a screenshot.
+cat > /tmp/tabs.py <<"PY"
+import os
+import sys
+import zipfile
+
+W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+PKG = "http://schemas.openxmlformats.org/package/2006/relationships"
+CT = "http://schemas.openxmlformats.org/package/2006/content-types"
+OOXML = "application/vnd.openxmlformats-officedocument.wordprocessingml"
+HEAD = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"""
+RIGHT, CENTRE, LEADER, DEFAULT = 10800, 5400, 7200, 720
+
+def para(texts, tabs=""):
+    runs = "<w:r><w:tab/></w:r>".join(f"""<w:r><w:t xml:space="preserve">{t}</w:t></w:r>""" for t in texts)
+    ppr = f"<w:pPr><w:tabs>{tabs}</w:tabs></w:pPr>" if tabs else ""
+    return f"<w:p>{ppr}{runs}</w:p>"
+
+def make(path):
+    body = (para(["NAVA", "Remote"], f"""<w:tab w:val="right" w:pos="{RIGHT}"/>""")
+            + para(["Lead Product Manager", "", "", "X"])
+            + para(["A", "Middle"], f"""<w:tab w:val="center" w:pos="{CENTRE}"/>""")
+            + para(["Contents", "42"], f"""<w:tab w:val="right" w:leader="dot" w:pos="{LEADER}"/>""")
+            + """<w:tbl><w:tr><w:tc><w:p><w:r><w:t>c</w:t></w:r></w:p></w:tc></w:tr></w:tbl>"""
+            + para(["Z"])
+            + """<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="720" w:right="720" """
+            """w:bottom="720" w:left="720" w:header="0" w:footer="0" w:gutter="0"/></w:sectPr>""")
+    styles = ("""<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Liberation Serif" """
+              """w:hAnsi="Liberation Serif"/><w:sz w:val="22"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr>"""
+              """<w:spacing w:before="0" w:after="120"/></w:pPr></w:pPrDefault></w:docDefaults>"""
+              """<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>""")
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("[Content_Types].xml", HEAD + f"""<Types xmlns="{CT}">"""
+                   """<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"""
+                   """<Default Extension="xml" ContentType="application/xml"/>"""
+                   f"""<Override PartName="/word/document.xml" ContentType="{OOXML}.document.main+xml"/>"""
+                   f"""<Override PartName="/word/styles.xml" ContentType="{OOXML}.styles+xml"/>"""
+                   f"""<Override PartName="/word/settings.xml" ContentType="{OOXML}.settings+xml"/></Types>""")
+        z.writestr("_rels/.rels", HEAD + f"""<Relationships xmlns="{PKG}"><Relationship Id="rId1" """
+                   f"""Type="{REL}/officeDocument" Target="word/document.xml"/></Relationships>""")
+        z.writestr("word/_rels/document.xml.rels", HEAD + f"""<Relationships xmlns="{PKG}">"""
+                   f"""<Relationship Id="rId1" Type="{REL}/styles" Target="styles.xml"/>"""
+                   f"""<Relationship Id="rId2" Type="{REL}/settings" Target="settings.xml"/></Relationships>""")
+        z.writestr("word/styles.xml", HEAD + f"""<w:styles xmlns:w="{W}">{styles}</w:styles>""")
+        z.writestr("word/settings.xml", HEAD + f"""<w:settings xmlns:w="{W}">"""
+                   f"""<w:defaultTabStop w:val="{DEFAULT}"/></w:settings>""")
+        z.writestr("word/document.xml", HEAD + f"""<w:document xmlns:w="{W}"><w:body>{body}</w:body></w:document>""")
+
+def measure(png):
+    import gi
+    gi.require_version("GdkPixbuf", "2.0")
+    from gi.repository import GdkPixbuf
+    p = GdkPixbuf.Pixbuf.new_from_file(png)
+    w, h, rs, n, px = p.get_width(), p.get_height(), p.get_rowstride(), p.get_n_channels(), p.get_pixels()
+    # The border of the table, as col.py finds it: the longest run of its grey on a row.
+    rule, rule_y, left = 0, h, 0
+    for y in range(h):
+        row = px[y * rs:y * rs + w * n]
+        run = 0
+        for x in range(w):
+            if all(abs(row[x * n + i] - c) <= 6 for i, c in enumerate((0xC0, 0xBF, 0xBC))):
+                run += 1
+                if run > rule:
+                    rule, rule_y, left = run, y, x - run + 1
+            else:
+                run = 0
+    print(f"column: {left} {rule}")
+    dark = lambda x, y: sum(px[y * rs + x * n:y * rs + x * n + 3]) < 300
+    # Bands of rows with ink above the table, each with its ink by column.
+    bands, cur = [], None
+    for y in range(int(os.environ["TOP"]), rule_y - 2):
+        xs = [x for x in range(left, left + rule) if dark(x, y)]
+        if xs:
+            if cur is None:
+                cur = {"top": y, "rows": {}}
+            cur["bottom"] = y
+            cur["rows"][y] = xs
+        elif cur is not None:
+            bands.append(cur)
+            cur = None
+    print(f"lines: {len(bands)}")
+    if len(bands) != 4:
+        return
+    def clusters(xs, gap=8):
+        out = []
+        for x in sorted(set(xs)):
+            if out and x - out[-1][1] <= gap:
+                out[-1][1] = x
+            else:
+                out.append([x, x])
+        return out
+    def ink(band, rows=None):
+        return [x for y, xs in band["rows"].items() if rows is None or y in rows for x in xs]
+    def report(label, got, want):
+        print(f"{label}: {got} (want {want}) " + ("ok" if abs(got - want) <= 2 else "off"))
+    a, b, c, d = bands
+    # Ink ends one past its last dark column; the right edge of the column is left + rule.
+    words = clusters(ink(a))
+    print("remote words: " + " ".join(f"{l}-{r}" for l, r in words))
+    report("remote right edge", words[-1][1] + 1 - left, rule)
+    words = clusters(ink(b))
+    first = words[0][1] + 1 - left
+    stop = (first // 48 + 3) * 48
+    print(f"manager ends at {first}")
+    report("x after three default tabs", words[-1][0] - left, stop)
+    words = clusters(ink(c))
+    report("middle centre", (words[-1][0] + words[-1][1] + 1) / 2 - left, CENTRE // 15)
+    # Letters and digits reach above the 4 rows of the baseline; leader dots do not.
+    bottom = d["bottom"]
+    tall = clusters(ink(d, range(d["top"], bottom - 3)))
+    print(f"leader line tall clusters: {len(tall)}")
+    if len(tall) != 2:
+        return
+    report("42 right edge", tall[1][1] + 1 - left, LEADER // 15)
+    gap = range(tall[0][1] + 5, tall[1][0] - 4)
+    low = set(ink(d, range(bottom - 3, bottom + 1)))
+    dots = [x for x in gap if x in low]
+    holes, run = 0, 0
+    for x in gap:
+        run = 0 if x in low else run + 1
+        holes = max(holes, run)
+    print(f"leader gap: {len(gap)} px, dotted {len(dots)} px, widest hole {holes} px")
+    print("leader fills the gap on the baseline: " + ("yes" if len(gap) > 100 and len(dots) * 4 >= len(gap) and holes <= 6 else "no"))
+
+make(sys.argv[2]) if sys.argv[1] == "make" else measure(sys.argv[2])
 PY
 # SLATE-20: `make PATH` writes fonts.docx; `measure PNG` measures its screenshot: each
 # band of ink (a line of text) and its left and right edges, against Pango at 96 dpi and
@@ -1308,6 +1447,16 @@ print(f\"typing for 20 s: first journal after ${first:-0} ms, writes {len(t)}, s
   slate /tmp/col-a.md >>/tmp/app.log 2>&1 & sleep 4
   measure pagemd col-a
   quit
+  echo "== 29 tab stops"
+  python3 /tmp/tabs.py make /tmp/tabs.docx
+  printf "Tabbed\tline\n" > /tmp/tab.md
+  slate /tmp/tabs.docx >>/tmp/app.log 2>&1 & sleep 4
+  titles
+  # The caret on the last line, Z, below the table the measurements stop at.
+  keys -M ctrl -k End -m ctrl; sleep 1; shot tabs
+  python3 /tmp/tabs.py measure /shots/tabs.png 2>&1; quit
+  slate /tmp/tab.md >>/tmp/app.log 2>&1 & sleep 4
+  titles | sed "s/^/md-/"; a11y page tab.md | sed "s/^/md-tab /"; shot tab-md; quit
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -1592,6 +1741,18 @@ column "28: Medium leaves the 6.5″ page 624 px" "28 page width" "medium page-n
 column "28: Page again restores 720 px" "28 page width" "page-again page-75\.docx" 720
 check "28: the settings file says page" "28 page width" "^settings: text-width=page$"
 column "28: a Markdown window under Page measures Medium's 624 px" "28 page width" "pagemd col-a\.md" 624
+check "29: tabs.docx opens" "29 tab stops" "^titles: .*tabs\.docx"
+check "29: the column is the page's 720 px" "29 tab stops" "^column: [0-9]+ (719|720|721)$"
+check "29: a right stop at the text width ends Remote at the column's right edge" "29 tab stops" \
+  "^remote right edge: .* ok$"
+check "29: text after three default tabs starts at a multiple of the default stop" "29 tab stops" \
+  "^x after three default tabs: .* ok$"
+check "29: a centre stop centres its text on it" "29 tab stops" "^middle centre: .* ok$"
+check "29: a right stop with a leader ends its text at the stop" "29 tab stops" "^42 right edge: .* ok$"
+check "29: the dot leader fills the gap on the baseline, nothing above it" "29 tab stops" \
+  "^leader fills the gap on the baseline: yes$"
+check "29: a Markdown file with a tab opens" "29 tab stops" "^md-titles: .*tab\.md"
+check "29: and reads as written" "29 tab stops" "^md-tab page: Tabbed.line$"
 if [ $fail = 0 ]; then echo "SLATE OK"; else
   echo "SLATE CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

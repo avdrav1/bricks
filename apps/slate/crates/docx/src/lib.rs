@@ -11,7 +11,9 @@
 //! levels, and numbers resolve through `word/numbering.xml`, and hyperlinks and pictures
 //! through the part's relationships. Headers, footers, footnotes, comments, text boxes,
 //! and field codes are not read (field results are). The last section's page width less
-//! its margins (`w:sectPr`) is the document's text width (ADR 0009).
+//! its margins (`w:sectPr`) is the document's text width, and `word/settings.xml`'s
+//! `w:defaultTabStop` its default tab stop (ADR 0009); paragraphs' and styles' own stops
+//! (`w:tabs`) merge as Word layers them.
 
 mod body;
 mod numbering;
@@ -22,6 +24,7 @@ mod xml;
 pub use save::{save, DocxSource};
 
 use document_model::{Document, DocxInfo, Format};
+use quick_xml::events::Event;
 use std::collections::HashMap;
 use std::fmt;
 use std::fs::File;
@@ -122,6 +125,7 @@ fn read_package<R: Read + Seek>(reader: R) -> Result<(Document, MainPart), DocxE
     let main = package.main_part()?;
     let rels = package.rels(&main)?;
     let (styles, numbering) = package.styles_and_numbering(&rels)?;
+    let default_tab = package.default_tab(&rels)?;
     let bytes = package.bytes(&main)?.ok_or(DocxError::NotDocx)?;
     let (bom, bytes) = match bytes.strip_prefix(b"\xEF\xBB\xBF") {
         Some(rest) => (true, rest.to_vec()),
@@ -139,6 +143,7 @@ fn read_package<R: Read + Seek>(reader: R) -> Result<(Document, MainPart), DocxE
         styles: styles.sheet(),
         format: Format::Docx(DocxInfo {
             text_width: text_width.unwrap_or(DocxInfo::LETTER_TEXT_WIDTH),
+            default_tab,
         }),
     };
     let main = MainPart {
@@ -172,6 +177,13 @@ pub(crate) struct Package<R> {
 }
 
 impl<R: Read + Seek> Package<R> {
+    /// The part the main part's relationships `rels` name of type `kind`, else `default`.
+    fn part_of(rels: &HashMap<String, Rel>, kind: &str, default: &str) -> String {
+        rels.values()
+            .find(|r| !r.external && rel_kind(r) == kind)
+            .map_or_else(|| default.to_owned(), |r| r.target.clone())
+    }
+
     /// The styles (with the theme's fonts) and list numbering the main part's
     /// relationships `rels` name (else at their usual names); empty when the package has
     /// none.
@@ -179,11 +191,7 @@ impl<R: Read + Seek> Package<R> {
         &mut self,
         rels: &HashMap<String, Rel>,
     ) -> Result<(styles::Styles, numbering::Numbering), DocxError> {
-        let part_of = |kind: &str, default: &str| {
-            rels.values()
-                .find(|r| !r.external && rel_kind(r) == kind)
-                .map_or_else(|| default.to_owned(), |r| r.target.clone())
-        };
+        let part_of = |kind: &str, default: &str| Self::part_of(rels, kind, default);
         let theme = match self.text(&part_of("theme", "word/theme/theme1.xml"))? {
             Some(xml) => styles::Theme::parse(&xml)?,
             None => styles::Theme::default(),
@@ -197,6 +205,29 @@ impl<R: Read + Seek> Package<R> {
             None => numbering::Numbering::default(),
         };
         Ok((styles, numbering))
+    }
+
+    /// The default tab stop in twips: the settings part's `w:defaultTabStop`, Word's 0.5″
+    /// when there is no settings part, it sets none, or it sets 0.
+    fn default_tab(&mut self, rels: &HashMap<String, Rel>) -> Result<u32, DocxError> {
+        let Some(xml) = self.text(&Self::part_of(rels, "settings", "word/settings.xml"))? else {
+            return Ok(DocxInfo::DEFAULT_TAB);
+        };
+        let mut r = xml::reader(&xml);
+        loop {
+            match r.read_event()? {
+                Event::Empty(e) | Event::Start(e) if xml::local(&e) == b"defaultTabStop" => {
+                    let twips = xml::num::<u32>(&e, b"val").unwrap_or(0).min(31_680);
+                    return Ok(if twips == 0 {
+                        DocxInfo::DEFAULT_TAB
+                    } else {
+                        twips
+                    });
+                }
+                Event::Eof => return Ok(DocxInfo::DEFAULT_TAB),
+                _ => {}
+            }
+        }
     }
 
     /// A part's bytes, `None` if the package has no such part.

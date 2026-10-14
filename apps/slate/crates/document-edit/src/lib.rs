@@ -513,6 +513,7 @@ pub(crate) fn bare(p: &Paragraph) -> Paragraph {
         align: p.align,
         indent: p.indent,
         runs: Vec::new(),
+        tabs: p.tabs.clone(),
     }
 }
 

@@ -12,12 +12,14 @@
 mod markdown;
 mod matching;
 mod styles;
+mod tabs;
 mod text;
 mod write;
 
 pub use markdown::{load_linked_images, read_markdown, read_markdown_source, MarkdownSource};
 pub use matching::{match_blocks, match_blocks_by};
 pub use styles::{LineSpacing, Look, ParaLook, Style, StyleSheet};
+pub use tabs::{effective_tabs, merge_tabs, TabAlign, TabLeader, TabStop};
 pub use text::{decode, read_text, Encoding, LineEnding, TextInfo};
 pub use write::{encode, write_markdown, write_text, Unencodable};
 
@@ -60,6 +62,15 @@ impl Format {
             Format::Text(_) | Format::Markdown(_) => None,
         }
     }
+
+    /// The default tab stop's interval in twips, for a format that sets one (ADR 0009);
+    /// Markdown and text have four spaces' width.
+    pub fn default_tab(&self) -> Option<u32> {
+        match self {
+            Format::Docx(info) => Some(info.default_tab),
+            Format::Text(_) | Format::Markdown(_) => None,
+        }
+    }
 }
 
 /// A Word document's page layout, as Slate's pageless column borrows it (ADR 0009).
@@ -68,17 +79,23 @@ pub struct DocxInfo {
     /// The last section's page width less its left and right margins and gutter, in
     /// twips (1/1440″).
     pub text_width: u32,
+    /// Past a paragraph's last tab stop, tabs advance to multiples of this from the text's
+    /// left edge (`w:defaultTabStop` in `word/settings.xml`), in twips.
+    pub default_tab: u32,
 }
 
 impl DocxInfo {
     /// Letter (8.5″) with 1″ margins: 6.5″, Word's page when a document gives none.
     pub const LETTER_TEXT_WIDTH: u32 = 12_240 - 2 * 1_440;
+    /// Word's default tab stop when its settings give none: 0.5″.
+    pub const DEFAULT_TAB: u32 = 720;
 }
 
 impl Default for DocxInfo {
     fn default() -> Self {
         Self {
             text_width: Self::LETTER_TEXT_WIDTH,
+            default_tab: Self::DEFAULT_TAB,
         }
     }
 }
@@ -106,6 +123,10 @@ pub struct Paragraph {
     /// paragraphs continue (1 = inside a first-level item), or the quote depth beyond one.
     pub indent: u8,
     pub runs: Vec<Run>,
+    /// Its own tab stops, on top of its style's ([`StyleSheet::tab_stops`]), clears
+    /// included, in position order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tabs: Vec<TabStop>,
 }
 
 impl Paragraph {
