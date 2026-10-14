@@ -3,14 +3,15 @@
 //! spacing says), and text wraps at any character.
 
 use document_model::{
-    Block, Document, DocxInfo, Format, Image, ImageFormat, ImageSource, LineSpacing, ParaLook,
-    ParaOverrides, ParaSpacing, Paragraph, Run, RunStyle, Style, StyleSheet, TabAlign, TabLeader,
-    TabStop, Table, TableCell, TableRow,
+    Block, Border, BorderOverrides, BorderStyle, Borders, Document, DocxInfo, Format, Image,
+    ImageFormat, ImageSource, LineSpacing, ParaLook, ParaOverrides, ParaSpacing, Paragraph, Rgb,
+    Run, RunStyle, Shading, Style, StyleSheet, TabAlign, TabLeader, TabStop, Table, TableCell,
+    TableRow,
 };
 use flow::{
-    Content, Flow, Hit, LayoutKey, LeafId, Look, Metrics, Paint, Position, Shaper, Splice, Tab,
-    Tabs, BOTTOM_MARGIN, CELL_BORDER, CELL_PADDING, LEVEL_INDENT, PAGE_BREAK_HEIGHT, TABLE_MARGIN,
-    TOP_MARGIN,
+    Content, Dash, Flow, Hit, LayoutKey, LeafId, Look, Metrics, Paint, Position, Shaper, Splice,
+    Tab, Tabs, BOTTOM_MARGIN, CELL_BORDER, CELL_PADDING, LEVEL_INDENT, PAGE_BREAK_HEIGHT,
+    TABLE_MARGIN, TOP_MARGIN,
 };
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -1295,4 +1296,291 @@ fn contextual_spacing_drops_the_space_between_paragraphs_of_one_style() {
         &mut Fake::default(),
     );
     assert_eq!(flow.content_height(), fresh.content_height());
+}
+
+/// A paragraph's shading or border stroke as painted: (x, y, width, height), and its dash
+/// and colour (a fill's colour, solid).
+type Drawn = (i32, f64, i32, i32, Dash, Option<Rgb>);
+
+/// Every fill and stroke painted, in order.
+fn frames(flow: &Flow) -> Vec<Drawn> {
+    let mut out = Vec::new();
+    flow.paint(0.0, 1e9, &mut |p| match p {
+        Paint::Fill {
+            x,
+            y,
+            width,
+            height,
+            color,
+        } => out.push((x, y, width, height, Dash::Solid, Some(color))),
+        Paint::Stroke {
+            x,
+            y,
+            width,
+            height,
+            dash,
+            color,
+        } => out.push((x, y, width, height, dash, color)),
+        _ => {}
+    });
+    out
+}
+
+fn line(style: BorderStyle, width: u16, space: u16, color: Option<Rgb>) -> Border {
+    Border {
+        style,
+        width,
+        space,
+        color,
+    }
+}
+
+fn bordered(text: &str, borders: BorderOverrides) -> Block {
+    own(
+        "Normal",
+        text,
+        ParaOverrides {
+            borders,
+            ..ParaOverrides::default()
+        },
+    )
+}
+
+#[test]
+fn a_paragraphs_border_lines_and_spaces_add_to_its_height() {
+    let red = Some([0xC0, 0, 0]);
+    let single = |space| Some(line(BorderStyle::Single, 8, space, None));
+    let blocks = vec![
+        // The résumé's title rule: half a point, 1 pt below (10 + 20 twips: 2 px).
+        bordered(
+            "x",
+            BorderOverrides {
+                bottom: Some(line(BorderStyle::Single, 4, 1, Some([0; 3]))),
+                ..BorderOverrides::default()
+            },
+        ),
+        // A box of 1 pt lines 4 pt out (20 + 80 twips: 7 px), 1 px strokes.
+        bordered(
+            "y",
+            BorderOverrides {
+                top: single(4),
+                bottom: single(4),
+                left: single(4),
+                right: single(4),
+                ..BorderOverrides::default()
+            },
+        ),
+        // A red double rule of 0.75 pt lines 2 pt below (45 + 40 twips: 6 px): two 1 px
+        // strokes with a 1 px gap, at the zone's bottom.
+        bordered(
+            "z",
+            BorderOverrides {
+                bottom: Some(line(BorderStyle::Double, 6, 2, red)),
+                ..BorderOverrides::default()
+            },
+        ),
+        // A dotted 1.5 pt rule 1 pt above (30 + 20 twips: 3 px), 2 px thick.
+        bordered(
+            "w",
+            BorderOverrides {
+                top: Some(line(BorderStyle::Dotted, 12, 1, None)),
+                ..BorderOverrides::default()
+            },
+        ),
+        para("v"),
+    ];
+    let mut fake = Fake::default();
+    let mut flow = Flow::new(doc(blocks));
+    flow.set_width(200, &mut fake);
+    let estimated = flow.content_height();
+    flow.layout_slice(&mut fake, &mut || true);
+    let top = f64::from(TOP_MARGIN);
+    // Each paragraph: its space before (0), its top zone, a 20 px line, its bottom zone,
+    // its 8 px after.
+    let (a, b, c, d) = (top, top + 30.0, top + 72.0, top + 106.0);
+    let ys: Vec<f64> = boxes(&flow).into_iter().map(|(_, y, _)| y).collect();
+    assert_eq!(ys, vec![a, b + 7.0, c, d + 3.0, d + 31.0]);
+    assert_eq!(
+        flow.content_height(),
+        d + 31.0 + 20.0 + 8.0 + f64::from(BOTTOM_MARGIN)
+    );
+    assert_eq!(estimated, flow.content_height(), "estimates agree");
+    let black = Some([0; 3]);
+    assert_eq!(
+        frames(&flow),
+        vec![
+            // The rule: 1 px under the text's 20 px line, across the column.
+            (0, a + 21.0, 200, 1, Dash::Solid, black),
+            // The box: its lines 7 px outside the text, the sides from top to bottom.
+            (-7, b, 214, 1, Dash::Solid, None),
+            (-7, b + 33.0, 214, 1, Dash::Solid, None),
+            (-7, b, 1, 34, Dash::Solid, None),
+            (206, b, 1, 34, Dash::Solid, None),
+            // The double rule's outer stroke at the zone's bottom, its inner one 2 px up.
+            (0, c + 25.0, 200, 1, Dash::Solid, red),
+            (0, c + 23.0, 200, 1, Dash::Solid, red),
+            (0, d, 200, 2, Dash::Dotted, None),
+        ]
+    );
+}
+
+#[test]
+fn paragraphs_bordered_together_share_one_box_with_lines_between() {
+    let blue = Some([0x2F, 0x54, 0x96]);
+    let fill = Some([0xDE, 0xEA, 0xF6]);
+    // `S`: 10 px after (150 twips), a box of 1 pt lines 1 pt out (3 px), a red half-point
+    // line between, 1 pt out (2 px), and a fill.
+    let side = line(BorderStyle::Single, 8, 1, blue);
+    let red = Some([0xC0, 0, 0]);
+    let styles = sheet(ParaLook {
+        spacing: ParaSpacing {
+            space_after: 150,
+            ..ParaSpacing::default()
+        },
+        borders: Borders {
+            top: side,
+            bottom: side,
+            left: side,
+            right: side,
+            between: line(BorderStyle::Single, 4, 1, red),
+        },
+        shading: Shading { fill },
+        ..ParaLook::default()
+    });
+    let blocks: Vec<Block> = ["a", "b", "c"]
+        .iter()
+        .map(|t| Block::Paragraph(styled("S", t)))
+        .chain([para("d")])
+        .collect();
+    let mut fake = Fake::default();
+    let mut flow = flow_of(styles.clone(), blocks, 200, &mut fake);
+    let top = f64::from(TOP_MARGIN);
+    // a: the top zone (3), its line, 10 after. b: the between zone (2), its line, 10
+    // after. c: the between zone, its line, the bottom zone (3), 10 after.
+    let (a, b, c, d) = (top, top + 33.0, top + 65.0, top + 100.0);
+    let ys: Vec<f64> = boxes(&flow).into_iter().map(|(_, y, _)| y).collect();
+    assert_eq!(ys, vec![a + 3.0, b + 2.0, c + 2.0, d]);
+    let (x, w) = (-3, 206);
+    let together = vec![
+        // a: the fill and sides run on through its space after; the top line only.
+        (x, a, w, 33, Dash::Solid, fill),
+        (x, a, w, 1, Dash::Solid, blue),
+        (x, a, 1, 33, Dash::Solid, blue),
+        (202, a, 1, 33, Dash::Solid, blue),
+        // b: open above and below; the line between at its top.
+        (x, b, w, 32, Dash::Solid, fill),
+        (x, b, w, 1, Dash::Solid, red),
+        (x, b, 1, 32, Dash::Solid, blue),
+        (202, b, 1, 32, Dash::Solid, blue),
+        // c: the line between, and the bottom line above its space after.
+        (x, c, w, 25, Dash::Solid, fill),
+        (x, c, w, 1, Dash::Solid, red),
+        (x, c + 24.0, w, 1, Dash::Solid, blue),
+        (x, c, 1, 25, Dash::Solid, blue),
+        (202, c, 1, 25, Dash::Solid, blue),
+    ];
+    assert_eq!(frames(&flow), together);
+
+    // A Normal paragraph after a ends the group there: a gets its bottom line, b its top
+    // line. Each matches a flow made from scratch, and removing it joins them again.
+    let insert = |flow: &mut Flow, fake: &mut Fake| {
+        flow.edit(fake, |doc| {
+            doc.blocks.insert(1, para("n"));
+            (
+                (),
+                Splice {
+                    start: 1,
+                    removed: 0,
+                    inserted: 1,
+                },
+            )
+        });
+        flow.layout_slice(fake, &mut || true);
+    };
+    insert(&mut flow, &mut fake);
+    let fresh = flow_of(
+        styles.clone(),
+        flow.document().blocks.clone(),
+        200,
+        &mut Fake::default(),
+    );
+    assert_eq!(frames(&flow), frames(&fresh));
+    assert_eq!(flow.content_height(), fresh.content_height());
+    let first: Vec<Drawn> = frames(&flow).into_iter().take(5).collect();
+    assert_eq!(
+        first,
+        vec![
+            (x, a, w, 26, Dash::Solid, fill),
+            (x, a, w, 1, Dash::Solid, blue),
+            (x, a + 25.0, w, 1, Dash::Solid, blue),
+            (x, a, 1, 26, Dash::Solid, blue),
+            (202, a, 1, 26, Dash::Solid, blue),
+        ]
+    );
+    flow.edit(&mut fake, |doc| {
+        doc.blocks.remove(1);
+        (
+            (),
+            Splice {
+                start: 1,
+                removed: 1,
+                inserted: 0,
+            },
+        )
+    });
+    flow.layout_slice(&mut fake, &mut || true);
+    assert_eq!(frames(&flow), together);
+}
+
+#[test]
+fn shading_fills_the_texts_indented_box_and_nil_borders_draw_nothing() {
+    let yellow = Some([0xFF, 0xE5, 0x99]);
+    let blocks = vec![
+        // 40 px in, 20 px from the right, two exact 40 px lines.
+        own(
+            "Normal",
+            &"w".repeat(20),
+            ParaOverrides {
+                line: Some(LineSpacing::Exact(600)),
+                indent_left: Some(600),
+                indent_right: Some(300),
+                shading: Some(Shading { fill: yellow }),
+                ..ParaOverrides::default()
+            },
+        ),
+        // Google Docs' paragraphs: nil sides and an automatic fill.
+        own(
+            "Normal",
+            "plain",
+            ParaOverrides {
+                borders: BorderOverrides {
+                    top: Some(Border::default()),
+                    bottom: Some(Border::default()),
+                    left: Some(Border::default()),
+                    right: Some(Border::default()),
+                    between: Some(Border::default()),
+                },
+                shading: Some(Shading { fill: None }),
+                ..ParaOverrides::default()
+            },
+        ),
+        para("end"),
+    ];
+    let flow = flow_of(StyleSheet::builtin(), blocks, 200, &mut Fake::default());
+    let top = f64::from(TOP_MARGIN);
+    assert_eq!(frames(&flow), vec![(40, top, 140, 80, Dash::Solid, yellow)]);
+    let ys: Vec<f64> = boxes(&flow).into_iter().map(|(_, y, _)| y).collect();
+    assert_eq!(ys, vec![top, top + 88.0, top + 116.0]);
+}
+
+#[test]
+fn dots_and_dashes_split_a_stroke_along_its_length() {
+    let pieces = |dash: Dash, length, thickness| -> Vec<(i32, i32)> {
+        dash.pieces(length, thickness).collect()
+    };
+    assert_eq!(pieces(Dash::Solid, 50, 1), vec![(0, 50)]);
+    assert_eq!(pieces(Dash::Dotted, 10, 2), vec![(0, 2), (4, 2), (8, 2)]);
+    assert_eq!(pieces(Dash::Dashed, 14, 1), vec![(0, 3), (5, 3), (10, 3)]);
+    // The last piece stops at the stroke's end.
+    assert_eq!(pieces(Dash::Dashed, 12, 1), vec![(0, 3), (5, 3), (10, 2)]);
 }

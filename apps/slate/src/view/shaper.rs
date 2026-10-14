@@ -500,7 +500,8 @@ fn channels(hex: u32) -> (u16, u16, u16) {
     (c(16), c(8), c(0))
 }
 
-fn hex([r, g, b]: [u8; 3]) -> u32 {
+/// A colour as the page's hex colours are written.
+pub(super) fn hex([r, g, b]: [u8; 3]) -> u32 {
     u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b)
 }
 

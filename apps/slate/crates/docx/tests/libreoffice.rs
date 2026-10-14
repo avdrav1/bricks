@@ -1,11 +1,12 @@
-//! SLATE-3, SLATE-19, and SLATE-26: every paragraph of the fixtures matches LibreOffice's
-//! dump: text, paragraph style (by name), list level, alignment, its spacing, line spacing,
-//! indents, and contextual spacing (its style's with its own on top), each run's font,
-//! size, bold, italic, underline, strikethrough, and colour, and table cells.
+//! SLATE-3, SLATE-19, SLATE-26, and SLATE-27: every paragraph of the fixtures matches
+//! LibreOffice's dump: text, paragraph style (by name), list level, alignment, its spacing,
+//! line spacing, indents, contextual spacing, borders, and fill (its style's with its own
+//! on top), each run's font, size, bold, italic, underline, strikethrough, and colour, and
+//! table cells.
 //!
-//! Each `X.docx` under `tests/data` (the LibreOffice-built fixture, and the spacing
-//! document written by hand as Word writes it) and `tests/data/poi` (Word-authored samples
-//! from Apache POI) has `X-libreoffice.txt`, written by
+//! Each `X.docx` under `tests/data` (the LibreOffice-built fixture, and the spacing and
+//! borders documents written by hand as Word writes them) and `tests/data/poi`
+//! (Word-authored samples from Apache POI) has `X-libreoffice.txt`, written by
 //! `python3 scripts/lo_docx.py dump X.docx` (format in that script). The reader's blocks
 //! are written out in the same shape and compared line by line.
 //!
@@ -17,15 +18,23 @@
 //! - A list label compares only when it has text: LibreOffice reports `""` as the label of
 //!   a bullet (the bullet is a symbol-font glyph, not text), so both sides write `*` for
 //!   bullets and empty labels.
-//! - Spacing and indents compare within a twip: LibreOffice keeps them in 1/100 mm, so a
-//!   value in twips comes back rounded.
+//! - Spacing, indents, and border widths and distances compare within a twip: LibreOffice
+//!   keeps them in 1/100 mm, so a value in twips comes back rounded.
+//! - Border line styles compare as the model draws them: LibreOffice's dot-dash styles as
+//!   dashed, its thin-thick ones as double, and embossed, engraved, inset, and outset as
+//!   solid. An automatic border colour is LibreOffice's black.
+//! - LibreOffice reads the line between paragraphs bordered together (Word's `between`)
+//!   as the top border of each but the first, and leaves the bottom border off each but
+//!   the last: the model's side gives them so.
 //! - Runs compare as the paragraph's text cut where the look changes: both sides join
 //!   adjacent runs with the same look, because the two split runs differently where
 //!   nothing changes.
 //! - Pictures, page breaks, and rules aren't paragraphs in LibreOffice's text: they are
 //!   left out of the model's side.
 
-use document_model::{Align, Block, Document, LineSpacing, ListKind, Paragraph};
+use document_model::{
+    Align, Block, Border, BorderStyle, Document, LineSpacing, ListKind, Paragraph,
+};
 use std::path::{Path, PathBuf};
 
 fn data() -> PathBuf {
@@ -82,6 +91,24 @@ fn line(l: LineSpacing) -> String {
     }
 }
 
+/// A border as the dump writes it: `-`, or its style, whole width and distance from the
+/// text in twips, and colour.
+fn border(b: &Border) -> String {
+    let style = match b.style {
+        BorderStyle::None => return "-".into(),
+        BorderStyle::Single | BorderStyle::Thick => "solid",
+        BorderStyle::Double => "double",
+        BorderStyle::Dotted => "dotted",
+        BorderStyle::Dashed => "dashed",
+    };
+    let [r, g, bl] = b.color.unwrap_or_default();
+    format!(
+        "{style}:{}:{}:{r:02X}{g:02X}{bl:02X}",
+        (f64::from(b.line_width()) * 2.5).round(),
+        u32::from(b.space) * 20
+    )
+}
+
 /// A size in half-points as the dump writes points (Python's `:g`).
 fn points(half: u16) -> String {
     if half.is_multiple_of(2) {
@@ -98,7 +125,23 @@ struct Counts {
     runs: usize,
 }
 
-fn paragraph(doc: &Document, p: &Paragraph, list: Option<(u8, &ListKind)>, out: &mut Vec<String>) {
+/// The paragraph of a paragraph or list item.
+fn paragraph_of(block: &Block) -> Option<&Paragraph> {
+    match block {
+        Block::Paragraph(p) => Some(p),
+        Block::ListItem(item) => Some(&item.paragraph),
+        _ => None,
+    }
+}
+
+/// Paragraph `p` (between `prev` and `next`) as the dump writes it.
+fn paragraph(
+    doc: &Document,
+    p: &Paragraph,
+    list: Option<(u8, &ListKind)>,
+    (prev, next): (Option<&Paragraph>, Option<&Paragraph>),
+    out: &mut Vec<String>,
+) {
     let (level, label) = match list {
         Some((level, ListKind::Ordered { label, .. })) if !label.is_empty() => {
             (level.to_string(), json(label))
@@ -108,8 +151,22 @@ fn paragraph(doc: &Document, p: &Paragraph, list: Option<(u8, &ListKind)>, out: 
     };
     let style = doc.styles.style_of(&p.style);
     let look = doc.styles.spacing(p);
+    let mut borders = doc.styles.borders(p);
+    if borders.between.is_drawn() {
+        if next.is_some_and(|n| doc.styles.bordered_together(p, n)) {
+            borders.bottom = Border::default();
+        }
+        if prev.is_some_and(|n| doc.styles.bordered_together(n, p)) {
+            borders.top = borders.between;
+        }
+    }
+    let fill = doc
+        .styles
+        .shading(p)
+        .fill
+        .map_or("-".to_owned(), |[r, g, b]| format!("{r:02X}{g:02X}{b:02X}"));
     out.push(format!(
-        "para\t{}\t{level}\t{label}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        "para\t{}\t{level}\t{label}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{fill}\t{}",
         style.name,
         align(p.align),
         look.space_before,
@@ -119,6 +176,10 @@ fn paragraph(doc: &Document, p: &Paragraph, list: Option<(u8, &ListKind)>, out: 
         look.indent_right,
         look.indent_first,
         u8::from(look.contextual),
+        border(&borders.top),
+        border(&borders.bottom),
+        border(&borders.left),
+        border(&borders.right),
         json(&p.text())
     ));
     let mut runs: Vec<(String, String)> = Vec::new();
@@ -152,12 +213,20 @@ fn paragraph(doc: &Document, p: &Paragraph, list: Option<(u8, &ListKind)>, out: 
 }
 
 fn outline(doc: &Document, blocks: &[Block], out: &mut Vec<String>) {
-    for b in blocks {
+    for (i, b) in blocks.iter().enumerate() {
+        let around = (
+            i.checked_sub(1).and_then(|j| paragraph_of(&blocks[j])),
+            blocks.get(i + 1).and_then(paragraph_of),
+        );
         match b {
-            Block::Paragraph(p) => paragraph(doc, p, None, out),
-            Block::ListItem(item) => {
-                paragraph(doc, &item.paragraph, Some((item.level, &item.kind)), out)
-            }
+            Block::Paragraph(p) => paragraph(doc, p, None, around, out),
+            Block::ListItem(item) => paragraph(
+                doc,
+                &item.paragraph,
+                Some((item.level, &item.kind)),
+                around,
+                out,
+            ),
             Block::Table(t) => {
                 out.push("table".into());
                 for row in &t.rows {
@@ -178,25 +247,42 @@ fn outline(doc: &Document, blocks: &[Block], out: &mut Vec<String>) {
     }
 }
 
-/// The dump with LibreOffice's names for Word's styles mapped back, and bullet labels
-/// hidden.
+/// A LibreOffice border line style as the model draws it.
+fn drawn_style(style: &str) -> &str {
+    match style {
+        "dash_dot" | "dash_dot_dot" | "fine_dashed" => "dashed",
+        "double_thin" => "double",
+        s if s.starts_with("thinthick") || s.starts_with("thickthin") => "double",
+        "embossed" | "engraved" | "inset" | "outset" => "solid",
+        s => s,
+    }
+}
+
+/// The dump with LibreOffice's names for Word's styles mapped back, bullet labels hidden,
+/// and border styles as the model draws them.
 fn libreoffice(dump: &str) -> Vec<String> {
     dump.lines()
         .map(|line| {
-            let mut f: Vec<&str> = line.split('\t').collect();
+            let mut f: Vec<String> = line.split('\t').map(str::to_owned).collect();
             if f[0] != "para" {
                 return line.to_owned();
             }
-            f[1] = libreoffice_name(f[1]);
+            f[1] = libreoffice_name(&f[1]).to_owned();
             if f[2] == "-" || f[3] == "\"\"" {
-                f[3] = "*";
+                f[3] = "*".into();
+            }
+            for side in &mut f[12..16] {
+                if let Some((style, rest)) = side.split_once(':') {
+                    *side = format!("{}:{rest}", drawn_style(style));
+                }
             }
             f.join("\t")
         })
         .collect()
 }
 
-/// Whether two outline lines match: equal, but for spacing and indents within a twip.
+/// Whether two outline lines match: equal, but for spacing, indents, and border widths and
+/// distances within a twip.
 fn matches(slate: &str, lo: &str) -> bool {
     if slate == lo {
         return true;
@@ -215,6 +301,17 @@ fn matches(slate: &str, lo: &str) -> bool {
             (Some((m, v)), Some((n, w))) if m == n && m != "auto" => near(v, w),
             _ => x == y,
         },
+        12..=15 => {
+            let (x, y): (Vec<&str>, Vec<&str>) = (x.split(':').collect(), y.split(':').collect());
+            x.len() == y.len()
+                && x.iter().zip(&y).enumerate().all(|(j, (u, v))| {
+                    if j == 1 || j == 2 {
+                        near(u, v)
+                    } else {
+                        u == v
+                    }
+                })
+        }
         _ => x == y,
     })
 }
@@ -270,6 +367,14 @@ fn the_fixture_matches_libreoffice() {
 fn the_spacing_document_matches_libreoffice() {
     let counts = compare(&data().join("spacing.docx"));
     assert_eq!(counts.paragraphs, 21);
+}
+
+/// SLATE-27: paragraph borders and shading, a paragraph's own over its style's, written as
+/// Word and Google Docs write them (`python3 scripts/lo_docx.py borders`).
+#[test]
+fn the_borders_document_matches_libreoffice() {
+    let counts = compare(&data().join("borders.docx"));
+    assert_eq!(counts.paragraphs, 22);
 }
 
 #[test]

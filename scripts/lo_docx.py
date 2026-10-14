@@ -7,9 +7,12 @@ Usage: python3 scripts/lo_docx.py fixture OUT   (store the fixture document at O
        python3 scripts/lo_docx.py spacing OUT   (write the spacing document at OUT:
                                                  apps/slate/crates/docx/tests/data/
                                                  spacing.docx; no LibreOffice needed)
+       python3 scripts/lo_docx.py borders OUT   (write the borders document at OUT:
+                                                 apps/slate/crates/docx/tests/data/
+                                                 borders.docx; no LibreOffice needed)
 
 `dump` prints the body in document order, one line per item, tab-separated:
-  para<TAB>STYLE<TAB>LIST<TAB>LABEL<TAB>ALIGN<TAB>BEFORE<TAB>AFTER<TAB>LINE<TAB>LEFT<TAB>RIGHT<TAB>FIRST<TAB>CONTEXT<TAB>TEXT
+  para<TAB>STYLE<TAB>LIST<TAB>LABEL<TAB>ALIGN<TAB>BEFORE<TAB>AFTER<TAB>LINE<TAB>LEFT<TAB>RIGHT<TAB>FIRST<TAB>CONTEXT<TAB>TOP<TAB>BOTTOM<TAB>BORDERLEFT<TAB>BORDERRIGHT<TAB>FILL<TAB>TEXT
                                      a paragraph: its paragraph style's display name, its
                                      list level (0-based) or `-` outside lists, its list
                                      label (`"2."`; LibreOffice gives `""` for bullets), its
@@ -18,8 +21,13 @@ Usage: python3 scripts/lo_docx.py fixture OUT   (store the fixture document at O
                                      (`auto:PERCENT`, `exact:TWIPS`, or `atLeast:TWIPS`),
                                      left, right, and first-line indent (in twips, rounded;
                                      a hanging indent is negative), whether space between
-                                     paragraphs of its style is left out (`1` or `0`), and
-                                     its text; label and text as JSON strings
+                                     paragraphs of its style is left out (`1` or `0`), its
+                                     top, bottom, left, and right borders (`-` for none, or
+                                     `STYLE:WIDTH:DISTANCE:RRGGBB`: LibreOffice's line style
+                                     in lower case, `solid`, `double`, ..., the line's whole
+                                     width and its distance from the text in twips,
+                                     rounded), its fill (`-` or `RRGGBB`), and its text;
+                                     label and text as JSON strings
   run<TAB>FLAGS<TAB>FONT<TAB>SIZE<TAB>COLOR<TAB>TEXT
                                      the paragraph's text in runs of one look: FLAGS is
                                      `b`, `i`, `u`, `s` (bold, italic, underline,
@@ -29,8 +37,10 @@ Usage: python3 scripts/lo_docx.py fixture OUT   (store the fixture document at O
   table / row / cell / end           a table, its rows and cells (in cell-name order), and
                                      its end; a cell's paragraphs and nested tables follow
                                      its `cell` line
-Spacing and indents are the paragraph's own (ADR 0009), which LibreOffice resolves
-through its style, its parents, and the document defaults.
+Spacing, indents, borders, and fill are the paragraph's own (ADR 0009), which LibreOffice
+resolves through its style, its parents, and the document defaults. LibreOffice reads
+Word's line between paragraphs bordered together as the top border of each but the first,
+the first's bottom border left off.
 The fixture (apps/slate/crates/docx/tests/data/fixture.docx) has a title, headings 1-3,
 runs that are bold, italic, underlined, struck, sized, coloured, and in the Strong and
 Emphasis character styles (also inside a heading), centred, right-aligned, and justified
@@ -277,6 +287,36 @@ def para_look(p):
             "1" if p.ParaContextMargin else "0"]
 
 
+# com.sun.star.table.BorderLineStyle by value, as the dump names them.
+BORDER_STYLES = ["solid", "dotted", "dashed", "double", "thinthick_smallgap",
+                 "thinthick_mediumgap", "thinthick_largegap", "thickthin_smallgap",
+                 "thickthin_mediumgap", "thickthin_largegap", "embossed", "engraved", "outset",
+                 "inset", "fine_dashed", "double_thin", "dash_dot", "dash_dot_dot"]
+
+
+def color(c):
+    return f"{c & 0xFFFFFF:06X}"
+
+
+def para_frame(p):
+    """A paragraph's top, bottom, left, and right borders (`-`, or the line's style, its
+    whole width and its distance from the text in twips, and its colour) and its fill
+    (`-` or its colour)."""
+    out = []
+    for side in ("Top", "Bottom", "Left", "Right"):
+        line = p.getPropertyValue(f"{side}Border")
+        if line.LineWidth == 0 or line.LineStyle == 0x7FFF:
+            out.append("-")
+            continue
+        style = (BORDER_STYLES[line.LineStyle] if line.LineStyle < len(BORDER_STYLES)
+                 else f"style{line.LineStyle}")
+        distance = p.getPropertyValue(f"{side}BorderDistance")
+        out.append(f"{style}:{twips(line.LineWidth)}:{twips(distance)}:{color(line.Color)}")
+    solid = p.FillStyle.value == "SOLID"
+    out.append(color(p.FillColor) if solid else "-")
+    return out
+
+
 def dump_text(text, out):
     paras = text.createEnumeration()
     while paras.hasMoreElements():
@@ -297,7 +337,8 @@ def dump_text(text, out):
         level = str(p.NumberingLevel) if listed else "-"
         label = p.getPropertyValue("ListLabelString") or "" if listed else ""
         out.append("\t".join(["para", display_name(p), level, json.dumps(label, ensure_ascii=False),
-                              *para_look(p), json.dumps(p.getString(), ensure_ascii=False)]))
+                              *para_look(p), *para_frame(p),
+                              json.dumps(p.getString(), ensure_ascii=False)]))
         runs = []
         for portion in portions(p):
             s = portion.getString()
@@ -432,12 +473,14 @@ def spacing_document():
     return f'<w:document xmlns:w="{W_NS}" xmlns:r="{R_NS}"><w:body>{body}{sect}</w:body></w:document>'
 
 
-def write_spacing(path):
-    """The spacing document: paragraphs with their own spacing, line spacing, and indents
-    (Word's `start`, `end`, `hanging`, and negative ones), a style's overridden, contextual
-    and automatic spacing, list items, and a table cell's paragraph. Byte for byte the same
-    on every run."""
+def write_package(path, document, styles, numbering=None):
+    """A .docx at `path` of `document`, `styles`, and `numbering` (when given): byte for
+    byte the same on every run."""
     import zipfile
+    numbering_type = (f'<Override PartName="/word/numbering.xml" '
+                      f'ContentType="{DOCX_CT}.numbering+xml"/>' if numbering else "")
+    numbering_rel = (f'<Relationship Id="rId2" Type="{R_NS}/numbering" Target="numbering.xml"/>'
+                     if numbering else "")
     parts = [
         ("[Content_Types].xml",
          '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
@@ -445,7 +488,7 @@ def write_spacing(path):
          '<Default Extension="xml" ContentType="application/xml"/>'
          f'<Override PartName="/word/document.xml" ContentType="{DOCX_CT}.document.main+xml"/>'
          f'<Override PartName="/word/styles.xml" ContentType="{DOCX_CT}.styles+xml"/>'
-         f'<Override PartName="/word/numbering.xml" ContentType="{DOCX_CT}.numbering+xml"/>'
+         f"{numbering_type}"
          "</Types>"),
         ("_rels/.rels",
          f'<Relationships xmlns="{PKG_NS}">'
@@ -454,27 +497,154 @@ def write_spacing(path):
         ("word/_rels/document.xml.rels",
          f'<Relationships xmlns="{PKG_NS}">'
          f'<Relationship Id="rId1" Type="{R_NS}/styles" Target="styles.xml"/>'
-         f'<Relationship Id="rId2" Type="{R_NS}/numbering" Target="numbering.xml"/>'
+         f"{numbering_rel}"
          "</Relationships>"),
-        ("word/document.xml", spacing_document()),
-        ("word/styles.xml", SPACING_STYLES),
-        ("word/numbering.xml", SPACING_NUMBERING),
+        ("word/document.xml", document),
+        ("word/styles.xml", styles),
     ]
+    if numbering:
+        parts.append(("word/numbering.xml", numbering))
     path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
         for name, xml in parts:
             info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
             z.writestr(info, DECL + xml)
+
+
+def write_spacing(path):
+    """The spacing document: paragraphs with their own spacing, line spacing, and indents
+    (Word's `start`, `end`, `hanging`, and negative ones), a style's overridden, contextual
+    and automatic spacing, list items, and a table cell's paragraph. Byte for byte the same
+    on every run."""
+    write_package(path, spacing_document(), SPACING_STYLES, SPACING_NUMBERING)
     print(f"spacing -> {path}")
 
 
+# The borders document (SLATE-27): paragraph borders and shading, a paragraph's own and its
+# style's, written by hand as Word and Google Docs write them.
+BORDERS_STYLES = (
+    f'<w:styles xmlns:w="{W_NS}">'
+    "<w:docDefaults>"
+    '<w:rPrDefault><w:rPr><w:rFonts w:ascii="Liberation Serif" w:hAnsi="Liberation Serif"/>'
+    '<w:sz w:val="22"/></w:rPr></w:rPrDefault>'
+    '<w:pPrDefault><w:pPr><w:spacing w:after="160" w:line="259" w:lineRule="auto"/>'
+    "</w:pPr></w:pPrDefault>"
+    "</w:docDefaults>"
+    '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/>'
+    "</w:style>"
+    '<w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/>'
+    '<w:basedOn w:val="Normal"/><w:pPr><w:spacing w:after="60"/></w:pPr>'
+    '<w:rPr><w:sz w:val="52"/></w:rPr></w:style>'
+    '<w:style w:type="paragraph" w:styleId="Boxed"><w:name w:val="Boxed"/>'
+    '<w:basedOn w:val="Normal"/><w:pPr><w:pBdr>'
+    '<w:top w:val="single" w:sz="8" w:space="4" w:color="2F5496"/>'
+    '<w:left w:val="single" w:sz="8" w:space="4" w:color="2F5496"/>'
+    '<w:bottom w:val="single" w:sz="8" w:space="4" w:color="2F5496"/>'
+    '<w:right w:val="single" w:sz="8" w:space="4" w:color="2F5496"/>'
+    '</w:pBdr><w:shd w:val="clear" w:color="auto" w:fill="DEEAF6"/></w:pPr></w:style>'
+    '<w:style w:type="paragraph" w:styleId="BoxedDouble"><w:name w:val="Boxed Double"/>'
+    '<w:basedOn w:val="Boxed"/><w:pPr><w:pBdr>'
+    '<w:bottom w:val="double" w:sz="4" w:space="1" w:color="C00000"/>'
+    "</w:pBdr></w:pPr></w:style>"
+    "</w:styles>"
+)
+
+
+def border(side, val, sz=4, space=0, color="auto"):
+    return f'<w:{side} w:val="{val}" w:sz="{sz}" w:space="{space}" w:color="{color}"/>'
+
+
+def box(val="single", sz=4, space=4, color="auto", between=""):
+    """A `w:pBdr` with the same line on all four sides, and `between` (a side's XML)."""
+    sides = "".join(border(s, val, sz, space, color) for s in ["top", "left", "bottom", "right"])
+    return f"<w:pBdr>{sides}{between}</w:pBdr>"
+
+
+# Two paragraphs bordered together, with a red line between them.
+GROUP = box(sz=8, space=1, color="2F5496", between=border("between", "single", 4, 1, "C00000"))
+
+
+# The résumé's title rule, exactly as Google Docs writes it.
+RESUME_RULE = ('<w:pBdr><w:bottom w:color="000000" w:space="1" w:sz="4" w:val="single"/>'
+               "</w:pBdr>")
+# Google Docs' paragraphs without borders or shading.
+NO_BORDERS = ('<w:pBdr><w:top w:space="0" w:sz="0" w:val="nil"/>'
+              '<w:left w:space="0" w:sz="0" w:val="nil"/>'
+              '<w:bottom w:space="0" w:sz="0" w:val="nil"/>'
+              '<w:right w:space="0" w:sz="0" w:val="nil"/>'
+              '<w:between w:space="0" w:sz="0" w:val="nil"/></w:pBdr>'
+              '<w:shd w:fill="auto" w:val="clear"/>')
+
+# (style, the paragraph's own pPr, text) for each paragraph, in order.
+BORDERS_PARAGRAPHS = [
+    ("Title", RESUME_RULE, "Jane Q. Writer"),
+    ("Normal", NO_BORDERS, "Nil borders and automatic shading draw nothing."),
+    ("Normal", box(), "Boxed on all four sides, 4 pt from the text."),
+    ("Normal", "<w:pBdr>" + border("bottom", "double", 6, 2, "C00000") + "</w:pBdr>",
+     "A double rule below, red."),
+    ("Normal", "<w:pBdr>" + border("top", "dotted", 12, 1, "00B050") + "</w:pBdr>",
+     "A dotted rule above, green."),
+    ("Normal", "<w:pBdr>" + border("left", "dashed", 8, 8, "7030A0")
+     + border("right", "dashed", 8, 8, "7030A0") + '</w:pBdr><w:ind w:left="720" w:right="720"/>',
+     "Dashed left and right, outside the indents."),
+    ("Normal", GROUP, "The first of two boxed paragraphs, with a red line between."),
+    ("Normal", GROUP, "The second of them: one box around both."),
+    ("Normal", '<w:shd w:val="clear" w:color="auto" w:fill="FFE599"/>', "Shaded yellow."),
+    ("Normal", '<w:shd w:val="solid" w:color="BDD7EE" w:fill="auto"/>',
+     "Solid shading in the pattern's colour."),
+    ("Normal", '<w:shd w:val="solid" w:color="auto" w:fill="auto"/>',
+     "Solid shading in an automatic colour."),
+    ("Normal", '<w:shd w:val="pct25" w:color="auto" w:fill="FFFFFF"/>',
+     "A 25% pattern."),
+    ("Boxed", "", "The Boxed style's box and fill."),
+    ("Boxed", "", "A second Boxed paragraph: one box around both, no line between."),
+    ("Boxed", '<w:pBdr><w:top w:val="nil"/>' + border("bottom", "none", 0, 0)
+     + '</w:pBdr><w:shd w:val="clear" w:color="auto" w:fill="auto"/>',
+     "Boxed, with its own nil top, no bottom, and no fill."),
+    ("BoxedDouble", "", "Boxed Double: the Boxed style's box with a double bottom."),
+    ("Normal", "<w:pBdr>" + border("bottom", "thick", 12, 1) + "</w:pBdr>", "A thick rule."),
+    ("Normal", "<w:pBdr>" + border("bottom", "dotDash", 8, 1) + "</w:pBdr>",
+     "A dot-dash rule draws dashed."),
+    ("Normal", "<w:pBdr>" + border("bottom", "triple", 4, 1) + "</w:pBdr>",
+     "A triple rule draws double."),
+    ("Normal", "<w:pBdr>" + border("bottom", "wave", 6, 1) + "</w:pBdr>",
+     "A wavy rule draws single."),
+]
+
+
+def borders_document():
+    body = "".join(spacing_paragraph(*p) for p in BORDERS_PARAGRAPHS)
+    cell = spacing_paragraph(
+        "Normal", "<w:pBdr>" + border("bottom", "single", 8, 1, "70AD47")
+        + '</w:pBdr><w:shd w:val="clear" w:color="auto" w:fill="E2EFDA"/>',
+        "A cell paragraph with a rule below and a green fill.")
+    body += ("<w:tbl><w:tblPr><w:tblW w:w=\"5000\" w:type=\"pct\"/></w:tblPr>"
+             "<w:tblGrid><w:gridCol w:w=\"9360\"/></w:tblGrid>"
+             f"<w:tr><w:tc><w:tcPr><w:tcW w:w=\"9360\" w:type=\"dxa\"/></w:tcPr>{cell}</w:tc></w:tr>"
+             "</w:tbl>")
+    body += spacing_paragraph("Normal", "", "The end.")
+    sect = ('<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" '
+            'w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>')
+    return f'<w:document xmlns:w="{W_NS}" xmlns:r="{R_NS}"><w:body>{body}{sect}</w:body></w:document>'
+
+
+def write_borders(path):
+    """The borders document: the résumé's title rule, Google Docs' nil borders and automatic
+    shading, a box, double, dotted, dashed, and thick lines, two boxed paragraphs with a line
+    between, shading fills, a style's box and fill with nil sides over it, a style based on
+    it, the styles drawn as their nearest, and a table cell's paragraph. Byte for byte the
+    same on every run."""
+    write_package(path, borders_document(), BORDERS_STYLES)
+    print(f"borders -> {path}")
+
+
 def main():
-    if len(sys.argv) != 3 or sys.argv[1] not in ("fixture", "dump", "spacing"):
+    if len(sys.argv) != 3 or sys.argv[1] not in ("fixture", "dump", "spacing", "borders"):
         sys.exit(__doc__)
     path = Path(sys.argv[2]).resolve()
-    if sys.argv[1] == "spacing":
-        write_spacing(path)
+    if sys.argv[1] in ("spacing", "borders"):
+        (write_spacing if sys.argv[1] == "spacing" else write_borders)(path)
         return
     ctx = connect()
     desktop = ctx.ServiceManager.createInstanceWithContext("com.sun.star.frame.Desktop", ctx)

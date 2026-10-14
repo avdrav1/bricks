@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # SLATE-4, SLATE-10, SLATE-11, SLATE-6, SLATE-12, SLATE-13, SLATE-20, SLATE-21, SLATE-22,
-# SLATE-23, SLATE-24, SLATE-25, and SLATE-26 acceptance: the window opens, shows, and
-# refuses documents, its pageless column follows View → Text Width and a Word document's
-# page, its text selects and copies, it edits with undo, table cells included, it composes
-# through an input method, it draws a Word document's fonts (embedded ones and fallbacks by
-# class), paragraph looks (its styles' and its own), and tab stops, its format bar sets
-# them, and they save.
+# SLATE-23, SLATE-24, SLATE-25, SLATE-26, and SLATE-27 acceptance: the window opens,
+# shows, and refuses documents, its pageless column follows View → Text Width and a Word
+# document's page, its text selects and copies, it edits with undo, table cells included,
+# it composes through an input method, it draws a Word document's fonts (embedded ones and
+# fallbacks by class), paragraph looks (its styles' and its own), borders and shading, and
+# tab stops, its format bar sets them, and they save.
 #
 #   scripts/check_slate.sh [BINARY]   (default target/release/slate)
 #
@@ -180,6 +180,16 @@
 #      600 apart, each within 2 px; a character typed into the last paragraph (its own
 #      spacing and right indent) and Ctrl+S save it with its w:spacing and w:ind as they
 #      were and every other paragraph byte for byte.
+#  32. borders and shading: borders.docx (written by /tmp/borders.py, Liberation Sans 11
+#      pt, a one-cell table whose border is the column) measured in a screenshot: the
+#      résumé's title rule (half a point, 1 pt from the text) lies 1 px under the text's
+#      line box (two plain lines' pitch) and spans the column; a shaded paragraph's box is
+#      its fill colour (#FFE599), spans the column, and is as tall as its line; a box of 1
+#      pt lines 4 pt from the text draws all four 7 px outside the line box and the
+#      column, its sides joining its top and bottom lines; a paragraph with nil borders
+#      and an automatic fill (as Google Docs writes them) draws nothing but its text; each
+#      within 2 px. A character typed into the last paragraph and Ctrl+S keep every other
+#      paragraph, borders and shading included, byte for byte.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -1202,6 +1212,177 @@ elif sys.argv[1] == "measure":
 else:
     kept(sys.argv[2], sys.argv[3])
 PY
+# SLATE-27: `make PATH` writes borders.docx (Liberation Sans 11 pt, 16 px after each
+# paragraph but the first): two plain HAMBURG lines (the pitch of a line box), the title
+# rule of the résumé, a shaded line, a boxed line, a line with the nil borders and
+# automatic fill of Google Docs, and a one-cell table (its border is the column); `measure
+# PNG` measures its screenshot; `kept ORIGINAL SAVED` checks that saving an edit in the last
+# paragraph keeps every other paragraph byte for byte.
+cat > /tmp/borders.py <<"PY"
+import os
+import re
+import sys
+import zipfile
+
+W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+PKG = "http://schemas.openxmlformats.org/package/2006/relationships"
+CT = "http://schemas.openxmlformats.org/package/2006/content-types"
+OOXML = "application/vnd.openxmlformats-officedocument.wordprocessingml"
+HEAD = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"""
+TEXT = "HAMBURG"
+RULE = """<w:pBdr><w:bottom w:color="000000" w:space="1" w:sz="4" w:val="single"/></w:pBdr>"""
+YELLOW = (0xFF, 0xE5, 0x99)
+SHADE = """<w:shd w:val="clear" w:color="auto" w:fill="FFE599"/>"""
+BLUE = (0x2F, 0x54, 0x96)
+BOX = "<w:pBdr>" + "".join(f"""<w:{s} w:val="single" w:sz="8" w:space="4" w:color="2F5496"/>"""
+                           for s in ("top", "left", "bottom", "right")) + "</w:pBdr>"
+NIL = ("<w:pBdr>" + "".join(f"""<w:{s} w:space="0" w:sz="0" w:val="nil"/>"""
+                            for s in ("top", "left", "bottom", "right", "between"))
+       + """</w:pBdr><w:shd w:fill="auto" w:val="clear"/>""")
+
+def para(text, own=""):
+    return (f"""<w:p><w:pPr>{own}</w:pPr>"""
+            f"""<w:r><w:t xml:space="preserve">{text}</w:t></w:r></w:p>""")
+
+def make(path):
+    styles = (
+        """<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Liberation Sans" """
+        """w:hAnsi="Liberation Sans"/><w:sz w:val="22"/></w:rPr></w:rPrDefault><w:pPrDefault>"""
+        """<w:pPr><w:spacing w:before="0" w:after="240" w:line="240" w:lineRule="auto"/></w:pPr>"""
+        """</w:pPrDefault></w:docDefaults>"""
+        """<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>""")
+    cell = para(TEXT)
+    paras = [
+        para(TEXT, """<w:spacing w:after="0"/>"""), para(TEXT), para(TEXT, RULE), para(TEXT, SHADE),
+        para(TEXT, BOX), para(TEXT, NIL),
+        """<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/></w:tblPr><w:tblGrid><w:gridCol w:w="9360"/>"""
+        f"""</w:tblGrid><w:tr><w:tc>{cell}</w:tc></w:tr></w:tbl>""",
+        para("Z"),
+    ]
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("[Content_Types].xml", HEAD + f"""<Types xmlns="{CT}">"""
+                   """<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"""
+                   """<Default Extension="xml" ContentType="application/xml"/>"""
+                   f"""<Override PartName="/word/document.xml" ContentType="{OOXML}.document.main+xml"/>"""
+                   f"""<Override PartName="/word/styles.xml" ContentType="{OOXML}.styles+xml"/></Types>""")
+        z.writestr("_rels/.rels", HEAD + f"""<Relationships xmlns="{PKG}"><Relationship Id="rId1" """
+                   f"""Type="{REL}/officeDocument" Target="word/document.xml"/></Relationships>""")
+        z.writestr("word/_rels/document.xml.rels", HEAD + f"""<Relationships xmlns="{PKG}">"""
+                   f"""<Relationship Id="rId1" Type="{REL}/styles" Target="styles.xml"/></Relationships>""")
+        z.writestr("word/styles.xml", HEAD + f"""<w:styles xmlns:w="{W}">{styles}</w:styles>""")
+        z.writestr("word/document.xml", HEAD + f"""<w:document xmlns:w="{W}"><w:body>"""
+                   + "".join(paras) + "</w:body></w:document>")
+
+def measure(png):
+    import gi
+    gi.require_version("GdkPixbuf", "2.0")
+    from gi.repository import GdkPixbuf
+    p = GdkPixbuf.Pixbuf.new_from_file(png)
+    w, h, rs, n, px = p.get_width(), p.get_height(), p.get_rowstride(), p.get_n_channels(), p.get_pixels()
+    top = int(os.environ["TOP"])
+    def at(x, y):
+        i = y * rs + x * n
+        return (px[i], px[i + 1], px[i + 2])
+    def report(label, got, want):
+        verdict = "ok" if abs(got - want) <= 2 else "off"
+        print(f"{label}: {got} (want {want}) {verdict}")
+    def rows(colour):
+        """Rows with more than 400 pixels of `colour`: [(y, first x, last x)]."""
+        out = []
+        for y in range(top, h - 10):
+            xs = [x for x in range(w) if at(x, y) == colour]
+            if len(xs) > 400:
+                out.append((y, xs[0], xs[-1]))
+        return out
+    table = rows((0xC0, 0xBF, 0xBC))
+    if len(table) < 2:
+        print("no table")
+        return
+    left, right = table[0][1], table[0][2]
+    print(f"column: {left}-{right}")
+    # Bands of rows with the ink of text (dark and grey), inside the column.
+    def ink(x, y):
+        r, g, b = at(x, y)
+        return r + g + b < 450 and abs(r - g) < 30 and abs(g - b) < 30
+    bands, cur = [], None
+    for y in range(top, h - 10):
+        xs = [x for x in range(left + 2, right - 1) if ink(x, y)]
+        if xs and len(xs) < 400:
+            if cur is None:
+                cur = [y, y, xs[0], xs[-1]]
+            cur[1], cur[2], cur[3] = y, min(cur[2], xs[0]), max(cur[3], xs[-1])
+        elif cur is not None:
+            bands.append(cur)
+            cur = None
+    print("bands: " + " ".join(f"{b[0]}-{b[1]}@{b[2]}-{b[3]}" for b in bands))
+    if len(bands) < 8:
+        print("too few lines")
+        return
+    one, two, title, shaded, boxed, nil = bands[:6]
+    pitch = two[0] - one[0]
+    print(f"line box: {pitch}")
+    yellow = rows(YELLOW)
+    if not yellow:
+        print("no fill")
+        return
+    # How far the ink of the text starts below its line box, from the fill (which starts
+    # at the line box).
+    ascent = shaded[0] - yellow[0][0]
+    print(f"ink below line top: {ascent}")
+    rule = rows((0, 0, 0))
+    if rule:
+        y, x0, x1 = rule[0]
+        report("rule below the line box", y - (title[0] - ascent + pitch), 1)
+        report("rule left edge from the column", x0 - left, 0)
+        report("rule right edge from the column", x1 - right, 0)
+        print(f"rule rows: {len(rule)}")
+    else:
+        print("no rule")
+    colour = "".join(f"{c:02X}" for c in at((left + right) // 2, yellow[0][0]))
+    print(f"fill colour: {colour}")
+    report("fill left edge from the column", yellow[0][1] - left, 0)
+    report("fill right edge from the column", yellow[0][2] - right, 0)
+    report("fill height", len(yellow), pitch)
+    blue = rows(BLUE)
+    if len(blue) >= 2:
+        (ty, tx0, tx1), (by, _, _) = blue[0], blue[-1]
+        line_top = boxed[0] - ascent
+        report("box top line above the line box", line_top - ty, 7)
+        report("box bottom line below the line box", by + 1 - (line_top + pitch), 7)
+        report("box left line outside the column", left - tx0, 7)
+        report("box right line outside the column", tx1 - right, 7)
+        sides = [x for x in (tx0, tx1) if all(at(x, y) == BLUE for y in range(ty, by + 1))]
+        print(f"box sides from top to bottom: {len(sides)}")
+    else:
+        print("no box")
+    # Below the box and above the table: nothing but the text of the nil paragraph (and
+    # its anti-aliased edges, 2 px around its ink).
+    start, end = (blue[-1][0] + 1 if blue else nil[0] - 20), table[0][0]
+    def text(x, y):
+        return nil[0] - 2 <= y <= nil[1] + 2 and nil[2] - 2 <= x <= nil[3] + 2
+    extra = sum(1 for y in range(start, end) for x in range(40, w - 40)
+                if at(x, y) != (255, 255, 255) and not text(x, y))
+    print(f"nil paragraph extra pixels: {extra}")
+
+def kept(original, saved):
+    def split(path):
+        with zipfile.ZipFile(path) as z:
+            xml = z.read("word/document.xml").decode()
+        at = [m.start() for m in re.finditer(r"<w:p[ >]", xml)][-1]
+        return xml[:at], xml[at:]
+    (a, _), (b, last) = split(original), split(saved)
+    edited = "Z!" in last
+    print(f"borders saved: edit {edited}; others kept: {a == b}; "
+          f"rule {RULE in b}, box {BOX in b}, nil {NIL in b}, shade {SHADE in b}")
+
+if sys.argv[1] == "make":
+    make(sys.argv[2])
+elif sys.argv[1] == "measure":
+    measure(sys.argv[2])
+else:
+    kept(sys.argv[2], sys.argv[3])
+PY
 # SLATE-21: `make PATH` writes bar.docx (styles Normal, Heading 2, and a custom Fancy);
 # `line PNG` measures the first line of text below the format bar in a screenshot: the
 # left and right edges of its ink and how far its middle is from the middle of the window.
@@ -1782,6 +1963,17 @@ print(f\"typing for 20 s: first journal after ${first:-0} ms, writes {len(t)}, s
   keys "!"; keys -M ctrl s -m ctrl; sleep 1; saved
   python3 /tmp/own.py kept /tmp/own.docx /tmp/save/own.docx 2>&1
   quit
+  echo "== 32 borders"
+  python3 /tmp/borders.py make /tmp/borders.docx
+  cp /tmp/borders.docx /tmp/save/borders.docx
+  slate /tmp/save/borders.docx >>/tmp/app.log 2>&1 & sleep 4
+  titles | sed "s/^/borders-/"
+  # The caret on the last line, Z, below the table the measurements stop at.
+  keys -M ctrl -k End -m ctrl; sleep 1; shot borders
+  python3 /tmp/borders.py measure /shots/borders.png 2>&1
+  keys "!"; keys -M ctrl s -m ctrl; sleep 1; saved
+  python3 /tmp/borders.py kept /tmp/borders.docx /tmp/save/borders.docx 2>&1
+  quit
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -2105,6 +2297,25 @@ check "31: ... and its next line at the indent" "$s31" "^own hanging next line: 
 check "31: its own exact line spacing sets every line's pitch" "$s31" "^own exact line: .* ok$"
 check "31: an edited paragraph saves with its own spacing and indents, the others as they were" \
   "$s31" "^last saved: own look True, edit True; others kept: True$"
+s32="32 borders"
+check "32: the document opens" "$s32" "^borders-titles: .*borders\.docx"
+check "32: the résumé's rule lies its space and width under the text's line box" "$s32" \
+  "^rule below the line box: .* ok$"
+check "32: ... from the column's left edge" "$s32" "^rule left edge from the column: .* ok$"
+check "32: ... to its right edge" "$s32" "^rule right edge from the column: .* ok$"
+check "32: ... one pixel thick" "$s32" "^rule rows: 1$"
+check "32: a shaded paragraph's box is its fill colour" "$s32" "^fill colour: FFE599$"
+check "32: ... from the column's left edge" "$s32" "^fill left edge from the column: .* ok$"
+check "32: ... to its right edge" "$s32" "^fill right edge from the column: .* ok$"
+check "32: ... as tall as its line" "$s32" "^fill height: .* ok$"
+check "32: a box's top line lies its space above the text" "$s32" "^box top line above the line box: .* ok$"
+check "32: ... its bottom line below" "$s32" "^box bottom line below the line box: .* ok$"
+check "32: ... its left line outside the column's edge" "$s32" "^box left line outside the column: .* ok$"
+check "32: ... and its right line" "$s32" "^box right line outside the column: .* ok$"
+check "32: ... its sides run from its top line to its bottom" "$s32" "^box sides from top to bottom: 2$"
+check "32: nil borders and an automatic fill draw nothing" "$s32" "^nil paragraph extra pixels: 0$"
+check "32: saving an edit keeps every other paragraph's borders and shading byte for byte" \
+  "$s32" "^borders saved: edit True; others kept: True; rule True, box True, nil True, shade True$"
 if [ $fail = 0 ]; then echo "SLATE OK"; else
   echo "SLATE CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

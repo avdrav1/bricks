@@ -232,6 +232,7 @@ fn a_paragraph_whose_own_looks_differ_from_its_templates_writes_them() {
         indent_right: Some(0),
         indent_first: Some(-200),
         contextual: Some(true),
+        ..ParaOverrides::default()
     };
     // Spacing isn't edited yet: a paragraph pasted from elsewhere stands for one.
     let Block::Paragraph(p) = &mut doc.blocks[i] else {

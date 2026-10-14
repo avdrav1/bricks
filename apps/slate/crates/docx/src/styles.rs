@@ -6,8 +6,9 @@
 use crate::xml::{self, XmlReader};
 use crate::DocxError;
 use document_model::{
-    effective_tabs, merge_tabs, Align, LineSpacing, Look, ParaLook, ParaOverrides, ParaSpacing,
-    Rgb, RunStyle, Style, StyleSheet, TabAlign, TabLeader, TabStop,
+    effective_tabs, merge_tabs, Align, Border, BorderOverrides, BorderStyle, Borders, LineSpacing,
+    Look, ParaLook, ParaOverrides, ParaSpacing, Rgb, RunStyle, Shading, Style, StyleSheet,
+    TabAlign, TabLeader, TabStop,
 };
 use quick_xml::events::{BytesStart, Event};
 use std::collections::HashMap;
@@ -193,6 +194,11 @@ pub(crate) struct ParaProps {
     pub indent_first: Option<i32>,
     /// `w:contextualSpacing`.
     pub contextual: Option<bool>,
+    /// `w:pBdr`'s sides, each as this level sets it; applying a level sets its sides over
+    /// these.
+    pub borders: BorderOverrides,
+    /// `w:shd`.
+    pub shading: Option<Shading>,
     /// `w:outlineLvl`: a heading's level (1 to 9), `Some(None)` for body text.
     pub outline: Option<Option<u8>>,
     /// `w:numPr`: the numbering instance (0 = no list) and level.
@@ -221,6 +227,13 @@ impl ParaProps {
         set(&mut self.indent_right, &over.indent_right);
         set(&mut self.indent_first, &over.indent_first);
         set(&mut self.contextual, &over.contextual);
+        let (b, o) = (&mut self.borders, &over.borders);
+        set(&mut b.top, &o.top);
+        set(&mut b.bottom, &o.bottom);
+        set(&mut b.left, &o.left);
+        set(&mut b.right, &o.right);
+        set(&mut b.between, &o.between);
+        set(&mut self.shading, &over.shading);
         set(&mut self.outline, &over.outline);
         if over.num_id.is_some() {
             self.num_id = over.num_id;
@@ -233,7 +246,8 @@ impl ParaProps {
         merge_tabs(&mut self.tabs, &over.tabs);
     }
 
-    /// The spacing and indents this level sets, as a paragraph's own in the model.
+    /// The spacing, indents, borders, and shading this level sets, as a paragraph's own in
+    /// the model.
     pub fn overrides(&self) -> ParaOverrides {
         ParaOverrides {
             space_before: self.space_before,
@@ -243,6 +257,8 @@ impl ParaProps {
             indent_right: self.indent_right,
             indent_first: self.indent_first,
             contextual: self.contextual,
+            borders: self.borders,
+            shading: self.shading,
         }
     }
 
@@ -263,6 +279,7 @@ impl ParaProps {
                     b"numPr" => p.numbering(r)?,
                     b"sectPr" => p.section = Some(Section::read(r)?),
                     b"tabs" => p.tabs = read_tabs(r)?,
+                    b"pBdr" => p.borders = read_borders(r)?,
                     _ => {
                         p.property(&e);
                         xml::skip(r, &e)?;
@@ -347,6 +364,7 @@ impl ParaProps {
                 }
             }
             b"contextualSpacing" => self.contextual = Some(xml::on(e)),
+            b"shd" => self.shading = Some(shading(e)),
             b"outlineLvl" => {
                 if let Some(n) = xml::num::<u8>(e, b"val") {
                     self.outline = Some((n < 9).then_some(n + 1));
@@ -355,6 +373,97 @@ impl ParaProps {
             _ => {}
         }
     }
+}
+
+/// The sides of a `w:pBdr` just started, up to its end: `start` and `end` read as left and
+/// right; the bar border (a line in the page's margin) is left out.
+pub(crate) fn read_borders(r: &mut XmlReader<'_>) -> Result<BorderOverrides, DocxError> {
+    let mut borders = BorderOverrides::default();
+    loop {
+        match r.read_event()? {
+            Event::Empty(e) | Event::Start(e) => {
+                let side = match xml::local(&e) {
+                    b"top" => Some(&mut borders.top),
+                    b"bottom" => Some(&mut borders.bottom),
+                    b"left" | b"start" => Some(&mut borders.left),
+                    b"right" | b"end" => Some(&mut borders.right),
+                    b"between" => Some(&mut borders.between),
+                    _ => None,
+                };
+                if let Some(side) = side {
+                    *side = Some(border(&e));
+                }
+            }
+            Event::End(e) if e.local_name().as_ref() == b"pBdr" => return Ok(borders),
+            Event::Eof => return Err(DocxError::Xml("unclosed w:pBdr".into())),
+            _ => {}
+        }
+    }
+}
+
+/// A `w:pBdr` side (ADR 0009): Word's line styles as the nearest the model draws, as
+/// LibreOffice reads them: `nil`, `none`, and unknown ones no line; dot-dash ones dashed;
+/// triple and thin-thick ones double; `thick` a line twice the width; the rest (wavy,
+/// 3-D, inset, outset, art borders) single.
+fn border(e: &BytesStart<'_>) -> Border {
+    let style = match xml::val(e).as_deref() {
+        None | Some("nil" | "none") => BorderStyle::None,
+        Some("thick") => BorderStyle::Thick,
+        Some("dotted") => BorderStyle::Dotted,
+        Some("dashed" | "dashSmallGap" | "dotDash" | "dotDotDash" | "dashDotStroked") => {
+            BorderStyle::Dashed
+        }
+        Some(v) if v == "double" || v == "triple" || v.starts_with("thinThick") => {
+            BorderStyle::Double
+        }
+        Some(v) if v.starts_with("thickThin") || v == "doubleWave" => BorderStyle::Double,
+        Some(_) => BorderStyle::Single,
+    };
+    if style == BorderStyle::None {
+        return Border::default();
+    }
+    Border {
+        style,
+        width: xml::num::<u32>(e, b"sz").map_or(4, |v| v.min(96) as u16),
+        space: xml::num::<u32>(e, b"space").map_or(0, |v| v.min(31) as u16),
+        color: xml::attr(e, b"color").and_then(|v| rgb(&v)),
+    }
+}
+
+/// A `w:shd`'s fill (ADR 0009), as LibreOffice shows it: its `w:fill` (none when
+/// automatic); a solid pattern's `w:color` (black when automatic); a percentage pattern's
+/// colour over its fill (white when automatic) by that much; none for `nil`. Other
+/// patterns (stripes, grids) are drawn as their fill.
+fn shading(e: &BytesStart<'_>) -> Shading {
+    const BLACK: Rgb = [0, 0, 0];
+    const WHITE: Rgb = [0xFF; 3];
+    let colour = |name: &[u8]| xml::attr(e, name).and_then(|v| rgb(&v));
+    let val = xml::val(e);
+    let percent = val
+        .as_deref()
+        .and_then(|v| v.strip_prefix("pct"))
+        .and_then(|p| p.parse::<u16>().ok())
+        .filter(|&p| p <= 100);
+    let fill = match (val.as_deref(), percent) {
+        (Some("nil"), _) => None,
+        (Some("solid"), _) => Some(colour(b"color").unwrap_or(BLACK)),
+        (_, Some(p)) => {
+            let (front, back) = (
+                colour(b"color").unwrap_or(BLACK),
+                colour(b"fill").unwrap_or(WHITE),
+            );
+            let mix = |f: u8, b: u8| {
+                ((u32::from(f) * u32::from(p) + u32::from(b) * u32::from(100 - p) + 50) / 100) as u8
+            };
+            Some([
+                mix(front[0], back[0]),
+                mix(front[1], back[1]),
+                mix(front[2], back[2]),
+            ])
+        }
+        _ => colour(b"fill"),
+    };
+    Shading { fill }
 }
 
 /// The stops of a `w:tabs` just started, up to its end, in position order: `start` and
@@ -703,6 +812,8 @@ impl Styles {
                 align: ppr.align.unwrap_or_default(),
                 spacing: ppr.spacing(),
                 tabs: effective_tabs(&ppr.tabs, &[]),
+                borders: ppr.borders.over(Borders::default()),
+                shading: ppr.shading.unwrap_or_default(),
             },
         }
     }
@@ -903,6 +1014,66 @@ mod tests {
         assert_eq!((s.indent_left, s.indent_first), (720, -360));
         assert_eq!(s.line, LineSpacing::Exact(300));
         assert_eq!(s.space_before, 240);
+    }
+
+    #[test]
+    fn borders_and_shading_come_from_the_defaults_styles_and_the_paragraph() {
+        let xml = format!(
+            "<w:styles {W}><w:docDefaults><w:pPrDefault><w:pPr>\
+             <w:pBdr><w:bottom w:val=\"single\" w:sz=\"4\" w:space=\"1\" w:color=\"auto\"/></w:pBdr>\
+             <w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"EEEEEE\"/>\
+             </w:pPr></w:pPrDefault></w:docDefaults>\
+             <w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/></w:style>\
+             <w:style w:type=\"paragraph\" w:styleId=\"Plain\"><w:name w:val=\"Plain\"/><w:basedOn w:val=\"Normal\"/>\
+             <w:pPr><w:pBdr><w:top w:val=\"thinThickSmallGap\" w:sz=\"12\" w:space=\"2\" w:color=\"FF0000\"/>\
+             <w:bottom w:val=\"nil\"/></w:pBdr><w:shd w:val=\"nil\"/></w:pPr></w:style>\
+             </w:styles>"
+        );
+        let sheet = Styles::parse(&xml, Theme::default()).unwrap().sheet();
+        let normal = &sheet.get("Normal").unwrap().para;
+        let rule = Border {
+            style: BorderStyle::Single,
+            width: 4,
+            space: 1,
+            color: None,
+        };
+        assert_eq!(normal.borders.bottom, rule);
+        assert_eq!(normal.shading.fill, Some([0xEE; 3]));
+        // Plain's own top over the defaults; its nil bottom and fill remove theirs.
+        let plain = &sheet.get("Plain").unwrap().para;
+        assert_eq!(
+            plain.borders.top,
+            Border {
+                style: BorderStyle::Double,
+                width: 12,
+                space: 2,
+                color: Some([0xFF, 0, 0]),
+            }
+        );
+        assert!(!plain.borders.bottom.is_drawn());
+        assert_eq!(plain.shading.fill, None);
+
+        // A paragraph's own: `start` and `end` are left and right; the bar is left out.
+        let ppr = format!(
+            "<w:pPr {W}><w:pBdr><w:start w:val=\"dotted\" w:sz=\"8\" w:space=\"4\"/>\
+             <w:end w:val=\"dashSmallGap\" w:sz=\"8\" w:space=\"4\"/><w:bar w:val=\"single\"/>\
+             </w:pBdr><w:shd w:val=\"solid\" w:color=\"00FF00\" w:fill=\"FF0000\"/></w:pPr>"
+        );
+        let mut r = xml::reader(&ppr);
+        let _ = r.read_event();
+        let own = ParaProps::read(&mut r).unwrap().overrides();
+        assert_eq!(own.borders.left.map(|b| b.style), Some(BorderStyle::Dotted));
+        assert_eq!(
+            own.borders.right.map(|b| b.style),
+            Some(BorderStyle::Dashed)
+        );
+        assert_eq!((own.borders.top, own.borders.between), (None, None));
+        assert_eq!(
+            own.shading,
+            Some(Shading {
+                fill: Some([0, 0xFF, 0])
+            })
+        );
     }
 
     #[test]

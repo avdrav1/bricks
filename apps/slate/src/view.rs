@@ -2141,6 +2141,40 @@ fn draw(
             let outline = gsk::RoundedRect::from_rect(rect(x, y, width as f32, height as f32), 0.0);
             snapshot.append_border(&outline, &[1.0; 4], &[rgba(LINE); 4]);
         }
+        Paint::Fill {
+            x,
+            y,
+            width,
+            height,
+            color,
+        } => {
+            let (x, y) = at(x, y);
+            let bounds = rect(x, y, width as f32, height as f32);
+            snapshot.append_color(&rgba(shaper::hex(color)), &bounds);
+        }
+        Paint::Stroke {
+            x,
+            y,
+            width,
+            height,
+            dash,
+            color,
+        } => {
+            let (x, y) = at(x, y);
+            let colour = rgba(color.map_or(INK, shaper::hex));
+            // Dots and dashes run along the stroke's longer side.
+            if width >= height {
+                for (at, length) in dash.pieces(width, height) {
+                    let piece = rect(x + at as f32, y, length as f32, height as f32);
+                    snapshot.append_color(&colour, &piece);
+                }
+            } else {
+                for (at, length) in dash.pieces(height, width) {
+                    let piece = rect(x, y + at as f32, width as f32, length as f32);
+                    snapshot.append_color(&colour, &piece);
+                }
+            }
+        }
     }
 }
 

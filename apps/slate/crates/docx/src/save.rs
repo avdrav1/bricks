@@ -12,8 +12,8 @@
 //!   replaces none, of the paragraph copied next to it): the paragraph mark's look stays;
 //!   its style (by id: a built-in heading, title, or quote the document lacks is added, any
 //!   other unknown id is the default), list numbering, alignment, own tab stops (`w:tabs`),
-//!   and own spacing and indents (`w:spacing`, `w:ind`, `w:contextualSpacing`; ADR 0009)
-//!   are set where they differ. A run
+//!   own spacing and indents (`w:spacing`, `w:ind`, `w:contextualSpacing`), and own
+//!   borders and shading (`w:pBdr`, `w:shd`; ADR 0009) are set where they differ. A run
 //!   whose direct formatting is that of a run in that paragraph takes its run properties
 //!   as they are (but not an automatic colour in a coloured style: the model reads it as
 //!   the style's colour, and writes that); any other run's are its direct formatting
@@ -47,8 +47,9 @@ use crate::numbering::Numbering;
 use crate::styles::{ParaProps, RunProps, Styles};
 use crate::{dir_of, rel_kind, rels_part, DocxError, MainPart, Package, Rel};
 use document_model::{
-    match_blocks_by, Align, Block, Image, ImageFormat, ImageSource, LineSpacing, ListKind,
-    ParaOverrides, Paragraph, Rgb, Run, RunStyle, StyleSheet, TabAlign, TabLeader, TabStop, Table,
+    match_blocks_by, Align, Block, Border, BorderStyle, Image, ImageFormat, ImageSource,
+    LineSpacing, ListKind, ParaOverrides, Paragraph, Rgb, Run, RunStyle, StyleSheet, TabAlign,
+    TabLeader, TabStop, Table,
 };
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -1308,11 +1309,11 @@ impl<'a> Patcher<'a> {
         out: &mut String,
     ) -> String {
         match block {
-            Block::Paragraph(p) => self.paragraph(p, None, template, sect, lead, None),
+            Block::Paragraph(p) => self.paragraph(p, None, template, sect, lead),
             Block::ListItem(item) => {
                 let bullet = matches!(item.kind, ListKind::Bullet | ListKind::Task { .. });
                 let list = Some((bullet, item.level.min(8)));
-                self.paragraph(&item.paragraph, list, template, sect, lead, None)
+                self.paragraph(&item.paragraph, list, template, sect, lead)
             }
             Block::CodeBlock(code) => {
                 let text = code.text.strip_suffix('\n').unwrap_or(&code.text);
@@ -1327,14 +1328,8 @@ impl<'a> Patcher<'a> {
                     let mut p = Paragraph::default();
                     p.push(line, &style);
                     let last = lines.peek().is_none();
-                    let written = self.paragraph(
-                        &p,
-                        None,
-                        template,
-                        if last { sect } else { None },
-                        lead,
-                        None,
-                    );
+                    let written =
+                        self.paragraph(&p, None, template, if last { sect } else { None }, lead);
                     lead = "";
                     if last {
                         return written;
@@ -1349,20 +1344,24 @@ impl<'a> Patcher<'a> {
                     raw.source.trim_end_matches(['\n', '\r']),
                     &RunStyle::default(),
                 );
-                self.paragraph(&p, None, template, sect, lead, None)
+                self.paragraph(&p, None, template, sect, lead)
             }
             Block::Rule => {
-                let border = "<w:pBdr><w:bottom w:val=\"single\" w:sz=\"6\" w:space=\"1\" \
-                              w:color=\"auto\"/></w:pBdr>";
-                let p = Paragraph::default();
-                self.paragraph(&p, None, template, sect, lead, Some(border))
+                let mut p = Paragraph::default();
+                p.own.borders.bottom = Some(Border {
+                    style: BorderStyle::Single,
+                    width: 6,
+                    space: 1,
+                    color: None,
+                });
+                self.paragraph(&p, None, template, sect, lead)
             }
             _ => unreachable!("not a paragraph"),
         }
     }
 
     /// A paragraph without its end tag: `list` is its list kind (bulleted) and level,
-    /// `lead` runs it starts with, `border` a `w:pBdr`.
+    /// `lead` runs it starts with.
     fn paragraph(
         &mut self,
         p: &Paragraph,
@@ -1370,9 +1369,8 @@ impl<'a> Patcher<'a> {
         template: Option<&Template<'a>>,
         sect: Option<&str>,
         lead: &str,
-        border: Option<&str>,
     ) -> String {
-        let ppr = self.ppr(p, list, template, sect, border);
+        let ppr = self.ppr(p, list, template, sect);
         let color = self.style_color(&self.written_style(&p.style));
         let mut s = format!("<w:p{}>{ppr}{lead}", self.w_decl);
         let mut i = 0;
@@ -1399,14 +1397,13 @@ impl<'a> Patcher<'a> {
     }
 
     /// A paragraph's `w:pPr`: its template's, with its style, alignment, own tab stops,
-    /// spacing, and indents, list, border, and section as the model has them.
+    /// spacing, indents, borders, and shading, list, and section as the model has them.
     fn ppr(
         &mut self,
         p: &Paragraph,
         list: Option<(bool, u8)>,
         template: Option<&Template<'a>>,
         sect: Option<&str>,
-        border: Option<&str>,
     ) -> String {
         let mut props = template
             .and_then(|t| t.ppr)
@@ -1481,10 +1478,7 @@ impl<'a> Patcher<'a> {
             }
         }
         own_spacing(&mut props, &p.own);
-        if let Some(border) = border {
-            props.remove(&["pBdr"]);
-            props.push("pBdr", border.to_owned());
-        }
+        own_borders(&mut props, &p.own);
         if let Some(sect) = sect {
             props.push("sectPr", sect.to_owned());
         }
@@ -1813,7 +1807,7 @@ impl<'a> Patcher<'a> {
                 };
                 p.push(link_text(image, url), &style);
                 // Just the runs: a paragraph's start tag is dropped.
-                let xml = self.paragraph(&p, None, None, None, "", None);
+                let xml = self.paragraph(&p, None, None, None, "");
                 let start = xml.find('>').map_or(0, |i| i + 1);
                 return xml[start..].to_owned();
             }
@@ -2183,6 +2177,66 @@ fn own_spacing(props: &mut Props, own: &ParaOverrides) {
             None => {}
         }
     }
+}
+
+/// A paragraph's own borders and shading (ADR 0009) in `props`, its template's `w:pPr`:
+/// the template's `w:pBdr` and `w:shd` stay as written (with what the model doesn't hold,
+/// like a line style it draws as the nearest, or a shading pattern) where they give the
+/// model's values; the others are written from the model.
+fn own_borders(props: &mut Props, own: &ParaOverrides) {
+    let had = props.para_props();
+    if had.borders != own.borders {
+        props.remove(&["pBdr"]);
+        let b = &own.borders;
+        let sides: String = [
+            ("top", b.top),
+            ("left", b.left),
+            ("bottom", b.bottom),
+            ("right", b.right),
+            ("between", b.between),
+        ]
+        .into_iter()
+        .filter_map(|(side, border)| border.map(|border| border_xml(side, &border)))
+        .collect();
+        if !sides.is_empty() {
+            props.push("pBdr", format!("<w:pBdr>{sides}</w:pBdr>"));
+        }
+    }
+    if had.shading != own.shading {
+        props.remove(&["shd"]);
+        if let Some(shading) = own.shading {
+            props.push(
+                "shd",
+                format!(
+                    "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"{}\"/>",
+                    hex(shading.fill)
+                ),
+            );
+        }
+    }
+}
+
+/// A `w:pBdr` side `side` from the model.
+fn border_xml(side: &str, border: &Border) -> String {
+    let val = match border.style {
+        BorderStyle::None => return format!("<w:{side} w:val=\"nil\"/>"),
+        BorderStyle::Single => "single",
+        BorderStyle::Thick => "thick",
+        BorderStyle::Double => "double",
+        BorderStyle::Dotted => "dotted",
+        BorderStyle::Dashed => "dashed",
+    };
+    format!(
+        "<w:{side} w:val=\"{val}\" w:sz=\"{}\" w:space=\"{}\" w:color=\"{}\"/>",
+        border.width,
+        border.space,
+        hex(border.color)
+    )
+}
+
+/// A colour as WordprocessingML writes it: `RRGGBB`, or `auto`.
+fn hex(color: Option<Rgb>) -> String {
+    color.map_or("auto".into(), |[r, g, b]| format!("{r:02X}{g:02X}{b:02X}"))
 }
 
 /// A new media part's extension and content type, from its first bytes.

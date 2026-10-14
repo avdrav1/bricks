@@ -573,7 +573,7 @@ fn libreoffice_reads_the_edits_and_everything_else_as_before() {
             // The heading style added in Word's look, based on the default style.
             let text = "A right-aligned paragraph.";
             want.push(format!(
-                "para\tHeading 4\t-\t\"\"\tend\t240\t120\tauto:100\t0\t0\t0\t0\t\"{text}\""
+                "para\tHeading 4\t-\t\"\"\tend\t240\t120\tauto:100\t0\t0\t0\t0\t-\t-\t-\t-\t-\t\"{text}\""
             ));
             let run = lines.next().unwrap();
             let font = run.split('\t').nth(2).unwrap();
@@ -976,7 +976,7 @@ fn libreoffice_shows_a_colour_cleared_in_a_coloured_style_as_the_styles() {
     let dest = auto_and_red_cleared("libreoffice-auto");
     assert_eq!(
         lo_dump(&dest, 2183),
-        "para\tFancy\t-\t\"\"\tstart\t0\t0\tauto:100\t0\t0\t0\t0\t\"Auto red\"\n\
+        "para\tFancy\t-\t\"\"\tstart\t0\t0\tauto:100\t0\t0\t0\t0\t-\t-\t-\t-\t-\t\"Auto red\"\n\
          run\t-\tLiberation Sans\t13\t2E74B5\t\"Auto red\"\n"
     );
 }

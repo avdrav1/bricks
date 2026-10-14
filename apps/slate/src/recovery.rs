@@ -317,7 +317,10 @@ pub fn offers_left() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use document_model::{LineSpacing, ParaOverrides, Paragraph, RunStyle};
+    use document_model::{
+        Border, BorderOverrides, BorderStyle, LineSpacing, ParaOverrides, Paragraph, RunStyle,
+        Shading,
+    };
 
     /// A journal reads back its header and blocks; listing reads only the header, newest
     /// first; a file that isn't a journal is left out.
@@ -339,6 +342,17 @@ mod tests {
             space_before: Some(120),
             line: Some(LineSpacing::Exact(300)),
             indent_first: Some(-360),
+            borders: BorderOverrides {
+                bottom: Some(Border {
+                    style: BorderStyle::Double,
+                    width: 4,
+                    space: 1,
+                    color: Some([0xC0, 0, 0]),
+                }),
+                top: Some(Border::default()),
+                ..BorderOverrides::default()
+            },
+            shading: Some(Shading { fill: None }),
             ..ParaOverrides::default()
         };
         let blocks = vec![Block::Paragraph(p), Block::PageBreak];

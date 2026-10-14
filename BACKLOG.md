@@ -145,7 +145,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | SLATE-24 | SL4 | P0 | done | SLATE-23 | Tab stops: default stop and each paragraph's own (ADR 0009) | Tabs advance to the paragraph's stops (left, centre, right, decimal, with leaders; `clear` removes an inherited one), then to `w:defaultTabStop` multiples (0.5″ when absent); in the GUI check a right-aligned stop at the text width ends "Remote" at the column's right edge within 2 px, text after runs of default tabs starts at a multiple of the default stop (twips / 15 px) within 2 px, a centre stop centres its text on it, and a dot leader fills to its stop; the model reads and saves stops unchanged |
 | SLATE-25 | SL4 | P0 | done | SLATE-23 | Embedded fonts and family fallbacks (ADR 0009) | A .docx's embedded fonts (plain .ttf and Word's obfuscated .odttf, de-obfuscated with `w:fontKey`) draw its runs: a run in an embedded family measures as Pango measures that font within 2 px; a family neither installed nor embedded falls back by the font table's `w:family` (a `roman` font draws in the system serif, a `swiss` one in sans); saving keeps the font parts byte for byte |
 | SLATE-26 | SL4 | P0 | done | SLATE-23 | A paragraph's own spacing and indents (ADR 0009) | `w:spacing` and `w:ind` on a paragraph override its style's: LibreOffice's dump of each paragraph's own space before and after, line spacing, and left, right, and first-line indents matches Slate's model over the corpus; they draw (flow tests to the pixel) and save back unchanged, and an edited paragraph keeps them |
-| SLATE-27 | SL4 | P0 | todo | SLATE-26 | Paragraph borders and shading (ADR 0009) | `w:pBdr` (top, bottom, left, right, between; single, double, dotted, dashed; width, space, colour) and `w:shd` fills, a paragraph's own and its style's, draw around and behind the paragraph: in the GUI check a bottom border lies under the text by its space and width within 2 px and a shaded paragraph's box is its fill colour; LibreOffice's dump of borders and shading matches the model; they save back unchanged |
+| SLATE-27 | SL4 | P0 | done | SLATE-26 | Paragraph borders and shading (ADR 0009) | `w:pBdr` (top, bottom, left, right, between; single, double, dotted, dashed; width, space, colour) and `w:shd` fills, a paragraph's own and its style's, draw around and behind the paragraph: in the GUI check a bottom border lies under the text by its space and width within 2 px and a shaded paragraph's box is its fill colour; LibreOffice's dump of borders and shading matches the model; they save back unchanged |
 | SLATE-28 | SL4 | P0 | todo | SLATE-26 | List markers from the numbering (ADR 0009) | Each list item's marker is its level's `w:lvlText` in the level's run font (Symbol and Wingdings glyphs mapped to Unicode), at the level's left and hanging indents with the tab after it: the corpus' markers match LibreOffice's list labels and the GUI check draws "●" bullets at their indent within 2 px |
 | FRAME-1 | FR0 | P0 | done | - | Presentation model and PPTX package: slide order, size, shapes, placeholder inheritance | Slide count, order, size, and every shape's frame in the fixtures and a real-world deck match LibreOffice's dump within 1 EMU; placeholders without a frame take their layout's or master's |
 | FRAME-2 | FR0 | P0 | done | FRAME-1 | PPTX text: runs, fonts, sizes, colours, bullets, levels, alignment, inherited styles | Every paragraph's text, level, alignment, and every run's size, bold, italic, and colour match LibreOffice's dump; theme colours resolve with lumMod, lumOff, tint, and shade |
@@ -167,6 +167,32 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-14 SLATE-27:** paragraph borders and shading (ADR 0009). A subagent built it; it was integrated and verified here.
+  - Model: `BorderStyle` (None, Single, Thick, Double, Dotted, Dashed) and `Border` (style, `w:sz` eighths, `w:space` points, colour or automatic); `Borders` holds top, bottom, left, right, and between. `BorderOverrides` sets sides one by one, so a nil side removes the style's. `Shading { fill }`. `ParaLook` gains borders and shading, and `ParaOverrides` gains `borders` and `shading`. Resolvers: `StyleSheet::borders`, `shading`, and `bordered_together` (Word's group rule).
+  - Reader: `w:pBdr` (start and end as left and right; no bar border) and `w:shd`, merged side by side along pPrDefault, basedOn, and the paragraph, in table cells too. Styles map as LibreOffice reads them: dash variants draw dashed, triple, thinThick, and the like double, wave, 3-D, and art single. `clear` uses the fill, `solid` the colour, and pctNN blends.
+  - Flow: `TextBox.frame` holds the paragraph's frame. The top and bottom zones (space plus lines, whole px) add to the height in measuring and estimating, inside the space before and after. Left and right lines lie their space outside the indents. In a group, the top line is drawn on the first paragraph, between lines on the later ones, and the bottom line on the last.
+  - Paints `Fill` and `Stroke { dash }` are drawn in `view.rs`. A Markdown rule is now a paragraph with its own bottom border, written byte-identical to before.
+  - Saving keeps an edited paragraph's `w:pBdr` and `w:shd` byte for byte when they give the model's values; otherwise they're written from the model in schema order. Enter, `bare()`, and the journal carry them.
+  - `scripts/lo_docx.py borders OUT` makes `tests/data/borders.docx`, 22 paragraphs including the résumé's title rule as Google Docs writes it. The dump gains TOP, BOTTOM, BORDERLEFT, BORDERRIGHT, and FILL, and all 8 recorded dumps were regenerated (only the new fields changed).
+  - Deviations:
+    - Thick draws at 2× `w:sz` and double at 3×, as LibreOffice reads them.
+    - Strokes are whole px, at least 1, so a 0.5 pt rule lies 1 px (not 1.33) under the text.
+    - Automatic text on dark shading stays ink; Word turns it white. Follow-up.
+    - Shading alone never groups.
+    - Patterns other than pctNN draw as their fill.
+  - Acceptance:
+    - `cargo test -p docx --test libreoffice` (4): borders and fill match LibreOffice over the corpus and borders.docx, within 1 twip.
+    - `--test borders -- --include-ignored` (4): edited paragraphs keep their bytes, Enter keeps both halves, and LibreOffice reads them back.
+    - Flow: 4 pixel-exact tests (heights, groups with insertion and removal, nil frames, dash pieces).
+    - `scripts/check_slate.sh` SLATE OK, 272 checks, 16 of them new in section 32:
+      - The résumé's rule lies 1 px under the line box (1.33 wanted), spans the column to 0 px, and is 1 px thick.
+      - The fill is FFE599 across the column, as tall as its line.
+      - The box's sides are each 7 px out (6.67 wanted).
+      - A nil paragraph draws 0 extra pixels.
+      - Saving keeps the other paragraphs' bytes.
+    - The first full run failed section 27's journal timing ("typing for 20 s: first journal after …"), a check SLATE-27 doesn't touch; the rerun passed. It's timing-sensitive under load.
+  - `flow_perf`, with 5 tests in parallel: Word document whole 336 ms max, first frame 14.6 ms, scroll p99 10.7 ms, typing p99 21.9 ms (18.1 ms alone, against 18.2 before); Markdown typing p99 19.9 ms; first match 17.6 ms. All within targets.
+  - The user's résumé now has its rule under the name. Follow-up: Pango breaks the contact line's URL at a `/` ("https://linkedin.com/ in/dravid"), where Word and Google Docs move the whole URL to the next line.
 - **2026-10-14 SLATE-26:** a paragraph's own spacing and indents (ADR 0009). A subagent built it; it was integrated and verified here.
   - Model: `Paragraph.own: ParaOverrides` holds space before and after, line spacing, left, right, and first-line indents, and contextual spacing, each `Option` (serde default; old journals load). `ParaLook` holds a `ParaSpacing`, which gained a right indent and contextual spacing. One resolver, `StyleSheet::spacing(&Paragraph)`, serves the flow, the drawing, and the LibreOffice test.
   - The reader reads `w:right` and `w:end` and `w:contextualSpacing`. Automatic spacing counts as 280 twips.
