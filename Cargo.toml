@@ -28,10 +28,12 @@ members = [
     "apps/frame/crates/presentation-model",
     "apps/frame/crates/pptx",
     "apps/frame/crates/deck-edit",
+    # Etch-only crates
+    "apps/etch/crates/image-model",
 ]
 
 # `version` is Brick's release version (scripts/ship.sh bumps it); Brick and its crates
-# inherit it. Slate, Frame, and the suite-* crates set their own.
+# inherit it. Slate, Frame, Etch, and the suite-* crates set their own.
 [workspace.package]
 version = "0.3.0"
 edition = "2021"
@@ -63,6 +65,8 @@ document-edit = { path = "apps/slate/crates/document-edit" }
 presentation-model = { path = "apps/frame/crates/presentation-model" }
 pptx = { path = "apps/frame/crates/pptx" }
 deck-edit = { path = "apps/frame/crates/deck-edit" }
+# Etch crates
+image-model = { path = "apps/etch/crates/image-model" }
 # The suite's UI toolkit (docs/adr/0002-gtk4-for-the-suite.md); v4_14 matches Ubuntu 24.04's GTK.
 gtk = { package = "gtk4", version = "0.11", features = ["v4_14"] }
 # Every app logs through these.

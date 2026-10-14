@@ -20,7 +20,12 @@ pub enum AppKind {
 
 impl AppKind {
     /// Every application, in a stable order.
-    pub const ALL: [AppKind; 4] = [AppKind::Brick, AppKind::Slate, AppKind::Frame, AppKind::Etch];
+    pub const ALL: [AppKind; 4] = [
+        AppKind::Brick,
+        AppKind::Slate,
+        AppKind::Frame,
+        AppKind::Etch,
+    ];
 
     /// The name shown to people: window titles, menus, messages.
     pub fn display_name(self) -> &'static str {
