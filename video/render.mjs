@@ -8,8 +8,8 @@
 //   node render.mjs --from 30 --to 60     a stretch, in seconds
 //   node render.mjs --still 31.5 [--still 40 ...]   PNG frames, for checking a look
 //   node render.mjs --draft ...           render even though the page logs errors
-//   node render.mjs --voice bm_george     the narrator's voice (default af_heart; see voice.mjs)
-//   node render.mjs --speed 0.9           the narrator's pace (default 0.85, about 165 words a minute)
+//   node render.mjs --voice af_heart      the narrator's voice (default en-IE-ConnorNeural, Irish; see voice.mjs)
+//   node render.mjs --speed 0.9           the narrator's pace, relative to the voice's default
 //   node render.mjs --voice-only          just make the voiceover in .voice/ (for the preview)
 //   node render.mjs --no-voice            no voiceover: captions only, timed by word count
 //   node render.mjs --audio vo.wav        a voiceover recorded elsewhere instead, against the captions; the music ducks under it
@@ -25,7 +25,7 @@ import { cpus } from "node:os";
 import { join, extname, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
-import { makeVoice } from "./voice.mjs";
+import { makeVoice, DEFAULT_VOICE, defaultSpeed } from "./voice.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -98,7 +98,7 @@ async function render() {
     // whatever voiceover is already there.
     if (speak && !stills.length) {
       const lines = await first.page.evaluate(() => V.voiceLines());
-      const { changed } = await makeVoice({ lines, dir: join(here, ".voice"), voice: opt("voice", "af_heart"), speed: Number(opt("speed", 0.85)) });
+      const { changed } = await makeVoice({ lines, dir: join(here, ".voice"), voice: opt("voice", DEFAULT_VOICE), speed: Number(opt("speed", defaultSpeed(opt("voice", DEFAULT_VOICE)))) });
       if (args.includes("--voice-only")) return;
       if (changed) {
         await first.page.close();
