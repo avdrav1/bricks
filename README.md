@@ -1,6 +1,13 @@
 # Cronkite
 
-A Linux-native office suite written in Rust: Brick, Slate, and Frame. One repository, one Cargo workspace, three independently runnable applications. Install instructions: <https://cronkite.cc>.
+A Linux-native office suite written in Rust: Brick, Slate, Frame, and Etch. One repository, one Cargo workspace, four independently runnable applications. Install instructions: <https://cronkite.cc>.
+
+```text
+Brick — spreadsheet / CSV editor
+Slate — word processor
+Frame — presentation application
+Etch  — raster image editor
+```
 
 ## Applications
 
@@ -11,15 +18,19 @@ A fast CSV editor evolving toward a general spreadsheet application (`apps/brick
 - Initial product promise: open large CSV files faster and more smoothly than LibreOffice.
 - Long-term goal: become a serious Linux-native spreadsheet alternative.
 
-Brick is the most advanced of the three: it ships today (GTK 4), opens ~1 GB CSV files and `.xlsx` workbooks, and has formulas and cell styles. Install, usage, and its own layout: [`apps/brick/README.md`](apps/brick/README.md).
+Brick is the most advanced of the four: it ships today (GTK 4), opens ~1 GB CSV files and `.xlsx` workbooks, and has formulas and cell styles. Install, usage, and its own layout: [`apps/brick/README.md`](apps/brick/README.md).
 
 ### Slate
 
-A lightweight Linux-native word processor (`apps/slate`, command `slate`). Scaffold only.
+A lightweight, pageless Linux-native word processor for .txt, .md, and .docx (`apps/slate`, command `slate`). Spec: [`docs/specs/slate.md`](docs/specs/slate.md).
 
 ### Frame
 
-A lightweight Linux-native presentation application (`apps/frame`, command `frame`). Scaffold only. Frame is a working name.
+A lightweight Linux-native presentation application for .pptx, easier to use than PowerPoint (`apps/frame`, command `frame`). Frame is a working name. Spec: [`docs/specs/frame.md`](docs/specs/frame.md).
+
+### Etch
+
+A fast, approachable Linux-native raster image editor, closer to Paint than to Photoshop (`apps/etch`, command `etch`): draw, erase, crop, resize, annotate screenshots, and save PNG, JPEG, and BMP. In progress: the ET0 canvas prototype. Spec: [`docs/specs/etch.md`](docs/specs/etch.md).
 
 ## Layout
 
@@ -27,6 +38,7 @@ A lightweight Linux-native presentation application (`apps/frame`, command `fram
 apps/brick/           Brick: the app, its own crates (apps/brick/crates/), and its docs
 apps/slate/           Slate
 apps/frame/           Frame
+apps/etch/            Etch
 crates/suite-core     app-independent primitives (AppKind)
 crates/suite-ui       UI conventions shared by the apps
 crates/suite-platform OS integration (Linux)
@@ -34,8 +46,8 @@ crates/suite-file     format-independent file infrastructure
 docs/architecture/    how the suite is put together
 docs/adr/             suite-wide architecture decisions
 docs/specs/           one product spec per app
-BACKLOG.md            Brick's work queue, read by scripts/backlog.py
-scripts/, packaging/  tooling and packaging (desktop entries and icons for Brick, Slate, and Frame)
+BACKLOG.md            every app's work queue, read by scripts/backlog.py
+scripts/, packaging/  tooling and packaging (desktop entries and icons for the apps)
 sites/brick/          Brick's download page and installer (brick.cronkite.cc)
 sites/slate/          Slate's download page and installer (slate.cronkite.cc)
 sites/frame/          Frame's download page and installer (frame.cronkite.cc)
@@ -61,6 +73,7 @@ Run one application:
 cargo run -p brick
 cargo run -p slate
 cargo run -p frame
+cargo run -p etch
 ```
 
 Logs go to stderr.

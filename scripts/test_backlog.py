@@ -73,6 +73,17 @@ class ChainTest(unittest.TestCase):
         )
         self.assertEqual(backlog.next_story("slate")["id"], "SLATE-1")
 
+    def test_etch_gates_unlock_its_chain(self):
+        self.write(
+            ["- [ ] FR1: frame editor", "- [ ] ET0: etch canvas", "- [ ] ET1: etch paint"],
+            [row("FRAME-6", "FR1", "todo"), row("ETCH-1", "ET0", "done"), row("ETCH-6", "ET1", "todo")],
+        )
+        got = backlog.next_story("etch")
+        self.assertEqual((got["action"], got["milestone"]), ("gate", "ET0"))
+        backlog.check_gate("ET0")
+        got = backlog.next_story("etch")
+        self.assertEqual((got["action"], got["id"]), ("start", "ETCH-6"))
+
 
 if __name__ == "__main__":
     unittest.main()

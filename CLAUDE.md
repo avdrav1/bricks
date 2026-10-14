@@ -1,16 +1,17 @@
 # CLAUDE.md
 
-Cronkite: a Linux-native office suite in Rust: one Cargo workspace, three apps. Repo: `github.com/avdrav1/cronkite`; web pages: `sites/<name>/` (cronkite.cc, brick.cronkite.cc, slate.cronkite.cc, frame.cronkite.cc). Suite architecture: `docs/architecture/overview.md`; suite ADRs: `docs/adr/`.
+Cronkite: a Linux-native office suite in Rust: one Cargo workspace, four apps. Repo: `github.com/avdrav1/cronkite`; web pages: `sites/<name>/` (cronkite.cc, brick.cronkite.cc, slate.cronkite.cc, frame.cronkite.cc). Suite architecture: `docs/architecture/overview.md`; suite ADRs: `docs/adr/`.
 
 - **Brick** (`apps/brick`, command `brick`): a fast, lightweight spreadsheet. V0.1 is the best large-CSV editor on Linux; Excel compatibility comes later. Product spec: `apps/brick/docs/SPEC.md`. Work queue: `BACKLOG.md`.
 - **Slate** (`apps/slate`, command `slate`): pageless word processor for .txt, .md, and .docx: one endless column, never paginated, drawn by its own Pango flow. Spec: `docs/specs/slate.md`; design: `docs/adr/0003-slate-document-model.md`, `docs/adr/0005-slate-is-pageless.md`, `docs/adr/0007-slate-editing-engine.md`. SL0 builds a read-only viewer.
 - **Frame** (`apps/frame`, command `frame`): presentation app for .pptx, easier to use than PowerPoint: direct editing with one inspector, plus an outline view. Spec: `docs/specs/frame.md`; design: `docs/adr/0004-frame-presentation-model.md`, `docs/adr/0006-frame-editor.md`. FR0 builds a viewer with a slideshow.
+- **Etch** (`apps/etch`, command `etch`): raster image editor, closer to Paint than to Photoshop: pencil, brush, eraser, fill, shapes, text, selection, crop, resize, rotate; PNG, JPEG, BMP, edited as one RGBA8 image with tiled undo. Spec: `docs/specs/etch.md`; design: `docs/adr/0010-etch-image-model.md`. ET0 builds a canvas prototype.
 
 Everything below about stories, invariants, crates, benchmarks, and ADRs is Brick's unless it says otherwise.
 
 ## How we work
 
-- Build one story at a time with the `next-story` skill. Ship releases with the `ship-it` skill.
+- Build one story at a time with the `next-story` skill (`scripts/backlog.py next <app>`: each app has its own milestone chain in `BACKLOG.md`). Ship releases with the `ship-it` skill (`scripts/ship.sh <app> …`).
 - A story is done only when its acceptance criterion is proven by a test or a benchmark, not by reading the code.
 - Commit format: `<STORY-ID>: <imperative summary>`. One story per branch: `story/<id>-<slug>`.
 - Never push, merge, tag, or deploy without asking first.
@@ -82,7 +83,7 @@ Frame's crates, in `apps/frame/crates/`:
 cargo fmt --all
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace
-cargo run -p brick                       # or -p slate, -p frame
+cargo run -p brick                       # or -p slate, -p frame, -p etch
 cargo test --release --workspace -- --ignored  # perf acceptance tests (timing asserted in release only)
 python3 scripts/gen_corpus.py            # builds corpus/ (gitignored)
 python3 scripts/fetch_delimiter_sample.py  # 50 real-world files into corpus/realworld/ (ENG-4 test)
@@ -102,7 +103,7 @@ python3 scripts/blank_docx.py           # Slate's built-in blank document: apps/
 scripts/check_frame.sh [BINARY]          # Frame in a container: decks, drawing, Ctrl+O, drop, alerts, slideshow, editing, slides, save, shapes, inspector, insert, outline, new deck, with undo; the reference task counted against PowerPoint, read back by LibreOffice; the installer and a .pptx double-click (FRAME-4 to FRAME-15)
 python3 -m unittest discover -s scripts  # script tests (corpus generator, backlog helper)
 cargo bench                              # prints the apps/brick/docs/BENCHMARKS.md table (needs corpus/)
-python3 scripts/backlog.py next [brick|slate|frame]|status   # backlog helper; one milestone chain per app
+python3 scripts/backlog.py next [brick|slate|frame|etch]|status   # backlog helper; one milestone chain per app
 (cd video && npm ci && node render.mjs)   # the explainer video (docs/video/explainer-script.md) from HTML scenes, with a synthesised techno soundtrack (video/soundtrack.js) and a Kokoro TTS voiceover (video/voice.mjs, cached in video/.voice/) -> dist/video/; --serve previews, --still SCENE@SEC checks a frame, --voice NAME picks the narrator
 ```
 
