@@ -1,5 +1,6 @@
 //! The pencil: hard-edged lines of one colour, Bresenham's between the pixels the pointer
-//! reported, stamped with a disc for widths above one (ADR 0010).
+//! reported, stamped with a disc for widths above one (ADR 0010). The eraser is the same
+//! tip writing transparent pixels: the image is always RGBA, so erasing leaves alpha 0.
 
 use crate::geom::Rect;
 use crate::{Color, Image};
@@ -13,6 +14,14 @@ pub struct Pencil {
 }
 
 impl Pencil {
+    /// The eraser: a tip of `width` that sets pixels transparent.
+    pub const fn eraser(width: u32) -> Pencil {
+        Pencil {
+            color: Color::TRANSPARENT,
+            width,
+        }
+    }
+
     /// The rows of the tip's disc relative to the pixel it's stamped on: `(dy, dx0, dx1)`,
     /// the pixels `dx0..=dx1` of row `dy`. Pixel `(i, j)` of the tip's `width`-square is
     /// in when its distance from the square's centre is at most half the width; offsets

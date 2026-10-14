@@ -2,6 +2,7 @@
 //! New Image dialog; and the stroke benchmark (`--bench-stroke`).
 
 use crate::canvas::Canvas;
+use crate::tools::{self, Tool};
 use gtk::prelude::*;
 use gtk::{gdk, gio, glib};
 use image_model::{Color, Image, MAX_SIDE};
@@ -170,8 +171,12 @@ impl Status {
 fn show(app: &gtk::Application, image: Image, bench: Option<u32>) {
     let canvas = Canvas::new(image, bench.is_some());
     let (bar, status) = Status::new();
+    let middle = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    middle.append(&tools::column());
+    middle.append(&gtk::Separator::new(gtk::Orientation::Vertical));
+    middle.append(&canvas);
     let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    content.append(&canvas);
+    content.append(&middle);
     content.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
     content.append(&bar);
     let window = gtk::ApplicationWindow::builder()
@@ -197,13 +202,34 @@ fn show(app: &gtk::Application, image: Image, bench: Option<u32>) {
         action("actual-size", Canvas::actual_size),
         action("fit", Canvas::fit),
     ]);
+    // The tool: the tool column's buttons and the tool keys set it.
+    let tool = gio::ActionEntry::builder("tool")
+        .parameter_type(Some(glib::VariantTy::STRING))
+        .state(Tool::default().id().to_variant())
+        .activate(|_: &gtk::ApplicationWindow, action, target| {
+            if let Some(target) = target {
+                action.change_state(target);
+            }
+        })
+        .change_state({
+            let canvas = canvas.clone();
+            move |_: &gtk::ApplicationWindow, action, state| {
+                let picked = state.and_then(|s| s.str()).and_then(Tool::from_id);
+                if let (Some(t), Some(state)) = (picked, state) {
+                    action.set_state(state);
+                    canvas.set_tool(t);
+                }
+            }
+        })
+        .build();
+    window.add_action_entries([tool]);
 
     // Space held: dragging pans. Ctrl+Shift+Z redoes (shifted, z may arrive as Z; Edit →
-    // Redo's accelerator is Ctrl+Y).
+    // Redo's accelerator is Ctrl+Y). A tool's key, unmodified, picks it.
     let keys = gtk::EventControllerKey::new();
     keys.set_propagation_phase(gtk::PropagationPhase::Capture);
     keys.connect_key_pressed({
-        let canvas = canvas.clone();
+        let (canvas, window) = (canvas.clone(), window.downgrade());
         move |_, key, _, state| {
             let mods = state & gtk::accelerator_get_default_mod_mask();
             let redo = gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK;
@@ -213,6 +239,15 @@ fn show(app: &gtk::Application, image: Image, bench: Option<u32>) {
             }
             if mods == redo && matches!(key, gdk::Key::z | gdk::Key::Z) {
                 canvas.redo();
+                return glib::Propagation::Stop;
+            }
+            let picked = key.to_unicode().and_then(|c| {
+                Tool::ALL
+                    .into_iter()
+                    .find(|t| t.key() == c.to_ascii_uppercase())
+            });
+            if let (true, Some(t), Some(w)) = (mods.is_empty(), picked, window.upgrade()) {
+                ActionGroupExt::activate_action(&w, "tool", Some(&t.id().to_variant()));
                 return glib::Propagation::Stop;
             }
             glib::Propagation::Proceed

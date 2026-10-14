@@ -28,6 +28,11 @@
 #   8. `etch --bench-stroke 120` draws a stroke on a 7680x4320 image at 100% a segment a
 #      frame, each segment under 8 ms p99 (frame times printed; the frame target is the
 #      reference box's, not this software-rendered container's).
+# ETCH-3 acceptance: the eraser and the tool column.
+#   9. on a new image the tool column shows Pencil on; a pencil line drawn, a click on
+#      Eraser turns it on (and Pencil off), and the same drag erases the line: no black
+#      left, and the checkerboard's grey shows through where it was; Ctrl+Z gives the
+#      line back (as many black pixels, no grey); the P and E keys pick the tools.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -125,6 +130,11 @@ elif cmd == "sharp":
     black = sum(1 for p in box if max(p) < 60)
     between = sum(1 for p in box if 60 <= max(p) and min(p) < 245)
     print(f"black {black} between {between}")
+elif cmd == "checker":
+    # Pixels inside the image of the checkerboard grey (CCCCCC): transparency shown.
+    at, l, t, w, h = image(sys.argv[2])
+    print(sum(1 for y in range(t + 2, t + h - 2) for x in range(l + 2, l + w - 2)
+              if all(195 <= c <= 213 for c in at(x, y))))
 PY
 session() {
   WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 sway --unsupported-gpu -c /tmp/sway.conf >/tmp/sway.log 2>&1 &
@@ -220,6 +230,25 @@ session() {
   echo "== 8 bench"
   pkill -x etch; sleep 1
   etch --bench-stroke 120 2>>/tmp/app.log | sed "s/^/bench: /"
+
+  echo "== 9 eraser"
+  etch >>/tmp/app.log 2>&1 & sleep 3
+  keys -M ctrl 0 -m ctrl
+  tool() { python3 /tmp/a11y.py state $1; }
+  echo "start: pencil $(tool Pencil) eraser $(tool Eraser)"
+  read mx my <<<"$(px centre)"
+  ax=$((mx - 150)); ay=$((my - 80)); bx=$((mx + 150)); by=$((my + 80))
+  python3 /scripts/dnd_helpers.py drag $ax $ay $bx $by; sleep 0.5
+  shot pencilled; drawn=$(px black /tmp/shot.png); echo "black: $drawn"
+  python3 /tmp/a11y.py press Eraser; sleep 0.5
+  echo "pressed: pencil $(tool Pencil) eraser $(tool Eraser)"
+  python3 /scripts/dnd_helpers.py drag $ax $ay $bx $by; sleep 0.5
+  shot erased; echo "erased: black $(px black /tmp/shot.png) grey $(px checker /tmp/shot.png)"
+  keys -M ctrl z -m ctrl; shot unerased
+  echo "unerased: $(same $drawn $(px black /tmp/shot.png)) grey $(px checker /tmp/shot.png)"
+  keys p; echo "key p: pencil $(tool Pencil) eraser $(tool Eraser)"
+  keys e; echo "key e: pencil $(tool Pencil) eraser $(tool Eraser)"
+  pkill -x etch
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -245,7 +274,7 @@ check "3: Ctrl+Z removes the stroke" "3 undo" "^undone: 0$"
 check "3: Ctrl+Shift+Z restores it" "3 undo" "^redone: yes$"
 check "3: Ctrl+Y redoes too" "3 undo" "^redone y: yes$"
 check "4: resizing the window keeps the drawing" "4 resize" "^resized: yes$"
-check "4: ... in the smaller window" "4 resize" "^resized canvas: 900 "
+check "4: ... in the smaller window (900 px less the tool column)" "4 resize" "^resized canvas: 8[0-9]{2} "
 check "4: tiling it again keeps it too" "4 resize" "^tiled: yes$"
 check "4: ... still at 100%" "4 resize" "^zoom: 100%$"
 for z in 150 200 300 400 600 800; do
@@ -265,6 +294,14 @@ check "7: ... 640×480" "7 new" "^new: 640×480$"
 check "7: the next New Image offers 640" "7 new" "^again: 640$"
 check "7: ... by 480" "7 new" "^again: 480$"
 check "7: Escape closes the dialog" "7 new" "^closed: no dialog$"
+# ETCH-3: the eraser and the tool column.
+check "9: the tool column starts on Pencil" "9 eraser" "^start: pencil on eraser off$"
+absent "9: the pencil draws" "9 eraser" "^black: 0$"
+check "9: a click on Eraser picks it" "9 eraser" "^pressed: pencil off eraser on$"
+check "9: erasing the line leaves no black, the checkerboard showing through" "9 eraser" "^erased: black 0 grey [1-9][0-9]*$"
+check "9: Ctrl+Z gives the line back over white" "9 eraser" "^unerased: yes grey 0$"
+check "9: P picks the pencil" "9 eraser" "^key p: pencil on eraser off$"
+check "9: E picks the eraser" "9 eraser" "^key e: pencil off eraser on$"
 absent "the app logs no errors or panics" "app log" "^etch:|panicked|CRITICAL"
 bench=$(section "8 bench" | sed -n "s/^bench: //p")
 if [ -z "$bench" ]; then echo "FAIL 8: --bench-stroke printed nothing"; fail=1; else
