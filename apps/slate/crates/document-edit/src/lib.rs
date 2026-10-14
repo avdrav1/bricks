@@ -536,6 +536,7 @@ pub(crate) fn shell(block: &Block) -> Block {
             kind: item.kind.clone(),
             level: item.level,
             paragraph: bare(&item.paragraph),
+            numbering: item.numbering.clone(),
         }),
         Block::CodeBlock(code) => Block::CodeBlock(CodeBlock {
             language: code.language.clone(),

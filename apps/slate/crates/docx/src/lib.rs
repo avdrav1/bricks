@@ -148,6 +148,7 @@ fn read_package<R: Read + Seek>(reader: R) -> Result<(Document, MainPart), DocxE
             text_width: text_width.unwrap_or(DocxInfo::LETTER_TEXT_WIDTH),
             default_tab,
             fonts: Arc::new(fonts),
+            numbering: Arc::new(numbering.model()),
         }),
     };
     let main = MainPart {

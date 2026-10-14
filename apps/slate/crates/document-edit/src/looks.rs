@@ -234,6 +234,8 @@ pub fn toggle_list(
                     style: normal(),
                     ..bare(&item.paragraph)
                 },
+                // The other kind's list is another numbering instance, Slate's own.
+                numbering: None,
             }),
             Block::Paragraph(p) => Block::ListItem(ListItem {
                 kind: new_kind(ordered),
@@ -242,6 +244,7 @@ pub fn toggle_list(
                     style: normal(),
                     ..relisted(p)
                 },
+                numbering: None,
             }),
             _ => continue,
         };
@@ -279,6 +282,8 @@ pub fn indent(doc: &Document, at: Container, blocks: Range<usize>, by: i8) -> Op
             kind,
             level,
             paragraph: relisted(&item.paragraph),
+            // The same instance, at the new level.
+            numbering: item.numbering.clone(),
         });
         out.push((i, shell(block), after));
     }
@@ -359,6 +364,7 @@ pub(crate) fn renumber<'a>(
                         },
                         level: item.level,
                         paragraph: bare(&item.paragraph),
+                        numbering: item.numbering.clone(),
                     });
                     each(i, block, after);
                 }

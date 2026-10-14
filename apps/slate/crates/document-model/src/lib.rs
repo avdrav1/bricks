@@ -12,6 +12,7 @@
 mod fonts;
 mod markdown;
 mod matching;
+mod numbering;
 mod styles;
 mod tabs;
 mod text;
@@ -20,6 +21,7 @@ mod write;
 pub use fonts::{EmbeddedFace, FaceKind, Font, FontFamily, FontPitch, FontTable};
 pub use markdown::{load_linked_images, read_markdown, read_markdown_source, MarkdownSource};
 pub use matching::{match_blocks, match_blocks_by};
+pub use numbering::{symbol_text, ListLevel, ListNumbering, MarkerAlign, MarkerSuffix, Numbering};
 pub use styles::{
     Border, BorderOverrides, BorderStyle, Borders, LineSpacing, Look, ParaLook, ParaOverrides,
     ParaSpacing, Shading, Style, StyleSheet,
@@ -84,6 +86,24 @@ impl Format {
             Format::Text(_) | Format::Markdown(_) => None,
         }
     }
+
+    /// The level a list item of a document in this format lays out with (ADR 0009): in a
+    /// Word document, its numbering instance's level when that exists and is bulleted as
+    /// the item is (as saving keeps the instance only then), else Slate's own level
+    /// ([`ListLevel::slate`]); `None` in Markdown and text, whose lists the viewer lays
+    /// out.
+    pub fn list_level(&self, item: &ListItem) -> Option<&ListLevel> {
+        let Format::Docx(info) = self else {
+            return None;
+        };
+        let bullet = !matches!(item.kind, ListKind::Ordered { .. });
+        let level = item.level.min(8);
+        item.numbering
+            .as_ref()
+            .and_then(|n| info.numbering.level(n.num, level))
+            .filter(|l| l.bulleted() == bullet)
+            .or_else(|| Some(ListLevel::slate(bullet, level)))
+    }
 }
 
 /// A Word document's page layout, as Slate's pageless column borrows it, and its fonts
@@ -99,6 +119,8 @@ pub struct DocxInfo {
     /// `word/fontTable.xml`: each font's class and embedded faces; shared, as documents
     /// are cloned for crash recovery.
     pub fonts: Arc<FontTable>,
+    /// `word/numbering.xml`: each list level's marker and indents; shared as `fonts`.
+    pub numbering: Arc<Numbering>,
 }
 
 impl DocxInfo {
@@ -114,6 +136,7 @@ impl Default for DocxInfo {
             text_width: Self::LETTER_TEXT_WIDTH,
             default_tab: Self::DEFAULT_TAB,
             fonts: Arc::default(),
+            numbering: Arc::default(),
         }
     }
 }
@@ -239,6 +262,25 @@ pub struct ListItem {
     /// Nesting level, 0 for a top-level item.
     pub level: u8,
     pub paragraph: Paragraph,
+    /// A Word list item's numbering instance and paragraph mark ([`Format::list_level`]);
+    /// `None` in Markdown and text, and for lists Slate starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub numbering: Option<ListNumbering>,
+}
+
+impl ListItem {
+    /// Its marker's text: with a Word level `level` ([`Format::list_level`]), a bullet's
+    /// level text or a number's label; without one, the viewer's (bullets by level, the
+    /// label, task boxes).
+    pub fn marker<'a>(&'a self, level: Option<&'a ListLevel>) -> &'a str {
+        match (&self.kind, level) {
+            (ListKind::Bullet, Some(level)) => &level.text,
+            (ListKind::Bullet, None) => ["•", "◦", "▪"][usize::from(self.level) % 3],
+            (ListKind::Ordered { label, .. }, _) => label,
+            (ListKind::Task { checked: true }, _) => "☑",
+            (ListKind::Task { checked: false }, _) => "☐",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -374,6 +374,7 @@ pub fn split(doc: &Document, from: Pos, to: Pos) -> Option<Edit> {
             },
             level: item.level,
             paragraph: bare(&item.paragraph),
+            numbering: item.numbering.clone(),
         }),
         Block::Paragraph(p) => {
             let at_end = Some(to.offset) == block_len(&blocks[to.block]);

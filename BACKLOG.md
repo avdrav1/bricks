@@ -146,7 +146,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | SLATE-25 | SL4 | P0 | done | SLATE-23 | Embedded fonts and family fallbacks (ADR 0009) | A .docx's embedded fonts (plain .ttf and Word's obfuscated .odttf, de-obfuscated with `w:fontKey`) draw its runs: a run in an embedded family measures as Pango measures that font within 2 px; a family neither installed nor embedded falls back by the font table's `w:family` (a `roman` font draws in the system serif, a `swiss` one in sans); saving keeps the font parts byte for byte |
 | SLATE-26 | SL4 | P0 | done | SLATE-23 | A paragraph's own spacing and indents (ADR 0009) | `w:spacing` and `w:ind` on a paragraph override its style's: LibreOffice's dump of each paragraph's own space before and after, line spacing, and left, right, and first-line indents matches Slate's model over the corpus; they draw (flow tests to the pixel) and save back unchanged, and an edited paragraph keeps them |
 | SLATE-27 | SL4 | P0 | done | SLATE-26 | Paragraph borders and shading (ADR 0009) | `w:pBdr` (top, bottom, left, right, between; single, double, dotted, dashed; width, space, colour) and `w:shd` fills, a paragraph's own and its style's, draw around and behind the paragraph: in the GUI check a bottom border lies under the text by its space and width within 2 px and a shaded paragraph's box is its fill colour; LibreOffice's dump of borders and shading matches the model; they save back unchanged |
-| SLATE-28 | SL4 | P0 | todo | SLATE-26 | List markers from the numbering (ADR 0009) | Each list item's marker is its level's `w:lvlText` in the level's run font (Symbol and Wingdings glyphs mapped to Unicode), at the level's left and hanging indents with the tab after it: the corpus' markers match LibreOffice's list labels and the GUI check draws "●" bullets at their indent within 2 px |
+| SLATE-28 | SL4 | P0 | done | SLATE-26 | List markers from the numbering (ADR 0009) | Each list item's marker is its level's `w:lvlText` in the level's run font (Symbol and Wingdings glyphs mapped to Unicode), at the level's left and hanging indents with the tab after it: the corpus' markers match LibreOffice's list labels and the GUI check draws "●" bullets at their indent within 2 px |
 | FRAME-1 | FR0 | P0 | done | - | Presentation model and PPTX package: slide order, size, shapes, placeholder inheritance | Slide count, order, size, and every shape's frame in the fixtures and a real-world deck match LibreOffice's dump within 1 EMU; placeholders without a frame take their layout's or master's |
 | FRAME-2 | FR0 | P0 | done | FRAME-1 | PPTX text: runs, fonts, sizes, colours, bullets, levels, alignment, inherited styles | Every paragraph's text, level, alignment, and every run's size, bold, italic, and colour match LibreOffice's dump; theme colours resolve with lumMod, lumOff, tint, and shade |
 | FRAME-3 | FR0 | P0 | done | FRAME-1 | PPTX pictures, fills, outlines, backgrounds, groups, and tables | Pictures carry their bytes; group children land where LibreOffice reads them; table cells carry text and fills; unsupported content becomes a labelled shape |
@@ -167,6 +167,40 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-14 SLATE-28:** list markers from the numbering (ADR 0009). A subagent built it; it ran out of budget before `flow_perf` and the GUI check, and both were run here.
+  - Model `numbering.rs`: `ListLevel` (format, text with symbol characters mapped, lvlJc, suff, the level's indents and tabs, its run look), `ListLevel::slate` (Slate's own levels, also what save's `add_numbering` writes), and `Numbering`. `ListItem.numbering: Option<ListNumbering { num, mark }>`, where `mark` is the paragraph mark's run look. `DocxInfo.numbering`. `Format::list_level(item)`.
+  - `StyleSheet::marker_look`, `list_spacing` (style < level < own), and `list_tabs`.
+  - `symbol_text` maps Symbol's full table and Wingdings by Unicode's mapping, with ➢ for 0xD8 and ❏ for 0x71. The mapped level then loses its symbol font.
+  - Reader: levels' `lvlJc`, `suff`, `pPr`, and `rPr`. The marker font follows the hint, eastAsia, cs, then ascii and hAnsi. `ParaProps.mark` reads `w:pPr/w:rPr`.
+  - Flow: `Content::place(MarkerWidth)` replaces `text_left` and `first_indent`. The marker sits at the first line's start, aligned by lvlJc. A tab suffix goes to the next stop past the marker's end, the implicit stop at the hanging indent counting; that implicit stop now counts for text tabs too, SLATE-24's leftover. `Shaper::marker_width` measures the marker.
+  - Word list items now take their style's spacing and their level's indents: SLATE-26's 28 px clamp and ignored first-line indent are gone for Word. Markdown and text lists are unchanged.
+  - Hit-testing, the caret, and accessible text leave markers out, as before.
+  - `scripts/lo_docx.py lists OUT` makes `tests/data/lists.docx`, 26 paragraphs: Google's ●○■ levels, Symbol 0xB7, Courier New o, Wingdings 0xA7 and 0xD8, `%1.`, `%1.%2.`, `(%3)`, right-justified upperRoman, space and nothing suffixes, empty lvlText, own indents over a level, and a red 14 pt paragraph mark.
+  - The dump's LABEL is now the bullet's character, and it gains NUMLEFT, NUMFIRST, MARKERJC, SUFFIX, and MARKERFONT. All 9 dumps were regenerated.
+  - Old expectations changed: a Word list item's flow indent moves from 28 to 48 px (the level's 720/360), its tab stops shift to match, and the Markdown own-indent test was split from a new Word one.
+  - Deviations:
+    - LibreOffice gives a level whose `numFmt` sits in `mc:AlternateContent` the style's left indent, so NUMLEFT is skipped for those three POI items.
+    - The marker's tab treats every stop as left.
+    - Wingdings 2 and 3, Webdings, and picture bullets aren't mapped.
+    - Lists Slate starts in a Word document use Slate's levels.
+    - A Word list item's borders start at its text, not its marker.
+  - Acceptance:
+    - `cargo test -p docx --test libreoffice` (5): markers and level fields match LibreOffice over 546 paragraphs, 26 of them lists.docx.
+    - LibreOffice-ignored docx tests: 7 pass.
+    - docx `tests/lists.rs`: 5. Flow: 31 tests, 5 of them new or rewritten.
+    - `scripts/check_slate.sh` SLATE OK, 286 checks, section 33 new, on a 720 px page:
+      - Google's ● ink starts at 0 and its text at 24 px.
+      - The ● is a filled circle about an x-height tall.
+      - The second level sits at its indent.
+      - 1. and 2. sit at 24, with text at 48.
+      - Right-justified roman numbers end at their position.
+      - Markers aren't in the accessible text.
+  - `flow_perf` (release, one test at a time):
+    - Word document: whole 329 ms max, first frame 5.6 ms, scroll p99 4.2 ms, typing p99 18.7 ms.
+    - Markdown: whole 300 ms, typing p99 17.6 ms.
+    - Find: first match 13.0 ms.
+    - All within targets.
+  - The user's résumé now draws Google's "●" bullets at their 0.25″ hanging indent.
 - **2026-10-14 SLATE-27:** paragraph borders and shading (ADR 0009). A subagent built it; it was integrated and verified here.
   - Model: `BorderStyle` (None, Single, Thick, Double, Dotted, Dashed) and `Border` (style, `w:sz` eighths, `w:space` points, colour or automatic); `Borders` holds top, bottom, left, right, and between. `BorderOverrides` sets sides one by one, so a nil side removes the style's. `Shading { fill }`. `ParaLook` gains borders and shading, and `ParaOverrides` gains `borders` and `shading`. Resolvers: `StyleSheet::borders`, `shading`, and `bordered_together` (Word's group rule).
   - Reader: `w:pBdr` (start and end as left and right; no bar border) and `w:shd`, merged side by side along pPrDefault, basedOn, and the paragraph, in table cells too. Styles map as LibreOffice reads them: dash variants draw dashed, triple, thinThick, and the like double, wave, 3-D, and art single. `clear` uses the fill, `solid` the colour, and pctNN blends.

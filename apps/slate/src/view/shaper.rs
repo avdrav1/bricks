@@ -17,12 +17,16 @@
 use super::{texture_key, Textures};
 use crate::fonts::Families;
 use document_model::{
-    Align, Image, ImageSource, LineSpacing, ListKind, Look as RunLook, RunStyle, StyleSheet,
-    TabAlign, TabLeader,
+    Align, Image, ImageSource, LineSpacing, Look as RunLook, RunStyle, StyleSheet, TabAlign,
+    TabLeader,
 };
-use flow::{Content, Hit, LayoutKey, Look, Metrics, Shaper, Tabs, MONOSPACE, TWIPS_PER_PX};
+use flow::{
+    Content, Hit, LayoutKey, Look, Marker, MarkerWidth, Metrics, Shaper, Tabs, MONOSPACE,
+    TWIPS_PER_PX,
+};
 use gtk::pango;
 use gtk::prelude::*;
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 /// The cache's cap, in bytes of text laid out: room for every layout of a document of about
@@ -79,7 +83,11 @@ pub struct PangoShaper {
     cache: HashMap<LayoutKey, Entry>,
     cached_bytes: usize,
     clock: u64,
-    markers: HashMap<String, pango::Layout>,
+    /// List markers laid out, by text and look.
+    markers: HashMap<(String, RunLook), pango::Layout>,
+    /// Markers' widths ([`MarkerWidth`]), by text and look: measured once, as every Word
+    /// list item's layout and measure take them.
+    widths: RefCell<HashMap<(String, RunLook), MarkerWidth>>,
     preedit: Option<Preedit>,
 }
 
@@ -105,6 +113,7 @@ impl PangoShaper {
             cached_bytes: 0,
             clock: 0,
             markers: HashMap::new(),
+            widths: RefCell::default(),
             preedit: None,
         }
     }
@@ -232,21 +241,72 @@ impl PangoShaper {
         self.cached_bytes -= freed;
     }
 
-    /// The marker of a list item, laid out.
-    pub fn marker(&mut self, item: &document_model::ListItem) -> &pango::Layout {
-        let text = match &item.kind {
-            ListKind::Bullet => ["•", "◦", "▪"][usize::from(item.level) % 3],
-            ListKind::Ordered { label, .. } => label,
-            ListKind::Task { checked: true } => "☑",
-            ListKind::Task { checked: false } => "☐",
+    /// List item marker `marker` laid out (kept for drawing it again).
+    pub fn marker(&mut self, marker: &Marker<'_>) -> &pango::Layout {
+        let key = (marker.text.to_owned(), marker.look.clone());
+        if !self.markers.contains_key(&key) {
+            let layout = self.marker_layout(marker.text, &marker.look);
+            self.markers.insert(key.clone(), layout);
+        }
+        &self.markers[&key]
+    }
+
+    /// `text` laid out in marker look `look`: its font, underline, and strikethrough (its
+    /// colour is drawn).
+    fn marker_layout(&self, text: &str, look: &RunLook) -> pango::Layout {
+        let layout = pango::Layout::new(&self.context);
+        layout.set_font_description(Some(&self.font_of(look)));
+        let attrs = pango::AttrList::new();
+        if look.underline {
+            insert(
+                &attrs,
+                pango::AttrInt::new_underline(pango::Underline::Single),
+                0,
+                u32::MAX,
+            );
+        }
+        if look.strike {
+            insert(&attrs, pango::AttrInt::new_strikethrough(true), 0, u32::MAX);
+        }
+        layout.set_attributes(Some(&attrs));
+        layout.set_text(text);
+        layout
+    }
+
+    /// The width of `marker` and of a space in its look, in pixels: what places a Word
+    /// list item's marker and text ([`Content::place`]).
+    fn marker_widths(&self, marker: &Marker<'_>) -> MarkerWidth {
+        let key = (marker.text.to_owned(), marker.look.clone());
+        if let Some(&widths) = self.widths.borrow().get(&key) {
+            return widths;
+        }
+        let width = |text: &str| {
+            let layout = self.marker_layout(text, &marker.look);
+            f64::from(layout.size().0) / f64::from(pango::SCALE)
         };
-        let (context, base) = (&self.context, &self.base);
-        self.markers.entry(text.to_owned()).or_insert_with(|| {
-            let layout = pango::Layout::new(context);
-            layout.set_font_description(Some(base));
-            layout.set_text(text);
-            layout
-        })
+        let widths = MarkerWidth {
+            marker: if marker.text.is_empty() {
+                0.0
+            } else {
+                width(marker.text)
+            },
+            space: width(" "),
+        };
+        self.widths.borrow_mut().insert(key, widths);
+        widths
+    }
+
+    /// Where `content`'s text goes ([`Content::place`]), its marker measured.
+    fn place(&self, content: &Content<'_>) -> flow::Place {
+        let widths = match content
+            .measures_marker()
+            .then(|| content.marker())
+            .flatten()
+        {
+            Some(m) => self.marker_widths(&m),
+            None => MarkerWidth::default(),
+        };
+        content.place(widths)
     }
 
     fn make(&self, content: Content<'_>) -> pango::Layout {
@@ -291,13 +351,13 @@ impl PangoShaper {
                     Align::Justify => layout.set_justify(true),
                 }
                 line_spacing(&layout, content.line_spacing(), &all);
-                let first = content.first_indent();
-                if first != 0 {
-                    layout.set_indent(first * pango::SCALE);
+                let place = self.place(&content);
+                if place.first != 0 {
+                    layout.set_indent(place.first * pango::SCALE);
                 }
                 // Only text with a tab needs its stops; the rest stays as cheap to shape.
                 if text.contains('\t') {
-                    if let Some(tabs) = content.tabs() {
+                    if let Some(tabs) = content.tabs(place.left) {
                         layout.set_tabs(Some(&self.tab_array(&tabs, style)));
                     }
                 }
@@ -401,7 +461,7 @@ impl PangoShaper {
         if !paragraph.runs.iter().any(|r| r.text.contains('\t')) {
             return Vec::new();
         }
-        let Some(Tabs::Stops(stops)) = content.tabs() else {
+        let Some(Tabs::Stops(stops)) = content.tabs(self.place(&content).left) else {
             return Vec::new();
         };
         if stops.iter().all(|s| s.leader == TabLeader::None) {
@@ -609,6 +669,10 @@ impl Shaper for PangoShaper {
     fn picture_size(&mut self, image: &Image) -> Option<(f32, f32)> {
         self.texture(image)
             .map(|t| (t.width() as f32, t.height() as f32))
+    }
+
+    fn marker_width(&mut self, marker: &Marker<'_>) -> MarkerWidth {
+        self.marker_widths(marker)
     }
 
     fn forget(&mut self, key: LayoutKey) {

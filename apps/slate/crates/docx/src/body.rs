@@ -22,8 +22,8 @@ use crate::styles::{ParaProps, RunProps, Section, Styles};
 use crate::xml::{self, XmlReader};
 use crate::{DocxError, Package, Rel};
 use document_model::{
-    Block, Image, ImageFormat, ImageSource, ListItem, Paragraph, RunStyle, Table, TableCell,
-    TableRow,
+    Block, Image, ImageFormat, ImageSource, ListItem, ListNumbering, Paragraph, RunStyle, Table,
+    TableCell, TableRow,
 };
 use quick_xml::events::{BytesStart, Event};
 use std::collections::HashMap;
@@ -471,6 +471,10 @@ impl<R: Read + Seek> Body<'_, '_, R> {
                     kind,
                     level,
                     paragraph: p,
+                    numbering: self.num.map(|num| ListNumbering {
+                        num,
+                        mark: self.styles.overrides(&direct.mark),
+                    }),
                 })),
                 None => out.push(Block::Paragraph(p)),
             }

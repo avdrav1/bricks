@@ -32,7 +32,7 @@ use document_edit::{
     Change, Container, Edit, Flag, Fragment, History, LookPatch, Looks, Match, Pos, SizeChange,
 };
 use document_model::{Align, RunStyle};
-use flow::{Flow, Located, Paint, Splice, LEVEL_INDENT};
+use flow::{Flow, Located, Paint, Splice};
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{gdk, gio, glib, graphene, gsk, pango};
@@ -2062,18 +2062,19 @@ fn draw(
             ..
         } => {
             let (x, y) = at(x, y);
-            if marker {
-                if let flow::Content::Paragraph {
-                    list: Some(item), ..
-                } = content
-                {
+            let layout = shaper.layout(key, content, width).clone();
+            // A list item's marker, on its first line's baseline.
+            if let (Some(mx), Some(m)) = (marker, content.marker()) {
+                if !m.text.is_empty() {
+                    let colour = m.look.color.map_or(INK, shaper::hex);
+                    let marker = shaper.marker(&m);
+                    let drop = (layout.baseline() - marker.baseline()) as f32 / pango::SCALE as f32;
                     snapshot.save();
-                    snapshot.translate(&graphene::Point::new(x - LEVEL_INDENT as f32, y));
-                    snapshot.append_layout(shaper.marker(item), &rgba(INK));
+                    snapshot.translate(&graphene::Point::new(left + mx as f32, y + drop));
+                    snapshot.append_layout(marker, &rgba(colour));
                     snapshot.restore();
                 }
             }
-            let layout = shaper.layout(key, content, width).clone();
             snapshot.save();
             snapshot.translate(&graphene::Point::new(x, y));
             if let Some((found, flow)) = found {

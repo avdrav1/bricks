@@ -64,7 +64,7 @@ impl Theme {
         }
     }
 
-    fn font(&self, font: &Font) -> Option<String> {
+    pub fn font(&self, font: &Font) -> Option<String> {
         match font {
             Font::Name(n) => Some(n.clone()),
             Font::Theme { major: true } => self.major.clone(),
@@ -83,6 +83,11 @@ pub(crate) struct RunProps {
     /// `w:rFonts`' font for Latin text: `asciiTheme`, `ascii`, `hAnsiTheme`, `hAnsi`, the
     /// first written.
     pub font: Option<Font>,
+    /// `w:rFonts`' East Asian and complex-script fonts, and whether its `w:hint` asks
+    /// for the East Asian one: what a list marker's characters pick from (ADR 0009).
+    pub east_asia: Option<Font>,
+    pub complex: Option<Font>,
+    pub hint_east_asia: bool,
     /// Half-points.
     pub size: Option<u16>,
     /// `Some(None)` is `auto`: back to the default colour.
@@ -149,6 +154,15 @@ impl RunProps {
                 if font.is_some() {
                     self.font = font;
                 }
+                if let Some(f) = theme(b"eastAsiaTheme").or_else(|| named(b"eastAsia")) {
+                    self.east_asia = Some(f);
+                }
+                if let Some(f) = theme(b"cstheme").or_else(|| named(b"cs")) {
+                    self.complex = Some(f);
+                }
+                if let Some(hint) = xml::attr(e, b"hint") {
+                    self.hint_east_asia = hint == "eastAsia";
+                }
             }
             // A double strikethrough is still struck through.
             b"dstrike" if xml::on(e) => self.strike = Some(true),
@@ -210,6 +224,9 @@ pub(crate) struct ParaProps {
     /// `w:tabs`: the stops this level sets, clears included, in position order; applying
     /// a level merges its stops over these ([`merge_tabs`]).
     pub tabs: Vec<TabStop>,
+    /// The paragraph mark's run properties (`w:pPr/w:rPr`): not the text's, but a list
+    /// item's marker's (ADR 0009).
+    pub mark: RunProps,
 }
 
 impl ParaProps {
@@ -269,7 +286,7 @@ impl ParaProps {
     }
 
     /// Read the children of a `w:pPr` just started, up to its end. The paragraph mark's
-    /// run properties (`w:pPr/w:rPr`) are skipped: they don't apply to the text.
+    /// run properties (`w:pPr/w:rPr`) go to `mark`: they don't apply to the text.
     pub fn read(r: &mut XmlReader<'_>) -> Result<Self, DocxError> {
         let mut p = ParaProps::default();
         loop {
@@ -280,6 +297,7 @@ impl ParaProps {
                     b"sectPr" => p.section = Some(Section::read(r)?),
                     b"tabs" => p.tabs = read_tabs(r)?,
                     b"pBdr" => p.borders = read_borders(r)?,
+                    b"rPr" => p.mark = RunProps::read(r)?,
                     _ => {
                         p.property(&e);
                         xml::skip(r, &e)?;

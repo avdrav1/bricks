@@ -31,7 +31,7 @@ mod content;
 mod fenwick;
 mod tree;
 
-pub use content::{Content, Tab, Tabs, TAB_SPACES};
+pub use content::{Content, Marker, MarkerWidth, Place, Tab, Tabs, TAB_SPACES};
 pub use tree::{
     px, CELL_BORDER, CELL_PADDING, CODE_INSET, LEVEL_INDENT, PAGE_BREAK_HEIGHT, RULE_HEIGHT,
     RULE_MARGIN, TABLE_MARGIN, TWIPS_PER_PX,
@@ -139,6 +139,9 @@ pub trait Shaper {
     /// A picture's size in pixels when it can be shown; the flow prefers the size the file
     /// gives ([`Image::size`]).
     fn picture_size(&mut self, image: &Image) -> Option<(f32, f32)>;
+    /// A Word list item's marker's width in its look, and a space's after it
+    /// ([`Content::place`]), in pixels.
+    fn marker_width(&mut self, marker: &Marker<'_>) -> MarkerWidth;
     /// The leaf whose layout is cached under `key` is gone: drop what is kept for it.
     fn forget(&mut self, key: LayoutKey);
 }
@@ -147,8 +150,9 @@ pub trait Shaper {
 /// coordinates (0 is the top of the document, [`TOP_MARGIN`] above the first block).
 #[derive(Debug, Clone)]
 pub enum Paint<'a> {
-    /// Text laid out `width` wide with its top left at (`x`, `y`); a list item's marker
-    /// hangs [`LEVEL_INDENT`] to its left. `selected`: the bytes the selection covers.
+    /// Text laid out `width` wide with its top left at (`x`, `y`). `marker`: a list item's
+    /// marker's left edge ([`Content::marker`] says what it is), on the text's first line.
+    /// `selected`: the bytes the selection covers.
     Text {
         leaf: LeafId,
         key: LayoutKey,
@@ -156,7 +160,7 @@ pub enum Paint<'a> {
         x: i32,
         y: f64,
         width: i32,
-        marker: bool,
+        marker: Option<f64>,
         selected: Option<Range<usize>>,
     },
     /// A code block's background.

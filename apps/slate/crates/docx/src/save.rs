@@ -48,8 +48,8 @@ use crate::styles::{ParaProps, RunProps, Styles};
 use crate::{dir_of, rel_kind, rels_part, DocxError, MainPart, Package, Rel};
 use document_model::{
     match_blocks_by, Align, Block, Border, BorderStyle, Image, ImageFormat, ImageSource,
-    LineSpacing, ListKind, ParaOverrides, Paragraph, Rgb, Run, RunStyle, StyleSheet, TabAlign,
-    TabLeader, TabStop, Table,
+    LineSpacing, ListKind, ListLevel, ParaOverrides, Paragraph, Rgb, Run, RunStyle, StyleSheet,
+    TabAlign, TabLeader, TabStop, Table,
 };
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -1608,21 +1608,14 @@ impl<'a> Patcher<'a> {
     fn add_numbering(&mut self, bullet: bool) -> u32 {
         let (abs, num) = self.numbering.free_ids();
         let mut levels = String::new();
-        for l in 0..9u32 {
-            let (format, text) = if bullet {
-                (
-                    "bullet",
-                    ["\u{2022}", "\u{25E6}", "\u{25AA}"][l as usize % 3].to_owned(),
-                )
-            } else {
-                (
-                    ["decimal", "lowerLetter", "lowerRoman"][l as usize % 3],
-                    format!("%{}.", l + 1),
-                )
-            };
+        for l in 0..9u8 {
+            let level = ListLevel::slate(bullet, l);
             levels.push_str(&format!(
-                "<w:lvl w:ilvl=\"{l}\"><w:start w:val=\"1\"/><w:numFmt w:val=\"{format}\"/><w:lvlText w:val=\"{text}\"/><w:lvlJc w:val=\"left\"/><w:pPr><w:ind w:left=\"{}\" w:hanging=\"360\"/></w:pPr></w:lvl>",
-                720 * (l + 1)
+                "<w:lvl w:ilvl=\"{l}\"><w:start w:val=\"1\"/><w:numFmt w:val=\"{}\"/><w:lvlText w:val=\"{}\"/><w:lvlJc w:val=\"left\"/><w:pPr><w:ind w:left=\"{}\" w:hanging=\"{}\"/></w:pPr></w:lvl>",
+                level.format,
+                level.text,
+                level.indent_left.unwrap_or(0),
+                -level.indent_first.unwrap_or(0),
             ));
         }
         let decl = format!(" xmlns:w=\"{W_NS}\"");

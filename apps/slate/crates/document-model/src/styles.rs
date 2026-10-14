@@ -9,13 +9,13 @@
 //! [`StyleSheet::borders`], [`StyleSheet::shading`]; ADR 0009). Markdown and plain text
 //! get Slate's built-in sheet ([`StyleSheet::builtin`]); a DOCX file's is its `styles.xml`.
 
-use crate::{effective_tabs, Align, Paragraph, Rgb, RunStyle, TabStop};
+use crate::{effective_tabs, merge_tabs, Align, ListLevel, Paragraph, Rgb, RunStyle, TabStop};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
 /// A run's resolved look.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Look {
     /// The font family's name.
     pub font: String,
@@ -27,6 +27,34 @@ pub struct Look {
     pub strike: bool,
     /// `None` is automatic: the page's text colour.
     pub color: Option<Rgb>,
+}
+
+impl Look {
+    /// This look with the run overrides `run` on top.
+    pub fn with(mut self, run: &RunStyle) -> Look {
+        if let Some(font) = &run.font {
+            self.font.clone_from(font);
+        }
+        if let Some(size) = run.size {
+            self.size = size;
+        }
+        if let Some(b) = run.bold {
+            self.bold = b;
+        }
+        if let Some(i) = run.italic {
+            self.italic = i;
+        }
+        if let Some(u) = run.underline {
+            self.underline = u;
+        }
+        if let Some(s) = run.strike {
+            self.strike = s;
+        }
+        if run.color.is_some() {
+            self.color = run.color;
+        }
+        self
+    }
 }
 
 /// How far apart a paragraph's lines are.
@@ -492,29 +520,14 @@ impl StyleSheet {
     /// The look of a run with direct formatting `run` in a paragraph of style `style_id`:
     /// the style's run look with the run's overrides on top.
     pub fn look(&self, style_id: &str, run: &RunStyle) -> Look {
-        let mut look = self.style_of(style_id).run.clone();
-        if let Some(font) = &run.font {
-            look.font.clone_from(font);
-        }
-        if let Some(size) = run.size {
-            look.size = size;
-        }
-        if let Some(b) = run.bold {
-            look.bold = b;
-        }
-        if let Some(i) = run.italic {
-            look.italic = i;
-        }
-        if let Some(u) = run.underline {
-            look.underline = u;
-        }
-        if let Some(s) = run.strike {
-            look.strike = s;
-        }
-        if run.color.is_some() {
-            look.color = run.color;
-        }
-        look
+        self.style_of(style_id).run.clone().with(run)
+    }
+
+    /// The look of the marker of a Word list item of paragraph `p` at level `level`
+    /// (ADR 0009): the paragraph mark's run look `mark` over the paragraph's style, with
+    /// the level's on top.
+    pub fn marker_look(&self, p: &Paragraph, mark: &RunStyle, level: &ListLevel) -> Look {
+        self.look(&p.style, mark).with(&level.look)
     }
 
     /// The stops paragraph `p`'s tabs advance to: its style's with its own on top, in
@@ -526,6 +539,27 @@ impl StyleSheet {
     /// Paragraph `p`'s spacing and indents: its style's with its own on top (ADR 0009).
     pub fn spacing(&self, p: &Paragraph) -> ParaSpacing {
         p.own.over(self.style_of(&p.style).para.spacing)
+    }
+
+    /// The spacing and indents of a Word list item's paragraph `p` at level `level`: its
+    /// style's, then the level's indents, then its own (ADR 0009).
+    pub fn list_spacing(&self, p: &Paragraph, level: &ListLevel) -> ParaSpacing {
+        let mut s = self.style_of(&p.style).para.spacing;
+        if let Some(left) = level.indent_left {
+            s.indent_left = left;
+        }
+        if let Some(first) = level.indent_first {
+            s.indent_first = first;
+        }
+        p.own.over(s)
+    }
+
+    /// The stops a Word list item's paragraph `p` at level `level` advances to: its
+    /// style's, then the level's, then its own (ADR 0009).
+    pub fn list_tabs(&self, p: &Paragraph, level: &ListLevel) -> Vec<TabStop> {
+        let mut under = self.style_of(&p.style).para.tabs.clone();
+        merge_tabs(&mut under, &level.tabs);
+        effective_tabs(&under, &p.tabs)
     }
 
     /// Paragraph `p`'s borders: its style's with its own sides on top (ADR 0009).

@@ -4,9 +4,12 @@
 //!
 //! A paragraph's space above and below, its left, right, and first-line indents, and its
 //! line spacing are its style's with its own on top ([`StyleSheet::spacing`], ADR 0009),
-//! and contextual spacing drops the space between two paragraphs of one style. A list
-//! item keeps the viewer's list spacing and its level's indent unless it has its own;
-//! code blocks, tables, rules, and page breaks keep the viewer's own spacing.
+//! and contextual spacing drops the space between two paragraphs of one style. A Word list
+//! item's are too, with its level's indents between them; its marker and text go where
+//! Word puts them ([`Content::place`]), which takes the marker's width, so they are placed
+//! again when it is measured. A Markdown or text list item keeps the viewer's list spacing
+//! and its level's indent unless it has its own; code blocks, tables, rules, and page breaks
+//! keep the viewer's own spacing.
 //!
 //! A paragraph's borders and shading ([`StyleSheet::borders`], [`StyleSheet::shading`])
 //! frame it as Word does: its top and bottom lines lie their space from the text, and they
@@ -17,7 +20,7 @@
 //! (its sides and its shading) runs on through the space between them. Shading fills the
 //! box to its lines; without borders, the text's indented lines.
 
-use crate::content::{code_text, floor_boundary, Content};
+use crate::content::{code_text, floor_boundary, Content, MarkerWidth};
 use crate::{Dash, LayoutKey, LeafId, Located, Look, Metrics, Paint, Position, Shaper, MONOSPACE};
 use document_model::{
     Block, Border, BorderStyle, Document, Format, Image, LineSpacing, Paragraph, Rgb, Style,
@@ -166,12 +169,12 @@ pub(crate) struct TextBox {
     pub above: i32,
     pub below: i32,
     /// The text's left edge from the box's: the paragraph's left indent, less a hanging
-    /// first line's.
+    /// first line's ([`Content::place`]).
     pub indent: i32,
     /// The text's right edge from the box's: the paragraph's right indent.
     pub right: i32,
-    /// A list item: its marker hangs in the indent's last level.
-    pub marker: bool,
+    /// A list item's marker's left edge from the box's.
+    pub marker: Option<f64>,
     /// A code block: its band starts this far in.
     pub band: Option<i32>,
     /// Its first run's look ([`Looks`]), for estimates.
@@ -248,6 +251,8 @@ pub(crate) struct Builder<'a> {
     /// Top-level blocks holding a page break, in order.
     pub break_tops: Vec<usize>,
     styles: &'a StyleSheet,
+    /// The document's format, which gives list items their levels.
+    format: &'a Format,
     plain: bool,
     /// The document's default tab stop ([`Content::Paragraph`]'s `default_tab`).
     default_tab: Option<u32>,
@@ -264,6 +269,7 @@ impl<'a> Builder<'a> {
             page_breaks: 0,
             break_tops: Vec::new(),
             styles: &doc.styles,
+            format: &doc.format,
             plain: matches!(doc.format, Format::Text(_)),
             default_tab: doc.format.default_tab(),
             base: base as u32,
@@ -340,6 +346,7 @@ impl<'a> Builder<'a> {
                     paragraph: p,
                     styles: self.styles,
                     list: None,
+                    level: None,
                     header,
                     default_tab: self.default_tab,
                 };
@@ -348,7 +355,7 @@ impl<'a> Builder<'a> {
                 let line = content.line_spacing();
                 let mut b = TextBox::paragraph(leaf, looks, p, style, line, header);
                 self.place(&mut b, block, prev, next);
-                b.indent = content.text_left();
+                b.indent = content.place(MarkerWidth::default()).left;
                 b.right = content.text_right();
                 Kind::Text(b)
             }
@@ -357,6 +364,7 @@ impl<'a> Builder<'a> {
                     paragraph: &item.paragraph,
                     styles: self.styles,
                     list: Some(item),
+                    level: self.format.list_level(item),
                     header,
                     default_tab: self.default_tab,
                 };
@@ -365,9 +373,10 @@ impl<'a> Builder<'a> {
                 let line = content.line_spacing();
                 let mut b = TextBox::paragraph(leaf, looks, &item.paragraph, style, line, header);
                 self.place(&mut b, block, prev, next);
-                b.indent = content.text_left();
+                let place = content.place(MarkerWidth::default());
+                b.indent = place.left;
                 b.right = content.text_right();
-                b.marker = true;
+                b.marker = place.marker;
                 Kind::Text(b)
             }
             Block::CodeBlock(code) => {
@@ -468,10 +477,10 @@ impl<'a> Builder<'a> {
     }
 
     /// The space above and below paragraph or list item `block`, between `prev` and `next`
-    /// (ADR 0009): a paragraph's, its style's with its own on top; a list item's own, else
-    /// the viewer's list spacing. With contextual spacing, none against a paragraph or
-    /// list item in the same style. Plain text's paragraphs are the file's lines, without
-    /// space between. `None` for other blocks.
+    /// (ADR 0009): a paragraph's or Word list item's, its style's with its own on top; a
+    /// Markdown or text list item's own, else the viewer's list spacing. With contextual
+    /// spacing, none against a paragraph or list item in the same style. Plain text's
+    /// paragraphs are the file's lines, without space between. `None` for other blocks.
     fn around(
         &self,
         block: &Block,
@@ -480,7 +489,7 @@ impl<'a> Builder<'a> {
     ) -> Option<(i32, i32)> {
         let (p, list) = match block {
             Block::Paragraph(p) => (p, false),
-            Block::ListItem(item) => (&item.paragraph, true),
+            Block::ListItem(item) => (&item.paragraph, self.format.list_level(item).is_none()),
             _ => return None,
         };
         if self.plain {
@@ -746,7 +755,7 @@ impl TextBox {
             below: 0,
             indent: 0,
             right: 0,
-            marker: false,
+            marker: None,
             band: None,
             look,
             line: LineSpacing::default(),
@@ -822,6 +831,7 @@ pub(crate) fn content_at<'a>(doc: &'a Document, path: &[u32]) -> Option<Content<
             paragraph: p,
             styles: &doc.styles,
             list: None,
+            level: None,
             header,
             default_tab,
         }),
@@ -829,6 +839,7 @@ pub(crate) fn content_at<'a>(doc: &'a Document, path: &[u32]) -> Option<Content<
             paragraph: &item.paragraph,
             styles: &doc.styles,
             list: Some(item),
+            level: doc.format.list_level(item),
             header,
             default_tab,
         }),
@@ -897,6 +908,16 @@ pub(crate) fn measure(node: &mut Node, width: i32, cx: &mut Cx<'_>) -> i32 {
         Kind::Text(b) => {
             let leaf = &mut cx.leaves[b.leaf.index()];
             let content = content_at(cx.doc, &leaf.path).expect("a text leaf has content");
+            // A Word list item's text goes where its marker, as wide as it is, sends it.
+            if let Some(marker) = content
+                .measures_marker()
+                .then(|| content.marker())
+                .flatten()
+            {
+                let place = content.place(cx.shaper.marker_width(&marker));
+                b.indent = place.left;
+                b.marker = place.marker;
+            }
             let wrap = b.wrap(width);
             leaf.wrap = wrap;
             b.text_height = cx.shaper.shape(leaf.key, content, wrap).max(1);
@@ -1104,7 +1125,7 @@ pub(crate) fn paint<'a>(node: &'a Node, x: i32, y: f64, width: i32, cx: &mut Pai
                 x: x + b.indent,
                 y: y + f64::from(b.above),
                 width: b.wrap(width),
-                marker: b.marker,
+                marker: b.marker.map(|m| f64::from(x) + m),
                 selected,
             });
         }
@@ -1131,7 +1152,7 @@ pub(crate) fn paint<'a>(node: &'a Node, x: i32, y: f64, width: i32, cx: &mut Pai
                     x,
                     y,
                     width: width.max(1),
-                    marker: false,
+                    marker: None,
                     selected: selected.then(|| 0..crate::content::picture_label(image).len()),
                 }),
             }

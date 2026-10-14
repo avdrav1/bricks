@@ -10,12 +10,16 @@ Usage: python3 scripts/lo_docx.py fixture OUT   (store the fixture document at O
        python3 scripts/lo_docx.py borders OUT   (write the borders document at OUT:
                                                  apps/slate/crates/docx/tests/data/
                                                  borders.docx; no LibreOffice needed)
+       python3 scripts/lo_docx.py lists OUT     (write the lists document at OUT:
+                                                 apps/slate/crates/docx/tests/data/
+                                                 lists.docx; no LibreOffice needed)
 
 `dump` prints the body in document order, one line per item, tab-separated:
-  para<TAB>STYLE<TAB>LIST<TAB>LABEL<TAB>ALIGN<TAB>BEFORE<TAB>AFTER<TAB>LINE<TAB>LEFT<TAB>RIGHT<TAB>FIRST<TAB>CONTEXT<TAB>TOP<TAB>BOTTOM<TAB>BORDERLEFT<TAB>BORDERRIGHT<TAB>FILL<TAB>TEXT
+  para<TAB>STYLE<TAB>LIST<TAB>LABEL<TAB>ALIGN<TAB>BEFORE<TAB>AFTER<TAB>LINE<TAB>LEFT<TAB>RIGHT<TAB>FIRST<TAB>CONTEXT<TAB>TOP<TAB>BOTTOM<TAB>BORDERLEFT<TAB>BORDERRIGHT<TAB>FILL<TAB>NUMLEFT<TAB>NUMFIRST<TAB>MARKERJC<TAB>SUFFIX<TAB>MARKERFONT<TAB>TEXT
                                      a paragraph: its paragraph style's display name, its
                                      list level (0-based) or `-` outside lists, its list
-                                     label (`"2."`; LibreOffice gives `""` for bullets), its
+                                     marker (its label, `"2."`, or a bullet's character as
+                                     its level has it, a symbol font's unmapped), its
                                      alignment (`start`, `center`, `end`, `justify`), then
                                      its space before and after, line spacing
                                      (`auto:PERCENT`, `exact:TWIPS`, or `atLeast:TWIPS`),
@@ -26,8 +30,13 @@ Usage: python3 scripts/lo_docx.py fixture OUT   (store the fixture document at O
                                      `STYLE:WIDTH:DISTANCE:RRGGBB`: LibreOffice's line style
                                      in lower case, `solid`, `double`, ..., the line's whole
                                      width and its distance from the text in twips,
-                                     rounded), its fill (`-` or `RRGGBB`), and its text;
-                                     label and text as JSON strings
+                                     rounded), its fill (`-` or `RRGGBB`), its numbering
+                                     level's left and first-line indents (twips), its
+                                     marker's alignment (`left`, `center`, `right`) and
+                                     what follows it (`tab`, `space`, `nothing`), and a
+                                     bullet's font (`-` for none, and for a number), each
+                                     `-` outside lists, and its text; label and text as
+                                     JSON strings
   run<TAB>FLAGS<TAB>FONT<TAB>SIZE<TAB>COLOR<TAB>TEXT
                                      the paragraph's text in runs of one look: FLAGS is
                                      `b`, `i`, `u`, `s` (bold, italic, underline,
@@ -38,7 +47,8 @@ Usage: python3 scripts/lo_docx.py fixture OUT   (store the fixture document at O
                                      its end; a cell's paragraphs and nested tables follow
                                      its `cell` line
 Spacing, indents, borders, and fill are the paragraph's own (ADR 0009), which LibreOffice
-resolves through its style, its parents, and the document defaults. LibreOffice reads
+resolves through its style, its parents, and the document defaults, without its numbering
+level's indents (NUMLEFT and NUMFIRST). LibreOffice reads
 Word's line between paragraphs bordered together as the top border of each but the first,
 the first's bottom border left off.
 The fixture (apps/slate/crates/docx/tests/data/fixture.docx) has a title, headings 1-3,
@@ -317,6 +327,40 @@ def para_frame(p):
     return out
 
 
+# com.sun.star.style.NumberingType's CHAR_SPECIAL: a bullet.
+BULLET = 6
+# com.sun.star.text.HoriOrientation (a level's Adjust) and LabelFollowedBy, as the dump
+# names them.
+MARKER_JC = {1: "right", 2: "center", 3: "left"}
+MARKER_SUFFIX = {0: "tab", 1: "space", 2: "nothing"}
+
+
+def level_props(p):
+    """The properties of the paragraph's numbering level."""
+    return {x.Name: x.Value for x in p.NumberingRules.getByIndex(p.NumberingLevel)}
+
+
+def marker_label(p):
+    """A list item's marker: its list label, or a bullet's character (LibreOffice gives no
+    label for a bullet), as the level has it (a symbol font's characters unmapped)."""
+    props = level_props(p)
+    if props.get("NumberingType") == BULLET:
+        return props.get("BulletChar") or ""
+    return p.getPropertyValue("ListLabelString") or ""
+
+
+def list_level(p, listed):
+    """A list item's level: its left and first-line indents (twips), its marker's alignment
+    and suffix, and a bullet's font (`-` for none or a number); `-` for each outside lists."""
+    if not listed:
+        return ["-"] * 5
+    props = level_props(p)
+    font = props.get("BulletFontName") if props.get("NumberingType") == BULLET else None
+    return [twips(props.get("IndentAt", 0)), twips(props.get("FirstLineIndent", 0)),
+            MARKER_JC.get(props.get("Adjust"), f"adjust{props.get('Adjust')}"),
+            MARKER_SUFFIX.get(props.get("LabelFollowedBy"), "?"), font or "-"]
+
+
 def dump_text(text, out):
     paras = text.createEnumeration()
     while paras.hasMoreElements():
@@ -335,9 +379,9 @@ def dump_text(text, out):
             continue
         listed = p.NumberingIsNumber is True and bool(p.ListId)
         level = str(p.NumberingLevel) if listed else "-"
-        label = p.getPropertyValue("ListLabelString") or "" if listed else ""
+        label = marker_label(p) if listed else ""
         out.append("\t".join(["para", display_name(p), level, json.dumps(label, ensure_ascii=False),
-                              *para_look(p), *para_frame(p),
+                              *para_look(p), *para_frame(p), *list_level(p, listed),
                               json.dumps(p.getString(), ensure_ascii=False)]))
         runs = []
         for portion in portions(p):
@@ -639,12 +683,136 @@ def write_borders(path):
     print(f"borders -> {path}")
 
 
+# The lists document (SLATE-28): list levels written by hand as Word and Google Docs write
+# them, each paragraph's marker and indents from its level.
+LISTS_STYLES = (
+    f'<w:styles xmlns:w="{W_NS}">'
+    "<w:docDefaults>"
+    '<w:rPrDefault><w:rPr><w:rFonts w:ascii="Liberation Sans" w:hAnsi="Liberation Sans"/>'
+    '<w:sz w:val="22"/></w:rPr></w:rPrDefault>'
+    '<w:pPrDefault><w:pPr><w:spacing w:after="120" w:line="240" w:lineRule="auto"/>'
+    "</w:pPr></w:pPrDefault>"
+    "</w:docDefaults>"
+    '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/>'
+    "</w:style>"
+    '<w:style w:type="paragraph" w:styleId="ListParagraph"><w:name w:val="List Paragraph"/>'
+    '<w:basedOn w:val="Normal"/><w:pPr><w:spacing w:after="0"/><w:ind w:left="720"/>'
+    "<w:contextualSpacing/></w:pPr></w:style>"
+    "</w:styles>"
+)
+
+
+def lvl(ilvl, fmt, text, left, hanging=None, first=None, jc="left", suff=None, rpr="",
+        start=True):
+    """A `w:lvl`: its format, text, alignment, suffix, indents, and run properties."""
+    ind = f'w:left="{left}"' + (f' w:hanging="{hanging}"' if hanging is not None else "") + (
+        f' w:firstLine="{first}"' if first is not None else "")
+    return (f'<w:lvl w:ilvl="{ilvl}">' + ('<w:start w:val="1"/>' if start else "")
+            + f'<w:numFmt w:val="{fmt}"/>' + (f'<w:suff w:val="{suff}"/>' if suff else "")
+            + f'<w:lvlText w:val="{text}"/><w:lvlJc w:val="{jc}"/>'
+            f"<w:pPr><w:ind {ind}/></w:pPr>" + (f"<w:rPr>{rpr}</w:rPr>" if rpr else "")
+            + "</w:lvl>")
+
+
+def abstract(n, *levels):
+    return f'<w:abstractNum w:abstractNumId="{n}">{"".join(levels)}</w:abstractNum>'
+
+
+# Google Docs' bullet levels, exactly as it writes them (no w:start).
+GOOGLE_LEVEL = ('<w:lvl w:ilvl="0"><w:numFmt w:val="bullet"/><w:lvlText w:val="\u25cf"/>'
+                '<w:lvlJc w:val="left"/><w:pPr><w:ind w:left="360" w:hanging="360"/></w:pPr>'
+                '<w:rPr><w:u w:val="none"/></w:rPr></w:lvl>')
+SYMBOL = '<w:rFonts w:ascii="Symbol" w:hAnsi="Symbol" w:hint="default"/>'
+WINGDINGS = '<w:rFonts w:ascii="Wingdings" w:hAnsi="Wingdings" w:hint="default"/>'
+COURIER = '<w:rFonts w:ascii="Courier New" w:hAnsi="Courier New" w:cs="Courier New" w:hint="default"/>'
+
+LISTS_NUMBERING = (
+    f'<w:numbering xmlns:w="{W_NS}">'
+    + abstract(0, GOOGLE_LEVEL,
+               lvl(1, "bullet", "\u25cb", 1080, 360, rpr='<w:u w:val="none"/>', start=False),
+               lvl(2, "bullet", "\u25a0", 1800, 360, rpr='<w:u w:val="none"/>', start=False))
+    + abstract(1, lvl(0, "bullet", "\uf0b7", 720, 360, rpr=SYMBOL),
+               lvl(1, "bullet", "o", 1440, 360, rpr=COURIER),
+               lvl(2, "bullet", "\uf0a7", 2160, 360, rpr=WINGDINGS),
+               lvl(3, "bullet", "\uf0d8", 2880, 360, rpr=WINGDINGS))
+    + abstract(2, lvl(0, "decimal", "%1.", 720, 360),
+               lvl(1, "decimal", "%1.%2.", 1440, 720),
+               lvl(2, "lowerLetter", "(%3)", 2160, 360))
+    + abstract(3, lvl(0, "upperRoman", "%1.", 1080, 360, jc="right"))
+    + abstract(4, lvl(0, "decimal", "%1)", 720, 360, suff="space"),
+               lvl(1, "lowerRoman", "%2.", 1440, 360, suff="nothing"),
+               lvl(2, "decimal", "", 2160, 360),
+               lvl(3, "decimal", "Step %4:", 720, first=0))
+    + "".join(f'<w:num w:numId="{n + 1}"><w:abstractNumId w:val="{n}"/></w:num>'
+              for n in range(5))
+    + "</w:numbering>"
+)
+
+# (the paragraph's own pPr after its w:numPr, numId, ilvl, text) for each list item.
+LISTS_PARAGRAPHS = [
+    ("", 1, 0, "Google bullet: a filled circle at the margin, text at 0.25 in."),
+    ("", 1, 1, "Google's second level: a hollow circle."),
+    ("", 1, 2, "Google's third level: a square."),
+    ("", 1, 0, "Google bullet again, long enough to wrap onto a second line, which starts at "
+     "the level's left indent, under the first line's text and not under the bullet."),
+    ('<w:rPr><w:color w:val="C00000"/><w:sz w:val="28"/></w:rPr>', 1, 0,
+     "A bullet whose paragraph mark is red 14 pt: so is the bullet."),
+    ("", 2, 0, "Word's Symbol bullet."),
+    ("", 2, 1, "Word's Courier New o."),
+    ("", 2, 2, "Word's Wingdings square."),
+    ("", 2, 3, "Word's Wingdings arrowhead."),
+    ("", 3, 0, "Decimal one."),
+    ("", 3, 1, "Decimal one point one, a hanging indent of half an inch."),
+    ("", 3, 2, "Lower letter in parentheses."),
+    ("", 3, 2, "Lower letter, the second."),
+    ("", 3, 0, "Decimal two."),
+    ('<w:ind w:left="1440"/>', 3, 0, "Decimal three, with its own left indent over its level's."),
+    ('<w:ind w:left="1080" w:hanging="720"/>', 3, 0,
+     "Decimal four, with its own left and hanging indents."),
+    ("", 4, 0, "Upper roman one, right-justified."),
+    ("", 4, 0, "Upper roman two."),
+    ("", 4, 0, "Upper roman three."),
+    ("", 5, 0, "A number followed by a space."),
+    ("", 5, 1, "A roman number followed by nothing."),
+    ("", 5, 2, "A level whose text is empty: no marker."),
+    ("", 5, 3, "A first-line indent: the marker at the indent, the text after a tab."),
+]
+
+
+def lists_paragraph(own, num, ilvl, text, style="Normal"):
+    pstyle = f'<w:pStyle w:val="{style}"/>' if style != "Normal" else ""
+    numpr = f'<w:numPr><w:ilvl w:val="{ilvl}"/><w:numId w:val="{num}"/></w:numPr>'
+    return f"<w:p><w:pPr>{pstyle}{numpr}{own}</w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>"
+
+
+def lists_document():
+    body = spacing_paragraph("Normal", "", "Lists as Word and Google Docs write them.")
+    body += "".join(lists_paragraph(*p) for p in LISTS_PARAGRAPHS)
+    body += lists_paragraph("", 3, 0, "Decimal five, in List Paragraph.", "ListParagraph")
+    body += spacing_paragraph("Normal", "", "The end.")
+    sect = ('<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" '
+            'w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>')
+    return f'<w:document xmlns:w="{W_NS}" xmlns:r="{R_NS}"><w:body>{body}{sect}</w:body></w:document>'
+
+
+def write_lists(path):
+    """The lists document: Google Docs' bullet levels exactly as it writes them, Word's
+    Symbol, Courier New, and Wingdings bullets, decimal, multi-level, lettered, and
+    right-justified roman numbers, a space and no suffix, a level without text, a first-line
+    indent, own indents over a level's, and a style's indent under a level's. Byte for byte
+    the same on every run."""
+    write_package(path, lists_document(), LISTS_STYLES, LISTS_NUMBERING)
+    print(f"lists -> {path}")
+
+
 def main():
-    if len(sys.argv) != 3 or sys.argv[1] not in ("fixture", "dump", "spacing", "borders"):
+    commands = ("fixture", "dump", "spacing", "borders", "lists")
+    if len(sys.argv) != 3 or sys.argv[1] not in commands:
         sys.exit(__doc__)
     path = Path(sys.argv[2]).resolve()
-    if sys.argv[1] in ("spacing", "borders"):
-        (write_spacing if sys.argv[1] == "spacing" else write_borders)(path)
+    writers = {"spacing": write_spacing, "borders": write_borders, "lists": write_lists}
+    if sys.argv[1] in writers:
+        writers[sys.argv[1]](path)
         return
     ctx = connect()
     desktop = ctx.ServiceManager.createInstanceWithContext("com.sun.star.frame.Desktop", ctx)

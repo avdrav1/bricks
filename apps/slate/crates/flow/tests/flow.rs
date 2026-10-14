@@ -4,14 +4,14 @@
 
 use document_model::{
     Block, Border, BorderOverrides, BorderStyle, Borders, Document, DocxInfo, Format, Image,
-    ImageFormat, ImageSource, LineSpacing, ParaLook, ParaOverrides, ParaSpacing, Paragraph, Rgb,
-    Run, RunStyle, Shading, Style, StyleSheet, TabAlign, TabLeader, TabStop, Table, TableCell,
-    TableRow,
+    ImageFormat, ImageSource, LineSpacing, ListLevel, ListNumbering, MarkerAlign, MarkerSuffix,
+    Numbering, ParaLook, ParaOverrides, ParaSpacing, Paragraph, Rgb, Run, RunStyle, Shading, Style,
+    StyleSheet, TabAlign, TabLeader, TabStop, Table, TableCell, TableRow,
 };
 use flow::{
-    Content, Dash, Flow, Hit, LayoutKey, LeafId, Look, Metrics, Paint, Position, Shaper, Splice,
-    Tab, Tabs, BOTTOM_MARGIN, CELL_BORDER, CELL_PADDING, LEVEL_INDENT, PAGE_BREAK_HEIGHT,
-    TABLE_MARGIN, TOP_MARGIN,
+    Content, Dash, Flow, Hit, LayoutKey, LeafId, Look, Marker, MarkerWidth, Metrics, Paint,
+    Position, Shaper, Splice, Tab, Tabs, BOTTOM_MARGIN, CELL_BORDER, CELL_PADDING, LEVEL_INDENT,
+    PAGE_BREAK_HEIGHT, TABLE_MARGIN, TOP_MARGIN,
 };
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -35,6 +35,25 @@ struct Fake {
     asked: Vec<Look>,
     /// The tabs each layout was measured with.
     tabs: std::collections::HashMap<LayoutKey, Option<Tabs>>,
+    /// Every marker measured.
+    markers: Vec<String>,
+}
+
+/// A marker's width as the fake measures it: [`CHAR`] a character, and a space's.
+fn marker_width(marker: &Marker<'_>) -> MarkerWidth {
+    MarkerWidth {
+        marker: marker.text.chars().count() as f64 * CHAR,
+        space: CHAR,
+    }
+}
+
+/// Where `content` goes with its marker measured as the fake measures it.
+fn place_of(content: &Content<'_>) -> flow::Place {
+    let widths = match content.marker() {
+        Some(m) if content.measures_marker() => marker_width(&m),
+        _ => MarkerWidth::default(),
+    };
+    content.place(widths)
 }
 
 /// Lines of `text` wrapped `width` px wide: (byte start, byte end) of each.
@@ -69,7 +88,7 @@ impl Shaper for Fake {
 
     fn shape(&mut self, key: LayoutKey, content: Content<'_>, width: i32) -> i32 {
         self.shaped += 1;
-        self.tabs.insert(key, content.tabs());
+        self.tabs.insert(key, content.tabs(place_of(&content).left));
         let line = match content.line_spacing() {
             LineSpacing::Auto(m) => f64::from(LINE) * f64::from(m),
             LineSpacing::Exact(t) => f64::from(t) / 15.0,
@@ -109,6 +128,11 @@ impl Shaper for Fake {
             ImageSource::Embedded { .. } => Some((400.0, 300.0)),
             ImageSource::Link(_) => None,
         }
+    }
+
+    fn marker_width(&mut self, marker: &Marker<'_>) -> MarkerWidth {
+        self.markers.push(marker.text.to_owned());
+        marker_width(marker)
     }
 
     fn forget(&mut self, key: LayoutKey) {
@@ -727,10 +751,26 @@ fn styled(style: &str, text: &str) -> Paragraph {
 }
 
 fn flow_of(styles: StyleSheet, blocks: Vec<Block>, width: i32, shaper: &mut Fake) -> Flow {
+    flow_with(
+        Format::Docx(Default::default()),
+        styles,
+        blocks,
+        width,
+        shaper,
+    )
+}
+
+fn flow_with(
+    format: Format,
+    styles: StyleSheet,
+    blocks: Vec<Block>,
+    width: i32,
+    shaper: &mut Fake,
+) -> Flow {
     let mut flow = Flow::new(Document {
         blocks,
         styles,
-        format: Format::Docx(Default::default()),
+        format,
     });
     flow.set_width(width, shaper);
     flow.layout_slice(shaper, &mut || true);
@@ -778,6 +818,7 @@ fn a_paragraphs_left_and_first_line_indents_place_and_narrow_its_text() {
             kind: document_model::ListKind::Bullet,
             level: 0,
             paragraph: styled("S", "item"),
+            numbering: None,
         });
         let blocks = vec![
             Block::Paragraph(styled("S", &"w".repeat(30))),
@@ -791,7 +832,7 @@ fn a_paragraphs_left_and_first_line_indents_place_and_narrow_its_text() {
                 x, width, content, ..
             } = p
             {
-                painted.push((x, width, content.first_indent()));
+                painted.push((x, width, place_of(&content).first));
             }
         });
         let hang = (first / 15).min(0);
@@ -801,8 +842,10 @@ fn a_paragraphs_left_and_first_line_indents_place_and_narrow_its_text() {
                 (x, 200 - x, first / 15),
                 // A deeper quote's own levels add to the style's indent.
                 (x + LEVEL_INDENT, 200 - x - LEVEL_INDENT, first / 15),
-                // A list item's marker sets its indent, not its style.
-                (LEVEL_INDENT, 200 - LEVEL_INDENT, 0),
+                // A Word list item's level (Slate's own: 720 twips in, hanging 360) sets
+                // its indents over its style's: its text at 48 px, the marker's tab going
+                // to the hanging indent's stop.
+                (48, 200 - 48, 0),
             ],
             "first line {first} twips (hanging {hang})"
         );
@@ -918,7 +961,7 @@ fn painted_tabs(flow: &Flow, fake: &Fake) -> Vec<Option<Tabs>> {
     let mut out = Vec::new();
     flow.paint(0.0, 1e9, &mut |p| {
         if let Paint::Text { key, content, .. } = p {
-            let tabs = content.tabs();
+            let tabs = content.tabs(place_of(&content).left);
             assert_eq!(fake.tabs.get(&key), Some(&tabs), "measured as painted");
             out.push(tabs);
         }
@@ -1003,6 +1046,7 @@ fn default_stops_start_past_a_paragraphs_indent() {
         kind: document_model::ListKind::Bullet,
         level: 0,
         paragraph: styled("Normal", "item\tx"),
+        numbering: None,
     });
     let mut fake = Fake::default();
     let flow = flow_of(
@@ -1018,12 +1062,35 @@ fn default_stops_start_past_a_paragraphs_indent() {
                 left_tab(96.0 - 50.0),
                 left_tab(144.0 - 50.0)
             ])),
-            // A list item's text starts at its marker's indent.
+            // A Word list item's text starts at its level's left indent (Slate's own,
+            // 720 twips), the hanging indent's implicit stop there not right of it.
             Some(Tabs::Stops(vec![
-                left_tab(48.0 - f64::from(LEVEL_INDENT)),
-                left_tab(96.0 - f64::from(LEVEL_INDENT))
+                left_tab(96.0 - 48.0),
+                left_tab(144.0 - 48.0)
             ])),
         ]
+    );
+}
+
+#[test]
+fn a_hanging_indent_is_a_tab_stop() {
+    // 96 px in (1440 twips), hanging 96: the first line starts at the edge, and its tab
+    // goes to the hanging indent, Word's implicit stop; the default stops follow it.
+    let styles = sheet(spaced(ParaSpacing {
+        indent_left: 1440,
+        indent_first: -1440,
+        ..ParaSpacing::default()
+    }));
+    let mut fake = Fake::default();
+    let blocks = vec![Block::Paragraph(styled("S", "Term\tDefinition"))];
+    let flow = flow_of(styles, blocks, 400, &mut fake);
+    assert_eq!(
+        painted_tabs(&flow, &fake),
+        vec![Some(Tabs::Stops(vec![
+            left_tab(96.0),
+            left_tab(144.0),
+            left_tab(192.0)
+        ]))]
     );
 }
 
@@ -1067,6 +1134,148 @@ fn boxes(flow: &Flow) -> Vec<(i32, f64, i32)> {
         }
     });
     out
+}
+
+/// Every list item's marker as painted: its left edge.
+fn markers(flow: &Flow) -> Vec<f64> {
+    let mut out = Vec::new();
+    flow.paint(0.0, 1e9, &mut |p| {
+        if let Paint::Text {
+            marker: Some(m), ..
+        } = p
+        {
+            out.push(m);
+        }
+    });
+    out
+}
+
+/// `f` of every text painted.
+fn each_text<T>(flow: &Flow, f: impl Fn(&Content<'_>) -> T) -> Vec<T> {
+    let mut out = Vec::new();
+    flow.paint(0.0, 1e9, &mut |p| {
+        if let Paint::Text { content, .. } = p {
+            out.push(f(&content));
+        }
+    });
+    out
+}
+
+/// A Word document's format whose numbering instance 1 has `levels`, level 0 first.
+fn numbered(levels: Vec<ListLevel>) -> Format {
+    let mut numbering = Numbering::default();
+    for (l, def) in levels.into_iter().enumerate() {
+        numbering.insert(1, l as u8, def);
+    }
+    Format::Docx(DocxInfo {
+        numbering: Arc::new(numbering),
+        ..DocxInfo::default()
+    })
+}
+
+/// A Word list item of instance 1 at `level`: bulleted, or numbered with `label`.
+fn word_item(level: u8, label: Option<&str>, text: &str) -> Block {
+    Block::ListItem(document_model::ListItem {
+        kind: match label {
+            Some(label) => document_model::ListKind::Ordered {
+                number: 1,
+                label: label.into(),
+            },
+            None => document_model::ListKind::Bullet,
+        },
+        level,
+        paragraph: styled("Normal", text),
+        numbering: Some(ListNumbering {
+            num: 1,
+            mark: RunStyle::default(),
+        }),
+    })
+}
+
+/// A list level of `format` and `text`, left and first-line indents in twips, aligned and
+/// followed as given.
+fn level(
+    format: &str,
+    text: &str,
+    (left, first): (i32, i32),
+    align: MarkerAlign,
+    suffix: MarkerSuffix,
+) -> ListLevel {
+    ListLevel {
+        format: format.into(),
+        text: text.into(),
+        align,
+        suffix,
+        indent_left: Some(left),
+        indent_first: Some(first),
+        ..ListLevel::default()
+    }
+}
+
+#[test]
+fn word_list_markers_and_text_go_where_word_puts_them() {
+    use MarkerAlign::{Center, Left, Right};
+    use MarkerSuffix::{Nothing, Space, Tab};
+    let mut stopped = level("decimal", "%3.", (1440, -360), Left, Tab);
+    stopped.tabs = vec![
+        stop(1800, TabAlign::Left, TabLeader::None),
+        stop(2700, TabAlign::Left, TabLeader::None),
+    ];
+    let format = numbered(vec![
+        // Google Docs' bullet: 360 in, hanging 360.
+        level("bullet", "●", (360, -360), Left, Tab),
+        level("bullet", "●", (720, -360), Left, Tab),
+        level("decimal", "%2.", (1440, -360), Left, Tab),
+        stopped,
+        level("decimal", "%4)", (1440, -720), Left, Space),
+        level("decimal", "%5)", (1440, -720), Left, Nothing),
+        level("upperRoman", "%6.", (1080, -360), Right, Tab),
+        level("lowerRoman", "%7", (1080, -360), Center, Tab),
+        level("bullet", "", (720, -360), Left, Tab),
+    ]);
+    let blocks = vec![
+        word_item(0, None, "google"),
+        // A 10 px bullet at 24 px: its tab goes to the hanging indent's stop, 48 px.
+        word_item(1, None, "fits"),
+        // An 80 px label from 72 px ends past the hanging indent (96 px): its tab goes on
+        // to the next default stop (48 px apart), 192 px; the text's other lines at 96.
+        word_item(2, Some("Step 10:"), "wide"),
+        // ... or to its level's next stop past it: 2700 twips, not 1800 (under it).
+        word_item(3, Some("Step 10:"), "stops"),
+        // A space after a 20 px label from 48 px: the text at 78, left of the left
+        // indent (96), the other lines there.
+        word_item(4, Some("1)"), "space"),
+        // Nothing after it: the text at 68.
+        word_item(5, Some("1)"), "nothing"),
+        // Right-justified: the 40 px label ends at the first line's start, 48 px.
+        word_item(6, Some("III."), "right"),
+        // Centred: the 20 px label centres on 48 px.
+        word_item(7, Some("ii"), "centre"),
+        // No text: no marker drawn, but its tab still goes to the hanging indent.
+        word_item(8, None, "empty"),
+    ];
+    let mut fake = Fake::default();
+    let flow = flow_with(format, StyleSheet::builtin(), blocks, 400, &mut fake);
+    let lefts: Vec<i32> = boxes(&flow).iter().map(|b| b.0).collect();
+    assert_eq!(lefts, vec![24, 48, 96, 96, 78, 68, 72, 72, 48]);
+    let widths: Vec<i32> = boxes(&flow).iter().map(|b| b.2).collect();
+    assert_eq!(widths, lefts.iter().map(|l| 400 - l).collect::<Vec<_>>());
+    // The first line's start from the box (Pango's indent), so the text starts at 24,
+    // 48, 192, 180, 78, 68, 72, 72, and 48 px.
+    let firsts = each_text(&flow, |c| place_of(c).first);
+    assert_eq!(firsts, vec![0, 0, 96, 84, -18, -28, 0, 0, 0]);
+    assert_eq!(
+        markers(&flow),
+        vec![0.0, 24.0, 72.0, 72.0, 48.0, 48.0, 8.0, 38.0, 24.0]
+    );
+    assert_eq!(
+        fake.markers,
+        ["●", "●", "Step 10:", "Step 10:", "1)", "1)", "III.", "ii", ""]
+    );
+    // Hit-testing ignores the marker: a click on a hanging item's marker is at its
+    // text's start.
+    let place = flow.hit(&mut fake, 5.0, f64::from(TOP_MARGIN) + 5.0);
+    assert_eq!(place.map(|l| l.position.offset), Some(0));
 }
 
 fn own(style: &str, text: &str, own: ParaOverrides) -> Block {
@@ -1140,7 +1349,7 @@ fn a_paragraphs_own_space_indents_and_line_spacing_go_over_its_styles() {
     let mut first = Vec::new();
     flow.paint(0.0, 1e9, &mut |p| {
         if let Paint::Text { content, .. } = p {
-            first.push((content.first_indent(), content.line_spacing()));
+            first.push((place_of(&content).first, content.line_spacing()));
         }
     });
     assert_eq!(
@@ -1154,7 +1363,7 @@ fn a_paragraphs_own_space_indents_and_line_spacing_go_over_its_styles() {
 }
 
 #[test]
-fn a_list_items_own_space_and_left_indent_go_over_the_lists() {
+fn a_markdown_list_items_own_space_and_left_indent_go_over_the_lists() {
     let item = |text: &str, own: ParaOverrides| {
         let mut paragraph = styled("Normal", text);
         paragraph.own = own;
@@ -1162,6 +1371,7 @@ fn a_list_items_own_space_and_left_indent_go_over_the_lists() {
             kind: document_model::ListKind::Bullet,
             level: 0,
             paragraph,
+            numbering: None,
         })
     };
     let blocks = vec![
@@ -1186,7 +1396,9 @@ fn a_list_items_own_space_and_left_indent_go_over_the_lists() {
             },
         ),
     ];
-    let flow = flow_of(StyleSheet::builtin(), blocks, 200, &mut Fake::default());
+    let markdown = document_model::read_markdown(b"x\n").format;
+    let mut fake = Fake::default();
+    let flow = flow_with(markdown, StyleSheet::builtin(), blocks, 200, &mut fake);
     let top = f64::from(TOP_MARGIN);
     let item_space = 3.0;
     let l = LEVEL_INDENT;
@@ -1198,6 +1410,78 @@ fn a_list_items_own_space_and_left_indent_go_over_the_lists() {
             (l, top + 20.0 + item_space + 10.0 + 20.0 + 20.0, 200 - l),
         ]
     );
+    // The viewer's markers hang a level's indent left of the text, unmeasured.
+    assert_eq!(markers(&flow), vec![0.0, 72.0 - 28.0, 0.0]);
+    assert!(fake.markers.is_empty());
+}
+
+#[test]
+fn a_word_list_items_own_space_and_indents_go_over_its_levels() {
+    let item = |text: &str, own: ParaOverrides| {
+        let mut paragraph = styled("Normal", text);
+        paragraph.own = own;
+        Block::ListItem(document_model::ListItem {
+            kind: document_model::ListKind::Bullet,
+            level: 0,
+            paragraph,
+            numbering: None,
+        })
+    };
+    let blocks = vec![
+        item("a", ParaOverrides::default()),
+        // 10 px before, 20 after, 72 px in (1080 twips), the level's hanging 24 px.
+        item(
+            "b",
+            ParaOverrides {
+                space_before: Some(150),
+                space_after: Some(300),
+                indent_left: Some(1080),
+                indent_right: Some(150),
+                ..ParaOverrides::default()
+            },
+        ),
+        // In at the edge: the first line starts there too, its marker at 0 and its
+        // text past it at the first default stop (48 px).
+        item(
+            "c",
+            ParaOverrides {
+                indent_left: Some(0),
+                ..ParaOverrides::default()
+            },
+        ),
+        // Its own first line: 30 px in from 72 px, its marker there and its text at the
+        // next default stop.
+        item(
+            "d",
+            ParaOverrides {
+                indent_left: Some(1080),
+                indent_first: Some(450),
+                ..ParaOverrides::default()
+            },
+        ),
+    ];
+    let mut fake = Fake::default();
+    let flow = flow_of(StyleSheet::builtin(), blocks, 200, &mut fake);
+    let top = f64::from(TOP_MARGIN);
+    // Items space as their style does (Normal: 8 px after), not as a viewer list.
+    let after = 8.0;
+    assert_eq!(
+        boxes(&flow),
+        vec![
+            (48, top, 200 - 48),
+            (72, top + 20.0 + after + 10.0, 200 - 72 - 10),
+            (0, top + 20.0 + after + 10.0 + 20.0 + 20.0, 200),
+            (
+                72,
+                top + 20.0 + after + 10.0 + 20.0 + 20.0 + 20.0 + after,
+                200 - 72
+            ),
+        ]
+    );
+    assert_eq!(markers(&flow), vec![24.0, 48.0, 0.0, 102.0]);
+    let firsts = each_text(&flow, |c| place_of(c).first);
+    assert_eq!(firsts, vec![0, 0, 48, 144 - 72]);
+    assert_eq!(fake.markers, vec!["•"; 4]);
 }
 
 #[test]

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # SLATE-4, SLATE-10, SLATE-11, SLATE-6, SLATE-12, SLATE-13, SLATE-20, SLATE-21, SLATE-22,
-# SLATE-23, SLATE-24, SLATE-25, SLATE-26, and SLATE-27 acceptance: the window opens,
-# shows, and refuses documents, its pageless column follows View → Text Width and a Word
-# document's page, its text selects and copies, it edits with undo, table cells included,
-# it composes through an input method, it draws a Word document's fonts (embedded ones and
-# fallbacks by class), paragraph looks (its styles' and its own), borders and shading, and
-# tab stops, its format bar sets them, and they save.
+# SLATE-23, SLATE-24, SLATE-25, SLATE-26, SLATE-27, and SLATE-28 acceptance: the window
+# opens, shows, and refuses documents, its pageless column follows View → Text Width and a
+# Word document's page, its text selects and copies, it edits with undo, table cells
+# included, it composes through an input method, it draws a Word document's fonts
+# (embedded ones and fallbacks by class), paragraph looks (its styles' and its own),
+# borders and shading, tab stops, and list markers, its format bar sets them, and they save.
 #
 #   scripts/check_slate.sh [BINARY]   (default target/release/slate)
 #
@@ -190,6 +190,14 @@
 #      and an automatic fill (as Google Docs writes them) draws nothing but its text; each
 #      within 2 px. A character typed into the last paragraph and Ctrl+S keep every other
 #      paragraph, borders and shading included, byte for byte.
+#  33. list markers: lists.docx (written by /tmp/lists.py: Letter with 0.5″ margins,
+#      Liberation Sans 11 pt, a one-cell table whose border is the column) measured in a
+#      screenshot: a bullet of Google Docs' (its level exactly as Google Docs writes it,
+#      360 twips in, hanging 360) draws its "●" with its ink at the column's edge and its
+#      text 24 px in, the bullet a filled circle about an x-height tall (not a small "•");
+#      a second-level bullet's ○ starts 48 px in and its text 72; numbers 1. and 2. start
+#      24 px in and their text 48; right-justified roman numbers end 48 px in, their text
+#      at 72; each within 2 px; the accessible text holds the paragraphs, not the markers.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -1383,6 +1391,167 @@ elif sys.argv[1] == "measure":
 else:
     kept(sys.argv[2], sys.argv[3])
 PY
+# SLATE-28: `make PATH` writes lists.docx (Letter with 0.5″ margins, so a 720 px column;
+# Liberation Sans 11 pt, 8 px after each paragraph): a plain HAMBURG line, a line of x (the
+# x-height), the bullet levels 0 and 1 of Google Docs exactly as it writes them (● at 0, text at
+# 360 twips; ○ at 720, text at 1080), two decimal items (numbers at 360, text at 720),
+# three right-justified upper roman items (ending at 720, text at 1080), and a one-cell
+# table (its border is the column); `measure PNG` measures its screenshot.
+cat > /tmp/lists.py <<"PY"
+import os
+import sys
+import zipfile
+
+W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+PKG = "http://schemas.openxmlformats.org/package/2006/relationships"
+CT = "http://schemas.openxmlformats.org/package/2006/content-types"
+OOXML = "application/vnd.openxmlformats-officedocument.wordprocessingml"
+HEAD = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"""
+TEXT = "HAMBURG"
+
+def level(ilvl, fmt, text, left, hanging, jc="left"):
+    return (f"""<w:lvl w:ilvl="{ilvl}"><w:numFmt w:val="{fmt}"/><w:lvlText w:val="{text}"/>"""
+            f"""<w:lvlJc w:val="{jc}"/><w:pPr><w:ind w:left="{left}" w:hanging="{hanging}"/>"""
+            """</w:pPr><w:rPr><w:u w:val="none"/></w:rPr></w:lvl>""")
+
+NUMBERING = (
+    f"""<w:numbering xmlns:w="{W}">"""
+    # The bullet levels of Google Docs, exactly as it writes them.
+    f"""<w:abstractNum w:abstractNumId="0">{level(0, "bullet", "●", 360, 360)}"""
+    f"""{level(1, "bullet", "○", 1080, 360)}</w:abstractNum>"""
+    f"""<w:abstractNum w:abstractNumId="1">{level(0, "decimal", "%1.", 720, 360)}</w:abstractNum>"""
+    f"""<w:abstractNum w:abstractNumId="2">{level(0, "upperRoman", "%1.", 1080, 360, "right")}"""
+    """</w:abstractNum>"""
+    + "".join(f"""<w:num w:numId="{n + 1}"><w:abstractNumId w:val="{n}"/></w:num>""" for n in range(3))
+    + "</w:numbering>")
+
+def para(text, num=None, ilvl=0):
+    numpr = (f"""<w:numPr><w:ilvl w:val="{ilvl}"/><w:numId w:val="{num}"/></w:numPr>"""
+             if num else "")
+    return (f"""<w:p><w:pPr>{numpr}</w:pPr>"""
+            f"""<w:r><w:t xml:space="preserve">{text}</w:t></w:r></w:p>""")
+
+def make(path):
+    styles = (
+        """<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Liberation Sans" """
+        """w:hAnsi="Liberation Sans"/><w:sz w:val="22"/></w:rPr></w:rPrDefault><w:pPrDefault>"""
+        """<w:pPr><w:spacing w:before="0" w:after="120" w:line="240" w:lineRule="auto"/></w:pPr>"""
+        """</w:pPrDefault></w:docDefaults>"""
+        """<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>""")
+    paras = [
+        para(TEXT), para("xxxxxxxx"),
+        para(TEXT, 1, 0), para(TEXT, 1, 1),
+        para(TEXT, 2), para(TEXT, 2),
+        para(TEXT, 3), para(TEXT, 3), para(TEXT, 3),
+        """<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/></w:tblPr><w:tblGrid><w:gridCol w:w="10800"/>"""
+        f"""</w:tblGrid><w:tr><w:tc>{para(TEXT)}</w:tc></w:tr></w:tbl>""",
+        para("Z"),
+    ]
+    sect = ("""<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="720" w:right="720" """
+            """w:bottom="720" w:left="720" w:header="360" w:footer="360" w:gutter="0"/></w:sectPr>""")
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("[Content_Types].xml", HEAD + f"""<Types xmlns="{CT}">"""
+                   """<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"""
+                   """<Default Extension="xml" ContentType="application/xml"/>"""
+                   f"""<Override PartName="/word/document.xml" ContentType="{OOXML}.document.main+xml"/>"""
+                   f"""<Override PartName="/word/styles.xml" ContentType="{OOXML}.styles+xml"/>"""
+                   f"""<Override PartName="/word/numbering.xml" ContentType="{OOXML}.numbering+xml"/></Types>""")
+        z.writestr("_rels/.rels", HEAD + f"""<Relationships xmlns="{PKG}"><Relationship Id="rId1" """
+                   f"""Type="{REL}/officeDocument" Target="word/document.xml"/></Relationships>""")
+        z.writestr("word/_rels/document.xml.rels", HEAD + f"""<Relationships xmlns="{PKG}">"""
+                   f"""<Relationship Id="rId1" Type="{REL}/styles" Target="styles.xml"/>"""
+                   f"""<Relationship Id="rId2" Type="{REL}/numbering" Target="numbering.xml"/></Relationships>""")
+        z.writestr("word/styles.xml", HEAD + f"""<w:styles xmlns:w="{W}">{styles}</w:styles>""")
+        z.writestr("word/numbering.xml", HEAD + NUMBERING)
+        z.writestr("word/document.xml", HEAD + f"""<w:document xmlns:w="{W}"><w:body>"""
+                   + "".join(paras) + sect + "</w:body></w:document>")
+
+def measure(png):
+    import gi
+    gi.require_version("GdkPixbuf", "2.0")
+    from gi.repository import GdkPixbuf
+    p = GdkPixbuf.Pixbuf.new_from_file(png)
+    w, h, rs, n, px = p.get_width(), p.get_height(), p.get_rowstride(), p.get_n_channels(), p.get_pixels()
+    top = int(os.environ["TOP"])
+    def at(x, y):
+        i = y * rs + x * n
+        return (px[i], px[i + 1], px[i + 2])
+    def ink(x, y):
+        return sum(at(x, y)) < 600
+    def report(label, got, want):
+        verdict = "ok" if abs(got - want) <= 2 else "off"
+        print(f"{label}: {got} (want {want}) {verdict}")
+    table = [y for y in range(top, h - 10)
+             if sum(1 for x in range(w) if at(x, y) == (0xC0, 0xBF, 0xBC)) > 400]
+    if not table:
+        print("no table")
+        return
+    row = table[0]
+    cols = [x for x in range(w) if at(x, row) == (0xC0, 0xBF, 0xBC)]
+    left, right = cols[0], cols[-1]
+    print(f"column: {left}-{right} ({right - left + 1} px)")
+    # Bands of rows with ink inside the column, above the table: one a line, and in a
+    # band its pieces of ink apart by 5 px or more (a marker, then the text).
+    bands, cur = [], None
+    for y in range(top, row - 2):
+        xs = [x for x in range(left - 30, right) if ink(x, y)]
+        if xs:
+            if cur is None:
+                cur = [y, y]
+            cur[1] = y
+        elif cur is not None:
+            bands.append(cur)
+            cur = None
+    def pieces(band):
+        y0, y1 = band
+        xs = sorted({x for y in range(y0, y1 + 1) for x in range(left - 30, right) if ink(x, y)})
+        out = []
+        for x in xs:
+            if out and x - out[-1][1] < 5:
+                out[-1][1] = x
+            else:
+                out.append([x, x])
+        return out
+    print("bands: " + " ".join(f"{b[0]}-{b[1]}:" + ",".join(f"{a}-{z}" for a, z in pieces(b))
+                               for b in bands))
+    if len(bands) < 9:
+        print("too few lines")
+        return
+    plain, xs, google, second, one, two, *romans = bands[:9]
+    xheight = xs[1] - xs[0] + 1
+    def item(name, band, marker_at, text_at, end=False):
+        ps = pieces(band)
+        if len(ps) < 2:
+            print(f"{name}: no marker")
+            return None
+        m, t = ps[0], ps[-1]
+        side = "end" if end else "start"
+        report(f"{name} marker {side} from the column",
+               (m[1] + 1 if end else m[0]) - left, marker_at)
+        if text_at is not None:
+            report(f"{name} text from the column", t[0] - left, text_at)
+        return m
+    print(f"plain text from the column: {pieces(plain)[0][0] - left}")
+    bullet = item("google bullet", google, 0, 24)
+    item("second level bullet", second, 48, 72)
+    item("number 1", one, 24, 48)
+    item("number 2", two, 24, 48)
+    for i, band in enumerate(romans, 1):
+        item(f"roman {i}", band, 48, 72 if i == 1 else None, end=True)
+    if bullet:
+        x0, x1 = bullet
+        rows = [y for y in range(google[0], google[1] + 1) if any(ink(x, y) for x in range(x0, x1 + 1))]
+        y0, y1 = rows[0], rows[-1]
+        bw, bh = x1 - x0 + 1, y1 - y0 + 1
+        dark = sum(1 for y in range(y0, y1 + 1) for x in range(x0, x1 + 1) if sum(at(x, y)) < 384)
+        filled = dark / (bw * bh)
+        print(f"google bullet box: {bw}x{bh}, x-height {xheight}, filled {filled:.2f}")
+        circle = abs(bw - bh) <= 2 and bh >= 0.85 * xheight and bh <= 2 * xheight and filled >= 0.5
+        print("google bullet is a filled circle: " + ("yes" if circle else "no"))
+
+make(sys.argv[2]) if sys.argv[1] == "make" else measure(sys.argv[2])
+PY
 # SLATE-21: `make PATH` writes bar.docx (styles Normal, Heading 2, and a custom Fancy);
 # `line PNG` measures the first line of text below the format bar in a screenshot: the
 # left and right edges of its ink and how far its middle is from the middle of the window.
@@ -1974,6 +2143,15 @@ print(f\"typing for 20 s: first journal after ${first:-0} ms, writes {len(t)}, s
   keys "!"; keys -M ctrl s -m ctrl; sleep 1; saved
   python3 /tmp/borders.py kept /tmp/borders.docx /tmp/save/borders.docx 2>&1
   quit
+  echo "== 33 list markers"
+  python3 /tmp/lists.py make /tmp/lists.docx
+  slate /tmp/lists.docx >>/tmp/app.log 2>&1 & sleep 4
+  titles | sed "s/^/lists-/"
+  # The caret on the last line, Z, below the table the measurements stop at.
+  keys -M ctrl -k End -m ctrl; sleep 1; shot lists
+  python3 /tmp/lists.py measure /shots/lists.png 2>&1
+  a11y page lists.docx | sed "s/^/lists /"
+  quit
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -2316,6 +2494,27 @@ check "32: ... its sides run from its top line to its bottom" "$s32" "^box sides
 check "32: nil borders and an automatic fill draw nothing" "$s32" "^nil paragraph extra pixels: 0$"
 check "32: saving an edit keeps every other paragraph's borders and shading byte for byte" \
   "$s32" "^borders saved: edit True; others kept: True; rule True, box True, nil True, shade True$"
+s33="33 list markers"
+check "33: the document opens" "$s33" "^lists-titles: .*lists\.docx"
+check "33: its column is the page's 720 px" "$s33" "^column: .* \(720 px\)$"
+check "33: the Google Docs bullet's ink starts at its first line's start (360 - 360 twips)" \
+  "$s33" "^google bullet marker start from the column: .* ok$"
+check "33: ... its text at its left indent, 24 px" "$s33" "^google bullet text from the column: .* ok$"
+check "33: ... the bullet is a filled circle, about an x-height tall" "$s33" \
+  "^google bullet is a filled circle: yes$"
+check "33: a second-level bullet sits at its indent" "$s33" \
+  "^second level bullet marker start from the column: .* ok$"
+check "33: ... its text at its own" "$s33" "^second level bullet text from the column: .* ok$"
+check "33: numbers 1. and 2. sit at their level's first line" "$s33" \
+  "^number 1 marker start from the column: .* ok$"
+check "33: ... both" "$s33" "^number 2 marker start from the column: .* ok$"
+check "33: ... their text at the level's left indent" "$s33" "^number 2 text from the column: .* ok$"
+check "33: right-justified roman numbers end at their first line's start" "$s33" \
+  "^roman 1 marker end from the column: .* ok$"
+check "33: ... II." "$s33" "^roman 2 marker end from the column: .* ok$"
+check "33: ... III." "$s33" "^roman 3 marker end from the column: .* ok$"
+check "33: markers aren't in the accessible text" "$s33" \
+  "^lists page: HAMBURG\|xxxxxxxx(\|HAMBURG){8}\|Z$"
 if [ $fail = 0 ]; then echo "SLATE OK"; else
   echo "SLATE CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

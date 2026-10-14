@@ -507,6 +507,7 @@ fn a_new_list_item_between_items_keeps_the_list_tight() {
                 }
                 _ => unreachable!(),
             },
+            numbering: None,
         }),
     );
     let out = write(&edited, &info, Some(&source));
@@ -763,6 +764,7 @@ fn random_edit(blocks: &mut Vec<Block>, r: &mut Lcg) {
                 kind: ListKind::Bullet,
                 level: r.below(2) as u8,
                 paragraph: Paragraph { indent: 1, ..p },
+                numbering: None,
             }),
             2 => Block::ListItem(ListItem {
                 kind: ListKind::Ordered {
@@ -771,6 +773,7 @@ fn random_edit(blocks: &mut Vec<Block>, r: &mut Lcg) {
                 },
                 level: 0,
                 paragraph: Paragraph { indent: 1, ..p },
+                numbering: None,
             }),
             3 => Block::CodeBlock(document_model::CodeBlock {
                 language: None,
