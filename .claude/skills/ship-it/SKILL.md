@@ -21,7 +21,7 @@ Which app: ask if the user didn't say. Put the app before every command (`script
 | Frame | `apps/frame/Cargo.toml` | `frame/` | `CF_FRAME_PAGES_PROJECT` | `frame-vX.Y.Z` | `## Frame vX.Y.Z (YYYY-MM-DD)` | `--bench-draw` on the fixture deck; `check_install_frame.sh` |
 | Etch | `apps/etch/Cargo.toml` | `etch/` | `CF_ETCH_PAGES_PROJECT` | `etch-vX.Y.Z` | `## Etch vX.Y.Z (YYYY-MM-DD)` | `--bench-stroke`; `check_install_etch.sh` |
 
-Below, `vX.Y.Z` means the app's tag and the download base is `$DOWNLOAD_BASE_URL` plus the bucket prefix. Pages projects are created on the first `site` deploy if missing; each `<app>.cronkite.cc` custom domain is attached to its project once, in the Cloudflare dashboard. An app ships only once it has its desktop entry and icon (`packaging/dev.cronkite.<App>.*`), its download page and installer (`sites/<app>/`), and its install check; `preflight` fails without them (for Etch, story ETCH-5 adds them).
+Below, `vX.Y.Z` means the app's tag and the download base is `$DOWNLOAD_BASE_URL` plus the bucket prefix. Pages projects are created on the first `site` deploy if missing; each `<app>.cronkite.cc` custom domain is attached to its project once, in the Cloudflare dashboard. An app ships only once it has its desktop entry and icon (`packaging/dev.cronkite.<App>.*`), its download page and installer (`sites/<app>/`), and its install check; `preflight` fails without them. An app's first release also deploys the suite page (below), which lists it: deploy it after the app's own page, so its install command works by then.
 
 ## 0. One-time setup
 

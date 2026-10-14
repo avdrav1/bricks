@@ -96,7 +96,7 @@ The phases of the product plan, one milestone each (`BACKLOG.md`, chain `etch`):
 
 ## ET0: canvas prototype
 
-Built (ETCH-2 to ETCH-4):
+Built (ETCH-2 to ETCH-5):
 
 - **Window.** `etch` opens a window with a blank white 1024×768 image, titled Untitled ("Untitled 2" beside it, and so on), with a menu bar (File: New Image…, Close, Quit; Edit: Undo, Redo; View: Zoom In, Zoom Out, Actual Size, Fit to Window), the canvas, and a status bar (pointer position in image pixels, zoom, image size). Each image has its own window.
 - **New Image.** Ctrl+N asks for a width and height (1 to 16384 pixels each; the last ones used, 1024×768 at first) and opens the white image in a new window.
@@ -107,6 +107,7 @@ Built (ETCH-2 to ETCH-4):
 - **Pencil.** Dragging draws a line of the foreground colour at the pencil's size through every pixel the pointer crossed (a click draws one dot); each drag is one undo step.
 - **Eraser.** Dragging erases a line at the eraser's size to transparency, whatever the image was; the canvas's checkerboard shows through. Each drag is one undo step.
 - **Undo.** Ctrl+Z undoes the last stroke, Ctrl+Shift+Z and Ctrl+Y redo it; a new stroke after undoing drops what was undone.
+- **Install.** A per-user curl installer, as the other apps have (`sites/etch/install.sh`: `curl -fsSL https://etch.cronkite.cc/install.sh | sh`, `| sh -s -- --uninstall`), with no sudo. It checks the release against its sha256 and puts `etch` in `~/.local/bin` and its menu entry and icon (`dev.cronkite.Etch`, the app ID) in `~/.local/share`. Etch opens no files yet, so the installer takes over no file types and never touches `mimeapps.list`; the entry gets image types once opening works (ETCH-6), without making Etch anyone's default. GTK 4 comes from the system; without it, the installer says how to get it. The download page is `sites/etch/` (etch.cronkite.cc), and cronkite.cc lists Etch as an early preview.
 
 ## Non-goals for V0.1
 

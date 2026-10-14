@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cronkite: a fast, native office suite for Linux</title>
-<meta name="description" content="Cronkite is a fast, native office suite for Linux: Brick for spreadsheets, Slate for documents, Frame for presentations. Install each with one command.">
+<meta name="description" content="Cronkite is a fast, native office suite for Linux: Brick for spreadsheets, Slate for documents, Frame for presentations, Etch for images. Install each with one command.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=League+Spartan:wght@400;500;700;800&display=swap" rel="stylesheet">
@@ -36,14 +36,16 @@
   h3 { font-size: 18px; margin: 28px 0 8px; }
   .sub { color: var(--muted); margin: 0 0 20px; }
 
-  .apps { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--rule); }
-  .app { padding: 20px 22px 22px; border-right: 1px solid var(--rule); display: flex; flex-direction: column; gap: 6px; }
-  .app:last-child { border-right: 0; }
+  .apps { display: grid; grid-template-columns: repeat(2, 1fr); border: 1px solid var(--rule); }
+  .app { padding: 20px 22px 22px; border-right: 1px solid var(--rule); border-bottom: 1px solid var(--rule); display: flex; flex-direction: column; gap: 6px; }
+  .app:nth-child(2n) { border-right: 0; }
+  .app:nth-last-child(-n+2) { border-bottom: 0; }
   .app h3 { margin: 0; font-size: 24px; }
   .kind { color: var(--muted); font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; }
   .app p { margin: 4px 0 0; font-size: 15px; }
   .badge { align-self: flex-start; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; }
   .badge.ready { color: var(--accent); background: var(--accent-tint); }
+  .badge.preview { color: var(--muted); background: var(--head); }
   .app .more { margin-top: auto; padding-top: 12px; font-size: 15px; }
 
   .cmd { display: flex; align-items: stretch; border: 1px solid var(--rule); background: var(--head); margin: 10px 0 6px; }
@@ -82,7 +84,7 @@
 
   @media (max-width: 720px) {
     .apps { grid-template-columns: 1fr; }
-    .app { border-right: 0; border-bottom: 1px solid var(--rule); }
+    .app, .app:nth-last-child(-n+2) { border-right: 0; border-bottom: 1px solid var(--rule); }
     .app:last-child { border-bottom: 0; }
     .gallery { grid-template-columns: 1fr; }
     td code { white-space: normal; }
@@ -94,7 +96,7 @@
   <header class="masthead">
     <h1 class="wordmark">Cronkite</h1>
     <p class="tagline">A fast, native office suite for Linux. No subscriptions, no browser tab, no waiting.</p>
-    <p class="dateline">Spreadsheets &middot; Documents &middot; Presentations &middot; Written in Rust</p>
+    <p class="dateline">Spreadsheets &middot; Documents &middot; Presentations &middot; Images &middot; Written in Rust</p>
   </header>
 
   <section aria-labelledby="apps-h">
@@ -121,6 +123,13 @@
         <span class="kind">Presentations</span>
         <p>Opens, edits, plays, and saves PowerPoint decks (<code>.pptx</code>), directly on the slide or in an outline, with one inspector instead of a ribbon. Saving changes only what you edited.</p>
         <a class="more" href="#install-frame">Install Frame &darr;</a>
+      </article>
+      <article class="app">
+        <span class="badge preview">Early preview</span>
+        <h3>Etch</h3>
+        <span class="kind">Image editor</span>
+        <p>A simple paint program, closer to Paint than to Photoshop. Today it draws with a pencil and an eraser in any colour and size, zooms to 3200%, and undoes every stroke; opening and saving PNG, JPEG, and BMP come next.</p>
+        <a class="more" href="#install-etch">Install Etch &darr;</a>
       </article>
     </div>
   </section>
@@ -185,11 +194,18 @@
     </div>
     <p class="note">The command is <code>frame</code>. PowerPoint presentations (<code>.pptx</code>) open with it. Download page: <a href="https://frame.cronkite.cc">frame.cronkite.cc</a>.</p>
 
+    <h3 id="install-etch">Etch</h3>
+    <div class="cmd primary">
+      <pre id="install-etch-cmd">curl -fsSL https://etch.cronkite.cc/install.sh | sh</pre>
+      <button type="button" data-copy="install-etch-cmd">Copy</button>
+    </div>
+    <p class="note">The command is <code>etch</code>. It opens no files yet, so it takes over no file types. Download page: <a href="https://etch.cronkite.cc">etch.cronkite.cc</a>.</p>
+
     <h3>What an installer does</h3>
     <ol class="steps">
       <li>Downloads the app's latest release and checks it against its published sha256. If the checksum doesn't match, nothing is installed.</li>
-      <li>Puts the app (<code>brick</code>, <code>slate</code>, <code>frame</code>) in <code>~/.local/bin</code>, and its menu entry and icon in <code>~/.local/share</code>.</li>
-      <li>Makes it the default app for its files (above), so double-clicking one opens it. Other apps' defaults for other files are kept.</li>
+      <li>Puts the app (<code>brick</code>, <code>slate</code>, <code>frame</code>, <code>etch</code>) in <code>~/.local/bin</code>, and its menu entry and icon in <code>~/.local/share</code>.</li>
+      <li>Makes it the default app for its files (above), so double-clicking one opens it. Other apps' defaults for other files are kept. (Etch, which opens no files yet, changes no defaults.)</li>
     </ol>
 
     <h3>Requirements</h3>
@@ -220,10 +236,14 @@
       <pre id="uninstall-frame-cmd">curl -fsSL https://frame.cronkite.cc/install.sh | sh -s -- --uninstall</pre>
       <button type="button" data-copy="uninstall-frame-cmd">Copy</button>
     </div>
+    <div class="cmd">
+      <pre id="uninstall-etch-cmd">curl -fsSL https://etch.cronkite.cc/install.sh | sh -s -- --uninstall</pre>
+      <button type="button" data-copy="uninstall-etch-cmd">Copy</button>
+    </div>
     <p class="note">Removes the app, its menu entry, and its file defaults. Your files are untouched.</p>
 
     <h3>Prefer a tarball?</h3>
-    <p>Each app's download page has its latest release as a <code>.tar.gz</code>, with its version, size, and sha256: <a href="https://brick.cronkite.cc">Brick</a>, <a href="https://slate.cronkite.cc">Slate</a>, <a href="https://frame.cronkite.cc">Frame</a>.</p>
+    <p>Each app's download page has its latest release as a <code>.tar.gz</code>, with its version, size, and sha256: <a href="https://brick.cronkite.cc">Brick</a>, <a href="https://slate.cronkite.cc">Slate</a>, <a href="https://frame.cronkite.cc">Frame</a>, <a href="https://etch.cronkite.cc">Etch</a>.</p>
   </section>
 
   <section aria-labelledby="source-h">
@@ -231,7 +251,7 @@
     <p>Cronkite is open source (MIT or Apache-2.0) and built in the open: <a href="https://github.com/avdrav1/cronkite">github.com/avdrav1/cronkite</a>.</p>
   </section>
 </main>
-<footer>Cronkite &middot; a native office suite for Linux &middot; <a href="https://brick.cronkite.cc">brick.cronkite.cc</a> &middot; <a href="https://slate.cronkite.cc">slate.cronkite.cc</a> &middot; <a href="https://frame.cronkite.cc">frame.cronkite.cc</a></footer>
+<footer>Cronkite &middot; a native office suite for Linux &middot; <a href="https://brick.cronkite.cc">brick.cronkite.cc</a> &middot; <a href="https://slate.cronkite.cc">slate.cronkite.cc</a> &middot; <a href="https://frame.cronkite.cc">frame.cronkite.cc</a> &middot; <a href="https://etch.cronkite.cc">etch.cronkite.cc</a></footer>
 <dialog class="viewer" aria-label="Screenshot">
   <img alt="">
   <div class="bar">

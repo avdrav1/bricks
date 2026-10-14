@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Etch
+GenericName=Image Editor
+Comment=Draw and edit images
+Exec=etch
+Icon=dev.cronkite.Etch
+Terminal=false
+Categories=Graphics;2DGraphics;RasterGraphics;
+Keywords=paint;draw;image;picture;sketch;pencil;
