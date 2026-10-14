@@ -5,6 +5,7 @@ members = [
     "apps/brick",
     "apps/slate",
     "apps/frame",
+    "apps/etch",
     # Shared suite infrastructure
     "crates/suite-core",
     "crates/suite-ui",

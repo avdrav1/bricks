@@ -1,0 +1,279 @@
+#!/usr/bin/env bash
+# ETCH-2 acceptance: Etch's window and canvas.
+#
+#   scripts/check_etch.sh [BINARY]   (default target/release/etch)
+#
+# In an Arch container under headless sway (1280x720). What the app shows is read through
+# the accessibility tree (scripts/a11y_helpers.py, pointed at the app "etch"): the status
+# bar's pointer position, zoom, and image size. Screenshots (grim) are read pixel by pixel
+# inside the canvas (its accessible extents); the pointer moves, drags, and turns the wheel
+# through the wlr-virtual-pointer protocol (scripts/dnd_helpers.py).
+#   1. etch shows a white 1024x768 image: the status says 1024×768, the white area is 4:3
+#      and inkless; Ctrl+0 shows it at 100%;
+#   2. a drag draws black pixels along the pointer's path: every sample of the line from
+#      the press to the release has a black pixel within a pixel of it;
+#   3. Ctrl+Z removes the stroke (no black left), Ctrl+Shift+Z restores it (as many black
+#      pixels as before), and so do Ctrl+Z and Ctrl+Y;
+#   4. resizing the window (floating, 900x560) and tiling it again keeps the drawing: as
+#      many black pixels, still at 100%;
+#   5. Ctrl+wheel up zooms in a step a notch, keeping the pixel under the pointer (the
+#      status position doesn't move) through 150% to 800%; at 800% the stroke's pixels are
+#      sharp squares: no pixel between black and white around it;
+#   6. the wheel pans: a notch down moves the image 48 screen px, 6 image px at 800%;
+#      Shift+wheel sideways; a middle-button drag and a drag with Space held move the image
+#      with the pointer (the pixel grabbed ends under it); Space's drag draws nothing: after
+#      Fit to Window (Ctrl+9), one Ctrl+Z leaves no ink;
+#   7. Ctrl+N's dialog makes a 640x480 image in a new window (Untitled 2), and offers that
+#      size the next time; Escape closes it;
+#   8. `etch --bench-stroke 120` draws a stroke on a 7680x4320 image at 100% a segment a
+#      frame, each segment under 8 ms p99 (frame times printed; the frame target is the
+#      reference box's, not this software-rendered container's).
+# Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+bin=$(realpath "${1:-target/release/etch}")
+[ -x "$bin" ] || { echo "no binary at $bin (cargo build --release -p etch)"; exit 1; }
+
+shots=()
+if [ -n "${SHOTS:-}" ]; then mkdir -p "$SHOTS"; shots=(-v "$(realpath "$SHOTS"):/shots"); fi
+# Arch's sway binary carries cap_sys_nice: exec fails without it in the container's set.
+out=$(docker run --rm --cap-add SYS_NICE -v "$bin:/usr/local/bin/etch:ro" \
+  -v "$PWD/scripts:/scripts:ro" "${shots[@]}" archlinux:latest bash -c '
+set -uo pipefail
+pacman -Syu --noconfirm --needed sway wtype grim gtk4 ttf-dejavu dbus python-gobject at-spi2-core \
+  python-pywayland wlr-protocols wayland pkgconf >/dev/null 2>&1
+mkdir -p /shots /tmp/rt /tmp/proto && chmod 700 /tmp/rt && touch /tmp/proto/__init__.py
+python -m pywayland.scanner -i /usr/share/wayland/wayland.xml \
+  /usr/share/wlr-protocols/unstable/wlr-virtual-pointer-unstable-v1.xml -o /tmp/proto/wlr_proto >/dev/null
+export PYTHONPATH=/tmp/proto XDG_RUNTIME_DIR=/tmp/rt GDK_DEBUG=no-portals GDK_BACKEND=wayland
+printf "output HEADLESS-1 resolution 1280x720 position 0 0\ndefault_border none\n" > /tmp/sway.conf
+sed "s/^APP = .*/APP = \"etch\"/" /scripts/a11y_helpers.py > /tmp/a11y.py
+cat > /tmp/px.py <<"PY"
+import sys
+import gi
+gi.require_version("Atspi", "2.0")
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import Atspi, GdkPixbuf
+
+def canvas():
+    # The largest image in the app: the canvas.
+    desktop = Atspi.get_desktop(0)
+    stack = [desktop.get_child_at_index(i) for i in range(desktop.get_child_count())]
+    stack = [a for a in stack if a is not None and a.get_name() == "etch"]
+    best = None
+    while stack:
+        n = stack.pop()
+        if n is None:
+            continue
+        if n.get_role() == Atspi.Role.IMAGE:
+            e = n.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+            if best is None or e.width * e.height > best[2] * best[3]:
+                best = (e.x, e.y, e.width, e.height)
+        stack.extend(n.get_child_at_index(i) for i in range(n.get_child_count()))
+    if best is None:
+        sys.exit("no canvas")
+    return best
+
+def pixels(path):
+    p = GdkPixbuf.Pixbuf.new_from_file(path)
+    rs, nc, px = p.get_rowstride(), p.get_n_channels(), p.get_pixels()
+    return lambda x, y: tuple(px[y * rs + x * nc + k] for k in range(3))
+
+def image(path):
+    # The white image in the canvas: the white run through the canvas middle, each way.
+    cx, cy, cw, ch = canvas()
+    at = pixels(path)
+    white = lambda p: min(p) >= 245
+    my, mx = cy + ch // 2, cx + cw // 2
+    row = [x for x in range(cx, cx + cw) if white(at(x, my))]
+    col = [y for y in range(cy, cy + ch) if white(at(mx, y))]
+    return at, row[0], col[0], row[-1] - row[0] + 1, col[-1] - col[0] + 1
+
+def count(path, dark):
+    # Pixels inside the image (2 px in from its edges) darker than DARK in every channel.
+    at, l, t, w, h = image(path)
+    return sum(1 for y in range(t + 2, t + h - 2) for x in range(l + 2, l + w - 2) if max(at(x, y)) < dark)
+
+cmd = sys.argv[1]
+if cmd == "canvas":
+    print(*canvas())
+elif cmd == "centre":
+    cx, cy, cw, ch = canvas()
+    print(cx + cw // 2, cy + ch // 2)
+elif cmd == "image":
+    _, l, t, w, h = image(sys.argv[2])
+    print(f"image {w}x{h}: " + ("4:3" if abs(w * 3 - h * 4) <= 8 else "not 4:3"))
+elif cmd == "black":
+    print(count(sys.argv[2], 60))
+elif cmd == "ink":
+    print(count(sys.argv[2], 200))
+elif cmd == "line":
+    # Samples of the line from (X1, Y1) to (X2, Y2) with a black pixel within one of them.
+    at = pixels(sys.argv[2])
+    x1, y1, x2, y2 = map(float, sys.argv[3:7])
+    n, hit = 40, 0
+    for i in range(n + 1):
+        x, y = round(x1 + (x2 - x1) * i / n), round(y1 + (y2 - y1) * i / n)
+        if any(max(at(x + dx, y + dy)) < 60 for dx in (-1, 0, 1) for dy in (-1, 0, 1)):
+            hit += 1
+    print(f"{hit}/{n + 1}")
+elif cmd == "sharp":
+    # Around (X, Y): black pixels, and pixels between black and white (a smoothed edge).
+    at = pixels(sys.argv[2])
+    x0, y0, r = int(sys.argv[3]), int(sys.argv[4]), int(sys.argv[5])
+    box = [at(x, y) for y in range(y0 - r, y0 + r) for x in range(x0 - r, x0 + r)]
+    black = sum(1 for p in box if max(p) < 60)
+    between = sum(1 for p in box if 60 <= max(p) and min(p) < 245)
+    print(f"black {black} between {between}")
+PY
+session() {
+  WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 sway --unsupported-gpu -c /tmp/sway.conf >/tmp/sway.log 2>&1 &
+  for i in $(seq 50); do ls /tmp/rt/wayland-[0-9] >/dev/null 2>&1 && break; sleep 0.1; done
+  export WAYLAND_DISPLAY=$(basename $(ls /tmp/rt/wayland-[0-9] | head -1))
+  export SWAYSOCK=$(ls /tmp/rt/sway-ipc.*.sock | head -1)
+  n=0
+  shot() { n=$((n + 1)); grim /tmp/shot.png 2>/dev/null; cp /tmp/shot.png /shots/$n-$1.png 2>/dev/null || true; }
+  keys() { wtype -s 300 "$@" -s 400; }
+  shown() { python3 /tmp/a11y.py text 2>&1 | sed "s/^/${1:-shown}: /"; }
+  # The status bar: the pointer position ("X Y"), and the zoom.
+  pos() { python3 /tmp/a11y.py text | sed -n "s/^x: \([0-9]*\)  y: \([0-9]*\)$/\1 \2/p" | head -1; }
+  zoom() { python3 /tmp/a11y.py text | grep -E "^[0-9.]+%$" | head -1; }
+  point() { python3 /scripts/dnd_helpers.py wheel $1 $2 0; sleep 0.3; }
+  # Waits on the key holder alone: a bare wait would wait for sway and etch too.
+  ctrl_wheel() { wtype -M ctrl -s 1500 -m ctrl & k=$!; python3 /scripts/dnd_helpers.py wheel $1 $2 $3; wait $k; sleep 0.3; }
+  px() { python3 /tmp/px.py "$@"; }
+  same() { [ -n "$1" ] && [ "$1" = "$2" ] && echo yes || echo "no ($1 then $2)"; }
+  near() { # X1 Y1 X2 Y2 DX DY: whether (X2, Y2) is (X1 + DX, Y1 + DY), within a pixel
+    python3 -c "import sys; a = list(map(float, sys.argv[1:])); print(\"yes\" if abs(a[2] - a[0] - a[4]) <= 1 and abs(a[3] - a[1] - a[5]) <= 1 else f\"no ({a[0]:.0f},{a[1]:.0f} to {a[2]:.0f},{a[3]:.0f})\")" "$@"
+  }
+
+  echo "== 1 start"
+  etch >>/tmp/app.log 2>&1 & sleep 3
+  shown start
+  shot start; px image /tmp/shot.png | sed "s/^/start: /"
+  echo "start ink: $(px ink /tmp/shot.png)"
+  keys -M ctrl 0 -m ctrl
+  echo "actual: $(zoom)"
+
+  echo "== 2 draw"
+  read mx my <<<"$(px centre)"
+  ax=$((mx - 150)); ay=$((my - 80)); bx=$((mx + 150)); by=$((my + 80))
+  python3 /scripts/dnd_helpers.py drag $ax $ay $bx $by; sleep 0.5
+  shot drawn
+  echo "line: $(px line /tmp/shot.png $ax $ay $bx $by)"
+  drawn=$(px black /tmp/shot.png); echo "black: $drawn"
+
+  echo "== 3 undo"
+  keys -M ctrl z -m ctrl; shot undone; echo "undone: $(px black /tmp/shot.png)"
+  keys -M ctrl -M shift z -m shift -m ctrl; shot redone; echo "redone: $(same $drawn $(px black /tmp/shot.png))"
+  keys -M ctrl z -m ctrl; keys -M ctrl y -m ctrl; shot redone-y; echo "redone y: $(same $drawn $(px black /tmp/shot.png))"
+
+  echo "== 4 resize"
+  swaymsg "[app_id=dev.cronkite.Etch] floating enable, resize set 900 560, move position 0 0" >/dev/null; sleep 1
+  shot resized; echo "resized: $(same $drawn $(px black /tmp/shot.png))"
+  echo "resized canvas: $(px canvas | cut -d" " -f3-)"
+  swaymsg "[app_id=dev.cronkite.Etch] floating disable" >/dev/null; sleep 1
+  shot tiled; echo "tiled: $(same $drawn $(px black /tmp/shot.png))"
+  echo "zoom: $(zoom)"
+
+  echo "== 5 zoom"
+  read mx my <<<"$(px centre)"
+  # A pointer that stays, so the status keeps showing the position between the helpers.
+  python3 /scripts/dnd_helpers.py hold $mx $my 120 & held=$!; sleep 1
+  point $mx $my; before=""
+  for i in $(seq 10); do before=$(pos); [ -n "$before" ] && break; sleep 0.3; done
+  echo "under: $before"
+  for z in 150 200 300 400 600 800; do
+    ctrl_wheel $mx $my -1
+    echo "zoom $(zoom): $(same "$before" "$(pos)")"
+  done
+  shot zoomed; echo "sharp: $(px sharp /tmp/shot.png $mx $my 80)"
+
+  echo "== 6 pan"
+  point $mx $my; read x0 y0 <<<"$(pos)"
+  python3 /scripts/dnd_helpers.py wheel $mx $my 1; sleep 0.3
+  read x1 y1 <<<"$(pos)"; echo "wheel: $(near $x0 $y0 $x1 $y1 0 6)"
+  wtype -M shift -s 1500 -m shift & k=$!; python3 /scripts/dnd_helpers.py wheel $mx $my 1; wait $k; sleep 0.3
+  read x2 y2 <<<"$(pos)"; echo "shift wheel: $(near $x1 $y1 $x2 $y2 6 0)"
+  nx=$((mx - 160)); ny=$((my - 96))
+  python3 /scripts/dnd_helpers.py drag $mx $my $nx $ny 0.5 middle; sleep 0.3
+  read x3 y3 <<<"$(pos)"; echo "middle: $(near $x2 $y2 $x3 $y3 0 0)"
+  echo "middle zoom: $(zoom)"
+  # The leading pause lets the app take the keymap wtype sends before the press.
+  wtype -s 300 -P space -s 6000 -p space & k=$!; sleep 0.8
+  python3 /scripts/dnd_helpers.py drag $nx $ny $mx $my; wait $k; sleep 0.3
+  read x4 y4 <<<"$(pos)"; echo "space: $(near $x3 $y3 $x4 $y4 0 0)"
+  keys -M ctrl 9 -m ctrl; shot fitted; echo "fitted ink: $(px ink /tmp/shot.png)"
+  keys -M ctrl z -m ctrl; shot fitted-undone; echo "fitted undone ink: $(px ink /tmp/shot.png)"
+  kill $held
+
+  echo "== 7 new"
+  keys -M ctrl n -m ctrl; sleep 1
+  shown dialog | grep -E "New Image|Width|Height"
+  keys -M ctrl a -m ctrl; keys 640; keys -k Tab; keys -M ctrl a -m ctrl; keys 480; keys -k Return; sleep 2
+  shown new
+  keys -M ctrl n -m ctrl; sleep 1
+  shown again | grep -E "New Image|^again: (640|480)$"
+  keys -k Escape; sleep 1
+  shown closed | grep "New Image" || echo "closed: no dialog"
+
+  echo "== 8 bench"
+  pkill -x etch; sleep 1
+  etch --bench-stroke 120 2>>/tmp/app.log | sed "s/^/bench: /"
+  swaymsg exit >/dev/null 2>&1 || true
+}
+dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
+echo "== app log"; grep -E "^etch:|panicked|^thread|CRITICAL" -A2 /tmp/app.log | head -30
+' 2>&1) || true
+[ -n "${VERBOSE:-}" ] && sed 's/^/  /' <<<"$out"
+section() { awk -v s="== $1" '/^== /{on=($0 ~ "^" s)} on' <<<"$out"; }
+fail=0
+check() { # WHAT SECTION PATTERN
+  if section "$2" | grep -E -- "$3" >/dev/null; then echo "ok   $1"; else echo "FAIL $1 (no match for: $3)"; fail=1; fi
+}
+absent() { # WHAT SECTION PATTERN
+  if section "$2" | grep -E -- "$3" >/dev/null; then echo "FAIL $1 (found: $3)"; fail=1; else echo "ok   $1"; fi
+}
+check "1: etch opens a window titled Untitled" "1 start" "^start: Untitled$"
+check "1: ... with a 1024×768 image" "1 start" "^start: 1024×768$"
+check "1: ... white and 4:3 on the canvas" "1 start" "^start: image [0-9]+x[0-9]+: 4:3$"
+check "1: ... with no ink on it" "1 start" "^start ink: 0$"
+check "1: Ctrl+0 shows it at 100%" "1 start" "^actual: 100%$"
+check "2: a drag draws black pixels all along its path" "2 draw" "^line: 41/41$"
+absent "2: ... (some black at all)" "2 draw" "^black: 0$"
+check "3: Ctrl+Z removes the stroke" "3 undo" "^undone: 0$"
+check "3: Ctrl+Shift+Z restores it" "3 undo" "^redone: yes$"
+check "3: Ctrl+Y redoes too" "3 undo" "^redone y: yes$"
+check "4: resizing the window keeps the drawing" "4 resize" "^resized: yes$"
+check "4: ... in the smaller window" "4 resize" "^resized canvas: 900 "
+check "4: tiling it again keeps it too" "4 resize" "^tiled: yes$"
+check "4: ... still at 100%" "4 resize" "^zoom: 100%$"
+for z in 150 200 300 400 600 800; do
+  check "5: Ctrl+wheel zooms to $z% keeping the pixel under the pointer" "5 zoom" "^zoom $z%: yes$"
+done
+check "5: at 800% pixels are sharp squares" "5 zoom" "^sharp: black [1-9][0-9]* between 0$"
+check "6: the wheel pans down 6 image px at 800%" "6 pan" "^wheel: yes$"
+check "6: Shift+wheel pans sideways" "6 pan" "^shift wheel: yes$"
+check "6: a middle-button drag pans with the pointer" "6 pan" "^middle: yes$"
+check "6: ... without zooming" "6 pan" "^middle zoom: 800%$"
+check "6: a drag with Space held pans with the pointer" "6 pan" "^space: yes$"
+absent "6: Fit to Window shows the stroke" "6 pan" "^fitted ink: 0$"
+check "6: ... and one undo takes all ink: Space's drag drew nothing" "6 pan" "^fitted undone ink: 0$"
+check "7: Ctrl+N asks for the new image's size" "7 new" "^dialog: New Image$"
+check "7: ... and opens it in a new window" "7 new" "^new: Untitled 2$"
+check "7: ... 640×480" "7 new" "^new: 640×480$"
+check "7: the next New Image offers 640" "7 new" "^again: 640$"
+check "7: ... by 480" "7 new" "^again: 480$"
+check "7: Escape closes the dialog" "7 new" "^closed: no dialog$"
+absent "the app logs no errors or panics" "app log" "^etch:|panicked|CRITICAL"
+bench=$(section "8 bench" | sed -n "s/^bench: //p")
+if [ -z "$bench" ]; then echo "FAIL 8: --bench-stroke printed nothing"; fail=1; else
+  read seg frame <<<"$(python3 -c "import json, sys; b = json.loads(sys.argv[1]); print(b[\"segment_ms\"][\"p99\"], b[\"frame_cpu_ms\"][\"p99\"])" "$bench")"
+  if python3 -c "import sys; sys.exit(not float(sys.argv[1]) < 8)" "$seg"; then
+    echo "ok   8: a segment on 7680x4320 takes $seg ms p99 (under 8); frames here $frame ms p99"
+  else echo "FAIL 8: a segment on 7680x4320 takes $seg ms p99, not under 8"; fail=1; fi
+fi
+if [ $fail = 0 ]; then echo "ETCH OK"; else
+  echo "ETCH CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
+  exit 1
+fi

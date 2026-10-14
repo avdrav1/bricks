@@ -2,8 +2,9 @@
 
   dnd_helpers.py source FILE           a GTK 4 window, titled "dragsrc", whose whole area
                                        drags FILE as text/uri-list, as file managers do
-  dnd_helpers.py drag X1 Y1 X2 Y2 [HOLD]
-                                       under a wlroots compositor: press at (X1, Y1), move
+  dnd_helpers.py drag X1 Y1 X2 Y2 [HOLD] [BUTTON]
+                                       under a wlroots compositor: press BUTTON (left, or
+                                       middle) at (X1, Y1), move
                                        to (X2, Y2) in steps, wait HOLD seconds (0.5),
                                        release; through the wlr-virtual-pointer protocol,
                                        so no real input device is needed. Needs the
@@ -15,10 +16,16 @@
                                        row (1) make a double or triple click
   dnd_helpers.py wheel X Y NOTCHES     the same pointer at (X, Y) turns a mouse wheel
                                        NOTCHES notches down (negative: up)
+  dnd_helpers.py hold X Y SECONDS      a second pointer that moves to (X, Y) and stays
+                                       SECONDS: while it's there, the others coming and
+                                       going don't make the app see the pointer leave
 """
 
 import sys
 import time
+
+# Linux input event codes.
+BUTTONS = {"left": 0x110, "middle": 0x112}
 
 
 def source(path):
@@ -84,8 +91,8 @@ def pointer(width=1280, height=720):
         display.flush()
         time.sleep(0.03)
 
-    def button(pressed, hold=0.2):
-        pointer.button(ms(), 0x110, 1 if pressed else 0)  # BTN_LEFT
+    def button(pressed, hold=0.2, code=BUTTONS["left"]):
+        pointer.button(ms(), code, 1 if pressed else 0)
         pointer.frame()
         display.flush()
         time.sleep(hold)
@@ -105,16 +112,16 @@ def pointer(width=1280, height=720):
     return move, button, wheel, done
 
 
-def drag(x1, y1, x2, y2, hold=0.5):
+def drag(x1, y1, x2, y2, hold=0.5, which="left"):
     move, button, _, done = pointer()
     move(x1, y1)
     time.sleep(0.5)
-    button(True)
+    button(True, code=BUTTONS[which])
     steps = 40
     for i in range(1, steps + 1):
         move(x1 + (x2 - x1) * i / steps, y1 + (y2 - y1) * i / steps)
     time.sleep(hold)
-    button(False)
+    button(False, code=BUTTONS[which])
     time.sleep(0.5)
     done()
 
@@ -140,14 +147,25 @@ def wheel(x, y, notches):
     done()
 
 
+def hold(x, y, seconds):
+    # A pointer that stays: while it exists, other virtual pointers coming and going
+    # don't take the seat's pointer away, so the app keeps the pointer's position.
+    move, _, _, done = pointer()
+    move(x, y)
+    time.sleep(seconds)
+    done()
+
+
 if __name__ == "__main__":
     if sys.argv[1] == "source":
         source(sys.argv[2])
     elif sys.argv[1] == "drag":
-        drag(*map(float, sys.argv[2:7]))
+        drag(*map(float, sys.argv[2:7]), *sys.argv[7:8])
     elif sys.argv[1] == "click":
         click(*map(float, sys.argv[2:5]))
     elif sys.argv[1] == "wheel":
         wheel(float(sys.argv[2]), float(sys.argv[3]), int(sys.argv[4]))
+    elif sys.argv[1] == "hold":
+        hold(*map(float, sys.argv[2:5]))
     else:
         sys.exit(__doc__)

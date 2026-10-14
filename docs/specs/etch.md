@@ -95,11 +95,12 @@ The phases of the product plan, one milestone each (`BACKLOG.md`, chain `etch`):
 
 ## ET0: canvas prototype
 
-What ETCH-2 builds (the eraser, colours, and sizes follow in ET0):
+Built (ETCH-2; the eraser, colours, and sizes follow in ET0):
 
-- **Window.** `etch` opens a window with a blank white 1024×768 image, titled Untitled, with a menu bar (File: New Image…, Close; Edit: Undo, Redo; View: Zoom In, Zoom Out, Actual Size, Fit to Window), the canvas, and a status bar (pointer position, zoom, image size). Each image has its own window.
+- **Window.** `etch` opens a window with a blank white 1024×768 image, titled Untitled ("Untitled 2" beside it, and so on), with a menu bar (File: New Image…, Close, Quit; Edit: Undo, Redo; View: Zoom In, Zoom Out, Actual Size, Fit to Window), the canvas, and a status bar (pointer position in image pixels, zoom, image size). Each image has its own window.
 - **New Image.** Ctrl+N asks for a width and height (1 to 16384 pixels each; the last ones used, 1024×768 at first) and opens the white image in a new window.
-- **Canvas.** The image sits centred on a backdrop with a one-pixel boundary, at 100%, or fitted when larger than the window. Ctrl+wheel zooms around the pointer, Ctrl++ and Ctrl+- around the window's centre, through 10%, 12.5%, 16.7%, 25%, 33.3%, 50%, 66.7%, 100%, 150%, 200%, 300%, 400%, 600%, 800%, 1200%, 1600%, 2400%, 3200%. The wheel pans (Shift+wheel sideways), and so do dragging with the middle button and dragging with Space held. The image can't be panned out of sight; smaller than the window, it stays centred.
+- **Canvas.** The image sits centred on the window's backdrop with a one-pixel boundary, at 100%, or fitted with a margin when larger than the window. Ctrl+wheel zooms a step a notch around the pointer (a touchpad smoothly), Ctrl++ and Ctrl+- around the window's centre, through 10%, 12.5%, 16.7%, 25%, 33.3%, 50%, 66.7%, 100%, 150%, 200%, 300%, 400%, 600%, 800%, 1200%, 1600%, 2400%, 3200%; a zoom between steps (after Fit) goes to the next one. The wheel pans 48 screen pixels a notch (Shift+wheel sideways), and dragging with the middle button or with Space held moves the image with the pointer. The image can't be panned out of sight (16 pixels of it stay in); smaller than the window, it stays centred. Resizing the window keeps the point at its centre.
+- **Drawing stays immediate.** The canvas redraws only the 256-pixel tiles a stroke changed. `etch --bench-stroke FRAMES` draws a stroke a segment a frame on a 7680×4320 image at 100% and prints its frame times: on a Ryzen 9 5900 under Hyprland, 1.2 ms p99 a frame (target 8 ms).
 - **Pencil.** Dragging draws one-pixel black lines through every pixel the pointer crossed (a click draws one pixel); each drag is one undo step.
 - **Undo.** Ctrl+Z undoes the last stroke, Ctrl+Shift+Z and Ctrl+Y redo it; a new stroke after undoing drops what was undone.
 
