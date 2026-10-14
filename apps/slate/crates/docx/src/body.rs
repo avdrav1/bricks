@@ -359,12 +359,13 @@ impl<R: Read + Seek> Body<'_, '_, R> {
     }
 
     /// An empty paragraph in the style `direct` names, with the alignment it and the
-    /// styles give it, and its own tab stops.
+    /// styles give it, and its own tab stops, spacing, and indents.
     fn paragraph_of(&self, direct: &ParaProps) -> Paragraph {
         let ppr = self.styles.paragraph_props(direct);
         let mut p = Paragraph::new(self.styles.paragraph_id(direct.style.as_deref()));
         p.align = ppr.align.unwrap_or_default();
         p.tabs.clone_from(&direct.tabs);
+        p.own = direct.overrides();
         p
     }
 

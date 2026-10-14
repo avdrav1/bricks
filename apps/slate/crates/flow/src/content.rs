@@ -2,7 +2,8 @@
 
 use crate::tree::{px, LEVEL_INDENT, TWIPS_PER_PX};
 use document_model::{
-    CodeBlock, Image, LineSpacing, ListItem, Paragraph, Raw, StyleSheet, TabAlign, TabLeader,
+    CodeBlock, Image, LineSpacing, ListItem, ParaSpacing, Paragraph, Raw, StyleSheet, TabAlign,
+    TabLeader,
 };
 use std::borrow::Cow;
 
@@ -68,42 +69,62 @@ impl<'a> Content<'a> {
         }
     }
 
-    /// The first line's indent from the other lines', in pixels at 96 dpi: a paragraph's
-    /// style's first-line indent, negative for a hanging first line. 0 for a list item,
-    /// whose marker sets its indent, and for other content.
-    pub fn first_indent(&self) -> i32 {
+    /// A paragraph's (or list item's) spacing and indents: its style's with its own on top
+    /// (ADR 0009); `None` for other content.
+    pub fn spacing(&self) -> Option<ParaSpacing> {
         match *self {
             Content::Paragraph {
-                paragraph,
-                styles,
-                list: None,
-                ..
-            } => px(i64::from(
-                styles.style_of(&paragraph.style).para.indent_first,
-            )),
+                paragraph, styles, ..
+            } => Some(styles.spacing(paragraph)),
+            _ => None,
+        }
+    }
+
+    /// The first line's indent from the other lines', in pixels at 96 dpi: a paragraph's
+    /// first-line indent, negative for a hanging first line. 0 for a list item, whose
+    /// marker sets its indent, and for other content.
+    pub fn first_indent(&self) -> i32 {
+        match *self {
+            Content::Paragraph { list: None, .. } => {
+                self.spacing().map_or(0, |s| px(i64::from(s.indent_first)))
+            }
             _ => 0,
         }
     }
 
     /// Where the text's layout starts from the left edge of the column or table cell it is
-    /// in, in pixels at 96 dpi: a list item's at its marker's indent; a paragraph's at its
-    /// left indent (and its quote or list nesting), less a hanging first line's. 0 for
-    /// other content.
+    /// in, in pixels at 96 dpi: a list item's at its marker's indent, or at its own left
+    /// indent (leaving its marker room); a paragraph's at its left indent (and its quote or
+    /// list nesting), less a hanging first line's. Never left of the edge. 0 for other
+    /// content.
     pub fn text_left(&self) -> i32 {
         match *self {
             Content::Paragraph {
-                list: Some(item), ..
-            } => i32::from(item.level) * LEVEL_INDENT + LEVEL_INDENT,
+                paragraph,
+                list: Some(item),
+                ..
+            } => match paragraph.own.indent_left {
+                Some(left) => px(i64::from(left)).max(LEVEL_INDENT),
+                None => i32::from(item.level) * LEVEL_INDENT + LEVEL_INDENT,
+            },
             Content::Paragraph {
                 paragraph, styles, ..
             } => {
-                let para = &styles.style_of(&paragraph.style).para;
+                let s = styles.spacing(paragraph);
                 let left =
-                    i32::from(paragraph.indent) * LEVEL_INDENT + px(i64::from(para.indent_left));
-                (left + self.first_indent().min(0)).max(0)
+                    i32::from(paragraph.indent) * LEVEL_INDENT + px(i64::from(s.indent_left));
+                (left + px(i64::from(s.indent_first)).min(0)).max(0)
             }
             _ => 0,
         }
+    }
+
+    /// How far the text's layout ends left of the right edge of the column or table cell
+    /// it is in, in pixels at 96 dpi: a paragraph's or list item's right indent, never past
+    /// the edge. 0 for other content.
+    pub fn text_right(&self) -> i32 {
+        self.spacing()
+            .map_or(0, |s| px(i64::from(s.indent_right)).max(0))
     }
 
     /// Where a paragraph's tabs advance to, from its layout's left edge
@@ -147,15 +168,10 @@ impl<'a> Content<'a> {
         Some(Tabs::Stops(tabs))
     }
 
-    /// How far apart the lines are: a paragraph's (or list item's) style's line spacing;
-    /// single for other content.
+    /// How far apart the lines are: a paragraph's (or list item's) line spacing, its
+    /// style's or its own; single for other content.
     pub fn line_spacing(&self) -> LineSpacing {
-        match *self {
-            Content::Paragraph {
-                paragraph, styles, ..
-            } => styles.style_of(&paragraph.style).para.line,
-            _ => LineSpacing::default(),
-        }
+        self.spacing().map_or_else(LineSpacing::default, |s| s.line)
     }
 }
 

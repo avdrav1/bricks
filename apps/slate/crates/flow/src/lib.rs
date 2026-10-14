@@ -665,13 +665,20 @@ impl Flow {
                 tree::shift_leaves(node, leaf_shift);
             }
         }
-        // A list item's spacing depends on the block after it.
-        let mut respaced = 0;
-        if s.start > 0 {
-            let node = &mut self.tops[s.start - 1];
-            let before = node.height;
-            if builder.respace(node, self.doc.blocks.get(s.start)) {
-                respaced = node.height - before;
+        // A block's spacing depends on its neighbours: a list item's on the block after it,
+        // contextual spacing on both.
+        let mut respaced = Vec::new();
+        let blocks = &self.doc.blocks;
+        for i in [s.start.checked_sub(1), Some(new_end)]
+            .into_iter()
+            .flatten()
+        {
+            if let (Some(node), Some(block)) = (self.tops.get_mut(i), blocks.get(i)) {
+                let (prev, next) = tree::neighbours(blocks, i);
+                let by = builder.respace(node, block, prev, next);
+                if by != 0 {
+                    respaced.push((i, by));
+                }
             }
         }
         if had_breaks || new_breaks {
@@ -690,8 +697,8 @@ impl Flow {
                     self.heights.add(s.start + i, i64::from(by));
                 }
             }
-            if respaced != 0 {
-                self.heights.add(s.start - 1, i64::from(respaced));
+            for (i, by) in respaced {
+                self.heights.add(i, i64::from(by));
             }
             for i in first..first + added {
                 let by =

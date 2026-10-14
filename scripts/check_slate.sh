@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # SLATE-4, SLATE-10, SLATE-11, SLATE-6, SLATE-12, SLATE-13, SLATE-20, SLATE-21, SLATE-22,
-# SLATE-23, SLATE-24, and SLATE-25 acceptance: the window opens, shows, and refuses
-# documents, its pageless column follows View → Text Width and a Word document's page, its
-# text selects and copies, it edits with undo, table cells included, it composes through an
-# input method, it draws a Word document's fonts (embedded ones and fallbacks by class),
-# paragraph looks, and tab stops, its format bar sets them, and they save.
+# SLATE-23, SLATE-24, SLATE-25, and SLATE-26 acceptance: the window opens, shows, and
+# refuses documents, its pageless column follows View → Text Width and a Word document's
+# page, its text selects and copies, it edits with undo, table cells included, it composes
+# through an input method, it draws a Word document's fonts (embedded ones and fallbacks by
+# class), paragraph looks (its styles' and its own), and tab stops, its format bar sets
+# them, and they save.
 #
 #   scripts/check_slate.sh [BINARY]   (default target/release/slate)
 #
@@ -171,6 +172,14 @@
 #      relationships, and the font part byte for byte. The face is written once to
 #      $XDG_RUNTIME_DIR/slate/fonts (mode 700) and never installed: fc-list doesn't list
 #      Cardo afterwards and the user's font directories stay empty.
+#  31. a paragraph's own spacing and indents: own.docx (written by /tmp/own.py, Liberation
+#      Sans 11 pt) sets them in each paragraph's w:pPr over a style that sets others, and
+#      is measured as fonts.docx is in 23: space before 450 and after 300 twips, a left
+#      indent of 900, a right indent of 1500 (a right-aligned line ends 100 px left of an
+#      unindented one's end), a 450 hanging first line under a 900 indent, and lines exactly
+#      600 apart, each within 2 px; a character typed into the last paragraph (its own
+#      spacing and right indent) and Ctrl+S save it with its w:spacing and w:ind as they
+#      were and every other paragraph byte for byte.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -1068,6 +1077,131 @@ def measure(png):
 
 make(sys.argv[2]) if sys.argv[1] == "make" else measure(sys.argv[2])
 PY
+# SLATE-26: `make PATH` writes own.docx, whose paragraphs set their spacing and indents in
+# their own w:pPr over a style (Decoy) that sets others; `measure PNG` measures its
+# screenshot as fonts.py does; `kept ORIGINAL SAVED` checks that the edited last paragraph
+# keeps its w:pPr and the others are as they were.
+cat > /tmp/own.py <<"PY"
+import os
+import re
+import sys
+import zipfile
+
+BEFORE, AFTER, LEFT, HANG, EXACT, RIGHT = 450, 300, 900, 450, 600, 1500
+W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+PKG = "http://schemas.openxmlformats.org/package/2006/relationships"
+CT = "http://schemas.openxmlformats.org/package/2006/content-types"
+OOXML = "application/vnd.openxmlformats-officedocument.wordprocessingml"
+HEAD = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"""
+# The last paragraph, Z: its own look, which saving an edit in it keeps.
+LAST = f"""<w:spacing w:before="0" w:after="0"/><w:ind w:left="0" w:right="{RIGHT}"/>"""
+
+def para(text, own="", style="Normal", jc=""):
+    jc = f"""<w:jc w:val="{jc}"/>""" if jc else ""
+    return (f"""<w:p><w:pPr><w:pStyle w:val="{style}"/>{own}{jc}</w:pPr>"""
+            f"""<w:r><w:t xml:space="preserve">{text}</w:t></w:r></w:p>""")
+
+def spacing(before=0, after=0, line="""w:line="240" w:lineRule="auto\""""):
+    return f"""<w:spacing w:before="{before}" w:after="{after}" {line}/>"""
+
+def ind(left=0, first="""w:firstLine="0\""""):
+    return f"""<w:ind w:left="{left}" w:right="0" {first}/>"""
+
+def make(path):
+    styles = (
+        """<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Liberation Sans" """
+        """w:hAnsi="Liberation Sans"/><w:sz w:val="22"/></w:rPr></w:rPrDefault><w:pPrDefault>"""
+        """<w:pPr><w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/></w:pPr>"""
+        """</w:pPrDefault></w:docDefaults>"""
+        """<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>"""
+        """<w:style w:type="paragraph" w:styleId="Decoy"><w:name w:val="Decoy"/><w:basedOn w:val="Normal"/>"""
+        """<w:pPr><w:spacing w:before="150" w:after="150" w:line="300" w:lineRule="exact"/>"""
+        """<w:ind w:left="300" w:right="600" w:firstLine="300"/></w:pPr></w:style>""")
+    exact = f"""w:line="{EXACT}" w:lineRule="exact\""""
+    paras = [
+        para("Hamburg one"),
+        para("Hamburg two", spacing(BEFORE, AFTER) + ind(), "Decoy"),
+        para("Hamburg three"),
+        para("Hamburg four", spacing() + ind(LEFT), "Decoy"),
+        para("Hamburg right", jc="right"),
+        para("Hamburg right", f"""<w:ind w:right="{RIGHT}"/>""", jc="right"),
+        para(" ".join(["Hamburg"] * 20), spacing() + ind(LEFT, f"""w:hanging="{HANG}\""""), "Decoy"),
+        para(" ".join(["Hamburg"] * 30), spacing(line=exact) + ind(), "Decoy"),
+        para("Z", LAST),
+    ]
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("[Content_Types].xml", HEAD + f"""<Types xmlns="{CT}">"""
+                   """<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"""
+                   """<Default Extension="xml" ContentType="application/xml"/>"""
+                   f"""<Override PartName="/word/document.xml" ContentType="{OOXML}.document.main+xml"/>"""
+                   f"""<Override PartName="/word/styles.xml" ContentType="{OOXML}.styles+xml"/></Types>""")
+        z.writestr("_rels/.rels", HEAD + f"""<Relationships xmlns="{PKG}"><Relationship Id="rId1" """
+                   f"""Type="{REL}/officeDocument" Target="word/document.xml"/></Relationships>""")
+        z.writestr("word/_rels/document.xml.rels", HEAD + f"""<Relationships xmlns="{PKG}">"""
+                   f"""<Relationship Id="rId1" Type="{REL}/styles" Target="styles.xml"/></Relationships>""")
+        z.writestr("word/styles.xml", HEAD + f"""<w:styles xmlns:w="{W}">{styles}</w:styles>""")
+        z.writestr("word/document.xml", HEAD + f"""<w:document xmlns:w="{W}"><w:body>"""
+                   + "".join(paras) + "</w:body></w:document>")
+
+def measure(png):
+    import gi
+    gi.require_version("GdkPixbuf", "2.0")
+    from gi.repository import GdkPixbuf
+    p = GdkPixbuf.Pixbuf.new_from_file(png)
+    w, h, rs, n, px = p.get_width(), p.get_height(), p.get_rowstride(), p.get_n_channels(), p.get_pixels()
+    bands, cur = [], None
+    for y in range(int(os.environ["TOP"]), h - 10):
+        row = px[y * rs:y * rs + w * n]
+        xs = [x for x in range(40, w - 40) if row[x * n] + row[x * n + 1] + row[x * n + 2] < 600]
+        if xs:
+            if cur is None:
+                cur = [y, y, xs[0], xs[-1]]
+            cur[1], cur[2], cur[3] = y, min(cur[2], xs[0]), max(cur[3], xs[-1])
+        elif cur is not None:
+            bands.append(cur)
+            cur = None
+    print("bands: " + " ".join(f"{b[0]}-{b[1]}@{b[2]}-{b[3]}" for b in bands))
+    if len(bands) < 12:
+        print("too few lines")
+        return
+    one, two, three, four, right, inset = bands[:6]
+    rest, left0, hanging = bands[6:-1], three[2], []
+    while rest and rest[0][2] - left0 > 15:
+        hanging.append(rest.pop(0))
+    line = four[0] - three[0]
+    print(f"plain line: {line}")
+    def report(label, got, want):
+        verdict = "ok" if abs(got - want) <= 2 else "off"
+        print(f"{label}: {got} (want {want}) {verdict}")
+    report("own space before", two[0] - one[0] - line, BEFORE // 15)
+    report("own space after", three[0] - two[0] - line, AFTER // 15)
+    report("own left indent", four[2] - left0, LEFT // 15)
+    report("own right indent", right[3] - inset[3], RIGHT // 15)
+    report("own hanging first line", hanging[0][2] - left0 if hanging else -1, (LEFT - HANG) // 15)
+    report("own hanging next line", hanging[1][2] - left0 if len(hanging) > 1 else -1, LEFT // 15)
+    pitches = [b2[0] - b1[0] for b1, b2 in zip(rest, rest[1:])]
+    print("own exact pitches: " + " ".join(map(str, pitches)))
+    worst = max(pitches, key=lambda p: abs(p - EXACT // 15)) if len(pitches) > 1 else -1
+    report("own exact line", worst, EXACT // 15)
+
+def kept(original, saved):
+    def split(path):
+        with zipfile.ZipFile(path) as z:
+            xml = z.read("word/document.xml").decode()
+        at = [m.start() for m in re.finditer(r"<w:p[ >]", xml)][-1]
+        return xml[:at], xml[at:]
+    (a, _), (b, last) = split(original), split(saved)
+    edited = "Z!" in last
+    print(f"last saved: own look {LAST in last}, edit {edited}; others kept: {a == b}")
+
+if sys.argv[1] == "make":
+    make(sys.argv[2])
+elif sys.argv[1] == "measure":
+    measure(sys.argv[2])
+else:
+    kept(sys.argv[2], sys.argv[3])
+PY
 # SLATE-21: `make PATH` writes bar.docx (styles Normal, Heading 2, and a custom Fancy);
 # `line PNG` measures the first line of text below the format bar in a screenshot: the
 # left and right edges of its ink and how far its middle is from the middle of the window.
@@ -1637,6 +1771,17 @@ print(f\"typing for 20 s: first journal after ${first:-0} ms, writes {len(t)}, s
   echo "private fonts: $(ls /tmp/rt/slate/fonts | wc -l) mode $(stat -c %a /tmp/rt/slate/fonts)"
   echo "cardo installed after: $(fc-list | grep -ci cardo)"
   echo "user font files: $(find ~/.local/share/fonts ~/.fonts -type f 2>/dev/null | wc -l)"
+  echo "== 31 own spacing"
+  python3 /tmp/own.py make /tmp/own.docx
+  cp /tmp/own.docx /tmp/save/own.docx
+  slate /tmp/save/own.docx >>/tmp/app.log 2>&1 & sleep 4
+  titles | sed "s/^/own-/"
+  # The caret on the last line, Z, which the measurements leave out.
+  keys -M ctrl -k End -m ctrl; sleep 1; shot own
+  python3 /tmp/own.py measure /shots/own.png 2>&1
+  keys "!"; keys -M ctrl s -m ctrl; sleep 1; saved
+  python3 /tmp/own.py kept /tmp/own.docx /tmp/save/own.docx 2>&1
+  quit
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -1949,6 +2094,17 @@ done
 check "30: the face is written once, to a private directory" "30 embedded fonts" "^private fonts: 1 mode 700$"
 check "30: and isn't installed for the user" "30 embedded fonts" "^cardo installed after: 0$"
 check "30: nothing goes in the user's font directories" "30 embedded fonts" "^user font files: 0$"
+s31="31 own spacing"
+check "31: the document opens" "$s31" "^own-titles: .*own\.docx"
+check "31: a paragraph's own space before goes over its style's" "$s31" "^own space before: .* ok$"
+check "31: ... and its own space after" "$s31" "^own space after: .* ok$"
+check "31: its own left indent moves the text in" "$s31" "^own left indent: .* ok$"
+check "31: its own right indent ends right-aligned text that far in" "$s31" "^own right indent: .* ok$"
+check "31: its own hanging first line starts left of its indent" "$s31" "^own hanging first line: .* ok$"
+check "31: ... and its next line at the indent" "$s31" "^own hanging next line: .* ok$"
+check "31: its own exact line spacing sets every line's pitch" "$s31" "^own exact line: .* ok$"
+check "31: an edited paragraph saves with its own spacing and indents, the others as they were" \
+  "$s31" "^last saved: own look True, edit True; others kept: True$"
 if [ $fail = 0 ]; then echo "SLATE OK"; else
   echo "SLATE CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

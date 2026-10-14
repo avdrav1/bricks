@@ -6,11 +6,15 @@
 use crate::xml::{self, XmlReader};
 use crate::DocxError;
 use document_model::{
-    effective_tabs, merge_tabs, Align, LineSpacing, Look, ParaLook, Rgb, RunStyle, Style,
-    StyleSheet, TabAlign, TabLeader, TabStop,
+    effective_tabs, merge_tabs, Align, LineSpacing, Look, ParaLook, ParaOverrides, ParaSpacing,
+    Rgb, RunStyle, Style, StyleSheet, TabAlign, TabLeader, TabStop,
 };
 use quick_xml::events::{BytesStart, Event};
 use std::collections::HashMap;
+
+/// Automatic space before or after (`w:beforeAutospacing`, `w:afterAutospacing`), in
+/// twips: 14 pt.
+const AUTO_SPACING: u32 = 280;
 
 /// A run's font as one level names it: a family, or the theme's major (headings) or
 /// minor (body) font.
@@ -182,9 +186,13 @@ pub(crate) struct ParaProps {
     pub space_before: Option<u32>,
     pub space_after: Option<u32>,
     pub line: Option<LineSpacing>,
-    /// `w:ind`, in twips: the left indent and the first line's (negative: hanging).
+    /// `w:ind`, in twips: the left and right indents and the first line's (negative:
+    /// hanging).
     pub indent_left: Option<i32>,
+    pub indent_right: Option<i32>,
     pub indent_first: Option<i32>,
+    /// `w:contextualSpacing`.
+    pub contextual: Option<bool>,
     /// `w:outlineLvl`: a heading's level (1 to 9), `Some(None)` for body text.
     pub outline: Option<Option<u8>>,
     /// `w:numPr`: the numbering instance (0 = no list) and level.
@@ -210,7 +218,9 @@ impl ParaProps {
         set(&mut self.space_after, &over.space_after);
         set(&mut self.line, &over.line);
         set(&mut self.indent_left, &over.indent_left);
+        set(&mut self.indent_right, &over.indent_right);
         set(&mut self.indent_first, &over.indent_first);
+        set(&mut self.contextual, &over.contextual);
         set(&mut self.outline, &over.outline);
         if over.num_id.is_some() {
             self.num_id = over.num_id;
@@ -221,6 +231,25 @@ impl ParaProps {
         set(&mut self.page_break_before, &over.page_break_before);
         set(&mut self.section, &over.section);
         merge_tabs(&mut self.tabs, &over.tabs);
+    }
+
+    /// The spacing and indents this level sets, as a paragraph's own in the model.
+    pub fn overrides(&self) -> ParaOverrides {
+        ParaOverrides {
+            space_before: self.space_before,
+            space_after: self.space_after,
+            line: self.line,
+            indent_left: self.indent_left,
+            indent_right: self.indent_right,
+            indent_first: self.indent_first,
+            contextual: self.contextual,
+        }
+    }
+
+    /// The spacing and indents this level sets, resolved over nothing (0 and single
+    /// spacing where it sets none).
+    pub fn spacing(&self) -> ParaSpacing {
+        self.overrides().over(ParaSpacing::default())
     }
 
     /// Read the children of a `w:pPr` just started, up to its end. The paragraph mark's
@@ -279,10 +308,19 @@ impl ParaProps {
             b"pageBreakBefore" => self.page_break_before = Some(xml::on(e)),
             b"spacing" => {
                 let twips = |name: &[u8]| xml::num::<i64>(e, name).map(|v| v.clamp(0, 31_680));
-                if let Some(v) = twips(b"before") {
+                // Automatic spacing (Word's HTML spacing) is 14 pt, whatever `before` and
+                // `after` say, as Word and LibreOffice give it.
+                let auto = |name: &[u8]| {
+                    xml::attr(e, name).is_some_and(|v| matches!(v.trim(), "1" | "true" | "on"))
+                };
+                if auto(b"beforeAutospacing") {
+                    self.space_before = Some(AUTO_SPACING);
+                } else if let Some(v) = twips(b"before") {
                     self.space_before = Some(v as u32);
                 }
-                if let Some(v) = twips(b"after") {
+                if auto(b"afterAutospacing") {
+                    self.space_after = Some(AUTO_SPACING);
+                } else if let Some(v) = twips(b"after") {
                     self.space_after = Some(v as u32);
                 }
                 if let Some(v) = twips(b"line") {
@@ -299,12 +337,16 @@ impl ParaProps {
                 if let Some(v) = twips(b"left").or_else(|| twips(b"start")) {
                     self.indent_left = Some(v);
                 }
+                if let Some(v) = twips(b"right").or_else(|| twips(b"end")) {
+                    self.indent_right = Some(v);
+                }
                 if let Some(v) = twips(b"hanging") {
                     self.indent_first = Some(-v);
                 } else if let Some(v) = twips(b"firstLine") {
                     self.indent_first = Some(v);
                 }
             }
+            b"contextualSpacing" => self.contextual = Some(xml::on(e)),
             b"outlineLvl" => {
                 if let Some(n) = xml::num::<u8>(e, b"val") {
                     self.outline = Some((n < 9).then_some(n + 1));
@@ -659,11 +701,7 @@ impl Styles {
             },
             para: ParaLook {
                 align: ppr.align.unwrap_or_default(),
-                space_before: ppr.space_before.unwrap_or(0),
-                space_after: ppr.space_after.unwrap_or(0),
-                line: ppr.line.unwrap_or_default(),
-                indent_left: ppr.indent_left.unwrap_or(0),
-                indent_first: ppr.indent_first.unwrap_or(0),
+                spacing: ppr.spacing(),
                 tabs: effective_tabs(&ppr.tabs, &[]),
             },
         }
@@ -835,8 +873,8 @@ mod tests {
         assert_eq!(sheet.default_id(), "Normal");
         let normal = sheet.get("Normal").unwrap();
         assert_eq!((normal.run.font.as_str(), normal.run.size), ("Calibri", 22));
-        assert_eq!(normal.para.space_after, 160);
-        assert_eq!(normal.para.line, LineSpacing::Auto(259.0 / 240.0));
+        assert_eq!(normal.para.spacing.space_after, 160);
+        assert_eq!(normal.para.spacing.line, LineSpacing::Auto(259.0 / 240.0));
         assert_eq!(normal.outline, None);
 
         let heading = sheet.get("Heading1").unwrap();
@@ -846,11 +884,9 @@ mod tests {
         assert_eq!(heading.run.font, "Calibri Light");
         assert_eq!(heading.run.size, 32);
         assert_eq!(heading.run.color, Some([0x2F, 0x54, 0x96]));
-        assert_eq!(
-            (heading.para.space_before, heading.para.space_after),
-            (240, 0)
-        );
-        assert_eq!(heading.para.line, LineSpacing::Auto(259.0 / 240.0));
+        let s = heading.para.spacing;
+        assert_eq!((s.space_before, s.space_after), (240, 0));
+        assert_eq!(s.line, LineSpacing::Auto(259.0 / 240.0));
 
         // A custom style based on the heading is one, in its own font and the rest of
         // the heading's look.
@@ -863,9 +899,10 @@ mod tests {
             (32, Some([0x2F, 0x54, 0x96]))
         );
         assert_eq!(mine.para.align, Align::Center);
-        assert_eq!((mine.para.indent_left, mine.para.indent_first), (720, -360));
-        assert_eq!(mine.para.line, LineSpacing::Exact(300));
-        assert_eq!(mine.para.space_before, 240);
+        let s = mine.para.spacing;
+        assert_eq!((s.indent_left, s.indent_first), (720, -360));
+        assert_eq!(s.line, LineSpacing::Exact(300));
+        assert_eq!(s.space_before, 240);
     }
 
     #[test]

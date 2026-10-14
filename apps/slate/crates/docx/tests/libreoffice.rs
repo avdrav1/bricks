@@ -1,10 +1,11 @@
-//! SLATE-3 and SLATE-19: every paragraph of the fixtures matches LibreOffice's dump: text,
-//! paragraph style (by name), list level, alignment, the style's spacing, line spacing,
-//! and indents, each run's font, size, bold, italic, underline, strikethrough, and colour,
-//! and table cells.
+//! SLATE-3, SLATE-19, and SLATE-26: every paragraph of the fixtures matches LibreOffice's
+//! dump: text, paragraph style (by name), list level, alignment, its spacing, line spacing,
+//! indents, and contextual spacing (its style's with its own on top), each run's font,
+//! size, bold, italic, underline, strikethrough, and colour, and table cells.
 //!
-//! Each `X.docx` under `tests/data` (the LibreOffice-built fixture) and `tests/data/poi`
-//! (Word-authored samples from Apache POI) has `X-libreoffice.txt`, written by
+//! Each `X.docx` under `tests/data` (the LibreOffice-built fixture, and the spacing
+//! document written by hand as Word writes it) and `tests/data/poi` (Word-authored samples
+//! from Apache POI) has `X-libreoffice.txt`, written by
 //! `python3 scripts/lo_docx.py dump X.docx` (format in that script). The reader's blocks
 //! are written out in the same shape and compared line by line.
 //!
@@ -106,16 +107,18 @@ fn paragraph(doc: &Document, p: &Paragraph, list: Option<(u8, &ListKind)>, out: 
         None => ("-".into(), "*".into()),
     };
     let style = doc.styles.style_of(&p.style);
-    let look = &style.para;
+    let look = doc.styles.spacing(p);
     out.push(format!(
-        "para\t{}\t{level}\t{label}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        "para\t{}\t{level}\t{label}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
         style.name,
         align(p.align),
         look.space_before,
         look.space_after,
         line(look.line),
         look.indent_left,
+        look.indent_right,
         look.indent_first,
+        u8::from(look.contextual),
         json(&p.text())
     ));
     let mut runs: Vec<(String, String)> = Vec::new();
@@ -207,7 +210,7 @@ fn matches(slate: &str, lo: &str) -> bool {
         _ => x == y,
     };
     a.iter().zip(&b).enumerate().all(|(i, (x, y))| match i {
-        5 | 6 | 8 | 9 => near(x, y),
+        5 | 6 | 8..=10 => near(x, y),
         7 => match (x.split_once(':'), y.split_once(':')) {
             (Some((m, v)), Some((n, w))) if m == n && m != "auto" => near(v, w),
             _ => x == y,
@@ -259,6 +262,14 @@ fn compare(docx: &Path) -> Counts {
 fn the_fixture_matches_libreoffice() {
     let counts = compare(&data().join("fixture.docx"));
     assert!(counts.paragraphs > 30 && counts.runs > 30);
+}
+
+/// SLATE-26: a paragraph's own spacing and indents over its style's, written as Word and
+/// Google Docs write them (`python3 scripts/lo_docx.py spacing`).
+#[test]
+fn the_spacing_document_matches_libreoffice() {
+    let counts = compare(&data().join("spacing.docx"));
+    assert_eq!(counts.paragraphs, 21);
 }
 
 #[test]

@@ -4,8 +4,8 @@
 
 use document_model::{
     Block, Document, DocxInfo, Format, Image, ImageFormat, ImageSource, LineSpacing, ParaLook,
-    Paragraph, Run, RunStyle, Style, StyleSheet, TabAlign, TabLeader, TabStop, Table, TableCell,
-    TableRow,
+    ParaOverrides, ParaSpacing, Paragraph, Run, RunStyle, Style, StyleSheet, TabAlign, TabLeader,
+    TabStop, Table, TableCell, TableRow,
 };
 use flow::{
     Content, Flow, Hit, LayoutKey, LeafId, Look, Metrics, Paint, Position, Shaper, Splice, Tab,
@@ -711,6 +711,14 @@ fn sheet(para: ParaLook) -> StyleSheet {
     StyleSheet::new(vec![normal, s], "Normal")
 }
 
+/// A paragraph look of `spacing`.
+fn spaced(spacing: ParaSpacing) -> ParaLook {
+    ParaLook {
+        spacing,
+        ..ParaLook::default()
+    }
+}
+
 fn styled(style: &str, text: &str) -> Paragraph {
     let mut p = Paragraph::new(style);
     p.push(text, &RunStyle::default());
@@ -731,11 +739,11 @@ fn flow_of(styles: StyleSheet, blocks: Vec<Block>, width: i32, shaper: &mut Fake
 #[test]
 fn a_paragraphs_space_comes_from_its_style_and_adds_to_its_neighbours() {
     // `S` has 20 px above and 10 px below (300 and 150 twips); Normal 8 px below.
-    let styles = sheet(ParaLook {
+    let styles = sheet(spaced(ParaSpacing {
         space_before: 300,
         space_after: 150,
-        ..ParaLook::default()
-    });
+        ..ParaSpacing::default()
+    }));
     let blocks = ["Normal", "S", "Normal"]
         .iter()
         .map(|s| Block::Paragraph(styled(s, "x")))
@@ -758,11 +766,11 @@ fn a_paragraphs_left_and_first_line_indents_place_and_narrow_its_text() {
     // 40 px in from the left (600 twips); the first line 20 px further in (300 twips) or
     // hanging 20 px out (-300 twips), which moves the text's box to the first line.
     for (first, x) in [(0, 40), (300, 40), (-300, 20)] {
-        let styles = sheet(ParaLook {
+        let styles = sheet(spaced(ParaSpacing {
             indent_left: 600,
             indent_first: first,
-            ..ParaLook::default()
-        });
+            ..ParaSpacing::default()
+        }));
         let mut nested = styled("S", "nested");
         nested.indent = 1;
         let item = Block::ListItem(document_model::ListItem {
@@ -812,10 +820,10 @@ fn exact_and_least_line_spacing_set_each_lines_height() {
         (LineSpacing::Auto(1.5), 90),
     ];
     for (line, height) in cases {
-        let styles = sheet(ParaLook {
+        let styles = sheet(spaced(ParaSpacing {
             line,
-            ..ParaLook::default()
-        });
+            ..ParaSpacing::default()
+        }));
         let blocks = vec![Block::Paragraph(styled("S", &"w".repeat(25)))];
         let mut fake = Fake::default();
         let mut flow = Flow::new(Document {
@@ -923,7 +931,10 @@ fn a_word_paragraphs_tabs_go_to_its_stops_then_the_default_stops() {
     // 1440 that the paragraph clears; the paragraph adds a centre stop and a right one
     // with a dot leader. The default stop is 360 twips (24 px).
     let styles = sheet(ParaLook {
-        indent_left: 600,
+        spacing: ParaSpacing {
+            indent_left: 600,
+            ..ParaSpacing::default()
+        },
         tabs: vec![
             stop(300, TabAlign::Left, TabLeader::None),
             stop(1440, TabAlign::Left, TabLeader::None),
@@ -983,10 +994,10 @@ fn a_word_paragraphs_tabs_go_to_its_stops_then_the_default_stops() {
 #[test]
 fn default_stops_start_past_a_paragraphs_indent() {
     // 50 px in (750 twips): the default stops right of it are at 1440 and 2160 twips.
-    let styles = sheet(ParaLook {
+    let styles = sheet(spaced(ParaSpacing {
         indent_left: 750,
-        ..ParaLook::default()
-    });
+        ..ParaSpacing::default()
+    }));
     let item = Block::ListItem(document_model::ListItem {
         kind: document_model::ListKind::Bullet,
         level: 0,
@@ -1044,4 +1055,244 @@ fn markdown_and_text_tabs_are_four_spaces_and_code_keeps_the_shapers() {
         );
         assert_eq!(flow::TAB_SPACES, 4);
     }
+}
+
+/// Every text painted: its x, y, and width.
+fn boxes(flow: &Flow) -> Vec<(i32, f64, i32)> {
+    let mut out = Vec::new();
+    flow.paint(0.0, 1e9, &mut |p| {
+        if let Paint::Text { x, y, width, .. } = p {
+            out.push((x, y, width));
+        }
+    });
+    out
+}
+
+fn own(style: &str, text: &str, own: ParaOverrides) -> Block {
+    let mut p = styled(style, text);
+    p.own = own;
+    Block::Paragraph(p)
+}
+
+#[test]
+fn a_paragraphs_own_space_indents_and_line_spacing_go_over_its_styles() {
+    // `S`: 20 px before, 10 after (300 and 150 twips), 40 px in (600).
+    let styles = sheet(spaced(ParaSpacing {
+        space_before: 300,
+        space_after: 150,
+        indent_left: 600,
+        ..ParaSpacing::default()
+    }));
+    let blocks = vec![
+        Block::Paragraph(styled("S", "x")),
+        // No space before, 30 px after, 60 px in with a 10 px hanging first line, and 20
+        // px in from the right.
+        own(
+            "S",
+            &"w".repeat(30),
+            ParaOverrides {
+                space_before: Some(0),
+                space_after: Some(450),
+                indent_left: Some(900),
+                indent_right: Some(300),
+                indent_first: Some(-150),
+                ..ParaOverrides::default()
+            },
+        ),
+        // Normal (8 px after) with exact 40 px lines (600 twips).
+        own(
+            "Normal",
+            &"w".repeat(25),
+            ParaOverrides {
+                line: Some(LineSpacing::Exact(600)),
+                ..ParaOverrides::default()
+            },
+        ),
+    ];
+    let mut fake = Fake::default();
+    let mut flow = Flow::new(Document {
+        blocks,
+        styles,
+        format: Format::Docx(Default::default()),
+    });
+    flow.set_width(200, &mut fake);
+    let estimated = flow.content_height();
+    flow.layout_slice(&mut fake, &mut || true);
+    let top = f64::from(TOP_MARGIN);
+    // The first: 20 above, one 20 px line, 10 below. The second starts right under it,
+    // at 60 - 10 px, 200 - 50 - 20 px wide: 13 characters a line, three lines.
+    // The third: 30 px under that, two 40 px lines of 20 characters.
+    assert_eq!(
+        boxes(&flow),
+        vec![
+            (40, top + 20.0, 160),
+            (50, top + 50.0, 130),
+            (0, top + 140.0, 200)
+        ]
+    );
+    assert_eq!(flow.wrap_width(LeafId::from_index(1)), 130);
+    assert_eq!(
+        flow.content_height(),
+        top + 140.0 + 80.0 + 8.0 + f64::from(BOTTOM_MARGIN)
+    );
+    assert_eq!(estimated, flow.content_height(), "estimates agree");
+    let mut first = Vec::new();
+    flow.paint(0.0, 1e9, &mut |p| {
+        if let Paint::Text { content, .. } = p {
+            first.push((content.first_indent(), content.line_spacing()));
+        }
+    });
+    assert_eq!(
+        first,
+        vec![
+            (0, LineSpacing::Auto(1.0)),
+            (-10, LineSpacing::Auto(1.0)),
+            (0, LineSpacing::Exact(600))
+        ]
+    );
+}
+
+#[test]
+fn a_list_items_own_space_and_left_indent_go_over_the_lists() {
+    let item = |text: &str, own: ParaOverrides| {
+        let mut paragraph = styled("Normal", text);
+        paragraph.own = own;
+        Block::ListItem(document_model::ListItem {
+            kind: document_model::ListKind::Bullet,
+            level: 0,
+            paragraph,
+        })
+    };
+    let blocks = vec![
+        item("a", ParaOverrides::default()),
+        // 10 px before, 20 after, 72 px in (1080 twips).
+        item(
+            "b",
+            ParaOverrides {
+                space_before: Some(150),
+                space_after: Some(300),
+                indent_left: Some(1080),
+                indent_right: Some(150),
+                ..ParaOverrides::default()
+            },
+        ),
+        // In at the edge: its marker keeps its room.
+        item(
+            "c",
+            ParaOverrides {
+                indent_left: Some(0),
+                ..ParaOverrides::default()
+            },
+        ),
+    ];
+    let flow = flow_of(StyleSheet::builtin(), blocks, 200, &mut Fake::default());
+    let top = f64::from(TOP_MARGIN);
+    let item_space = 3.0;
+    let l = LEVEL_INDENT;
+    assert_eq!(
+        boxes(&flow),
+        vec![
+            (l, top, 200 - l),
+            (72, top + 20.0 + item_space + 10.0, 200 - 72 - 10),
+            (l, top + 20.0 + item_space + 10.0 + 20.0 + 20.0, 200 - l),
+        ]
+    );
+}
+
+#[test]
+fn a_cell_paragraphs_own_indents_narrow_it_in_its_cell() {
+    let blocks = vec![table(vec![vec![cell(vec![
+        Block::Paragraph(styled("Normal", "plain")),
+        own(
+            "Normal",
+            "indented",
+            ParaOverrides {
+                space_before: Some(150),
+                indent_left: Some(300),
+                indent_right: Some(150),
+                ..ParaOverrides::default()
+            },
+        ),
+    ])]])];
+    let flow = flow_of(StyleSheet::builtin(), blocks, 300, &mut Fake::default());
+    let b = boxes(&flow);
+    assert_eq!(b.len(), 2);
+    let ((x0, y0, w0), (x1, y1, w1)) = (b[0], b[1]);
+    assert_eq!((x1 - x0, w0 - w1), (20, 30));
+    // Normal's 8 px after the first, then the second's own 10 px before.
+    assert_eq!(y1 - y0, f64::from(LINE) + 8.0 + 10.0);
+}
+
+#[test]
+fn contextual_spacing_drops_the_space_between_paragraphs_of_one_style() {
+    // `T`: 20 px before, 10 after, contextual.
+    let styles = sheet(spaced(ParaSpacing {
+        space_before: 300,
+        space_after: 150,
+        contextual: true,
+        ..ParaSpacing::default()
+    }));
+    let off = ParaOverrides {
+        contextual: Some(false),
+        ..ParaOverrides::default()
+    };
+    let blocks = vec![
+        Block::Paragraph(styled("S", "a")),
+        Block::Paragraph(styled("S", "b")),
+        Block::Paragraph(styled("Normal", "c")),
+        own("S", "d", off),
+        Block::Paragraph(styled("S", "e")),
+    ];
+    let mut fake = Fake::default();
+    let mut flow = flow_of(styles.clone(), blocks, 200, &mut fake);
+    let top = f64::from(TOP_MARGIN);
+    let ys =
+        |flow: &Flow| -> Vec<f64> { boxes(flow).into_iter().map(|(_, y, _)| y - top).collect() };
+    // a and b touch; c follows b's 10 px; d (contextual off) keeps its 20 px before and
+    // its 10 after; e drops its own before against d, as it's in the same style.
+    assert_eq!(ys(&flow), vec![20.0, 40.0, 70.0, 118.0, 148.0]);
+
+    // A Normal paragraph between a and b gives both their space back; removing it takes
+    // it away again. Each matches a flow made from scratch.
+    flow.edit(&mut fake, |doc| {
+        doc.blocks
+            .insert(1, Block::Paragraph(styled("Normal", "n")));
+        (
+            (),
+            Splice {
+                start: 1,
+                removed: 0,
+                inserted: 1,
+            },
+        )
+    });
+    flow.layout_slice(&mut fake, &mut || true);
+    assert_eq!(ys(&flow), vec![20.0, 50.0, 98.0, 128.0, 176.0, 206.0]);
+    let fresh = flow_of(
+        styles.clone(),
+        flow.document().blocks.clone(),
+        200,
+        &mut Fake::default(),
+    );
+    assert_eq!(flow.content_height(), fresh.content_height());
+    flow.edit(&mut fake, |doc| {
+        doc.blocks.remove(1);
+        (
+            (),
+            Splice {
+                start: 1,
+                removed: 1,
+                inserted: 0,
+            },
+        )
+    });
+    flow.layout_slice(&mut fake, &mut || true);
+    assert_eq!(ys(&flow), vec![20.0, 40.0, 70.0, 118.0, 148.0]);
+    let fresh = flow_of(
+        styles,
+        flow.document().blocks.clone(),
+        200,
+        &mut Fake::default(),
+    );
+    assert_eq!(flow.content_height(), fresh.content_height());
 }

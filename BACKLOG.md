@@ -144,7 +144,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | SLATE-23 | SL4 | P0 | done | SLATE-22 | Text Width → Page: Word documents open at their page's text width (ADR 0009) | Text Width gains Page (the default): a .docx's column is its last section's page width minus its margins (Letter, 1″ margins when there's none), at 96 dpi, and Markdown and text get Medium; the setting is saved and shared as the others are; a 7.5″ document's column measures 720 px in the GUI check and a Letter 1″ one 624 px |
 | SLATE-24 | SL4 | P0 | done | SLATE-23 | Tab stops: default stop and each paragraph's own (ADR 0009) | Tabs advance to the paragraph's stops (left, centre, right, decimal, with leaders; `clear` removes an inherited one), then to `w:defaultTabStop` multiples (0.5″ when absent); in the GUI check a right-aligned stop at the text width ends "Remote" at the column's right edge within 2 px, text after runs of default tabs starts at a multiple of the default stop (twips / 15 px) within 2 px, a centre stop centres its text on it, and a dot leader fills to its stop; the model reads and saves stops unchanged |
 | SLATE-25 | SL4 | P0 | done | SLATE-23 | Embedded fonts and family fallbacks (ADR 0009) | A .docx's embedded fonts (plain .ttf and Word's obfuscated .odttf, de-obfuscated with `w:fontKey`) draw its runs: a run in an embedded family measures as Pango measures that font within 2 px; a family neither installed nor embedded falls back by the font table's `w:family` (a `roman` font draws in the system serif, a `swiss` one in sans); saving keeps the font parts byte for byte |
-| SLATE-26 | SL4 | P0 | todo | SLATE-23 | A paragraph's own spacing and indents (ADR 0009) | `w:spacing` and `w:ind` on a paragraph override its style's: LibreOffice's dump of each paragraph's own space before and after, line spacing, and left, right, and first-line indents matches Slate's model over the corpus; they draw (flow tests to the pixel) and save back unchanged, and an edited paragraph keeps them |
+| SLATE-26 | SL4 | P0 | done | SLATE-23 | A paragraph's own spacing and indents (ADR 0009) | `w:spacing` and `w:ind` on a paragraph override its style's: LibreOffice's dump of each paragraph's own space before and after, line spacing, and left, right, and first-line indents matches Slate's model over the corpus; they draw (flow tests to the pixel) and save back unchanged, and an edited paragraph keeps them |
 | SLATE-27 | SL4 | P0 | todo | SLATE-26 | Paragraph borders and shading (ADR 0009) | `w:pBdr` (top, bottom, left, right, between; single, double, dotted, dashed; width, space, colour) and `w:shd` fills, a paragraph's own and its style's, draw around and behind the paragraph: in the GUI check a bottom border lies under the text by its space and width within 2 px and a shaded paragraph's box is its fill colour; LibreOffice's dump of borders and shading matches the model; they save back unchanged |
 | SLATE-28 | SL4 | P0 | todo | SLATE-26 | List markers from the numbering (ADR 0009) | Each list item's marker is its level's `w:lvlText` in the level's run font (Symbol and Wingdings glyphs mapped to Unicode), at the level's left and hanging indents with the tab after it: the corpus' markers match LibreOffice's list labels and the GUI check draws "●" bullets at their indent within 2 px |
 | FRAME-1 | FR0 | P0 | done | - | Presentation model and PPTX package: slide order, size, shapes, placeholder inheritance | Slide count, order, size, and every shape's frame in the fixtures and a real-world deck match LibreOffice's dump within 1 EMU; placeholders without a frame take their layout's or master's |
@@ -167,6 +167,26 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-14 SLATE-26:** a paragraph's own spacing and indents (ADR 0009). A subagent built it; it was integrated and verified here.
+  - Model: `Paragraph.own: ParaOverrides` holds space before and after, line spacing, left, right, and first-line indents, and contextual spacing, each `Option` (serde default; old journals load). `ParaLook` holds a `ParaSpacing`, which gained a right indent and contextual spacing. One resolver, `StyleSheet::spacing(&Paragraph)`, serves the flow, the drawing, and the LibreOffice test.
+  - The reader reads `w:right` and `w:end` and `w:contextualSpacing`. Automatic spacing counts as 280 twips.
+  - Saving keeps the template's `w:spacing`, `w:ind`, and `w:contextualSpacing` byte for byte when they give the model's values; otherwise it writes them from the model. This replaces the old rule that dropped `w:ind` when a paragraph's list status changed.
+  - Enter keeps a paragraph's own looks on both halves. Joining or leaving a list, or changing level, drops its own indents.
+  - Flow: own looks apply to paragraphs, table-cell paragraphs, and list items. A right indent narrows the wrap, and contextual spacing removes the space between neighbours of the same style.
+  - Deviations:
+    - List items keep the viewer's list spacing and level indent unless they have their own. Their own left indent is clamped to at least 28 px, and their own first-line indent is ignored. SLATE-28 puts the numbering level's indent there: style < level < own.
+    - Negative indents are clamped to the column when drawing.
+    - Automatic spacing ignores LibreOffice's special cases.
+    - `beforeLines`, `afterLines`, `*Chars` indents, and `mirrorIndents` aren't modelled.
+    - Indents written from the model use `w:left` and `w:right`.
+  - Corpus: `tests/data/spacing.docx`, from `python3 scripts/lo_docx.py spacing OUT`, byte-identical each run. The dump gains RIGHT and CONTEXT, and all 7 recorded dumps were regenerated.
+  - Acceptance:
+    - `cargo test -p docx --test libreoffice`: 498 paragraphs' effective space before and after, line spacing, indents, and contextual spacing match LibreOffice.
+    - `--test spacing --test save -- --include-ignored`: 12 and 5 pass.
+    - Flow: 4 pixel-exact tests.
+    - `scripts/check_slate.sh` SLATE OK, 256 checks, 9 of them new in section 31, measured over a decoy style: before 30, after 20, left 60, right 100, hanging 30/60, exact pitch 40. Typing and saving kept `w:spacing` and `w:ind` byte for byte.
+  - `flow_perf`: Word document whole 377 ms max (p50 319), first frame 5.7 ms, scroll p99 4.3 ms, typing p99 18.2 ms; Markdown typing p99 15.2 ms; first match 14.3 ms. All within targets.
+  - The user's résumé now spaces as in Google Docs: the subtitle sits under the name, and the gaps between sections come from the file.
 - **2026-10-14 SLATE-25:** embedded fonts and family fallbacks (ADR 0009). A subagent built it; it was integrated and verified here.
   - Model: `document_model::fonts` (`FontTable`, `Font` with family class, pitch, altName, and embedded faces as `Arc<[u8]>`). `DocxInfo.fonts` holds the table, `Format::fonts()` returns it, and `DocxInfo` and `Format` are no longer `Copy`.
   - docx `fonts.rs` reads `fontTable.xml` through its relationship, its `.rels`, and the content types. A face is de-obfuscated when it's `.odttf`, has the obfuscatedFont content type, or isn't already a font: the GUID's bytes reversed, XORed over the first 32 bytes. A face is kept only if it then starts with an sfnt header.
@@ -337,7 +357,7 @@ Story notes, decisions made mid-story, and follow-ups go here, newest first.
       - A .docx with no size anywhere draws at Word's default 10 pt.
   - `scripts/lo_docx.py dump` now also gives each paragraph's alignment, its style's spacing, line spacing, and indents, and each run's font, size, and colour. All 7 recorded dumps were regenerated with LibreOffice 26.8.1.1, which reports start and end alignment as 5 and 6. `check_slate.sh` reads the paragraph text from the dump's last field.
   - Deviations:
-    - A paragraph's own spacing and indents (direct `w:spacing` and `w:ind` on the paragraph) aren't modelled yet, only its style's. The dump reads the style's too.
+    - A paragraph's own spacing and indents (direct `w:spacing` and `w:ind` on the paragraph) aren't modelled yet, only its style's. The dump reads the style's too. (SLATE-26 models them, and the dump reads effective values.)
     - An edited run's `rStyle` is written as the direct formatting it resolves to.
   - LibreOffice exceptions in the test, each narrow:
     - Word's Normal and Body Text Indent show under LibreOffice's names.

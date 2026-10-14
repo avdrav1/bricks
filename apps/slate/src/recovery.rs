@@ -317,7 +317,7 @@ pub fn offers_left() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use document_model::{Paragraph, RunStyle};
+    use document_model::{LineSpacing, ParaOverrides, Paragraph, RunStyle};
 
     /// A journal reads back its header and blocks; listing reads only the header, newest
     /// first; a file that isn't a journal is left out.
@@ -335,6 +335,12 @@ mod tests {
                 ..RunStyle::default()
             },
         );
+        p.own = ParaOverrides {
+            space_before: Some(120),
+            line: Some(LineSpacing::Exact(300)),
+            indent_first: Some(-360),
+            ..ParaOverrides::default()
+        };
         let blocks = vec![Block::Paragraph(p), Block::PageBreak];
         let header = |path: Option<&str>, saved_ms| Header {
             path: path.map(PathBuf::from),
@@ -363,5 +369,18 @@ mod tests {
         );
         assert_eq!(read_blocks(&older).unwrap(), blocks);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A journal written before paragraphs had their own looks reads them as none.
+    #[test]
+    fn journals_without_paragraph_looks_read() {
+        let old = r#"[{"Paragraph":{"style":"Normal","align":"Start","indent":0,"runs":[]}}]"#;
+        let blocks: Vec<Block> = serde_json::from_str(old).unwrap();
+        let Block::Paragraph(p) = &blocks[0] else {
+            panic!("a paragraph");
+        };
+        assert!(p.own.is_empty() && p.tabs.is_empty());
+        // And one without them is written as before.
+        assert_eq!(serde_json::to_string(&blocks).unwrap(), old);
     }
 }

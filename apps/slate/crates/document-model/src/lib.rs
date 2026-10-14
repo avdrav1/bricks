@@ -20,7 +20,7 @@ mod write;
 pub use fonts::{EmbeddedFace, FaceKind, Font, FontFamily, FontPitch, FontTable};
 pub use markdown::{load_linked_images, read_markdown, read_markdown_source, MarkdownSource};
 pub use matching::{match_blocks, match_blocks_by};
-pub use styles::{LineSpacing, Look, ParaLook, Style, StyleSheet};
+pub use styles::{LineSpacing, Look, ParaLook, ParaOverrides, ParaSpacing, Style, StyleSheet};
 pub use tabs::{effective_tabs, merge_tabs, TabAlign, TabLeader, TabStop};
 pub use text::{decode, read_text, Encoding, LineEnding, TextInfo};
 pub use write::{encode, write_markdown, write_text, Unencodable};
@@ -142,6 +142,9 @@ pub struct Paragraph {
     /// included, in position order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tabs: Vec<TabStop>,
+    /// Its own spacing and indents, on top of its style's ([`StyleSheet::spacing`]).
+    #[serde(default, skip_serializing_if = "ParaOverrides::is_empty")]
+    pub own: ParaOverrides,
 }
 
 impl Paragraph {

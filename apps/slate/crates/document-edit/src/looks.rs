@@ -2,8 +2,8 @@
 //! whole blocks, each holding the blocks' looks (without their text) before and after.
 
 use crate::{
-    bare, block_len, blocks, blocks_mut, paragraph, paragraph_mut, set_runs, shell, take_runs,
-    Change, Container, Edit, Pos,
+    bare, block_len, blocks, blocks_mut, paragraph, paragraph_mut, relisted, set_runs, shell,
+    take_runs, Change, Container, Edit, Pos,
 };
 use document_model::{Align, Block, Document, ListItem, ListKind, Paragraph};
 use std::ops::Range;
@@ -224,7 +224,7 @@ pub fn toggle_list(
         let after = match block {
             Block::ListItem(item) if off => Block::Paragraph(Paragraph {
                 style: normal(),
-                ..bare(&item.paragraph)
+                ..relisted(&item.paragraph)
             }),
             Block::ListItem(item) if same_kind(&item.kind, ordered) => continue,
             Block::ListItem(item) => Block::ListItem(ListItem {
@@ -240,7 +240,7 @@ pub fn toggle_list(
                 level: 0,
                 paragraph: Paragraph {
                     style: normal(),
-                    ..bare(p)
+                    ..relisted(p)
                 },
             }),
             _ => continue,
@@ -254,8 +254,8 @@ pub fn toggle_list(
 const MAX_LEVEL: i16 = 8;
 
 /// Move the list items in `blocks` of `at` `by` levels deeper (shallower when negative),
-/// within 0..=8. A numbered item moved starts at 1 unless it continues a list at its new
-/// level.
+/// within 0..=8, to their new level's indent (without their own). A numbered item moved
+/// starts at 1 unless it continues a list at its new level.
 pub fn indent(doc: &Document, at: Container, blocks: Range<usize>, by: i8) -> Option<Edit> {
     let (blocks, range) = clamp(doc, at, blocks)?;
     let mut out = Vec::new();
@@ -278,7 +278,7 @@ pub fn indent(doc: &Document, at: Container, blocks: Range<usize>, by: i8) -> Op
         let after = Block::ListItem(ListItem {
             kind,
             level,
-            paragraph: bare(&item.paragraph),
+            paragraph: relisted(&item.paragraph),
         });
         out.push((i, shell(block), after));
     }

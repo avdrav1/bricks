@@ -2,15 +2,15 @@
 //! nodes of their own), with the viewer's spacing rules, measuring through a [`Shaper`],
 //! estimating without one, and walking it to paint and to hit-test.
 //!
-//! A paragraph's space above and below, its left and first-line indents, and its line
-//! spacing come from its style ([`ParaLook`]); lists, code blocks, tables, rules, and page
-//! breaks keep the viewer's own spacing.
+//! A paragraph's space above and below, its left, right, and first-line indents, and its
+//! line spacing are its style's with its own on top ([`StyleSheet::spacing`], ADR 0009),
+//! and contextual spacing drops the space between two paragraphs of one style. A list
+//! item keeps the viewer's list spacing and its level's indent unless it has its own;
+//! code blocks, tables, rules, and page breaks keep the viewer's own spacing.
 
 use crate::content::{code_text, floor_boundary, Content};
 use crate::{LayoutKey, LeafId, Located, Look, Metrics, Paint, Position, Shaper, MONOSPACE};
-use document_model::{
-    Block, Document, Format, Image, LineSpacing, ParaLook, Paragraph, Style, StyleSheet,
-};
+use document_model::{Block, Document, Format, Image, LineSpacing, Paragraph, Style, StyleSheet};
 use std::ops::Range;
 
 /// Twips (DOCX's 1/20 pt) per pixel at 96 dpi.
@@ -156,6 +156,8 @@ pub(crate) struct TextBox {
     /// The text's left edge from the box's: the paragraph's left indent, less a hanging
     /// first line's.
     pub indent: i32,
+    /// The text's right edge from the box's: the paragraph's right indent.
+    pub right: i32,
     /// A list item: its marker hangs in the indent's last level.
     pub marker: bool,
     /// A code block: its band starts this far in.
@@ -239,7 +241,10 @@ impl<'a> Builder<'a> {
     /// Nodes for top-level blocks `range` of `all`, their looks numbered in `looks`.
     pub fn tops(&mut self, looks: &mut Looks, all: &[Block], range: Range<usize>) -> Vec<Node> {
         range
-            .map(|i| self.block(looks, &all[i], all.get(i + 1), vec![i as u32], false))
+            .map(|i| {
+                let (prev, next) = neighbours(all, i);
+                self.block(looks, &all[i], prev, next, vec![i as u32], false)
+            })
             .collect()
     }
 
@@ -255,7 +260,8 @@ impl<'a> Builder<'a> {
         for (i, block) in blocks.iter().enumerate() {
             let mut path = prefix.to_vec();
             path.push(i as u32);
-            nodes.push(self.block(looks, block, blocks.get(i + 1), path, header));
+            let (prev, next) = neighbours(blocks, i);
+            nodes.push(self.block(looks, block, prev, next, path, header));
         }
         nodes
     }
@@ -290,6 +296,7 @@ impl<'a> Builder<'a> {
         &mut self,
         looks: &mut Looks,
         block: &Block,
+        prev: Option<&Block>,
         next: Option<&Block>,
         path: Vec<u32>,
         header: bool,
@@ -305,14 +312,11 @@ impl<'a> Builder<'a> {
                 };
                 let leaf = self.leaf(path, Some(&content.text()));
                 let style = self.styles.style_of(&p.style);
-                let mut b = TextBox::paragraph(leaf, looks, p, style, header);
-                let para: &ParaLook = &style.para;
-                // Plain text's paragraphs are the file's lines, without space between.
-                if !self.plain {
-                    b.above = px(i64::from(para.space_before));
-                    b.below = px(i64::from(para.space_after));
-                }
+                let line = content.line_spacing();
+                let mut b = TextBox::paragraph(leaf, looks, p, style, line, header);
+                (b.above, b.below) = self.around(block, prev, next).unwrap_or_default();
                 b.indent = content.text_left();
+                b.right = content.text_right();
                 Kind::Text(b)
             }
             Block::ListItem(item) => {
@@ -325,9 +329,11 @@ impl<'a> Builder<'a> {
                 };
                 let leaf = self.leaf(path, Some(&content.text()));
                 let style = self.styles.style_of(&item.paragraph.style);
-                let mut b = TextBox::paragraph(leaf, looks, &item.paragraph, style, header);
-                b.below = self.item_below(next);
+                let line = content.line_spacing();
+                let mut b = TextBox::paragraph(leaf, looks, &item.paragraph, style, line, header);
+                (b.above, b.below) = self.around(block, prev, next).unwrap_or_default();
                 b.indent = content.text_left();
+                b.right = content.text_right();
                 b.marker = true;
                 Kind::Text(b)
             }
@@ -428,21 +434,88 @@ impl<'a> Builder<'a> {
         }
     }
 
-    /// Give a top-level list item's node the space its new `next` block calls for, keeping
-    /// its measurement. False if it isn't a list item.
-    pub fn respace(&self, node: &mut Node, next: Option<&Block>) -> bool {
-        let Kind::Text(b) = &mut node.kind else {
-            return false;
+    /// The space above and below paragraph or list item `block`, between `prev` and `next`
+    /// (ADR 0009): a paragraph's, its style's with its own on top; a list item's own, else
+    /// the viewer's list spacing. With contextual spacing, none against a paragraph or
+    /// list item in the same style. Plain text's paragraphs are the file's lines, without
+    /// space between. `None` for other blocks.
+    fn around(
+        &self,
+        block: &Block,
+        prev: Option<&Block>,
+        next: Option<&Block>,
+    ) -> Option<(i32, i32)> {
+        let (p, list) = match block {
+            Block::Paragraph(p) => (p, false),
+            Block::ListItem(item) => (&item.paragraph, true),
+            _ => return None,
         };
-        if !b.marker {
-            return false;
+        if self.plain {
+            return Some((0, 0));
         }
-        let below = self.item_below(next);
-        let by = below - b.below;
-        b.below = below;
+        let s = self.styles.spacing(p);
+        let style = self.styles.style_of(&p.style);
+        let joined = |other: Option<&Block>| {
+            s.contextual
+                && other
+                    .and_then(paragraph_of)
+                    .is_some_and(|o| std::ptr::eq(self.styles.style_of(&o.style), style))
+        };
+        let (before, after) = if list {
+            (p.own.space_before, p.own.space_after)
+        } else {
+            (Some(s.space_before), Some(s.space_after))
+        };
+        let above = match before {
+            Some(t) if !joined(prev) => px(i64::from(t)),
+            _ => 0,
+        };
+        let below = match after {
+            Some(_) if joined(next) => 0,
+            Some(t) => px(i64::from(t)),
+            None => self.item_below(next),
+        };
+        Some((above, below))
+    }
+
+    /// Give a top-level paragraph's or list item's node the space its neighbours `prev`
+    /// and `next` now call for (they were inserted or removed), keeping its measurement;
+    /// how much taller it got.
+    pub fn respace(
+        &self,
+        node: &mut Node,
+        block: &Block,
+        prev: Option<&Block>,
+        next: Option<&Block>,
+    ) -> i32 {
+        let Kind::Text(b) = &mut node.kind else {
+            return 0;
+        };
+        let Some((above, below)) = self.around(block, prev, next) else {
+            return 0;
+        };
+        let by = above - b.above + below - b.below;
+        (b.above, b.below) = (above, below);
         node.height += by;
         node.laid_height += by;
-        true
+        by
+    }
+}
+
+/// The blocks before and after block `i` of `blocks`.
+pub(crate) fn neighbours(blocks: &[Block], i: usize) -> (Option<&Block>, Option<&Block>) {
+    (
+        i.checked_sub(1).and_then(|j| blocks.get(j)),
+        blocks.get(i + 1),
+    )
+}
+
+/// The paragraph of a paragraph or list item.
+fn paragraph_of(block: &Block) -> Option<&Paragraph> {
+    match block {
+        Block::Paragraph(p) => Some(p),
+        Block::ListItem(item) => Some(&item.paragraph),
+        _ => None,
     }
 }
 
@@ -508,11 +581,9 @@ pub(crate) fn text_place(
     width: i32,
 ) -> Option<(i32, f64, i32)> {
     match &node.kind {
-        Kind::Text(b) if b.leaf == leaf => Some((
-            x + b.indent,
-            y + f64::from(b.above),
-            (width - b.indent).max(1),
-        )),
+        Kind::Text(b) if b.leaf == leaf => {
+            Some((x + b.indent, y + f64::from(b.above), b.wrap(width)))
+        }
         Kind::Table(table) => {
             let top = y + f64::from(TABLE_MARGIN);
             table.rows.iter().find_map(|row| {
@@ -556,6 +627,7 @@ impl TextBox {
             above: 0,
             below: 0,
             indent: 0,
+            right: 0,
             marker: false,
             band: None,
             look,
@@ -565,12 +637,13 @@ impl TextBox {
     }
 
     /// The box of paragraph `p` in `style` (in a table's header row: `header`): its first
-    /// run's look, as the shaper draws it, and the style's line spacing.
+    /// run's look, as the shaper draws it, and its line spacing `line`.
     fn paragraph(
         leaf: LeafId,
         looks: &mut Looks,
         p: &Paragraph,
         style: &Style,
+        line: LineSpacing,
         header: bool,
     ) -> Self {
         let look = &style.run;
@@ -587,9 +660,14 @@ impl TextBox {
             None => looks.id(&look.font, look.size, look.bold || header),
         };
         TextBox {
-            line: style.para.line,
+            line,
             ..TextBox::new(leaf, id)
         }
+    }
+
+    /// The width its text wraps at in a box `width` wide: between its indents.
+    pub(crate) fn wrap(&self, width: i32) -> i32 {
+        (width - self.indent - self.right).max(1)
     }
 }
 
@@ -700,7 +778,7 @@ pub(crate) fn measure(node: &mut Node, width: i32, cx: &mut Cx<'_>) -> i32 {
         Kind::Text(b) => {
             let leaf = &mut cx.leaves[b.leaf.index()];
             let content = content_at(cx.doc, &leaf.path).expect("a text leaf has content");
-            let wrap = (width - b.indent).max(1);
+            let wrap = b.wrap(width);
             leaf.wrap = wrap;
             b.text_height = cx.shaper.shape(leaf.key, content, wrap).max(1);
             b.above + b.text_height + b.below
@@ -769,7 +847,7 @@ pub(crate) fn estimate(node: &Node, width: i32, leaves: &[Leaf], looks: &Looks) 
     let height = match &node.kind {
         Kind::Text(b) => {
             let m = looks.metrics(b.look);
-            let text = estimate_text(&leaves[b.leaf.index()], m, b.line, width - b.indent);
+            let text = estimate_text(&leaves[b.leaf.index()], m, b.line, b.wrap(width));
             b.above + text + b.below
         }
         Kind::Picture { leaf, natural, .. } => match natural.flatten() {
@@ -903,7 +981,7 @@ pub(crate) fn paint<'a>(node: &'a Node, x: i32, y: f64, width: i32, cx: &mut Pai
                 content,
                 x: x + b.indent,
                 y: y + f64::from(b.above),
-                width: (width - b.indent).max(1),
+                width: b.wrap(width),
                 marker: b.marker,
                 selected,
             });
@@ -996,7 +1074,7 @@ pub(crate) fn hit(
         Kind::Text(b) => {
             let leaf = &leaves[b.leaf.index()];
             let content = content_at(doc, &leaf.path).expect("text leaf");
-            let wrap = (width - b.indent).max(1);
+            let wrap = b.wrap(width);
             let ty = (y - f64::from(b.above)).clamp(0.0, f64::from(b.text_height - 1).max(0.0));
             let h = shaper.hit(leaf.key, content, wrap, x - f64::from(b.indent), ty);
             let text = content.text();

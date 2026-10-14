@@ -4,10 +4,12 @@
 //!
 //! A paragraph names its style by id; a run holds only its direct formatting
 //! ([`RunStyle`]'s overrides), so the look drawn is the style's with the run's overrides on
-//! top ([`StyleSheet::look`]). Markdown and plain text get Slate's built-in sheet
-//! ([`StyleSheet::builtin`]); a DOCX file's is its `styles.xml`.
+//! top ([`StyleSheet::look`]). A paragraph's own spacing and indents go over its style's the
+//! same way ([`ParaOverrides`], [`StyleSheet::spacing`]; ADR 0009). Markdown and plain text
+//! get Slate's built-in sheet ([`StyleSheet::builtin`]); a DOCX file's is its `styles.xml`.
 
 use crate::{effective_tabs, Align, Paragraph, Rgb, RunStyle, TabStop};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
@@ -27,7 +29,7 @@ pub struct Look {
 }
 
 /// How far apart a paragraph's lines are.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum LineSpacing {
     /// A multiple of the font's line height: 1.0 is single spacing.
     Auto(f32),
@@ -43,16 +45,84 @@ impl Default for LineSpacing {
     }
 }
 
-/// A paragraph's resolved look. Distances are in twips (1/20 pt, 1/1440 in).
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct ParaLook {
-    pub align: Align,
+/// A paragraph's spacing and indents, in twips (1/20 pt, 1/1440 in): its style's, or its
+/// style's with its own on top ([`StyleSheet::spacing`]).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct ParaSpacing {
     pub space_before: u32,
     pub space_after: u32,
     pub line: LineSpacing,
     pub indent_left: i32,
+    pub indent_right: i32,
     /// The first line's indent from `indent_left`; negative is a hanging indent.
     pub indent_first: i32,
+    /// Word's contextual spacing: no space before the paragraph when the one before is in
+    /// the same style, none after it when the next one is.
+    pub contextual: bool,
+}
+
+/// A paragraph's own spacing and indents over its style's (ADR 0009), as [`RunStyle`] is a
+/// run's look over its style's: each `None` leaves the style's. Distances in twips.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ParaOverrides {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub space_before: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub space_after: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<LineSpacing>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub indent_left: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub indent_right: Option<i32>,
+    /// The first line's indent from the left one; negative is a hanging indent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub indent_first: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contextual: Option<bool>,
+}
+
+impl ParaOverrides {
+    /// Whether it sets nothing.
+    pub fn is_empty(&self) -> bool {
+        *self == ParaOverrides::default()
+    }
+
+    /// `spacing` with these overrides on top.
+    pub fn over(&self, mut spacing: ParaSpacing) -> ParaSpacing {
+        fn set<T: Copy>(to: &mut T, from: Option<T>) {
+            if let Some(v) = from {
+                *to = v;
+            }
+        }
+        set(&mut spacing.space_before, self.space_before);
+        set(&mut spacing.space_after, self.space_after);
+        set(&mut spacing.line, self.line);
+        set(&mut spacing.indent_left, self.indent_left);
+        set(&mut spacing.indent_right, self.indent_right);
+        set(&mut spacing.indent_first, self.indent_first);
+        set(&mut spacing.contextual, self.contextual);
+        spacing
+    }
+
+    /// These overrides without the indents: what a paragraph keeps when it joins or leaves
+    /// a list, whose levels indent it.
+    pub fn without_indents(self) -> ParaOverrides {
+        ParaOverrides {
+            indent_left: None,
+            indent_right: None,
+            indent_first: None,
+            ..self
+        }
+    }
+}
+
+/// A paragraph's resolved look.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ParaLook {
+    pub align: Align,
+    pub spacing: ParaSpacing,
     /// Its tab stops, in position order, without clears (ADR 0009).
     pub tabs: Vec<TabStop>,
 }
@@ -154,7 +224,10 @@ impl StyleSheet {
             color: None,
         };
         let para = ParaLook {
-            space_after: PARAGRAPH_SPACE * TWIPS_PER_PX,
+            spacing: ParaSpacing {
+                space_after: PARAGRAPH_SPACE * TWIPS_PER_PX,
+                ..ParaSpacing::default()
+            },
             ..ParaLook::default()
         };
         let scaled = |scale: f32| (f32::from(BUILTIN_SIZE) * scale).round() as u16;
@@ -181,7 +254,10 @@ impl StyleSheet {
                 ..normal.clone()
             },
             para: ParaLook {
-                space_after: TITLE_BELOW * TWIPS_PER_PX,
+                spacing: ParaSpacing {
+                    space_after: TITLE_BELOW * TWIPS_PER_PX,
+                    ..para.spacing
+                },
                 ..para.clone()
             },
             ..derived("Title", "Title")
@@ -196,8 +272,11 @@ impl StyleSheet {
                     ..normal.clone()
                 },
                 para: ParaLook {
-                    space_before: HEADING_ABOVE[i] * TWIPS_PER_PX,
-                    space_after: HEADING_BELOW * TWIPS_PER_PX,
+                    spacing: ParaSpacing {
+                        space_before: HEADING_ABOVE[i] * TWIPS_PER_PX,
+                        space_after: HEADING_BELOW * TWIPS_PER_PX,
+                        ..para.spacing
+                    },
                     ..para.clone()
                 },
                 ..derived(&format!("Heading{n}"), &format!("Heading {n}"))
@@ -210,7 +289,10 @@ impl StyleSheet {
                 ..normal.clone()
             },
             para: ParaLook {
-                indent_left: LEVEL_INDENT * TWIPS_PER_PX as i32,
+                spacing: ParaSpacing {
+                    indent_left: LEVEL_INDENT * TWIPS_PER_PX as i32,
+                    ..para.spacing
+                },
                 ..para.clone()
             },
             ..derived("Quote", "Quote")
@@ -306,6 +388,11 @@ impl StyleSheet {
     pub fn tab_stops(&self, p: &Paragraph) -> Vec<TabStop> {
         effective_tabs(&self.style_of(&p.style).para.tabs, &p.tabs)
     }
+
+    /// Paragraph `p`'s spacing and indents: its style's with its own on top (ADR 0009).
+    pub fn spacing(&self, p: &Paragraph) -> ParaSpacing {
+        p.own.over(self.style_of(&p.style).para.spacing)
+    }
 }
 
 impl Default for StyleSheet {
@@ -349,6 +436,36 @@ mod tests {
         // A quote's own colour stays without an override; an unknown id is Normal's.
         assert_eq!(sheet.look("Quote", &RunStyle::default()).color, Some(QUOTE));
         assert_eq!(sheet.look("Nope", &run).size, 22);
+    }
+
+    #[test]
+    fn a_paragraphs_own_spacing_goes_over_its_styles() {
+        let sheet = StyleSheet::builtin();
+        let mut p = Paragraph::new("Heading1");
+        let heading = sheet.style_of("Heading1").para.spacing;
+        assert_eq!(sheet.spacing(&p), heading);
+        p.own = ParaOverrides {
+            space_after: Some(0),
+            indent_right: Some(720),
+            indent_first: Some(-360),
+            ..ParaOverrides::default()
+        };
+        assert_eq!(
+            sheet.spacing(&p),
+            ParaSpacing {
+                space_after: 0,
+                indent_right: 720,
+                indent_first: -360,
+                ..heading
+            }
+        );
+        assert_eq!(
+            p.own.without_indents(),
+            ParaOverrides {
+                space_after: Some(0),
+                ..ParaOverrides::default()
+            }
+        );
     }
 
     #[test]

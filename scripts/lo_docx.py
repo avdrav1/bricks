@@ -4,18 +4,22 @@ LibreOffice reads it.
 
 Usage: python3 scripts/lo_docx.py fixture OUT   (store the fixture document at OUT)
        python3 scripts/lo_docx.py dump FILE     (print FILE's paragraphs and tables)
+       python3 scripts/lo_docx.py spacing OUT   (write the spacing document at OUT:
+                                                 apps/slate/crates/docx/tests/data/
+                                                 spacing.docx; no LibreOffice needed)
 
 `dump` prints the body in document order, one line per item, tab-separated:
-  para<TAB>STYLE<TAB>LIST<TAB>LABEL<TAB>ALIGN<TAB>BEFORE<TAB>AFTER<TAB>LINE<TAB>LEFT<TAB>FIRST<TAB>TEXT
+  para<TAB>STYLE<TAB>LIST<TAB>LABEL<TAB>ALIGN<TAB>BEFORE<TAB>AFTER<TAB>LINE<TAB>LEFT<TAB>RIGHT<TAB>FIRST<TAB>CONTEXT<TAB>TEXT
                                      a paragraph: its paragraph style's display name, its
                                      list level (0-based) or `-` outside lists, its list
                                      label (`"2."`; LibreOffice gives `""` for bullets), its
                                      alignment (`start`, `center`, `end`, `justify`), then
-                                     its paragraph style's space before and after, line
-                                     spacing (`auto:PERCENT`, `exact:TWIPS`, or
-                                     `atLeast:TWIPS`), and left and first-line indent (in
-                                     twips, rounded; a hanging indent is negative), and its
-                                     text; label and text as JSON strings
+                                     its space before and after, line spacing
+                                     (`auto:PERCENT`, `exact:TWIPS`, or `atLeast:TWIPS`),
+                                     left, right, and first-line indent (in twips, rounded;
+                                     a hanging indent is negative), whether space between
+                                     paragraphs of its style is left out (`1` or `0`), and
+                                     its text; label and text as JSON strings
   run<TAB>FLAGS<TAB>FONT<TAB>SIZE<TAB>COLOR<TAB>TEXT
                                      the paragraph's text in runs of one look: FLAGS is
                                      `b`, `i`, `u`, `s` (bold, italic, underline,
@@ -25,9 +29,8 @@ Usage: python3 scripts/lo_docx.py fixture OUT   (store the fixture document at O
   table / row / cell / end           a table, its rows and cells (in cell-name order), and
                                      its end; a cell's paragraphs and nested tables follow
                                      its `cell` line
-Spacing and indents are the paragraph style's (inherited through its parents and the
-document defaults), not the paragraph's own: Slate's model holds a paragraph's style and
-its alignment.
+Spacing and indents are the paragraph's own (ADR 0009), which LibreOffice resolves
+through its style, its parents, and the document defaults.
 The fixture (apps/slate/crates/docx/tests/data/fixture.docx) has a title, headings 1-3,
 runs that are bold, italic, underlined, struck, sized, coloured, and in the Strong and
 Emphasis character styles (also inside a heading), centred, right-aligned, and justified
@@ -263,15 +266,15 @@ def twips(hundredths_mm):
 
 
 def para_look(p):
-    """A paragraph's alignment, and its style's spacing, line spacing, and indents."""
+    """A paragraph's alignment, spacing, line spacing, indents, and contextual spacing."""
     adjust = p.ParaAdjust
     align = ALIGN[adjust] if 0 <= adjust < len(ALIGN) else f"adjust{adjust}"
-    style = STYLES.getByName(p.ParaStyleName)
-    line = style.ParaLineSpacing
+    line = p.ParaLineSpacing
     mode = LINE.get(line.Mode, f"mode{line.Mode}")
     value = str(line.Height) if line.Mode == 0 else twips(line.Height)
-    return [align, twips(style.ParaTopMargin), twips(style.ParaBottomMargin),
-            f"{mode}:{value}", twips(style.ParaLeftMargin), twips(style.ParaFirstLineIndent)]
+    return [align, twips(p.ParaTopMargin), twips(p.ParaBottomMargin), f"{mode}:{value}",
+            twips(p.ParaLeftMargin), twips(p.ParaRightMargin), twips(p.ParaFirstLineIndent),
+            "1" if p.ParaContextMargin else "0"]
 
 
 def dump_text(text, out):
@@ -337,10 +340,142 @@ def dump(doc):
     return "\n".join(out) + "\n"
 
 
+# The spacing document (SLATE-26): WordprocessingML written by hand, so it holds what Word
+# and Google Docs write and LibreOffice doesn't: `start` and `end` indents, automatic
+# spacing, contextual spacing, a line without its rule.
+W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+PKG_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
+DOCX_CT = "application/vnd.openxmlformats-officedocument.wordprocessingml"
+DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+
+SPACING_STYLES = (
+    f'<w:styles xmlns:w="{W_NS}">'
+    "<w:docDefaults>"
+    '<w:rPrDefault><w:rPr><w:rFonts w:ascii="Liberation Serif" w:hAnsi="Liberation Serif"/>'
+    '<w:sz w:val="22"/></w:rPr></w:rPrDefault>'
+    '<w:pPrDefault><w:pPr><w:spacing w:after="160" w:line="259" w:lineRule="auto"/>'
+    "</w:pPr></w:pPrDefault>"
+    "</w:docDefaults>"
+    '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/>'
+    "</w:style>"
+    '<w:style w:type="paragraph" w:styleId="Spaced"><w:name w:val="Spaced"/>'
+    '<w:basedOn w:val="Normal"/><w:pPr><w:spacing w:before="240" w:after="120" w:line="360" '
+    'w:lineRule="auto"/><w:ind w:left="720" w:right="360" w:hanging="360"/></w:pPr></w:style>'
+    '<w:style w:type="paragraph" w:styleId="Tight"><w:name w:val="Tight"/>'
+    '<w:basedOn w:val="Spaced"/><w:pPr><w:contextualSpacing/><w:ind w:right="0"/></w:pPr>'
+    "</w:style>"
+    "</w:styles>"
+)
+
+SPACING_NUMBERING = (
+    f'<w:numbering xmlns:w="{W_NS}">'
+    '<w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:start w:val="1"/>'
+    '<w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/><w:lvlJc w:val="left"/>'
+    '<w:pPr><w:ind w:left="720" w:hanging="360"/></w:pPr></w:lvl></w:abstractNum>'
+    '<w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>'
+    "</w:numbering>"
+)
+
+# (style, the paragraph's own pPr, text) for each paragraph, in order.
+SPACING_PARAGRAPHS = [
+    ("Normal", "", "Normal: the document defaults' 8 pt after and 1.08 lines."),
+    ("Normal", '<w:spacing w:before="120" w:after="0"/>', "Own space: 6 pt before, none after."),
+    ("Normal", '<w:spacing w:line="480" w:lineRule="auto"/>', "Own double line spacing."),
+    ("Normal", '<w:spacing w:line="300" w:lineRule="exact"/>', "Own exact 15 pt lines."),
+    ("Normal", '<w:spacing w:line="400" w:lineRule="atLeast"/>', "Own lines at least 20 pt."),
+    ("Normal", '<w:spacing w:line="360"/>', "A line without its rule: 1.5 lines."),
+    ("Normal", '<w:ind w:left="1440" w:firstLine="360"/>', "Own left 1 in, first line 0.25 in."),
+    ("Normal", '<w:ind w:start="720" w:end="1080" w:hanging="540"/>',
+     "Start, end, and hanging: left 0.5 in, right 0.75 in, hanging 0.375 in."),
+    ("Normal", '<w:ind w:left="-360" w:right="-720"/>', "Negative indents into the margins."),
+    ("Spaced", "", "The Spaced style's own look, nothing direct."),
+    ("Spaced", '<w:spacing w:before="0"/><w:ind w:firstLine="0"/>',
+     "Spaced, with no space before and no hanging line of its own; left and right kept."),
+    ("Spaced", '<w:spacing w:after="480" w:line="240" w:lineRule="auto"/><w:ind w:left="0"/>',
+     "Spaced, overridden: 24 pt after, single lines, no left indent."),
+    ("Tight", "", "Tight, contextual: no space between it"),
+    ("Tight", "", "and the next Tight paragraph."),
+    ("Tight", "<w:contextualSpacing w:val=\"0\"/>", "Tight with contextual spacing turned off."),
+    ("Normal", "<w:contextualSpacing/>", "Normal with its own contextual spacing."),
+    ("Normal", '<w:spacing w:before="100" w:beforeAutospacing="1" w:after="100" '
+     'w:afterAutospacing="1"/>', "Automatic spacing: 14 pt before and after."),
+    ("Normal", '<w:spacing w:after="0"/><w:ind w:left="1080" w:hanging="360"/>',
+     "A list item with its own indents and spacing.", "1"),
+    ("Normal", "", "A list item with its level's indents.", "1"),
+]
+
+
+def spacing_ppr(style, own, num=None):
+    """A `w:pPr` with the style, the list, and `own` (in schema order) in it."""
+    pstyle = f'<w:pStyle w:val="{style}"/>' if style != "Normal" else ""
+    numpr = f'<w:numPr><w:ilvl w:val="0"/><w:numId w:val="{num}"/></w:numPr>' if num else ""
+    inner = pstyle + numpr + own
+    return f"<w:pPr>{inner}</w:pPr>" if inner else ""
+
+
+def spacing_paragraph(style, own, text, num=None):
+    return f"<w:p>{spacing_ppr(style, own, num)}<w:r><w:t>{text}</w:t></w:r></w:p>"
+
+
+def spacing_document():
+    body = "".join(spacing_paragraph(*p) for p in SPACING_PARAGRAPHS)
+    cell = spacing_paragraph("Normal", '<w:spacing w:after="0"/><w:ind w:left="200"/>',
+                             "A cell paragraph with its own indent and no space after.")
+    body += ("<w:tbl><w:tblPr><w:tblW w:w=\"5000\" w:type=\"pct\"/></w:tblPr>"
+             "<w:tblGrid><w:gridCol w:w=\"9360\"/></w:tblGrid>"
+             f"<w:tr><w:tc><w:tcPr><w:tcW w:w=\"9360\" w:type=\"dxa\"/></w:tcPr>{cell}</w:tc></w:tr>"
+             "</w:tbl>")
+    body += spacing_paragraph("Normal", "", "The end.")
+    sect = ('<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" '
+            'w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>')
+    return f'<w:document xmlns:w="{W_NS}" xmlns:r="{R_NS}"><w:body>{body}{sect}</w:body></w:document>'
+
+
+def write_spacing(path):
+    """The spacing document: paragraphs with their own spacing, line spacing, and indents
+    (Word's `start`, `end`, `hanging`, and negative ones), a style's overridden, contextual
+    and automatic spacing, list items, and a table cell's paragraph. Byte for byte the same
+    on every run."""
+    import zipfile
+    parts = [
+        ("[Content_Types].xml",
+         '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+         '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+         '<Default Extension="xml" ContentType="application/xml"/>'
+         f'<Override PartName="/word/document.xml" ContentType="{DOCX_CT}.document.main+xml"/>'
+         f'<Override PartName="/word/styles.xml" ContentType="{DOCX_CT}.styles+xml"/>'
+         f'<Override PartName="/word/numbering.xml" ContentType="{DOCX_CT}.numbering+xml"/>'
+         "</Types>"),
+        ("_rels/.rels",
+         f'<Relationships xmlns="{PKG_NS}">'
+         f'<Relationship Id="rId1" Type="{R_NS}/officeDocument" Target="word/document.xml"/>'
+         "</Relationships>"),
+        ("word/_rels/document.xml.rels",
+         f'<Relationships xmlns="{PKG_NS}">'
+         f'<Relationship Id="rId1" Type="{R_NS}/styles" Target="styles.xml"/>'
+         f'<Relationship Id="rId2" Type="{R_NS}/numbering" Target="numbering.xml"/>'
+         "</Relationships>"),
+        ("word/document.xml", spacing_document()),
+        ("word/styles.xml", SPACING_STYLES),
+        ("word/numbering.xml", SPACING_NUMBERING),
+    ]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, xml in parts:
+            info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            z.writestr(info, DECL + xml)
+    print(f"spacing -> {path}")
+
+
 def main():
-    if len(sys.argv) != 3 or sys.argv[1] not in ("fixture", "dump"):
+    if len(sys.argv) != 3 or sys.argv[1] not in ("fixture", "dump", "spacing"):
         sys.exit(__doc__)
     path = Path(sys.argv[2]).resolve()
+    if sys.argv[1] == "spacing":
+        write_spacing(path)
+        return
     ctx = connect()
     desktop = ctx.ServiceManager.createInstanceWithContext("com.sun.star.frame.Desktop", ctx)
     try:

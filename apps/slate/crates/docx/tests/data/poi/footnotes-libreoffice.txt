@@ -1,2 +1,2 @@
-para	Default Paragraph Style	-	""	start	0	200	auto:115	0	0	"Eto ochen prostoy1 text so snoskoy"
+para	Default Paragraph Style	-	""	start	0	200	auto:115	0	0	0	0	"Eto ochen prostoy1 text so snoskoy"
 run	-	Calibri	11	auto	"Eto ochen prostoy1 text so snoskoy"
