@@ -133,38 +133,66 @@ const V = (() => {
   function order(ids) {
     edit = ids;
   }
+  // cut(name, clips): another, shorter edit of the same scenes, played with
+  // ?cut=name. A clip { scene, from, to, say, lead, xfade } shows that scene
+  // from `from` to `to` (seconds in its own time) under its own narration
+  // `say`, which starts `lead` seconds in; it lasts the window, or longer if
+  // the line needs it, holding the last frame.
+  const cuts = {};
+  const cut = (name, clips) => (cuts[name] = clips);
+  // What plays: the scenes in the edit's order, or a cut's clips. Each shot:
+  // { id, root, xfade, b, dur, start, end, update(localTime) }.
+  let shots = [];
   // Work a scene's build starts but can't finish at once (an iframe loading,
   // an image decoding): rendering waits for every promise passed here.
   const pending = [];
   const defer = (promise) => (pending.push(promise), promise);
   const settled = () => Promise.all(pending);
 
-  function layout() {
-    let t = 0;
-    for (const s of scenes) {
-      s.start = t;
-      let local = 0;
-      s.b = s.beats.map((beat) => {
-        // Each sentence: its text, where it starts in the line, its clip, its timing in the beat.
-        let at = LEAD, from = 0;
-        const lines = (beat.say ? sentences(beat.say) : []).map((text) => {
-          const key = clipKey(spoken(text));
-          const line = { text, key, off: beat.say.indexOf(text, from), dur: voice?.clips[key]?.dur ?? speech(text), start: at };
-          from = line.off + text.length;
-          at += line.dur + GAP;
-          return line;
-        });
-        const talk = lines.length ? at - GAP : 0;
-        const d = beat.dur ?? Math.max(beat.min ?? 0, beat.say ? talk + BREATH : 0);
-        const out = { start: local, end: local + d, say: beat.say, lines };
-        local += d;
-        return out;
+  function layoutBeats(beats) {
+    let local = 0;
+    const b = beats.map((beat) => {
+      // Each sentence: its text, where it starts in the line, its clip, its timing in the beat.
+      let at = beat.lead ?? LEAD, from = 0;
+      const lines = (beat.say ? sentences(beat.say) : []).map((text) => {
+        const key = clipKey(spoken(text));
+        const line = { text, key, off: beat.say.indexOf(text, from), dur: voice?.clips[key]?.dur ?? speech(text), start: at };
+        from = line.off + text.length;
+        at += line.dur + GAP;
+        return line;
       });
-      s.dur = local;
+      const talk = lines.length ? at - GAP : 0;
+      const d = beat.dur ?? Math.max(beat.min ?? 0, beat.say ? talk + BREATH : 0);
+      const out = { start: local, end: local + d, say: beat.say, lines };
+      local += d;
+      return out;
+    });
+    return { b, dur: local };
+  }
+
+  function layout(cutName) {
+    for (const s of scenes) {
+      Object.assign(s, layoutBeats(s.beats));
       s.at = (i, needle) => wordTime(s, i, needle);
-      s.end = t + local;
-      t = s.end;
-      for (const b of s.b) if (b.say) captions.push(...chunk(b, s.start));
+    }
+    const byId = new Map(scenes.map((s) => [s.id, s]));
+    for (const [name, clips] of Object.entries(cuts))
+      for (const c of clips) {
+        if (!byId.has(c.scene)) console.error(`Cut ${name} uses a scene that isn't written: ${c.scene}`);
+        Object.assign(c, layoutBeats([{ say: c.say, lead: c.lead, min: c.to - c.from }]));
+      }
+    if (cutName && !cuts[cutName]) console.error(`No cut called ${cutName}`);
+    shots = cuts[cutName]
+      ? cuts[cutName].map((c) => {
+          const s = byId.get(c.scene);
+          return { id: c.scene, root: s?.root, xfade: c.xfade, b: c.b, dur: c.dur, update: (t) => s?.update(clamp(c.from + t, c.from, c.to), s) };
+        })
+      : scenes.map((s) => ({ id: s.id, root: s.root, xfade: s.xfade, b: s.b, dur: s.dur, update: (t) => s.update(t, s) }));
+    let t = 0;
+    for (const shot of shots) {
+      shot.start = t;
+      shot.end = t += shot.dur;
+      for (const b of shot.b) if (b.say) captions.push(...chunk(b, shot.start));
     }
     total = t;
   }
@@ -185,10 +213,12 @@ const V = (() => {
     return charTime(b, at);
   }
 
-  // The voiceover's clips: what to say (for voice.mjs) and when (for the mix).
-  const voiceLines = () => [...new Map(scenes.flatMap((s) => s.b.flatMap((b) => b.lines)).map((l) => [l.key, { key: l.key, text: spoken(l.text) }])).values()];
+  // The voiceover's clips: what to say (for voice.mjs: every scene's and every
+  // cut's lines, so one voiceover serves them all) and when (for the mix).
+  const voiceLines = () =>
+    [...new Map([...scenes, ...Object.values(cuts).flat()].flatMap((s) => s.b.flatMap((b) => b.lines)).map((l) => [l.key, { key: l.key, text: spoken(l.text) }])).values()];
   const voiceTrack = () =>
-    voice ? scenes.flatMap((s) => s.b.flatMap((b) => b.lines.map((l) => ({ file: voice.clips[l.key]?.file, start: s.start + b.start + l.start })))).filter((c) => c.file) : [];
+    voice ? shots.flatMap((s) => s.b.flatMap((b) => b.lines.map((l) => ({ file: voice.clips[l.key]?.file, start: s.start + b.start + l.start })))).filter((c) => c.file) : [];
 
   // Split a beat's line into caption cards of at most two short lines, each
   // shown while the narrator says it. `start`: the scene's start.
@@ -291,21 +321,26 @@ const V = (() => {
   function seek(t) {
     hudKeys = [];
     pointerState = null;
-    for (let i = 0; i < scenes.length; i++) {
-      const s = scenes[i];
-      const next = scenes[i + 1];
+    // A shot plays until the next one has dissolved in over it. A cut can show
+    // a scene's root in more than one shot, so roots are shown first, then drawn.
+    const live = shots.filter((s, i) => {
+      const next = shots[i + 1];
       const tail = next ? (next.xfade ?? 0.35) : 0;
-      const on = t >= s.start - 1e-6 && (t < s.end + tail || (!next && t <= s.end + 1));
-      show(s.root, on);
-      if (!on) continue;
+      return t >= s.start - 1e-6 && (t < s.end + tail || (!next && t <= s.end + 1));
+    });
+    for (const s of scenes) show(s.root, live.some((shot) => shot.root === s.root));
+    for (const [i, s] of live.entries()) {
+      const next = shots[shots.indexOf(s) + 1];
+      const tail = next ? (next.xfade ?? 0.35) : 0;
       const xf = s.xfade ?? 0.35;
-      css(s.root, { opacity: xf > 0 ? p(t, s.start, s.start + xf, ease.linear) : 1 });
-      s.update(Math.min(t - s.start, s.dur + tail), s);
+      css(s.root, { zIndex: i, opacity: xf > 0 ? p(t, s.start, s.start + xf, ease.linear) : 1 });
+      s.update(Math.min(t - s.start, s.dur + tail));
     }
     drawOverlays(t);
   }
 
-  function init() {
+  // cutName: play that cut instead of the whole edit.
+  function init(cutName) {
     stage = document.getElementById("stage");
     if (edit) {
       const byId = new Map(scenes.map((s) => [s.id, s]));
@@ -320,7 +355,7 @@ const V = (() => {
       s.root = html(`<section class="scene" data-scene="${s.id}"></section>`);
       stage.appendChild(s.root);
     }
-    layout();
+    layout(cutName);
     for (const s of scenes) s.update = s.build(s.root, s) || (() => {});
     captionEl = stage.appendChild(html(`<div id="caption"></div>`));
     hudEl = stage.appendChild(html(`<div id="hud"></div>`));
@@ -342,7 +377,7 @@ const V = (() => {
     return "WEBVTT\n\n" + captions.map((c, i) => `${i + 1}\n${ts(c.start)} --> ${ts(c.end)}\n${c.text.replace(/`/g, "")}\n`).join("\n");
   }
 
-  const list = () => scenes.map((s) => ({ id: s.id, start: s.start, end: s.end }));
+  const list = () => shots.map((s) => ({ id: s.id, start: s.start, end: s.end }));
 
-  return { W, H, FPS, clamp, lerp, ease, p, tw, track, typed, typedEnd, hash, blink, fmt, html, css, text, markup, cls, show, scene, order, defer, settled, setVoice, voiceLines, voiceTrack, init, seek, keys, pointer, vtt, list, get duration() { return total; } };
+  return { W, H, FPS, clamp, lerp, ease, p, tw, track, typed, typedEnd, hash, blink, fmt, html, css, text, markup, cls, show, scene, order, cut, defer, settled, setVoice, voiceLines, voiceTrack, init, seek, keys, pointer, vtt, list, get duration() { return total; } };
 })();

@@ -4,6 +4,7 @@
 // are joined without re-encoding.
 //
 //   node render.mjs                       the whole video -> ../dist/video/cronkite-explainer.mp4
+//   node render.mjs --cut short           the short cut (short.js) -> ../dist/video/cronkite-explainer-short.mp4
 //   node render.mjs --scene brick-sort    one scene (ids: the preview's menu)
 //   node render.mjs --from 30 --to 60     a stretch, in seconds
 //   node render.mjs --still 31.5 [--still 40 ...]   PNG frames, for checking a look
@@ -89,7 +90,8 @@ function launch() {
 
 async function render() {
   const server = await serve(0);
-  const url = `http://127.0.0.1:${server.address().port}/?render${speak ? "" : "&novoice"}`;
+  const cutName = opt("cut");
+  const url = `http://127.0.0.1:${server.address().port}/?render${speak ? "" : "&novoice"}${cutName ? `&cut=${cutName}` : ""}`;
   const browser = await launch();
   const browsers = [browser];
   try {
@@ -106,7 +108,7 @@ async function render() {
       }
     }
     const { duration, fps } = first.info;
-    const outFile = resolve(opt("out", join(here, "..", "dist", "video", stills.length ? "still.png" : "cronkite-explainer.mp4")));
+    const outFile = resolve(opt("out", join(here, "..", "dist", "video", stills.length ? "still.png" : `cronkite-explainer${cutName ? `-${cutName}` : ""}.mp4`)));
     await mkdir(dirname(outFile), { recursive: true });
 
     if (stills.length) {
