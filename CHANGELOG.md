@@ -2,6 +2,16 @@
 
 Releases are added by the ship-it skill.
 
+## Etch v0.1.0 (2026-10-14)
+
+Etch's first release, milestone ET0: an early preview of a simple, native image editor for Linux, closer to Paint than to Photoshop. Draw on a blank canvas of any size up to 16384 pixels a side with a pencil and an eraser, in any of Paint's 20 colours and any size from 1 to 100 pixels; the eraser erases to transparency. Zoom from 10% to 3200% around the pointer, with pixels kept square from 100%, and pan with the wheel, the middle button, or Space. Every stroke undoes and redoes. A stroke on an 8K image draws in about a millisecond a frame. Opening and saving PNG, JPEG, and BMP come next.
+
+- ETCH-1: Add the image model: RGBA8 image, pencil strokes, tiled undo history
+- ETCH-2: Show the canvas: blank image, zoom, pan, pencil, undo, New Image
+- ETCH-3: Erase to transparency over a checkerboard; add the tool column
+- ETCH-4: Pick foreground and background colours from the palette; size the pencil and eraser
+- ETCH-5: Install Etch per user with a desktop entry, icon, and download page
+
 ## Slate v0.3.0 (2026-10-14)
 
 Word documents keep the layout their authors made. A Word document opens at its page's text width (View → Text Width → Page, the new default), so lines wrap and tab-aligned dates and places land where they do in Word and Google Docs. Tabs go to the document's own tab stops, with leaders. Fonts a .docx carries are used to draw it, and a missing font falls back to serif or sans as the document describes it. A paragraph's own spacing, indents, borders, and shading are drawn and saved, and list bullets and numbers are the ones the document defines, at its indents.
