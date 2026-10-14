@@ -11,11 +11,12 @@
 //! pointer. The widget emits `changed` whenever what the status bar or the Edit menu shows
 //! may have changed: the view, the history, or the pixel under the pointer.
 
+use crate::tools::Tool;
 use crate::view::View;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{gdk, glib, graphene, gsk};
-use image_model::{Color, Document, Image, Pencil, Rect};
+use image_model::{Document, Image, Rect};
 use std::time::Instant;
 
 /// The side of a tile texture, in image pixels.
@@ -26,11 +27,6 @@ const CHECK_LIGHT: gdk::RGBA = gdk::RGBA::new(1.0, 1.0, 1.0, 1.0);
 const CHECK_DARK: gdk::RGBA = gdk::RGBA::new(0.8, 0.8, 0.8, 1.0);
 /// The line around the image.
 const BOUNDARY: gdk::RGBA = gdk::RGBA::new(0.0, 0.0, 0.0, 0.35);
-/// ET0's pencil: one pixel, black (docs/specs/etch.md).
-const PENCIL: Pencil = Pencil {
-    color: Color::BLACK,
-    width: 1,
-};
 /// How far one wheel notch pans, in widget pixels.
 const NOTCH_PX: f64 = 48.0;
 const CHANGED: &str = "changed";
@@ -69,6 +65,8 @@ mod imp {
         pub last_ms: Cell<f64>,
         /// Whether the next allocation should show the image at 100% rather than fitted.
         pub actual_size: Cell<bool>,
+        /// What a primary-button drag draws with.
+        pub tool: Cell<Tool>,
     }
 
     #[glib::object_subclass]
@@ -335,6 +333,11 @@ impl Canvas {
         self.change_view(View::fit);
     }
 
+    /// The tool a primary-button drag draws with.
+    pub fn set_tool(&self, tool: Tool) {
+        self.imp().tool.set(tool);
+    }
+
     /// Space held or let go: while held, a primary-button drag pans.
     pub fn set_space(&self, held: bool) {
         let imp = self.imp();
@@ -358,7 +361,8 @@ impl Canvas {
     /// Starts a pencil stroke at widget point `at`.
     pub fn draw_begin(&self, at: (f64, f64)) {
         let Some(view) = self.view() else { return };
-        let changed = self.with_doc(|d| d.begin_stroke(PENCIL, view.to_image(at)));
+        let tip = self.imp().tool.get().tip();
+        let changed = self.with_doc(|d| d.begin_stroke(tip, view.to_image(at)));
         self.imp().drag.set(Drag::Draw);
         self.invalidate(changed);
     }
