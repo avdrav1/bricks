@@ -8,6 +8,7 @@
   },
   "devDependencies": {
     "kokoro-js": "^1.2.1",
+    "msedge-tts": "^2.1.0",
     "playwright-core": "^1.64.0"
   }
 }
