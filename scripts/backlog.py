@@ -2,7 +2,7 @@
 """Read and update BACKLOG.md.
 
   backlog.py next [APP]        print the next story to build (JSON); APP is brick, slate,
-                               or frame (default: every app, in that order)
+                               frame, or etch (default: every app, in that order)
   backlog.py show ID           print one story (JSON)
   backlog.py set ID STATUS     set a story's status
   backlog.py status            milestone progress summary
@@ -21,6 +21,7 @@ CHAINS = {
     "brick": ["S0", "M0", "M1", "M2", "M3", "M4", "M5"],
     "slate": ["SL0", "SL1", "SL3", "SL2", "SL4"],
     "frame": ["FR0", "FR1"],
+    "etch": ["ET0", "ET1", "ET2", "ET3"],
 }
 MILESTONES = [ms for chain in CHAINS.values() for ms in chain]
 STATUSES = {"todo", "in-progress", "review", "done", "blocked"}
@@ -31,7 +32,7 @@ def load():
     text = BACKLOG.read_text()
     stories, gates = [], {}
     for line in text.splitlines():
-        m = re.match(r"- \[( |x)\] (S0|M\d+|SL\d+|FR\d+):", line)
+        m = re.match(r"- \[( |x)\] (S0|M\d+|SL\d+|FR\d+|ET\d+):", line)
         if m:
             gates[m.group(2)] = m.group(1) == "x"
             continue

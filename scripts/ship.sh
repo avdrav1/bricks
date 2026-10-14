@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Release pipeline. Each step is separate so the ship-it skill can confirm
-# with the user before anything leaves the machine. APP is brick (the default), slate, or
-# frame.
+# with the user before anything leaves the machine. APP is brick (the default), slate,
+# frame, or etch.
 #
 #   scripts/ship.sh [APP] preflight          checks only, changes nothing
 #   scripts/ship.sh [APP] bump patch|minor|major|X.Y.Z
@@ -10,17 +10,17 @@
 #   scripts/ship.sh [APP] upload [--dry-run] tarball, checksum, latest.json -> Cloudflare R2
 #   scripts/ship.sh [APP] site   [--dry-run] the app's download page (sites/APP) -> Cloudflare Pages
 #   scripts/ship.sh suite-site [--dry-run]   suite install page (sites/cronkite) -> Cloudflare Pages
-#   scripts/ship.sh [APP] tag                annotated git tag (local only): vX.Y.Z for Brick, slate-vX.Y.Z for
-#                                            Slate, frame-vX.Y.Z for Frame
+#   scripts/ship.sh [APP] tag                annotated git tag (local only): vX.Y.Z for Brick,
+#                                            APP-vX.Y.Z for the others (slate-v0.3.0)
 #
-# Brick's release sits at the bucket's root (latest.json, releases/), Slate's under slate/,
-# Frame's under frame/.
+# Brick's release sits at the bucket's root (latest.json, releases/), the other apps' under
+# their name (slate/, frame/, etch/).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 [ -f .env.ship ] && set -a && . ./.env.ship && set +a
 APP=brick
-case "${1:-}" in brick|slate|frame) APP=$1; shift ;; esac
+case "${1:-}" in brick|slate|frame|etch) APP=$1; shift ;; esac
 TARGET=x86_64-unknown-linux-gnu
 case $APP in
 brick)
@@ -41,9 +41,15 @@ frame)
   PREFIX="frame/"; PAGES_VAR=CF_FRAME_PAGES_PROJECT; TAG_PREFIX=frame-v
   INSTALL_CHECK=scripts/check_install_frame.sh
   ;;
+etch)
+  ID=dev.cronkite.Etch  # APP_ID in apps/etch/src/main.rs
+  MANIFEST=apps/etch/Cargo.toml; SECTION=package
+  PREFIX="etch/"; PAGES_VAR=CF_ETCH_PAGES_PROJECT; TAG_PREFIX=etch-v
+  INSTALL_CHECK=scripts/check_install_etch.sh
+  ;;
 esac
 # Where the build puts latest.json and the deploy its copy of the site: dist/ for Brick,
-# dist/slate/ for Slate, dist/frame/ for Frame.
+# dist/APP/ for the others.
 OUT="dist${PREFIX:+/${PREFIX%/}}"
 version() { sed -n "/^\[$SECTION\]/,/^\[/{s/^version = \"\(.*\)\"/\1/p}" "$MANIFEST"; }
 V=$(version)
@@ -74,6 +80,9 @@ preflight)
   [ -z "$(git status --porcelain)" ] || { echo "FAIL working tree not clean"; fail=1; }
   b=$(git branch --show-current); [ "$b" = main ] || { echo "FAIL on branch $b, not main"; fail=1; }
   git rev-parse "$TAG" >/dev/null 2>&1 && { echo "FAIL tag $TAG already exists; bump first"; fail=1; }
+  for f in packaging/$ID.desktop packaging/$ID.svg sites/$APP/index.html sites/$APP/install.sh "$INSTALL_CHECK"; do
+    [ -f "$f" ] || { echo "FAIL $f missing: $APP has no packaging, download page, or install check yet"; fail=1; }
+  done
   cargo fmt --all --check || { echo "FAIL fmt"; fail=1; }
   cargo clippy --workspace --all-targets --all-features -- -D warnings || { echo "FAIL clippy"; fail=1; }
   cargo test --workspace || { echo "FAIL tests"; fail=1; }

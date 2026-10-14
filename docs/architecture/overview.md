@@ -1,11 +1,12 @@
 # Architecture overview
 
-Cronkite is a Linux-native office suite written in Rust: Brick, Slate, and Frame.
+Cronkite is a Linux-native office suite written in Rust: Brick, Slate, Frame, and Etch.
 
 ```text
 Brick — spreadsheet / CSV editor
 Slate  — pageless word processor: .txt, .md, .docx (docs/specs/slate.md, ADRs 0003, 0005)
 Frame  — presentation app (working name), easier than PowerPoint: .pptx (docs/specs/frame.md, ADRs 0004, 0006)
+Etch   — raster image editor, closer to Paint than Photoshop: PNG, JPEG, BMP (docs/specs/etch.md, ADR 0010)
 ```
 
 ## Guiding principle
@@ -17,8 +18,8 @@ Code becomes shared when at least two applications genuinely need the same abstr
 ## Structure
 
 - **One monorepo, one Cargo workspace** (`Cargo.toml` at the root, one `Cargo.lock`). See [ADR 0001](../adr/0001-use-rust-monorepo.md).
-- **Independently runnable applications** in `apps/`: `brick`, `slate`, `frame`. Each is its own binary crate and builds and runs alone (`cargo run -p <app>`).
-- **App-specific crates** live under their app: Brick's engine is in `apps/brick/crates/` (`csv-engine`, `formula`, `data-model`, `xlsx`, `grid`, `commands`, `file-format`, `jobs`). Their names describe what they do, not that they are shared: none of them is used by Slate or Frame.
+- **Independently runnable applications** in `apps/`: `brick`, `slate`, `frame`, `etch`. Each is its own binary crate and builds and runs alone (`cargo run -p <app>`).
+- **App-specific crates** live under their app: Brick's engine is in `apps/brick/crates/` (`csv-engine`, `formula`, `data-model`, `xlsx`, `grid`, `commands`, `file-format`, `jobs`), Etch's image model in `apps/etch/crates/image-model`. Their names describe what they do, not that they are shared: none of Brick's is used by Slate, Frame, or Etch.
 - **Small shared infrastructure crates** in `crates/`:
 
 | Crate | Purpose | Today |
@@ -47,6 +48,10 @@ graph TD
     frame --> suite-platform
     frame --> suite-core
     frame --> frame-crates["apps/frame/crates/*"]
+    etch --> suite-ui
+    etch --> suite-platform
+    etch --> suite-core
+    etch --> etch-crates["apps/etch/crates/*"]
     suite-ui --> suite-core
 ```
 
@@ -67,11 +72,11 @@ Rules:
 
 ## GUI toolkit
 
-All three apps use GTK 4 through gtk4-rs, GTK 4.14 or newer ([ADR 0002](../adr/0002-gtk4-for-the-suite.md); Brick's original evaluation is `apps/brick/docs/decisions/0001-ui-toolkit.md`). `gtk` is declared once in `[workspace.dependencies]`. Apps may depend on it; `suite-ui` and `suite-platform` may once they hold code that needs it; `suite-core`, `suite-file`, and app engine crates never do. All three use it today: Brick, Slate (its SL0 viewer), and Frame (its FR0 viewer).
+All four apps use GTK 4 through gtk4-rs, GTK 4.14 or newer ([ADR 0002](../adr/0002-gtk4-for-the-suite.md); Brick's original evaluation is `apps/brick/docs/decisions/0001-ui-toolkit.md`). `gtk` is declared once in `[workspace.dependencies]`. Apps may depend on it; `suite-ui` and `suite-platform` may once they hold code that needs it; `suite-core`, `suite-file`, and app engine crates never do. All four use it today: Brick, Slate (its SL0 viewer), Frame (its FR0 viewer), and Etch (its canvas; `image-model` stays toolkit-free).
 
 ## Versions and editions
 
-- Brick and its crates share the workspace version (`[workspace.package] version`), which is Brick's release version; `scripts/ship.sh bump` changes it. Slate, Frame, and the `suite-*` crates set their own versions.
+- Brick and its crates share the workspace version (`[workspace.package] version`), which is Brick's release version; `scripts/ship.sh bump` changes it. Slate, Frame, Etch, and the `suite-*` crates set their own versions.
 - The workspace uses edition 2021. Moving to edition 2024 is a separate change.
 
 ## Future crates (speculative)
@@ -84,5 +89,6 @@ These are likely candidates, listed so the shape is visible. None exists yet, an
 | Brick | `brick-model`, `csv-engine`, `xlsx` (the last two exist today as Brick-only crates) |
 | Slate | `document-model` and `docx` exist (`apps/slate/crates/`, SLATE-1 to SLATE-3) |
 | Frame | `presentation-model`, `pptx`, `deck-edit` (exist today as Frame-only crates in `apps/frame/crates/`, ADRs 0004 and 0006) |
+| Etch | `image-model` exists (`apps/etch/crates/`, ADR 0010); codecs and tools split out only once their boundaries are real |
 
 Candidates already overlap with the apps' own crates (`commands` holds Brick's undo stack, `deck-edit` Frame's). Extracting one for the suite means generalizing it with a second app as its user, not moving it ahead of time.

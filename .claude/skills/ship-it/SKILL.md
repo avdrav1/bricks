@@ -1,6 +1,6 @@
 ---
 name: ship-it
-description: Cut a release of a Cronkite app (Brick, the spreadsheet, by default; or Slate, the word processor) and deploy it to Cloudflare: preflight checks, version bump, release build, tarball upload to R2, download page to Cloudflare Pages, git tag. Use whenever the user says "ship it", "release", "deploy", "cut a build", "publish a version", "push to Cloudflare", or asks to put a new build online, even if they don't name Cloudflare.
+description: Cut a release of a Cronkite app (Brick, the spreadsheet; Slate, the word processor; Frame, the presentation app; or Etch, the image editor) and deploy it to Cloudflare: preflight checks, version bump, release build, tarball upload to R2, download page to Cloudflare Pages, git tag. Use whenever the user says "ship it", "release", "deploy", "cut a build", "publish a version", "push to Cloudflare", or asks to put a new build online, even if they don't name Cloudflare.
 ---
 
 # ship-it
@@ -8,18 +8,27 @@ description: Cut a release of a Cronkite app (Brick, the spreadsheet, by default
 The app is a native Linux binary, so Cloudflare hosts the release, not the app itself:
 
 - **R2** stores the tarball, its `.sha256`, and `latest.json` (version, URL, checksum).
-- **Pages** serves the app's download page (`sites/brick/` at brick.cronkite.cc, `sites/slate/` at slate.cronkite.cc), which reads `latest.json`.
+- **Pages** serves the app's download page (`sites/<app>/` at `<app>.cronkite.cc`), which reads `latest.json`.
 
 Every step runs through `scripts/ship.sh`. Anything that leaves the machine (upload, site deploy, push) needs an explicit yes from the user in chat first, every time.
 
-Which app: ask if the user didn't say. For Slate, put `slate` before every command (`scripts/ship.sh slate build`); without it, the commands act on Brick. Slate's version is `apps/slate/Cargo.toml`'s (Brick's is the workspace's), its release lives under `slate/` in the bucket, its Pages project is `CF_SLATE_PAGES_PROJECT` (created on the first `site` deploy if missing), and its tags are `slate-vX.Y.Z`; `vX.Y.Z` below means that tag. Its CHANGELOG heading is `## Slate vX.Y.Z (YYYY-MM-DD)`.
+Which app: ask if the user didn't say. Put the app before every command (`scripts/ship.sh etch build`); without one, the commands act on Brick. Each app's release differs only in these:
+
+| App | Version in | Bucket prefix | Pages project | Tag | CHANGELOG heading | Release smoke (`verify`) |
+| --- | --- | --- | --- | --- | --- | --- |
+| Brick | `Cargo.toml` `[workspace.package]` | none | `CF_PAGES_PROJECT` | `vX.Y.Z` | `## vX.Y.Z (YYYY-MM-DD)` | `--bench-open` on a CSV; `check_install.sh` |
+| Slate | `apps/slate/Cargo.toml` | `slate/` | `CF_SLATE_PAGES_PROJECT` | `slate-vX.Y.Z` | `## Slate vX.Y.Z (YYYY-MM-DD)` | still running on a .md; `check_install_slate.sh` |
+| Frame | `apps/frame/Cargo.toml` | `frame/` | `CF_FRAME_PAGES_PROJECT` | `frame-vX.Y.Z` | `## Frame vX.Y.Z (YYYY-MM-DD)` | `--bench-draw` on the fixture deck; `check_install_frame.sh` |
+| Etch | `apps/etch/Cargo.toml` | `etch/` | `CF_ETCH_PAGES_PROJECT` | `etch-vX.Y.Z` | `## Etch vX.Y.Z (YYYY-MM-DD)` | `--bench-stroke`; `check_install_etch.sh` |
+
+Below, `vX.Y.Z` means the app's tag and the download base is `$DOWNLOAD_BASE_URL` plus the bucket prefix. Pages projects are created on the first `site` deploy if missing; each `<app>.cronkite.cc` custom domain is attached to its project once, in the Cloudflare dashboard. An app ships only once it has its desktop entry and icon (`packaging/dev.cronkite.<App>.*`), its download page and installer (`sites/<app>/`), and its install check; `preflight` fails without them (for Etch, story ETCH-5 adds them).
 
 ## 0. One-time setup
 
 If `.env.ship` is missing, stop and walk the user through it:
 
 1. Copy `.env.ship.example` to `.env.ship`; confirm `.env.ship` is in `.gitignore`.
-2. In the Cloudflare dashboard: create the R2 bucket, enable public access (custom domain or r2.dev), create a Pages project with the name in `CF_PAGES_PROJECT` (or let the first `wrangler pages deploy` create it).
+2. In the Cloudflare dashboard: create the R2 bucket, enable public access (custom domain or r2.dev), create a Pages project with the name in the app's Pages variable (or let the first `site` deploy create it).
 3. Create an API token with Pages Edit and R2 Storage Edit. The user pastes it into `.env.ship` themselves.
 
 Never print, echo, log, or commit token values. Never ask the user to paste a token into chat.
@@ -27,7 +36,7 @@ Never print, echo, log, or commit token values. Never ask the user to paste a to
 ## 1. Preflight
 
 ```sh
-scripts/ship.sh preflight
+scripts/ship.sh <app> preflight
 ```
 
 Stop on any FAIL and report it. Common fixes: commit or stash changes, switch to `main`, bump the version if the tag exists. Do not "fix" failing tests by skipping them.
@@ -36,8 +45,8 @@ Stop on any FAIL and report it. Common fixes: commit or stash changes, switch to
 
 Propose a bump from what shipped since the last tag (`git log $(git describe --tags --abbrev=0 2>/dev/null)..HEAD --oneline`; story IDs are in commit subjects):
 
-- `0.0.x` patch: before V0.1, any internal build.
-- `minor`: a milestone gate passed (M3 gate = `0.1.0`).
+- `0.0.x` patch: before the app's first milestone release, any internal build.
+- `minor`: a milestone gate passed (Brick's M3 gate = `0.1.0`; an app's first gated release is its `0.1.0`).
 - `patch` after 0.1.0: fixes only.
 
 Confirm with the user, then:
@@ -46,13 +55,13 @@ Confirm with the user, then:
 scripts/ship.sh bump <patch|minor|major|X.Y.Z>
 ```
 
-Write the release notes into `CHANGELOG.md` under `## vX.Y.Z (YYYY-MM-DD)`, one line per story (`- ENG-4: Auto-detect delimiter`). Commit: `release: vX.Y.Z`.
+Write the release notes into `CHANGELOG.md` under the app's heading from the table, newest first, one line per story (`- ENG-4: Auto-detect delimiter`). Commit: `release: vX.Y.Z`.
 
 ## 3. Build
 
 ```sh
-scripts/ship.sh build    # compiles in an Ubuntu 24.04 container (needs docker)
-scripts/ship.sh verify   # starts the binary on clean Arch, Ubuntu 24.04, and Fedora
+scripts/ship.sh <app> build    # compiles in an Ubuntu 24.04 container (needs docker)
+scripts/ship.sh <app> verify   # starts the binary on clean Arch, Ubuntu 24.04, and Fedora; runs the installer there
 ```
 
 Check the output: tarball exists, size is plausible, `dist/<name>/<app> --version` prints the new version, and `verify` ends with `RELEASE OK` and `INSTALL OK`. Stop on any FAIL. Report size and sha256.
@@ -60,15 +69,15 @@ Check the output: tarball exists, size is plausible, `dist/<name>/<app> --versio
 ## 4. Dry run, then confirm
 
 ```sh
-scripts/ship.sh upload --dry-run
-scripts/ship.sh site --dry-run
+scripts/ship.sh <app> upload --dry-run
+scripts/ship.sh <app> site --dry-run
 ```
 
 Show the user what will happen in this shape and wait for a clear yes:
 
 ```
 Ready to ship vX.Y.Z
-- Upload brick-X.Y.Z-x86_64-linux.tar.gz (N MB) + checksum + latest.json to R2 bucket <bucket>
+- Upload <app>-X.Y.Z-x86_64-linux.tar.gz (N MB) + checksum + latest.json to R2 bucket <bucket>/<prefix>
 - Deploy download page to Pages project <project>
 - Tag vX.Y.Z locally
 Proceed?
@@ -79,14 +88,14 @@ Proceed?
 After the yes, in order:
 
 ```sh
-scripts/ship.sh upload
-scripts/ship.sh site
-scripts/ship.sh tag
+scripts/ship.sh <app> upload
+scripts/ship.sh <app> site
+scripts/ship.sh <app> tag
 ```
 
 Then verify, and report each check:
 
-- `curl -fsSI <download base>/releases/vX.Y.Z/<name>.tar.gz` returns 200 (the base is `$DOWNLOAD_BASE_URL`, plus `/slate` for Slate).
+- `curl -fsSI <download base>/releases/vX.Y.Z/<name>.tar.gz` returns 200.
 - `curl -fsS <pages URL from wrangler output>/ | grep -c '"version":"X.Y.Z"'` is 1: the deploy writes `latest.json` into the page (Pages fails to publish a `.json` file in the `slate` project).
 - `curl -fsS <pages URL>/install.sh | grep -c "<download base>"` is 1 (the deploy filled in the download URL).
 - Downloaded tarball matches the sha256.
@@ -110,4 +119,4 @@ Not done: <push pending | none>
 
 The download page also serves `install.sh` (story PKG-1), which reads `latest.json`, so a site deploy is all a new version needs; nothing goes to a package registry.
 
-The suite page at cronkite.cc (`sites/cronkite/`) is not part of a release: it links to the apps' installers and holds no version. Deploy it only when it changes, with the same yes first: `scripts/ship.sh suite-site --dry-run`, then `scripts/ship.sh suite-site` (Pages project `CF_SUITE_PAGES_PROJECT`). The cronkite.cc custom domain is attached to that project once, in the Cloudflare dashboard; so is slate.cronkite.cc to Slate's project.
+The suite page at cronkite.cc (`sites/cronkite/`) is not part of a release: it links to the apps' installers and holds no version. Deploy it only when it changes (an app's first release adds its row), with the same yes first: `scripts/ship.sh suite-site --dry-run`, then `scripts/ship.sh suite-site` (Pages project `CF_SUITE_PAGES_PROJECT`).
