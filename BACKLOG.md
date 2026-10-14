@@ -18,10 +18,15 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 - [x] M5: bricks opens the LibreOffice fixture workbook and a real-world .xlsx with formulas on 3+ sheets; after edits and Save, LibreOffice reopens it with the same values, formulas, and sheet names; styles, merged cells, charts, comments, and conditional formats survive Save (LibreOffice dump), and Bricks shows fonts, colours, fills, borders, alignment, and number formats; the XLSX, formula, and styled-XLSX rows in apps/bricks/docs/BENCHMARKS.md pass on the reference box
 - [x] SL0: slate opens the fixture .txt, .md, and .docx files and a real-world .docx and shows their paragraphs, headings, emphasis, lists, tables, links, and pictures as LibreOffice reads them (dump comparison), read-only, reading off the UI thread, in a pageless column at the text width the user picks
 - [x] SL1: slate edits and saves .txt, .md, and .docx with undo; LibreOffice reopens a saved .docx with the edits and everything else unchanged; an edited Markdown file changes only the edited blocks
-- [ ] SL2: slate finds and replaces text across paragraphs and table cells with undo, and after a crash offers back the unsaved edits of every open document without touching its file
+- [x] SL2: slate finds and replaces text across paragraphs and table cells with undo, and after a crash offers back the unsaved edits of every open document without touching its file
 - [x] SL3: slate draws each .docx in its own fonts and paragraph styles (LibreOffice's dump matches), the format bar sets style, font, size, bold, italic, underline, strikethrough, colour, and alignment with undo, saved .docx files read back in LibreOffice with them, and re-wrap and typing stay within SL1's targets on a multi-font Word document
+- [x] SL4: a .docx shaped like a Google Docs résumé (tab-aligned lines on a 7.5″ page, an embedded font, a bordered title, direct paragraph spacing and indents, "●" bullets) opens at its page width and draws its tab stops, embedded font, borders and shading, direct spacing and indents, and list markers as the file defines them (measured in the GUI check, and LibreOffice's dump matching the model), and saves them back unchanged
 - [x] FR0: frame opens the fixture .pptx files and a real-world PowerPoint deck and shows every slide's shapes, text, and pictures where LibreOffice reads them (dump comparison); F5 plays the deck full screen
 - [x] FR1: frame edits slide text on the slide and in the outline view, moves and resizes shapes with snapping, formats through the inspector, inserts text, shapes, pictures, and tables, and adds, deletes, and reorders slides, all with undo; File → New starts a deck; Save writes .pptx that LibreOffice reopens with the edits and everything else unchanged; the spec's reference task takes fewer input actions than in PowerPoint
+- [ ] ET0: etch opens a blank canvas and draws with the pencil and eraser in the chosen colours and sizes, zooms from 10% to 3200% around the pointer and pans, and undoes and redoes each stroke; a stroke on a 7680×4320 image draws each segment and frame in under 8 ms p99 (`--bench-stroke`); `scripts/ship.sh etch build` and `verify` pass
+- [ ] ET1: etch opens PNG, JPEG, and BMP files and draws on them with the brush, fill, colour picker, line, rectangle, ellipse, and text, each step undoable; Save and Save As write PNG, JPEG, and BMP that read back with the same pixels (JPEG within its loss, alpha composited onto white), atomically; closing an edited image asks Save, Discard, or Cancel
+- [ ] ET2: etch selects a rectangle and moves its pixels, cuts, copies, and pastes through the system clipboard (to and from another app), crops to the selection, resizes the image and the canvas, rotates and flips, all with undo: the spec's V0.1 definition of done
+- [ ] ET3: etch opens dropped files, lists recent files, picks colours by chooser and hex, switches every tool by its key, and after a crash offers back unsaved images without touching their files
 
 ## Stories
 
@@ -140,6 +145,12 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | SLATE-20 | SL3 | P0 | done | SLATE-19 | Draw the document's fonts and style looks | A .docx with paragraphs in Liberation Serif, Liberation Sans, and Liberation Mono draws each in its font: the screenshot's text widths match Pango's measure of that font within 2 px, and the three differ. Styles' space before and after, left and first-line indents, and line spacing (multiple, exact, at least) place each paragraph by their twips at 96 dpi (flow tests to the pixel; a screenshot within 2 px). Markdown and text look as before (check_slate's measures). On a generated 150,000-word .docx in three fonts, whole-document re-wrap stays under 500 ms and typing p99 under 25 ms |
 | SLATE-21 | SL3 | P0 | done | SLATE-20 | Format bar: style, font, size, B/I/U/S, colour, alignment | The bar shows the caret's style, font, size, and looks (blank when the selection mixes them); choosing each applies to the selection or what's typed next as one undo step; the style picker lists the document's styles in their looks; Ctrl+U, Ctrl+L/E/R/J, Ctrl+] and Ctrl+[ work; plain-text files hide the bar |
 | SLATE-22 | SL3 | P0 | done | SLATE-21 | Save fonts, styles, and looks in .docx | A .docx edited through the format bar (a custom style, a font, a size cleared and set, underline, strikethrough, colour, alignment) reopens in LibreOffice with exactly those, every other part unchanged; Markdown keeps headings and quotes and drops what it can't hold |
+| SLATE-23 | SL4 | P0 | done | SLATE-22 | Text Width → Page: Word documents open at their page's text width (ADR 0009) | Text Width gains Page (the default): a .docx's column is its last section's page width minus its margins (Letter, 1″ margins when there's none), at 96 dpi, and Markdown and text get Medium; the setting is saved and shared as the others are; a 7.5″ document's column measures 720 px in the GUI check and a Letter 1″ one 624 px |
+| SLATE-24 | SL4 | P0 | done | SLATE-23 | Tab stops: default stop and each paragraph's own (ADR 0009) | Tabs advance to the paragraph's stops (left, centre, right, decimal, with leaders; `clear` removes an inherited one), then to `w:defaultTabStop` multiples (0.5″ when absent); in the GUI check a right-aligned stop at the text width ends "Remote" at the column's right edge within 2 px, text after runs of default tabs starts at a multiple of the default stop (twips / 15 px) within 2 px, a centre stop centres its text on it, and a dot leader fills to its stop; the model reads and saves stops unchanged |
+| SLATE-25 | SL4 | P0 | done | SLATE-23 | Embedded fonts and family fallbacks (ADR 0009) | A .docx's embedded fonts (plain .ttf and Word's obfuscated .odttf, de-obfuscated with `w:fontKey`) draw its runs: a run in an embedded family measures as Pango measures that font within 2 px; a family neither installed nor embedded falls back by the font table's `w:family` (a `roman` font draws in the system serif, a `swiss` one in sans); saving keeps the font parts byte for byte |
+| SLATE-26 | SL4 | P0 | done | SLATE-23 | A paragraph's own spacing and indents (ADR 0009) | `w:spacing` and `w:ind` on a paragraph override its style's: LibreOffice's dump of each paragraph's own space before and after, line spacing, and left, right, and first-line indents matches Slate's model over the corpus; they draw (flow tests to the pixel) and save back unchanged, and an edited paragraph keeps them |
+| SLATE-27 | SL4 | P0 | done | SLATE-26 | Paragraph borders and shading (ADR 0009) | `w:pBdr` (top, bottom, left, right, between; single, double, dotted, dashed; width, space, colour) and `w:shd` fills, a paragraph's own and its style's, draw around and behind the paragraph: in the GUI check a bottom border lies under the text by its space and width within 2 px and a shaded paragraph's box is its fill colour; LibreOffice's dump of borders and shading matches the model; they save back unchanged |
+| SLATE-28 | SL4 | P0 | done | SLATE-26 | List markers from the numbering (ADR 0009) | Each list item's marker is its level's `w:lvlText` in the level's run font (Symbol and Wingdings glyphs mapped to Unicode), at the level's left and hanging indents with the tab after it: the corpus' markers match LibreOffice's list labels and the GUI check draws "●" bullets at their indent within 2 px |
 | FRAME-1 | FR0 | P0 | done | - | Presentation model and PPTX package: slide order, size, shapes, placeholder inheritance | Slide count, order, size, and every shape's frame in the fixtures and a real-world deck match LibreOffice's dump within 1 EMU; placeholders without a frame take their layout's or master's |
 | FRAME-2 | FR0 | P0 | done | FRAME-1 | PPTX text: runs, fonts, sizes, colours, bullets, levels, alignment, inherited styles | Every paragraph's text, level, alignment, and every run's size, bold, italic, and colour match LibreOffice's dump; theme colours resolve with lumMod, lumOff, tint, and shade |
 | FRAME-3 | FR0 | P0 | done | FRAME-1 | PPTX pictures, fills, outlines, backgrounds, groups, and tables | Pictures carry their bytes; group children land where LibreOffice reads them; table cells carry text and fills; unsupported content becomes a labelled shape |
@@ -155,11 +166,185 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | FRAME-13 | FR1 | P0 | done | FRAME-7 | Outline view of titles and bullets (ADR 0006) | Typing an outline makes its slides with Title and Content; Enter after a title starts a slide; Tab and Shift+Tab change levels and turn titles into bullets and back; text outside title and body placeholders is untouched (saved deck dump); outline and slide edits share undo |
 | FRAME-14 | FR1 | P0 | done | FRAME-8 | File → New from the built-in blank deck | Ctrl+N and frame without a file open a 16:9 deck with a title slide and the five standard layouts; typing a title and saving gives a .pptx LibreOffice reads with that title and all five layouts |
 | FRAME-15 | FR1 | P0 | done | FRAME-11, FRAME-12, FRAME-13, FRAME-14 | Reference task in fewer input actions than PowerPoint | check_frame.sh builds the spec's reference deck by keyboard and pointer and counts its input actions; the count is below PowerPoint's hand count recorded in Notes; the saved deck matches the task in LibreOffice's dump |
+| ETCH-1 | ET0 | P0 | done | - | Image model: RGBA8 image, pencil strokes, undo history (image-model, ADR 0010) | image-model tests: a new image holds its fill at every pixel and refuses 0 or more than 16384 pixels a side; a pencil stroke sets exactly its Bresenham pixels (1 px) or its discs' (wider), clips at the edges, and returns the rectangle it changed; undo restores the image byte for byte, redo gives back the stroked bytes, a new stroke drops the redo; a stroke's step keeps only the tiles it touched (a short stroke on 4096×4096 under 1% of the image) |
+| ETCH-2 | ET0 | P0 | done | ETCH-1 | Window and canvas: blank image, zoom, pan, pencil, undo, New Image | check_etch.sh: etch shows a white 1024×768 canvas; a drag draws black pixels along the pointer's path; Ctrl+Z removes the stroke and Ctrl+Shift+Z restores it; Ctrl+wheel zooms keeping the pixel under the pointer (status position) and pixels stay sharp at 800%; the wheel and a middle-button drag pan; resizing the window keeps the drawing; Ctrl+N's dialog opens a 640×480 image; `--bench-stroke` on 7680×4320 draws each segment and frame in under 8 ms p99 |
+| ETCH-3 | ET0 | P0 | done | ETCH-2 | Eraser to transparency over a checkerboard; the tool column | Model tests: erasing makes the stroke's pixels transparent and undoes; check_etch.sh: the canvas shows the checkerboard through erased pixels, the tool column switches Pencil and Eraser, and P and E do too |
+| ETCH-4 | ET0 | P0 | todo | ETCH-2 | Foreground and background colours, palette, pencil and eraser sizes | check_etch.sh: a palette click sets the foreground, a right-click the background, X swaps them; strokes draw in the foreground at the chosen size (screenshot); the colour row shows both colours |
+| ETCH-5 | ET0 | P1 | todo | ETCH-2 | Desktop entry, icon, installer, download page (etch.cronkite.cc) | `scripts/ship.sh etch build` and `verify` pass: the binary starts on clean Arch, Ubuntu 24.04, and Fedora, and the curl installer puts it in ~/.local/bin with a menu entry there (check_install_etch.sh); cronkite.cc lists Etch |
+| ETCH-6 | ET1 | P0 | todo | ETCH-3 | Open PNG, JPEG, and BMP off the UI thread: command line and Ctrl+O | Each fixture's pixels match its decoded reference (alpha kept, JPEG and BMP opaque); a damaged or unsupported file alerts with its name and the reason; an 8K PNG shows within 1 s |
+| ETCH-7 | ET1 | P0 | todo | ETCH-6 | Save, Save As, and Export as PNG, JPEG, BMP; dirty state and Save/Discard/Cancel on close | Saved PNG reads back with the same pixels and alpha; JPEG composites alpha onto white; saving is atomic through suite-file (a failed save leaves the old file); check_etch.sh: closing an edited image asks Save, Discard, or Cancel, and the title marks unsaved changes |
+| ETCH-8 | ET1 | P0 | todo | ETCH-4 | Brush with size and a hard or soft edge | Model tests: a hard brush fills its disc; a soft one falls off to transparent at its edge and blends over what's there; each stroke undoes |
+| ETCH-9 | ET1 | P0 | todo | ETCH-4 | Fill bucket: contiguous region, exact colour | Model tests: a 4-connected fill stops at any other colour, fills transparent regions, and undoes keeping only the tiles it touched; filling an 8K image takes under 200 ms |
+| ETCH-10 | ET1 | P0 | todo | ETCH-4 | Colour picker | A click sets the foreground to the pixel's colour, alpha included; I picks the tool |
+| ETCH-11 | ET1 | P0 | todo | ETCH-4 | Line, rectangle, and ellipse with previews: outline, filled, or both | Model tests pin each shape's pixels at widths 1 and 5; check_etch.sh: the shape previews while dragged without changing the image and lands on release as one undo step |
+| ETCH-12 | ET1 | P0 | todo | ETCH-4 | Text tool: font, size, colour, bold, italic; rasterized on commit | check_etch.sh: typing on the canvas shows the text in the chosen font; Enter or a click elsewhere commits it as pixels in one undo step; Escape cancels |
+| ETCH-13 | ET1 | P1 | todo | ETCH-4 | New Image background (white, transparent, background colour); sizes remembered across runs | A transparent new image is all alpha 0; the dialog offers the last size after a restart |
+| ETCH-14 | ET1 | P1 | todo | ETCH-9 | Fill tolerance | Model tests: tolerance 0 is an exact match; a tolerance fills colours within it of the seed and no others |
+| ETCH-15 | ET2 | P0 | todo | ETCH-7 | Rectangular selection: select, move pixels, delete, select all, deselect | Model tests: moving a selection lifts its pixels, leaves transparency, and lands as one undo step; check_etch.sh: the status shows the selection's size and the outline draws |
+| ETCH-16 | ET2 | P0 | todo | ETCH-15 | Cut, copy, and paste through the system clipboard; pasted pixels float until committed | check_etch.sh: copied pixels paste in another GTK app as an image, an image copied there pastes into Etch as a floating selection, and each step undoes |
+| ETCH-17 | ET2 | P0 | todo | ETCH-15 | Crop to selection | The image becomes the selection's bounds and its pixels; undo restores size and pixels |
+| ETCH-18 | ET2 | P0 | todo | ETCH-7 | Resize image: width, height, keep aspect, nearest or smooth | Model tests: nearest doubles each pixel exactly; smooth matches a reference within 1 per channel; undo restores size and pixels |
+| ETCH-19 | ET2 | P0 | todo | ETCH-7 | Resize canvas with a nine-way anchor; new area transparent or background | Model tests: each anchor places the old pixels where it says; undo restores |
+| ETCH-20 | ET2 | P0 | todo | ETCH-7 | Rotate 90° either way and 180°, flip horizontally and vertically | Model tests: four quarter turns and two flips each give back the original bytes; one turn swaps width and height; each undoes |
+| ETCH-21 | ET3 | P0 | todo | ETCH-7 | Drag and drop to open | check_etch.sh: a file dropped on a window opens in its own window |
+| ETCH-22 | ET3 | P0 | todo | ETCH-7 | Recent files | File → Open Recent lists the last ten images opened or saved, newest first, across runs |
+| ETCH-23 | ET3 | P0 | todo | ETCH-4 | Colour chooser and hex entry | Typing `#3366CC` sets the foreground; the chooser's colour, alpha included, sets it too |
+| ETCH-24 | ET3 | P0 | todo | ETCH-12 | Every tool on its key | Each tool key in the spec selects its tool, none while typing text, and no key is bound twice (test over the shortcut table) |
+| ETCH-25 | ET3 | P0 | todo | ETCH-7 | Crash recovery through suite-file journals | check_etch.sh: after etch is killed with unsaved strokes, the next start offers the image back with them and the file is untouched |
 
 ## Notes
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-14 ETCH-3:** the eraser and the tool column. The eraser is `Pencil::eraser(width)`, the pencil's tip writing `Color::TRANSPARENT` (writes replace, so it erases to alpha 0 with no new operation kind); 9 px wide until ETCH-4's sizes. `tools.rs` holds `Tool` (id, label, key, tip, icon) and the tool column: toggle buttons bound to the stateful `win.tool` action, icons drawn as stroked GSK paths in the theme's colour (Adwaita has no eraser icon, and this needs no icon theme). Unmodified tool keys go through the window's capture-phase key controller; ETCH-12's text tool must bypass them while typing (ETCH-24). Proof: 2 `image-model` eraser tests; `check_etch.sh` step 9 (43 checks in all, all passing).
+- **2026-10-14 ETCH-2:** Etch's window and canvas (`apps/etch`: `main.rs`, `window.rs`, `canvas.rs`, `view.rs`), section 38 of the user's spec. `check_etch.sh` passes all 36 checks; `--bench-stroke 300` on this machine (Ryzen 9 5900, Hyprland, GPU renderer): frame CPU 1.2 ms p99, segment 0.05 ms p99 (target 8 ms); in the check's software-rendered container 3.2 ms. `check_release.sh` runs `etch --bench-stroke 5` (limit 120 s: Broadway without a browser ticks about once a second) and passed on Arch, Ubuntu 24.04, and Fedora with the host build.
+  - For the next stories: tools reach pixels only through `Canvas::draw_begin`/`draw_to`/`draw_end` → `Document`; each returns the changed `Rect`, and `Canvas::invalidate` drops the 256-px tile textures it overlaps. The eraser (ETCH-3) and colours (ETCH-4) replace the `PENCIL` const with the window's tool state; the checkerboard already draws under the tiles.
+  - Tile edges are rounded to device pixels: unrounded, Cairo-style renderers (the container's) left faint seams between tiles. `View` keeps its origin unrounded, so repeated zooms don't drift off the pointer.
+  - Ctrl+Shift+Z is handled by the window's key controller, not an accelerator: wtype's keymap doesn't consume Shift, so `<Control><Shift>z` never matched there (Frame does the same). Edit → Redo shows Ctrl+Y.
+  - `scripts/dnd_helpers.py` gained middle-button drags and `hold` (a second virtual pointer that stays, so the app keeps seeing the pointer between helper calls); wtype's `-P` needs a leading `-s` pause, or the press arrives before its keymap and is dropped.
+- **2026-10-14 ETCH-1:** `image-model`: `Image` (RGBA8, `MAX_SIDE` 16384), `Color`, `Rect`, `Pencil` (Bresenham, disc stamps: offsets from `-(w-1)/2`, so even widths lean right and down), and `Document` with `begin_stroke`/`extend_stroke`/`end_stroke`, `undo`, `redo`, `history_bytes`. A stroke that touches no pixel leaves no step. 16 tests.
+- **2026-10-14 SUITE-5:** Etch, the suite's raster image editor (user request, with a product spec). `docs/specs/etch.md` condenses it; ADR 0010 decides the image model (RGBA8 straight alpha, toolkit-free `image-model` crate), history (operation plus the 64-px tiles it replaced; redo replays), and canvas (256-px tile textures, nearest at 100% and up). The spec's five phases became milestones ET0–ET3 (its Phase 5 is the spec's later list, no milestone). Decisions taken here, not in the user's spec: the app is `AppKind::Etch` beside `Brick` (the spec says "Bricks"; the repo renamed it Brick in PKG-5); Ctrl+0 is Actual Size and Ctrl+9 Fit to Window; Ellipse's key is O; New Image opens a new window, so nothing unsaved is replaced; images are capped at 16384 px a side; the desktop entry and installer (ETCH-5) are in ET0 so ET0's gate can ship. `scripts/backlog.py` reads `ET` gates and has the `etch` chain; both skills now cover every app; `scripts/ship.sh etch` is wired (bucket `etch/`, `CF_ETCH_PAGES_PROJECT`, tags `etch-vX.Y.Z`), and `preflight` fails while an app lacks packaging, a download page, or an install check.
+- **2026-10-14 SLATE-28:** list markers from the numbering (ADR 0009). A subagent built it; it ran out of budget before `flow_perf` and the GUI check, and both were run here.
+  - Model `numbering.rs`: `ListLevel` (format, text with symbol characters mapped, lvlJc, suff, the level's indents and tabs, its run look), `ListLevel::slate` (Slate's own levels, also what save's `add_numbering` writes), and `Numbering`. `ListItem.numbering: Option<ListNumbering { num, mark }>`, where `mark` is the paragraph mark's run look. `DocxInfo.numbering`. `Format::list_level(item)`.
+  - `StyleSheet::marker_look`, `list_spacing` (style < level < own), and `list_tabs`.
+  - `symbol_text` maps Symbol's full table and Wingdings by Unicode's mapping, with ➢ for 0xD8 and ❏ for 0x71. The mapped level then loses its symbol font.
+  - Reader: levels' `lvlJc`, `suff`, `pPr`, and `rPr`. The marker font follows the hint, eastAsia, cs, then ascii and hAnsi. `ParaProps.mark` reads `w:pPr/w:rPr`.
+  - Flow: `Content::place(MarkerWidth)` replaces `text_left` and `first_indent`. The marker sits at the first line's start, aligned by lvlJc. A tab suffix goes to the next stop past the marker's end, the implicit stop at the hanging indent counting; that implicit stop now counts for text tabs too, SLATE-24's leftover. `Shaper::marker_width` measures the marker.
+  - Word list items now take their style's spacing and their level's indents: SLATE-26's 28 px clamp and ignored first-line indent are gone for Word. Markdown and text lists are unchanged.
+  - Hit-testing, the caret, and accessible text leave markers out, as before.
+  - `scripts/lo_docx.py lists OUT` makes `tests/data/lists.docx`, 26 paragraphs: Google's ●○■ levels, Symbol 0xB7, Courier New o, Wingdings 0xA7 and 0xD8, `%1.`, `%1.%2.`, `(%3)`, right-justified upperRoman, space and nothing suffixes, empty lvlText, own indents over a level, and a red 14 pt paragraph mark.
+  - The dump's LABEL is now the bullet's character, and it gains NUMLEFT, NUMFIRST, MARKERJC, SUFFIX, and MARKERFONT. All 9 dumps were regenerated.
+  - Old expectations changed: a Word list item's flow indent moves from 28 to 48 px (the level's 720/360), its tab stops shift to match, and the Markdown own-indent test was split from a new Word one.
+  - Deviations:
+    - LibreOffice gives a level whose `numFmt` sits in `mc:AlternateContent` the style's left indent, so NUMLEFT is skipped for those three POI items.
+    - The marker's tab treats every stop as left.
+    - Wingdings 2 and 3, Webdings, and picture bullets aren't mapped.
+    - Lists Slate starts in a Word document use Slate's levels.
+    - A Word list item's borders start at its text, not its marker.
+  - Acceptance:
+    - `cargo test -p docx --test libreoffice` (5): markers and level fields match LibreOffice over 546 paragraphs, 26 of them lists.docx.
+    - LibreOffice-ignored docx tests: 7 pass.
+    - docx `tests/lists.rs`: 5. Flow: 31 tests, 5 of them new or rewritten.
+    - `scripts/check_slate.sh` SLATE OK, 286 checks, section 33 new, on a 720 px page:
+      - Google's ● ink starts at 0 and its text at 24 px.
+      - The ● is a filled circle about an x-height tall.
+      - The second level sits at its indent.
+      - 1. and 2. sit at 24, with text at 48.
+      - Right-justified roman numbers end at their position.
+      - Markers aren't in the accessible text.
+  - `flow_perf` (release, one test at a time):
+    - Word document: whole 329 ms max, first frame 5.6 ms, scroll p99 4.2 ms, typing p99 18.7 ms.
+    - Markdown: whole 300 ms, typing p99 17.6 ms.
+    - Find: first match 13.0 ms.
+    - All within targets.
+  - The user's résumé now draws Google's "●" bullets at their 0.25″ hanging indent.
+- **2026-10-14 SLATE-27:** paragraph borders and shading (ADR 0009). A subagent built it; it was integrated and verified here.
+  - Model: `BorderStyle` (None, Single, Thick, Double, Dotted, Dashed) and `Border` (style, `w:sz` eighths, `w:space` points, colour or automatic); `Borders` holds top, bottom, left, right, and between. `BorderOverrides` sets sides one by one, so a nil side removes the style's. `Shading { fill }`. `ParaLook` gains borders and shading, and `ParaOverrides` gains `borders` and `shading`. Resolvers: `StyleSheet::borders`, `shading`, and `bordered_together` (Word's group rule).
+  - Reader: `w:pBdr` (start and end as left and right; no bar border) and `w:shd`, merged side by side along pPrDefault, basedOn, and the paragraph, in table cells too. Styles map as LibreOffice reads them: dash variants draw dashed, triple, thinThick, and the like double, wave, 3-D, and art single. `clear` uses the fill, `solid` the colour, and pctNN blends.
+  - Flow: `TextBox.frame` holds the paragraph's frame. The top and bottom zones (space plus lines, whole px) add to the height in measuring and estimating, inside the space before and after. Left and right lines lie their space outside the indents. In a group, the top line is drawn on the first paragraph, between lines on the later ones, and the bottom line on the last.
+  - Paints `Fill` and `Stroke { dash }` are drawn in `view.rs`. A Markdown rule is now a paragraph with its own bottom border, written byte-identical to before.
+  - Saving keeps an edited paragraph's `w:pBdr` and `w:shd` byte for byte when they give the model's values; otherwise they're written from the model in schema order. Enter, `bare()`, and the journal carry them.
+  - `scripts/lo_docx.py borders OUT` makes `tests/data/borders.docx`, 22 paragraphs including the résumé's title rule as Google Docs writes it. The dump gains TOP, BOTTOM, BORDERLEFT, BORDERRIGHT, and FILL, and all 8 recorded dumps were regenerated (only the new fields changed).
+  - Deviations:
+    - Thick draws at 2× `w:sz` and double at 3×, as LibreOffice reads them.
+    - Strokes are whole px, at least 1, so a 0.5 pt rule lies 1 px (not 1.33) under the text.
+    - Automatic text on dark shading stays ink; Word turns it white. Follow-up.
+    - Shading alone never groups.
+    - Patterns other than pctNN draw as their fill.
+  - Acceptance:
+    - `cargo test -p docx --test libreoffice` (4): borders and fill match LibreOffice over the corpus and borders.docx, within 1 twip.
+    - `--test borders -- --include-ignored` (4): edited paragraphs keep their bytes, Enter keeps both halves, and LibreOffice reads them back.
+    - Flow: 4 pixel-exact tests (heights, groups with insertion and removal, nil frames, dash pieces).
+    - `scripts/check_slate.sh` SLATE OK, 272 checks, 16 of them new in section 32:
+      - The résumé's rule lies 1 px under the line box (1.33 wanted), spans the column to 0 px, and is 1 px thick.
+      - The fill is FFE599 across the column, as tall as its line.
+      - The box's sides are each 7 px out (6.67 wanted).
+      - A nil paragraph draws 0 extra pixels.
+      - Saving keeps the other paragraphs' bytes.
+    - The first full run failed section 27's journal timing ("typing for 20 s: first journal after …"), a check SLATE-27 doesn't touch; the rerun passed. It's timing-sensitive under load.
+  - `flow_perf`, with 5 tests in parallel: Word document whole 336 ms max, first frame 14.6 ms, scroll p99 10.7 ms, typing p99 21.9 ms (18.1 ms alone, against 18.2 before); Markdown typing p99 19.9 ms; first match 17.6 ms. All within targets.
+  - The user's résumé now has its rule under the name. Follow-up: Pango breaks the contact line's URL at a `/` ("https://linkedin.com/ in/dravid"), where Word and Google Docs move the whole URL to the next line.
+- **2026-10-14 SLATE-26:** a paragraph's own spacing and indents (ADR 0009). A subagent built it; it was integrated and verified here.
+  - Model: `Paragraph.own: ParaOverrides` holds space before and after, line spacing, left, right, and first-line indents, and contextual spacing, each `Option` (serde default; old journals load). `ParaLook` holds a `ParaSpacing`, which gained a right indent and contextual spacing. One resolver, `StyleSheet::spacing(&Paragraph)`, serves the flow, the drawing, and the LibreOffice test.
+  - The reader reads `w:right` and `w:end` and `w:contextualSpacing`. Automatic spacing counts as 280 twips.
+  - Saving keeps the template's `w:spacing`, `w:ind`, and `w:contextualSpacing` byte for byte when they give the model's values; otherwise it writes them from the model. This replaces the old rule that dropped `w:ind` when a paragraph's list status changed.
+  - Enter keeps a paragraph's own looks on both halves. Joining or leaving a list, or changing level, drops its own indents.
+  - Flow: own looks apply to paragraphs, table-cell paragraphs, and list items. A right indent narrows the wrap, and contextual spacing removes the space between neighbours of the same style.
+  - Deviations:
+    - List items keep the viewer's list spacing and level indent unless they have their own. Their own left indent is clamped to at least 28 px, and their own first-line indent is ignored. SLATE-28 puts the numbering level's indent there: style < level < own.
+    - Negative indents are clamped to the column when drawing.
+    - Automatic spacing ignores LibreOffice's special cases.
+    - `beforeLines`, `afterLines`, `*Chars` indents, and `mirrorIndents` aren't modelled.
+    - Indents written from the model use `w:left` and `w:right`.
+  - Corpus: `tests/data/spacing.docx`, from `python3 scripts/lo_docx.py spacing OUT`, byte-identical each run. The dump gains RIGHT and CONTEXT, and all 7 recorded dumps were regenerated.
+  - Acceptance:
+    - `cargo test -p docx --test libreoffice`: 498 paragraphs' effective space before and after, line spacing, indents, and contextual spacing match LibreOffice.
+    - `--test spacing --test save -- --include-ignored`: 12 and 5 pass.
+    - Flow: 4 pixel-exact tests.
+    - `scripts/check_slate.sh` SLATE OK, 256 checks, 9 of them new in section 31, measured over a decoy style: before 30, after 20, left 60, right 100, hanging 30/60, exact pitch 40. Typing and saving kept `w:spacing` and `w:ind` byte for byte.
+  - `flow_perf`: Word document whole 377 ms max (p50 319), first frame 5.7 ms, scroll p99 4.3 ms, typing p99 18.2 ms; Markdown typing p99 15.2 ms; first match 14.3 ms. All within targets.
+  - The user's résumé now spaces as in Google Docs: the subtitle sits under the name, and the gaps between sections come from the file.
+- **2026-10-14 SLATE-25:** embedded fonts and family fallbacks (ADR 0009). A subagent built it; it was integrated and verified here.
+  - Model: `document_model::fonts` (`FontTable`, `Font` with family class, pitch, altName, and embedded faces as `Arc<[u8]>`). `DocxInfo.fonts` holds the table, `Format::fonts()` returns it, and `DocxInfo` and `Format` are no longer `Copy`.
+  - docx `fonts.rs` reads `fontTable.xml` through its relationship, its `.rels`, and the content types. A face is de-obfuscated when it's `.odttf`, has the obfuscatedFont content type, or isn't already a font: the GUID's bytes reversed, XORed over the first 32 bytes. A face is kept only if it then starts with an sfnt header.
+  - Saving copies the font parts and `fontTable.xml` raw, and tests check they stay byte for byte.
+  - App `src/fonts.rs`: the open worker writes each face once to `$XDG_RUNTIME_DIR/slate/fonts` (or the cache dir), mode 0700, named `<fnv1a64>-<len>.ttf`, atomically. `Page::new` adds new faces with `FcConfigAppFontAddFile` on the page font map's config, reads their families from the application set, and calls `pango_fc_font_map_config_changed` once.
+  - The FFI is raw `extern "C"` against libfontconfig and libpangoft2, which GTK already ships; Pango 1.50+ is enough, and the Ubuntu 24.04 release image has both. No new crates.
+  - Family mapping per font-table entry:
+    - An embedded font keeps its name, or maps to the face's real family.
+    - An installed font is left unchanged.
+    - Anything else becomes `Name,generic`, by `w:family`: roman serif, swiss sans-serif, modern monospace, the rest serif.
+    - Calibri still gets Carlito, because fontconfig's alias comes before the generic.
+  - Deviations:
+    - Embedded fonts stay loaded for the process, since fontconfig can't remove one.
+    - Fonts missing from the table keep fontconfig's default.
+    - altName and pitch are read but not used.
+    - The format bar's style-list previews use the raw font name.
+  - Test data: `apps/slate/crates/docx/tests/data/fonts/Cardo-Regular.ttf`, a 24 KB Latin subset of google/fonts ofl/cardo, with `OFL.txt`. The OFL reserves no font name.
+  - Acceptance: `scripts/check_slate.sh` SLATE OK, 247 checks, 18 of them new in section 30. Plain (zero key) and obfuscated (.odttf) Cardo, a roman missing font, and a swiss one are measured against Pango at 96 dpi within 2 px:
+    - Cardo: 310 against 311.
+    - Roman: 367 against serif 368.
+    - Swiss: 364 against sans 364.
+    - After an edit and save, the font parts are byte for byte the same.
+    - There's one private font file, in a 0700 directory, and no font is installed for the user.
+  - Tests: docx de-obfuscation (GUID order, a reference vector, a round trip against an independent implementation, zero key, junk), `tests/fonts.rs`, family mapping, file writing.
+  - `flow_perf`, within noise of SLATE-24:
+    - Word document: whole 316 ms, first frame 8.6 ms, scroll p99 5.9 ms, typing p99 18.4 ms.
+    - Markdown: whole 283 ms, typing p99 19.0 ms.
+    - Find: first match 14.0 ms.
+  - The user's résumé now draws its Cardo line in Cardo instead of sans. Its title's Georgia, not installed here, falls back to the system serif.
+- **2026-10-14 SLATE-24:** tab stops (ADR 0009). A subagent built it; it was integrated and verified here.
+  - Model: `document_model::tabs` (`TabStop` with position in twips from the margin, `TabAlign` including Clear, `TabLeader`; `merge_tabs`, `effective_tabs`). `Paragraph.tabs` holds the paragraph's own stops, clears included; serde default keeps old journals loading. `ParaLook.tabs` holds a style's merged stops, so `ParaLook` is no longer `Copy`. `StyleSheet::tab_stops(&Paragraph)`. `DocxInfo.default_tab` is `w:defaultTabStop` from the settings part, 720 when missing or 0.
+  - docx: `w:tabs` is read from paragraphs, styles, and pPrDefault, merged along `basedOn`. start and end read as left and right, `num` as left, `bar` is skipped.
+  - Saving keeps the template's `w:tabs` byte for byte unless the model's stops differ (only pasted paragraphs today); then they're written from the model, and a bar stop is lost. `document-edit`'s `bare()` keeps stops through Enter, restyling, and lists.
+  - flow: `Content::tabs()` gives the stops right of the layout's edge, in layout px. Then come two default stops past the last explicit one, measured from the margin; Pango repeats that interval. Markdown and text use four spaces; code keeps Pango's default. `Content::text_left()` is now the one source for `TextBox.indent`.
+  - The `PangoShaper` sets a `pango::TabArray` only on text with a tab. Measuring, drawing, hit-testing, and the caret share the one cached layout. Leaders are drawn in `view.rs` from `PangoShaper::leaders()`.
+  - Word drops default stops left of a custom stop. So the check's right-stop line has one tab, as such lines do in Word. The résumé's "Remote" lines use only default tabs, and section 29's (b) covers that grid.
+  - Word's implicit stop at a hanging indent isn't modelled (SLATE-28).
+  - Acceptance: `scripts/check_slate.sh` SLATE OK, 229 checks, 9 of them new in section 29 on a 720 px Letter page:
+    - A right stop at 10800 ends "Remote" at 719 against 720.
+    - After three default tabs, "X" starts at 241 against 240 (5 × 48).
+    - A centre stop at 5400 centres "Middle" at 360.0 against 360.
+    - A right stop with a dot leader at 7200 ends "42" at 479 against 480; the dots fill the gap on the baseline (widest hole 3 px), with nothing above it.
+    - A Markdown file with a tab opens and reads as written.
+  - Tests: docx `tests/tabs.rs` (6), document-model merge (2), flow (3: painted tabs equal measured ones, indents, cells, markers, Spaces(4) for Markdown and text).
+  - `flow_perf` before → after:
+    - Word document: whole 298 → 312 ms, first frame 7.2 → 8.3 ms, scroll p99 5.9 → 6.1 ms.
+    - Markdown: whole 285 → 285 ms.
+    - Typing p99: Markdown 16.8 → 17.9 ms, Word 19.4 → 18.4 ms.
+    - Find: first match 12.3 → 16.9 ms.
+    - Within run-to-run noise and inside the targets.
+  - The user's résumé now lines up as in Google Docs: "Remote", the dates, and "New York, NY" are flush at the 7.5″ margin, and the title's tab gap is gone. LibreOffice, by comparison, wraps "Present" and keeps a gap in the title.
+- **2026-10-14 SLATE-23:** Word documents open at their page's text width (ADR 0009). A subagent built it; it was integrated and verified here.
+  - Model: `Format::Docx(DocxInfo { text_width })`, in twips. It's the last `w:sectPr`'s `pgSz w:w` minus `pgMar` left, right, and gutter; anything missing defaults to Letter with 1″ margins (9360). `Format::page_text_width()`.
+  - Setting: `TextWidth::Page` is the default and first in View → Text Width (Page, Narrow, Medium, Wide, Full). Under Page a Word document's column is twips / 15 px, clamped like the other widths; Markdown and text get Medium's 624. Saved values still parse, and other processes follow as before.
+  - `check_slate.sh`: Page now comes first in the menu, so the earlier width sections count menu positions one further down. Section 8's first measurement is now labelled Page (Markdown under Page is 624), and an explicit Medium step was added.
+  - Acceptance: `scripts/check_slate.sh` SLATE OK, 220 checks, 8 of them new in section 28, under the default setting:
+    - Letter with 0.5″ margins measures 720 px, and a .docx without `w:sectPr` 624 px.
+    - Medium makes the 7.5″ document 624 px, and Page restores 720. The settings file says `page`.
+    - A Markdown window under Page measures 624.
+  - Unit tests: pgSz, pgMar, and gutter; partial and over-wide margins; the last section wins; no `sectPr` gives 9360; Page as the default.
+  - The user's résumé (Letter, 0.5″ margins) now opens at 720 px. Its tab-aligned lines no longer wrap, though they don't line up yet (SLATE-24).
 - **2026-10-13 SLATE-17:** crash recovery. Brick's journal directory (owner lock per process, atomic journal writes, crashed sessions newest first) moved to `suite_file::recovery` now that two apps need it; Brick keeps its header reading (`recovery::crashed`) and journal format. Slate's journal (`$XDG_STATE_HOME/slate/recovery/<pid>-<n>.journal`) is a `SLATEJ1 ` line with a JSON header (path, the file's size and modification time when read or saved, time written) and the document's blocks as JSON (pictures' bytes as number arrays, so a document with pictures makes a big journal).
   - `saving::Saver` keeps the window's journal: 5 s after the first edit it doesn't hold (`recovery::WRITE_AFTER`), it clones the document on the UI thread and writes it with `gio::spawn_blocking`; the next write is scheduled once that one ends, so writes come at least 5 s apart. Nothing unsaved (saved, or every edit undone) removes it; so does closing the window, which happens only once its edits are saved or discarded. SIGTERM ends Slate without closing windows, so it leaves journals like a crash; `check_slate.sh`'s `quit` clears them between sections.
   - Restoring opens the file as it is and applies `document_edit::replace_document` (every block replaced, one undo step), so the title shows "• " and one undo gives the file's text back; the journal's pictures are decoded into the page's textures. A journal whose file changed size or time since it was read or saved isn't put onto it ("changed after the crash": Keep for Later, Discard). The start window stays open while it still lists sessions, so each can be restored in turn.
@@ -269,7 +454,7 @@ Story notes, decisions made mid-story, and follow-ups go here, newest first.
       - A .docx with no size anywhere draws at Word's default 10 pt.
   - `scripts/lo_docx.py dump` now also gives each paragraph's alignment, its style's spacing, line spacing, and indents, and each run's font, size, and colour. All 7 recorded dumps were regenerated with LibreOffice 26.8.1.1, which reports start and end alignment as 5 and 6. `check_slate.sh` reads the paragraph text from the dump's last field.
   - Deviations:
-    - A paragraph's own spacing and indents (direct `w:spacing` and `w:ind` on the paragraph) aren't modelled yet, only its style's. The dump reads the style's too.
+    - A paragraph's own spacing and indents (direct `w:spacing` and `w:ind` on the paragraph) aren't modelled yet, only its style's. The dump reads the style's too. (SLATE-26 models them, and the dump reads effective values.)
     - An edited run's `rStyle` is written as the direct formatting it resolves to.
   - LibreOffice exceptions in the test, each narrow:
     - Word's Normal and Body Text Indent show under LibreOffice's names.

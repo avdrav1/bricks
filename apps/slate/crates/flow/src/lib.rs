@@ -31,13 +31,13 @@ mod content;
 mod fenwick;
 mod tree;
 
-pub use content::Content;
+pub use content::{Content, Marker, MarkerWidth, Place, Tab, Tabs, TAB_SPACES};
 pub use tree::{
     px, CELL_BORDER, CELL_PADDING, CODE_INSET, LEVEL_INDENT, PAGE_BREAK_HEIGHT, RULE_HEIGHT,
     RULE_MARGIN, TABLE_MARGIN, TWIPS_PER_PX,
 };
 
-use document_model::{Block, Document, Image};
+use document_model::{Block, Document, Image, Rgb};
 use fenwick::Fenwick;
 use std::borrow::Cow;
 use std::ops::Range;
@@ -139,6 +139,9 @@ pub trait Shaper {
     /// A picture's size in pixels when it can be shown; the flow prefers the size the file
     /// gives ([`Image::size`]).
     fn picture_size(&mut self, image: &Image) -> Option<(f32, f32)>;
+    /// A Word list item's marker's width in its look, and a space's after it
+    /// ([`Content::place`]), in pixels.
+    fn marker_width(&mut self, marker: &Marker<'_>) -> MarkerWidth;
     /// The leaf whose layout is cached under `key` is gone: drop what is kept for it.
     fn forget(&mut self, key: LayoutKey);
 }
@@ -147,8 +150,9 @@ pub trait Shaper {
 /// coordinates (0 is the top of the document, [`TOP_MARGIN`] above the first block).
 #[derive(Debug, Clone)]
 pub enum Paint<'a> {
-    /// Text laid out `width` wide with its top left at (`x`, `y`); a list item's marker
-    /// hangs [`LEVEL_INDENT`] to its left. `selected`: the bytes the selection covers.
+    /// Text laid out `width` wide with its top left at (`x`, `y`). `marker`: a list item's
+    /// marker's left edge ([`Content::marker`] says what it is), on the text's first line.
+    /// `selected`: the bytes the selection covers.
     Text {
         leaf: LeafId,
         key: LayoutKey,
@@ -156,7 +160,7 @@ pub enum Paint<'a> {
         x: i32,
         y: f64,
         width: i32,
-        marker: bool,
+        marker: Option<f64>,
         selected: Option<Range<usize>>,
     },
     /// A code block's background.
@@ -193,6 +197,50 @@ pub enum Paint<'a> {
         width: i32,
         height: i32,
     },
+    /// A paragraph's shading, behind its text (ADR 0009).
+    Fill {
+        x: i32,
+        y: f64,
+        width: i32,
+        height: i32,
+        color: Rgb,
+    },
+    /// A stroke of a paragraph's border line (ADR 0009): a `width` x `height` rectangle,
+    /// dotted or dashed along its longer side; `color` `None` is the text's.
+    Stroke {
+        x: i32,
+        y: f64,
+        width: i32,
+        height: i32,
+        dash: Dash,
+        color: Option<Rgb>,
+    },
+}
+
+/// How a border's stroke is drawn along its length.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Dash {
+    Solid,
+    /// Dots as long as the stroke is thick, with gaps as long.
+    Dotted,
+    /// Dashes three times as long as the stroke is thick, with gaps twice as long.
+    Dashed,
+}
+
+impl Dash {
+    /// The pieces of a stroke `length` long and `thickness` thick: their starts and
+    /// lengths along it.
+    pub fn pieces(self, length: i32, thickness: i32) -> impl Iterator<Item = (i32, i32)> {
+        let t = thickness.max(1);
+        let (on, off) = match self {
+            Dash::Solid => (length.max(0), 1),
+            Dash::Dotted => (t, t),
+            Dash::Dashed => (3 * t, 2 * t),
+        };
+        (0..length.max(0))
+            .step_by((on + off).max(1) as usize)
+            .map(move |at| (at, on.min(length - at)))
+    }
 }
 
 /// What a point hits: the nearest caret position, and the character under the point when
@@ -665,13 +713,20 @@ impl Flow {
                 tree::shift_leaves(node, leaf_shift);
             }
         }
-        // A list item's spacing depends on the block after it.
-        let mut respaced = 0;
-        if s.start > 0 {
-            let node = &mut self.tops[s.start - 1];
-            let before = node.height;
-            if builder.respace(node, self.doc.blocks.get(s.start)) {
-                respaced = node.height - before;
+        // A block's spacing depends on its neighbours: a list item's on the block after it,
+        // contextual spacing on both.
+        let mut respaced = Vec::new();
+        let blocks = &self.doc.blocks;
+        for i in [s.start.checked_sub(1), Some(new_end)]
+            .into_iter()
+            .flatten()
+        {
+            if let (Some(node), Some(block)) = (self.tops.get_mut(i), blocks.get(i)) {
+                let (prev, next) = tree::neighbours(blocks, i);
+                let by = builder.respace(node, block, prev, next);
+                if by != 0 {
+                    respaced.push((i, by));
+                }
             }
         }
         if had_breaks || new_breaks {
@@ -690,8 +745,8 @@ impl Flow {
                     self.heights.add(s.start + i, i64::from(by));
                 }
             }
-            if respaced != 0 {
-                self.heights.add(s.start - 1, i64::from(respaced));
+            for (i, by) in respaced {
+                self.heights.add(i, i64::from(by));
             }
             for i in first..first + added {
                 let by =

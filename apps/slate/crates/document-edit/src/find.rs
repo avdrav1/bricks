@@ -258,7 +258,7 @@ mod tests {
     fn doc(blocks: Vec<Block>) -> Document {
         let mut d = Document {
             blocks,
-            format: Format::Docx,
+            format: Format::Docx(Default::default()),
             styles: StyleSheet::builtin(),
         };
         normalize(&mut d);

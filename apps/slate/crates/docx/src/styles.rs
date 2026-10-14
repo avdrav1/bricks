@@ -5,9 +5,17 @@
 
 use crate::xml::{self, XmlReader};
 use crate::DocxError;
-use document_model::{Align, LineSpacing, Look, ParaLook, Rgb, RunStyle, Style, StyleSheet};
+use document_model::{
+    effective_tabs, merge_tabs, Align, Border, BorderOverrides, BorderStyle, Borders, LineSpacing,
+    Look, ParaLook, ParaOverrides, ParaSpacing, Rgb, RunStyle, Shading, Style, StyleSheet,
+    TabAlign, TabLeader, TabStop,
+};
 use quick_xml::events::{BytesStart, Event};
 use std::collections::HashMap;
+
+/// Automatic space before or after (`w:beforeAutospacing`, `w:afterAutospacing`), in
+/// twips: 14 pt.
+const AUTO_SPACING: u32 = 280;
 
 /// A run's font as one level names it: a family, or the theme's major (headings) or
 /// minor (body) font.
@@ -56,7 +64,7 @@ impl Theme {
         }
     }
 
-    fn font(&self, font: &Font) -> Option<String> {
+    pub fn font(&self, font: &Font) -> Option<String> {
         match font {
             Font::Name(n) => Some(n.clone()),
             Font::Theme { major: true } => self.major.clone(),
@@ -75,6 +83,11 @@ pub(crate) struct RunProps {
     /// `w:rFonts`' font for Latin text: `asciiTheme`, `ascii`, `hAnsiTheme`, `hAnsi`, the
     /// first written.
     pub font: Option<Font>,
+    /// `w:rFonts`' East Asian and complex-script fonts, and whether its `w:hint` asks
+    /// for the East Asian one: what a list marker's characters pick from (ADR 0009).
+    pub east_asia: Option<Font>,
+    pub complex: Option<Font>,
+    pub hint_east_asia: bool,
     /// Half-points.
     pub size: Option<u16>,
     /// `Some(None)` is `auto`: back to the default colour.
@@ -141,6 +154,15 @@ impl RunProps {
                 if font.is_some() {
                     self.font = font;
                 }
+                if let Some(f) = theme(b"eastAsiaTheme").or_else(|| named(b"eastAsia")) {
+                    self.east_asia = Some(f);
+                }
+                if let Some(f) = theme(b"cstheme").or_else(|| named(b"cs")) {
+                    self.complex = Some(f);
+                }
+                if let Some(hint) = xml::attr(e, b"hint") {
+                    self.hint_east_asia = hint == "eastAsia";
+                }
             }
             // A double strikethrough is still struck through.
             b"dstrike" if xml::on(e) => self.strike = Some(true),
@@ -179,18 +201,32 @@ pub(crate) struct ParaProps {
     pub space_before: Option<u32>,
     pub space_after: Option<u32>,
     pub line: Option<LineSpacing>,
-    /// `w:ind`, in twips: the left indent and the first line's (negative: hanging).
+    /// `w:ind`, in twips: the left and right indents and the first line's (negative:
+    /// hanging).
     pub indent_left: Option<i32>,
+    pub indent_right: Option<i32>,
     pub indent_first: Option<i32>,
+    /// `w:contextualSpacing`.
+    pub contextual: Option<bool>,
+    /// `w:pBdr`'s sides, each as this level sets it; applying a level sets its sides over
+    /// these.
+    pub borders: BorderOverrides,
+    /// `w:shd`.
+    pub shading: Option<Shading>,
     /// `w:outlineLvl`: a heading's level (1 to 9), `Some(None)` for body text.
     pub outline: Option<Option<u8>>,
     /// `w:numPr`: the numbering instance (0 = no list) and level.
     pub num_id: Option<u32>,
     pub level: Option<u8>,
     pub page_break_before: Option<bool>,
-    /// The paragraph ends a section (`w:pPr/w:sectPr`): `true` if the next section starts
-    /// on a new page (any section type but `continuous`).
-    pub section_break: Option<bool>,
+    /// The paragraph ends a section (`w:pPr/w:sectPr`).
+    pub section: Option<Section>,
+    /// `w:tabs`: the stops this level sets, clears included, in position order; applying
+    /// a level merges its stops over these ([`merge_tabs`]).
+    pub tabs: Vec<TabStop>,
+    /// The paragraph mark's run properties (`w:pPr/w:rPr`): not the text's, but a list
+    /// item's marker's (ADR 0009).
+    pub mark: RunProps,
 }
 
 impl ParaProps {
@@ -205,7 +241,16 @@ impl ParaProps {
         set(&mut self.space_after, &over.space_after);
         set(&mut self.line, &over.line);
         set(&mut self.indent_left, &over.indent_left);
+        set(&mut self.indent_right, &over.indent_right);
         set(&mut self.indent_first, &over.indent_first);
+        set(&mut self.contextual, &over.contextual);
+        let (b, o) = (&mut self.borders, &over.borders);
+        set(&mut b.top, &o.top);
+        set(&mut b.bottom, &o.bottom);
+        set(&mut b.left, &o.left);
+        set(&mut b.right, &o.right);
+        set(&mut b.between, &o.between);
+        set(&mut self.shading, &over.shading);
         set(&mut self.outline, &over.outline);
         if over.num_id.is_some() {
             self.num_id = over.num_id;
@@ -214,11 +259,34 @@ impl ParaProps {
             self.level = over.level;
         }
         set(&mut self.page_break_before, &over.page_break_before);
-        set(&mut self.section_break, &over.section_break);
+        set(&mut self.section, &over.section);
+        merge_tabs(&mut self.tabs, &over.tabs);
+    }
+
+    /// The spacing, indents, borders, and shading this level sets, as a paragraph's own in
+    /// the model.
+    pub fn overrides(&self) -> ParaOverrides {
+        ParaOverrides {
+            space_before: self.space_before,
+            space_after: self.space_after,
+            line: self.line,
+            indent_left: self.indent_left,
+            indent_right: self.indent_right,
+            indent_first: self.indent_first,
+            contextual: self.contextual,
+            borders: self.borders,
+            shading: self.shading,
+        }
+    }
+
+    /// The spacing and indents this level sets, resolved over nothing (0 and single
+    /// spacing where it sets none).
+    pub fn spacing(&self) -> ParaSpacing {
+        self.overrides().over(ParaSpacing::default())
     }
 
     /// Read the children of a `w:pPr` just started, up to its end. The paragraph mark's
-    /// run properties (`w:pPr/w:rPr`) are skipped: they don't apply to the text.
+    /// run properties (`w:pPr/w:rPr`) go to `mark`: they don't apply to the text.
     pub fn read(r: &mut XmlReader<'_>) -> Result<Self, DocxError> {
         let mut p = ParaProps::default();
         loop {
@@ -226,7 +294,10 @@ impl ParaProps {
                 Event::Empty(e) => p.property(&e),
                 Event::Start(e) => match xml::local(&e) {
                     b"numPr" => p.numbering(r)?,
-                    b"sectPr" => p.section_break = Some(section_starts_page(r)?),
+                    b"sectPr" => p.section = Some(Section::read(r)?),
+                    b"tabs" => p.tabs = read_tabs(r)?,
+                    b"pBdr" => p.borders = read_borders(r)?,
+                    b"rPr" => p.mark = RunProps::read(r)?,
                     _ => {
                         p.property(&e);
                         xml::skip(r, &e)?;
@@ -272,10 +343,19 @@ impl ParaProps {
             b"pageBreakBefore" => self.page_break_before = Some(xml::on(e)),
             b"spacing" => {
                 let twips = |name: &[u8]| xml::num::<i64>(e, name).map(|v| v.clamp(0, 31_680));
-                if let Some(v) = twips(b"before") {
+                // Automatic spacing (Word's HTML spacing) is 14 pt, whatever `before` and
+                // `after` say, as Word and LibreOffice give it.
+                let auto = |name: &[u8]| {
+                    xml::attr(e, name).is_some_and(|v| matches!(v.trim(), "1" | "true" | "on"))
+                };
+                if auto(b"beforeAutospacing") {
+                    self.space_before = Some(AUTO_SPACING);
+                } else if let Some(v) = twips(b"before") {
                     self.space_before = Some(v as u32);
                 }
-                if let Some(v) = twips(b"after") {
+                if auto(b"afterAutospacing") {
+                    self.space_after = Some(AUTO_SPACING);
+                } else if let Some(v) = twips(b"after") {
                     self.space_after = Some(v as u32);
                 }
                 if let Some(v) = twips(b"line") {
@@ -292,12 +372,17 @@ impl ParaProps {
                 if let Some(v) = twips(b"left").or_else(|| twips(b"start")) {
                     self.indent_left = Some(v);
                 }
+                if let Some(v) = twips(b"right").or_else(|| twips(b"end")) {
+                    self.indent_right = Some(v);
+                }
                 if let Some(v) = twips(b"hanging") {
                     self.indent_first = Some(-v);
                 } else if let Some(v) = twips(b"firstLine") {
                     self.indent_first = Some(v);
                 }
             }
+            b"contextualSpacing" => self.contextual = Some(xml::on(e)),
+            b"shd" => self.shading = Some(shading(e)),
             b"outlineLvl" => {
                 if let Some(n) = xml::num::<u8>(e, b"val") {
                     self.outline = Some((n < 9).then_some(n + 1));
@@ -308,18 +393,193 @@ impl ParaProps {
     }
 }
 
-/// Read a `w:sectPr` just started: whether its section starts on a new page.
-fn section_starts_page(r: &mut XmlReader<'_>) -> Result<bool, DocxError> {
-    let mut page = true;
+/// The sides of a `w:pBdr` just started, up to its end: `start` and `end` read as left and
+/// right; the bar border (a line in the page's margin) is left out.
+pub(crate) fn read_borders(r: &mut XmlReader<'_>) -> Result<BorderOverrides, DocxError> {
+    let mut borders = BorderOverrides::default();
     loop {
         match r.read_event()? {
-            Event::Empty(e) if xml::local(&e) == b"type" => {
-                page = xml::val(&e).as_deref() != Some("continuous");
+            Event::Empty(e) | Event::Start(e) => {
+                let side = match xml::local(&e) {
+                    b"top" => Some(&mut borders.top),
+                    b"bottom" => Some(&mut borders.bottom),
+                    b"left" | b"start" => Some(&mut borders.left),
+                    b"right" | b"end" => Some(&mut borders.right),
+                    b"between" => Some(&mut borders.between),
+                    _ => None,
+                };
+                if let Some(side) = side {
+                    *side = Some(border(&e));
+                }
             }
-            Event::Start(e) => xml::skip(r, &e)?,
-            Event::End(e) if e.local_name().as_ref() == b"sectPr" => return Ok(page),
-            Event::Eof => return Err(DocxError::Xml("unclosed w:sectPr".into())),
+            Event::End(e) if e.local_name().as_ref() == b"pBdr" => return Ok(borders),
+            Event::Eof => return Err(DocxError::Xml("unclosed w:pBdr".into())),
             _ => {}
+        }
+    }
+}
+
+/// A `w:pBdr` side (ADR 0009): Word's line styles as the nearest the model draws, as
+/// LibreOffice reads them: `nil`, `none`, and unknown ones no line; dot-dash ones dashed;
+/// triple and thin-thick ones double; `thick` a line twice the width; the rest (wavy,
+/// 3-D, inset, outset, art borders) single.
+fn border(e: &BytesStart<'_>) -> Border {
+    let style = match xml::val(e).as_deref() {
+        None | Some("nil" | "none") => BorderStyle::None,
+        Some("thick") => BorderStyle::Thick,
+        Some("dotted") => BorderStyle::Dotted,
+        Some("dashed" | "dashSmallGap" | "dotDash" | "dotDotDash" | "dashDotStroked") => {
+            BorderStyle::Dashed
+        }
+        Some(v) if v == "double" || v == "triple" || v.starts_with("thinThick") => {
+            BorderStyle::Double
+        }
+        Some(v) if v.starts_with("thickThin") || v == "doubleWave" => BorderStyle::Double,
+        Some(_) => BorderStyle::Single,
+    };
+    if style == BorderStyle::None {
+        return Border::default();
+    }
+    Border {
+        style,
+        width: xml::num::<u32>(e, b"sz").map_or(4, |v| v.min(96) as u16),
+        space: xml::num::<u32>(e, b"space").map_or(0, |v| v.min(31) as u16),
+        color: xml::attr(e, b"color").and_then(|v| rgb(&v)),
+    }
+}
+
+/// A `w:shd`'s fill (ADR 0009), as LibreOffice shows it: its `w:fill` (none when
+/// automatic); a solid pattern's `w:color` (black when automatic); a percentage pattern's
+/// colour over its fill (white when automatic) by that much; none for `nil`. Other
+/// patterns (stripes, grids) are drawn as their fill.
+fn shading(e: &BytesStart<'_>) -> Shading {
+    const BLACK: Rgb = [0, 0, 0];
+    const WHITE: Rgb = [0xFF; 3];
+    let colour = |name: &[u8]| xml::attr(e, name).and_then(|v| rgb(&v));
+    let val = xml::val(e);
+    let percent = val
+        .as_deref()
+        .and_then(|v| v.strip_prefix("pct"))
+        .and_then(|p| p.parse::<u16>().ok())
+        .filter(|&p| p <= 100);
+    let fill = match (val.as_deref(), percent) {
+        (Some("nil"), _) => None,
+        (Some("solid"), _) => Some(colour(b"color").unwrap_or(BLACK)),
+        (_, Some(p)) => {
+            let (front, back) = (
+                colour(b"color").unwrap_or(BLACK),
+                colour(b"fill").unwrap_or(WHITE),
+            );
+            let mix = |f: u8, b: u8| {
+                ((u32::from(f) * u32::from(p) + u32::from(b) * u32::from(100 - p) + 50) / 100) as u8
+            };
+            Some([
+                mix(front[0], back[0]),
+                mix(front[1], back[1]),
+                mix(front[2], back[2]),
+            ])
+        }
+        _ => colour(b"fill"),
+    };
+    Shading { fill }
+}
+
+/// The stops of a `w:tabs` just started, up to its end, in position order: `start` and
+/// `end` read as left and right, as Word reads them, and a list's `num` stop as left; bar
+/// stops (a vertical line, not a stop) are left out.
+pub(crate) fn read_tabs(r: &mut XmlReader<'_>) -> Result<Vec<TabStop>, DocxError> {
+    let mut tabs = Vec::new();
+    loop {
+        match r.read_event()? {
+            Event::Empty(e) if xml::local(&e) == b"tab" => tabs.extend(tab_stop(&e)),
+            Event::Start(e) => {
+                if xml::local(&e) == b"tab" {
+                    tabs.extend(tab_stop(&e));
+                }
+                xml::skip(r, &e)?;
+            }
+            Event::End(e) if e.local_name().as_ref() == b"tabs" => break,
+            Event::Eof => return Err(DocxError::Xml("unclosed w:tabs".into())),
+            _ => {}
+        }
+    }
+    let mut stops = Vec::with_capacity(tabs.len());
+    merge_tabs(&mut stops, &tabs);
+    Ok(stops)
+}
+
+/// A `w:tab`'s stop; `None` for a bar stop or one without a position.
+fn tab_stop(e: &BytesStart<'_>) -> Option<TabStop> {
+    let align = match xml::val(e).as_deref() {
+        Some("left" | "start" | "num") => TabAlign::Left,
+        Some("center") => TabAlign::Center,
+        Some("right" | "end") => TabAlign::Right,
+        Some("decimal") => TabAlign::Decimal,
+        Some("clear") => TabAlign::Clear,
+        _ => return None,
+    };
+    let leader = match xml::attr(e, b"leader").as_deref() {
+        Some("dot") => TabLeader::Dot,
+        Some("hyphen") => TabLeader::Hyphen,
+        Some("underscore") => TabLeader::Underscore,
+        Some("heavy") => TabLeader::Heavy,
+        Some("middleDot") => TabLeader::MiddleDot,
+        _ => TabLeader::None,
+    };
+    Some(TabStop {
+        position: xml::num::<i64>(e, b"pos")?.clamp(-31_680, 31_680) as i32,
+        align,
+        leader,
+    })
+}
+
+/// A section's properties (`w:sectPr`), as far as Slate uses them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Section {
+    /// The section starts on a new page (any section type but `continuous`).
+    pub starts_page: bool,
+    /// Its page's width (`w:pgSz w:w`) less its left and right margins and gutter
+    /// (`w:pgMar`), in twips; Letter with 1″ margins for what it doesn't say.
+    pub text_width: u32,
+}
+
+impl Section {
+    /// Read a `w:sectPr` just started, up to its end.
+    pub fn read(r: &mut XmlReader<'_>) -> Result<Self, DocxError> {
+        let mut starts_page = true;
+        let (mut page, mut left, mut right, mut gutter) = (12_240i64, 1_440i64, 1_440i64, 0i64);
+        loop {
+            let (e, empty) = match r.read_event()? {
+                Event::Empty(e) => (e, true),
+                Event::Start(e) => (e, false),
+                Event::End(e) if e.local_name().as_ref() == b"sectPr" => {
+                    let width = page - left.max(0) - right.max(0) - gutter.max(0);
+                    return Ok(Self {
+                        starts_page,
+                        text_width: width.clamp(0, u32::MAX.into()) as u32,
+                    });
+                }
+                Event::Eof => return Err(DocxError::Xml("unclosed w:sectPr".into())),
+                _ => continue,
+            };
+            let twips = |name: &[u8], to: &mut i64| {
+                if let Some(v) = xml::num::<i64>(&e, name) {
+                    *to = v;
+                }
+            };
+            match xml::local(&e) {
+                b"type" => starts_page = xml::val(&e).as_deref() != Some("continuous"),
+                b"pgSz" => twips(b"w", &mut page),
+                b"pgMar" => {
+                    twips(b"left", &mut left);
+                    twips(b"right", &mut right);
+                    twips(b"gutter", &mut gutter);
+                }
+                _ => {}
+            }
+            if !empty {
+                xml::skip(r, &e)?;
+            }
         }
     }
 }
@@ -568,11 +828,10 @@ impl Styles {
             },
             para: ParaLook {
                 align: ppr.align.unwrap_or_default(),
-                space_before: ppr.space_before.unwrap_or(0),
-                space_after: ppr.space_after.unwrap_or(0),
-                line: ppr.line.unwrap_or_default(),
-                indent_left: ppr.indent_left.unwrap_or(0),
-                indent_first: ppr.indent_first.unwrap_or(0),
+                spacing: ppr.spacing(),
+                tabs: effective_tabs(&ppr.tabs, &[]),
+                borders: ppr.borders.over(Borders::default()),
+                shading: ppr.shading.unwrap_or_default(),
             },
         }
     }
@@ -743,8 +1002,8 @@ mod tests {
         assert_eq!(sheet.default_id(), "Normal");
         let normal = sheet.get("Normal").unwrap();
         assert_eq!((normal.run.font.as_str(), normal.run.size), ("Calibri", 22));
-        assert_eq!(normal.para.space_after, 160);
-        assert_eq!(normal.para.line, LineSpacing::Auto(259.0 / 240.0));
+        assert_eq!(normal.para.spacing.space_after, 160);
+        assert_eq!(normal.para.spacing.line, LineSpacing::Auto(259.0 / 240.0));
         assert_eq!(normal.outline, None);
 
         let heading = sheet.get("Heading1").unwrap();
@@ -754,11 +1013,9 @@ mod tests {
         assert_eq!(heading.run.font, "Calibri Light");
         assert_eq!(heading.run.size, 32);
         assert_eq!(heading.run.color, Some([0x2F, 0x54, 0x96]));
-        assert_eq!(
-            (heading.para.space_before, heading.para.space_after),
-            (240, 0)
-        );
-        assert_eq!(heading.para.line, LineSpacing::Auto(259.0 / 240.0));
+        let s = heading.para.spacing;
+        assert_eq!((s.space_before, s.space_after), (240, 0));
+        assert_eq!(s.line, LineSpacing::Auto(259.0 / 240.0));
 
         // A custom style based on the heading is one, in its own font and the rest of
         // the heading's look.
@@ -771,9 +1028,70 @@ mod tests {
             (32, Some([0x2F, 0x54, 0x96]))
         );
         assert_eq!(mine.para.align, Align::Center);
-        assert_eq!((mine.para.indent_left, mine.para.indent_first), (720, -360));
-        assert_eq!(mine.para.line, LineSpacing::Exact(300));
-        assert_eq!(mine.para.space_before, 240);
+        let s = mine.para.spacing;
+        assert_eq!((s.indent_left, s.indent_first), (720, -360));
+        assert_eq!(s.line, LineSpacing::Exact(300));
+        assert_eq!(s.space_before, 240);
+    }
+
+    #[test]
+    fn borders_and_shading_come_from_the_defaults_styles_and_the_paragraph() {
+        let xml = format!(
+            "<w:styles {W}><w:docDefaults><w:pPrDefault><w:pPr>\
+             <w:pBdr><w:bottom w:val=\"single\" w:sz=\"4\" w:space=\"1\" w:color=\"auto\"/></w:pBdr>\
+             <w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"EEEEEE\"/>\
+             </w:pPr></w:pPrDefault></w:docDefaults>\
+             <w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/></w:style>\
+             <w:style w:type=\"paragraph\" w:styleId=\"Plain\"><w:name w:val=\"Plain\"/><w:basedOn w:val=\"Normal\"/>\
+             <w:pPr><w:pBdr><w:top w:val=\"thinThickSmallGap\" w:sz=\"12\" w:space=\"2\" w:color=\"FF0000\"/>\
+             <w:bottom w:val=\"nil\"/></w:pBdr><w:shd w:val=\"nil\"/></w:pPr></w:style>\
+             </w:styles>"
+        );
+        let sheet = Styles::parse(&xml, Theme::default()).unwrap().sheet();
+        let normal = &sheet.get("Normal").unwrap().para;
+        let rule = Border {
+            style: BorderStyle::Single,
+            width: 4,
+            space: 1,
+            color: None,
+        };
+        assert_eq!(normal.borders.bottom, rule);
+        assert_eq!(normal.shading.fill, Some([0xEE; 3]));
+        // Plain's own top over the defaults; its nil bottom and fill remove theirs.
+        let plain = &sheet.get("Plain").unwrap().para;
+        assert_eq!(
+            plain.borders.top,
+            Border {
+                style: BorderStyle::Double,
+                width: 12,
+                space: 2,
+                color: Some([0xFF, 0, 0]),
+            }
+        );
+        assert!(!plain.borders.bottom.is_drawn());
+        assert_eq!(plain.shading.fill, None);
+
+        // A paragraph's own: `start` and `end` are left and right; the bar is left out.
+        let ppr = format!(
+            "<w:pPr {W}><w:pBdr><w:start w:val=\"dotted\" w:sz=\"8\" w:space=\"4\"/>\
+             <w:end w:val=\"dashSmallGap\" w:sz=\"8\" w:space=\"4\"/><w:bar w:val=\"single\"/>\
+             </w:pBdr><w:shd w:val=\"solid\" w:color=\"00FF00\" w:fill=\"FF0000\"/></w:pPr>"
+        );
+        let mut r = xml::reader(&ppr);
+        let _ = r.read_event();
+        let own = ParaProps::read(&mut r).unwrap().overrides();
+        assert_eq!(own.borders.left.map(|b| b.style), Some(BorderStyle::Dotted));
+        assert_eq!(
+            own.borders.right.map(|b| b.style),
+            Some(BorderStyle::Dashed)
+        );
+        assert_eq!((own.borders.top, own.borders.between), (None, None));
+        assert_eq!(
+            own.shading,
+            Some(Shading {
+                fill: Some([0, 0xFF, 0])
+            })
+        );
     }
 
     #[test]

@@ -283,6 +283,7 @@ impl<'t> Builder<'t> {
                     kind,
                     level,
                     paragraph,
+                    numbering: None,
                 }),
                 at,
             ),
@@ -291,6 +292,7 @@ impl<'t> Builder<'t> {
                     kind,
                     level,
                     paragraph: Paragraph::new("Normal"),
+                    numbering: None,
                 });
                 self.push(marker, at);
                 (other, start)
@@ -585,6 +587,7 @@ impl<'t> Builder<'t> {
                             kind,
                             level,
                             paragraph: Paragraph::new("Normal"),
+                            numbering: None,
                         }),
                         start,
                     );

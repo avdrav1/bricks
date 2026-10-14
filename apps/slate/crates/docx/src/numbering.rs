@@ -5,10 +5,10 @@
 //! from each other, as in Word; an instance's `w:startOverride` restarts a level the first
 //! time the instance is used. Numbering a level restarts the levels below it.
 
-use crate::styles::{ParaProps, Styles};
+use crate::styles::{Font, ParaProps, RunProps, Styles};
 use crate::xml::{self, XmlReader};
 use crate::DocxError;
-use document_model::ListKind;
+use document_model::{ListKind, ListLevel, MarkerAlign, MarkerSuffix, RunStyle};
 use quick_xml::events::Event;
 use std::collections::{HashMap, HashSet};
 
@@ -19,12 +19,22 @@ struct Level {
     start: u64,
     /// `w:numFmt`: `decimal`, `bullet`, `lowerLetter`, `none`…
     format: String,
-    /// `w:lvlText`: `%1.`, `%1.%2.`, or a bullet character.
+    /// `w:lvlText`: `%1.`, `%1.%2.`, or a bullet character; a symbol font's characters
+    /// mapped to Unicode once the level is read ([`Level::resolve`]).
     text: String,
     /// `w:isLgl`: the levels this one shows are written as decimals.
     legal: bool,
     /// `w:pStyle`: the paragraph style this level belongs to (outline numbering).
     style: Option<String>,
+    /// `w:lvlJc` and `w:suff`.
+    align: MarkerAlign,
+    suffix: MarkerSuffix,
+    /// `w:pPr`: its indents and tab stops.
+    ppr: ParaProps,
+    /// `w:rPr`, as read.
+    rpr: RunProps,
+    /// The marker's run look from `rpr` ([`Level::resolve`]).
+    look: RunStyle,
 }
 
 impl Default for Level {
@@ -35,6 +45,63 @@ impl Default for Level {
             text: String::new(),
             legal: false,
             style: None,
+            align: MarkerAlign::Left,
+            suffix: MarkerSuffix::Tab,
+            ppr: ParaProps::default(),
+            rpr: RunProps::default(),
+            look: RunStyle::default(),
+        }
+    }
+}
+
+impl Level {
+    /// Map the text's symbol font characters to Unicode and resolve the marker's look
+    /// (ADR 0009): its font is the one Word picks for the text's characters (`w:eastAsia`
+    /// when `w:hint` asks for it and the text isn't ASCII, `w:cs` for complex script, else
+    /// `w:ascii` or `w:hAnsi`); a Symbol or Wingdings text is mapped and loses the font,
+    /// so it draws in the paragraph's (or one that has the characters).
+    fn resolve(&mut self, styles: &Styles) {
+        let rpr = &self.rpr;
+        let complex = self
+            .text
+            .chars()
+            .any(|c| ('\u{590}'..='\u{8FF}').contains(&c));
+        let font = if rpr.hint_east_asia && !self.text.is_ascii() && rpr.east_asia.is_some() {
+            rpr.east_asia.as_ref()
+        } else if complex && rpr.complex.is_some() {
+            rpr.complex.as_ref()
+        } else {
+            rpr.font.as_ref()
+        };
+        let name = font.and_then(|f| styles.theme().font(f));
+        let mapped = name
+            .as_deref()
+            .and_then(|n| document_model::symbol_text(n, &self.text));
+        let mut props = RunProps {
+            font: match (&mapped, name) {
+                (None, Some(name)) => Some(Font::Name(name)),
+                _ => None,
+            },
+            ..rpr.clone()
+        };
+        props.style = None;
+        self.look = styles.overrides(&props);
+        if let Some(text) = mapped {
+            self.text = text;
+        }
+    }
+
+    /// The level as the model has it.
+    fn model(&self) -> ListLevel {
+        ListLevel {
+            format: self.format.clone(),
+            text: self.text.clone(),
+            align: self.align,
+            suffix: self.suffix,
+            indent_left: self.ppr.indent_left,
+            indent_first: self.ppr.indent_first,
+            tabs: self.ppr.tabs.clone(),
+            look: self.look.clone(),
         }
     }
 }
@@ -104,6 +171,14 @@ impl Numbering {
                 n.abstract_id = abstract_id;
             }
         }
+        let levels = out
+            .abstracts
+            .values_mut()
+            .flat_map(|a| a.levels.values_mut())
+            .chain(out.nums.values_mut().flat_map(|n| n.levels.values_mut()));
+        for level in levels {
+            level.resolve(styles);
+        }
         Ok(out)
     }
 
@@ -111,6 +186,19 @@ impl Numbering {
         num.levels
             .get(&level)
             .or_else(|| self.abstracts.get(&num.abstract_id)?.levels.get(&level))
+    }
+
+    /// Every instance's levels as the model has them (ADR 0009).
+    pub fn model(&self) -> document_model::Numbering {
+        let mut out = document_model::Numbering::default();
+        for (&id, num) in &self.nums {
+            for l in 0..LEVELS as u8 {
+                if let Some(level) = self.level(num, l) {
+                    out.insert(id, l, level.model());
+                }
+            }
+        }
+        out
     }
 
     /// The level of instance `num_id` that belongs to paragraph style `style`, for a
@@ -301,9 +389,27 @@ fn read_level(r: &mut XmlReader<'_>) -> Result<Level, DocxError> {
                 b"lvlText" => level.text = xml::val(&e).unwrap_or_default().into_owned(),
                 b"isLgl" => level.legal = xml::on(&e),
                 b"pStyle" => level.style = xml::val(&e).map(|v| v.into_owned()),
+                b"lvlJc" => {
+                    level.align = match xml::val(&e).as_deref() {
+                        Some("center") => MarkerAlign::Center,
+                        Some("right" | "end") => MarkerAlign::Right,
+                        _ => MarkerAlign::Left,
+                    }
+                }
+                b"suff" => {
+                    level.suffix = match xml::val(&e).as_deref() {
+                        Some("space") => MarkerSuffix::Space,
+                        Some("nothing") => MarkerSuffix::Nothing,
+                        _ => MarkerSuffix::Tab,
+                    }
+                }
                 _ => {}
             },
-            Event::Start(e) => xml::skip(r, &e)?,
+            Event::Start(e) => match xml::local(&e) {
+                b"pPr" => level.ppr = ParaProps::read(r)?,
+                b"rPr" => level.rpr = RunProps::read(r)?,
+                _ => xml::skip(r, &e)?,
+            },
             Event::End(e) if e.local_name().as_ref() == b"lvl" => return Ok(level),
             Event::Eof => return Err(DocxError::Xml("unclosed w:lvl".into())),
             _ => {}

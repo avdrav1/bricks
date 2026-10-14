@@ -4,8 +4,8 @@
 
 use crate::looks::LooksEdit;
 use crate::{
-    bare, block_len, block_text, blocks, blocks_mut, paragraph, paragraph_mut, runs_len, runs_of,
-    set_runs, shell, take_runs, Change, Edit, Flag, Fragment, Pos,
+    bare, block_len, block_text, blocks, blocks_mut, paragraph, paragraph_mut, relisted, runs_len,
+    runs_of, set_runs, shell, take_runs, Change, Edit, Flag, Fragment, Pos,
 };
 use document_model::{Block, Document, ListItem, ListKind, Paragraph, Run, RunStyle};
 use std::ops::Range;
@@ -362,7 +362,7 @@ pub fn split(doc: &Document, from: Pos, to: Pos) -> Option<Edit> {
         Block::ListItem(item) if from == to && runs_len(&item.paragraph.runs) == 0 => {
             let after = Block::Paragraph(Paragraph {
                 style: doc.styles.default_id().to_owned(),
-                ..bare(&item.paragraph)
+                ..relisted(&item.paragraph)
             });
             let looks = vec![(from.block, shell(block), after)];
             return Some(LooksEdit::new(from.at, looks, Some(from)).into());
@@ -374,6 +374,7 @@ pub fn split(doc: &Document, from: Pos, to: Pos) -> Option<Edit> {
             },
             level: item.level,
             paragraph: bare(&item.paragraph),
+            numbering: item.numbering.clone(),
         }),
         Block::Paragraph(p) => {
             let at_end = Some(to.offset) == block_len(&blocks[to.block]);
@@ -403,7 +404,7 @@ pub fn join_backward(doc: &Document, at: Pos) -> Option<Edit> {
     }
     match &blocks[at.block] {
         block @ Block::ListItem(item) => {
-            let after = Block::Paragraph(bare(&item.paragraph));
+            let after = Block::Paragraph(relisted(&item.paragraph));
             let looks = vec![(at.block, shell(block), after)];
             Some(LooksEdit::new(at.at, looks, Some(at)).into())
         }

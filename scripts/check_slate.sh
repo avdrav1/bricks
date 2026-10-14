@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# SLATE-4, SLATE-10, SLATE-11, SLATE-6, SLATE-12, SLATE-13, SLATE-20, SLATE-21, and
-# SLATE-22 acceptance: the window opens, shows, and refuses documents, its pageless column
-# follows View → Text Width, its text selects and copies, it edits with undo, table cells
-# included, it composes through an input method, it draws a Word document's fonts and
-# paragraph looks, its format bar sets them, and they save.
+# SLATE-4, SLATE-10, SLATE-11, SLATE-6, SLATE-12, SLATE-13, SLATE-20, SLATE-21, SLATE-22,
+# SLATE-23, SLATE-24, SLATE-25, SLATE-26, SLATE-27, and SLATE-28 acceptance: the window
+# opens, shows, and refuses documents, its pageless column follows View → Text Width and a
+# Word document's page, its text selects and copies, it edits with undo, table cells
+# included, it composes through an input method, it draws a Word document's fonts
+# (embedded ones and fallbacks by class), paragraph looks (its styles' and its own),
+# borders and shading, tab stops, and list markers, its format bar sets them, and they save.
 #
 #   scripts/check_slate.sh [BINARY]   (default target/release/slate)
 #
@@ -29,10 +31,11 @@
 #      is gone and slate has exited.
 #   8. col-a.md and col-b.md (a long word that wraps, a rule, a table) in two windows of one
 #      slate process and col-c.md in another process, tabbed: each window measured in a
-#      screenshot at Medium, then after F10 → Text Width → Narrow, Wide, and Full in col-a's
-#      menu: the rule (the column's width exactly) and the widest line of text above it
-#      measure 480, 624, 816, and 1232 px (the 1280 px screen less 24 px a side) in all
-#      three windows, centred;
+#      screenshot at the default, Page (Markdown has no page: Medium's 624), then after
+#      F10 → Text Width → Narrow, Medium, Wide, and Full in col-a's menu: the rule (the
+#      column's width exactly) and the widest line of text above it measure 624, 480, 624,
+#      816, and 1232 px (the 1280 px screen less 24 px a side) in all three windows,
+#      centred;
 #   9. after Ctrl+Q the settings file says full, and slate relaunched shows a Full column;
 #  10. Wide in a window resized to 640 px (floating) narrows the column to 592; Narrow
 #      there stays 480;
@@ -143,6 +146,58 @@
 #      leaves no journal. An edit crashed and discarded leaves the file and no journal.
 #      Typing a letter every half second for 20 s, the journal shows up about 5 s after the
 #      first and is rewritten at least 5 s apart.
+#  28. Page width, without a settings file (the default, Page): page-75.docx (written by
+#      /tmp/page.py: Letter with 0.5″ left and right margins, a long word that wraps, and a
+#      one-cell table, whose border is the column's width exactly) and page-none.docx (the
+#      same without w:sectPr), tabbed, measure as col.py measures in 8: 720 px (7.5″ at 96
+#      dpi) and 624 (Letter with 1″ margins); Medium from the menu makes page-75 624, and
+#      Page again 720; the settings file says page, and col-a.md opened then measures 624.
+#  29. tab stops: tabs.docx (written by /tmp/tabs.py: Letter with 0.5″ margins, Liberation
+#      Serif 11 pt, w:defaultTabStop 720, and a one-cell table whose border is the column)
+#      measured in a screenshot: "NAVA", a tab, and "Remote" with a right stop at 10800
+#      twips ends Remote's ink at the column's right edge; "Lead Product Manager" and three
+#      default tabs start "X" at the third multiple of 48 px past the first text's ink; a
+#      centre stop at 5400 centres "Middle" 360 px in; and a right stop at 7200 with a dot
+#      leader ends "42" 480 px in, with dots along the gap after "Contents" on the baseline
+#      and no ink above it; each within 2 px. tab.md, a Markdown line with a tab, opens and
+#      reads as written.
+#  30. embedded fonts: embed-plain.docx and embed-obfuscated.docx (written by /tmp/embed.py)
+#      embed Cardo (OFL, a Latin subset, apps/slate/crates/docx/tests/data/fonts; not
+#      installed in the container), one as a plain .ttf with a zero w:fontKey, the other as
+#      Word's obfuscated .odttf with a key, and run the same line in Cardo, in "Nosuchfont
+#      Serifish" (font table: roman), and in "Nosuchfont Sansish" (swiss): in a screenshot
+#      the Cardo line's ink is as wide as Pango measures it in Cardo loaded from the file,
+#      the roman one as in the system serif, and the swiss one as in sans, each within 2 px
+#      (and the three differ); a typed character and Ctrl+S keep fontTable.xml, its
+#      relationships, and the font part byte for byte. The face is written once to
+#      $XDG_RUNTIME_DIR/slate/fonts (mode 700) and never installed: fc-list doesn't list
+#      Cardo afterwards and the user's font directories stay empty.
+#  31. a paragraph's own spacing and indents: own.docx (written by /tmp/own.py, Liberation
+#      Sans 11 pt) sets them in each paragraph's w:pPr over a style that sets others, and
+#      is measured as fonts.docx is in 23: space before 450 and after 300 twips, a left
+#      indent of 900, a right indent of 1500 (a right-aligned line ends 100 px left of an
+#      unindented one's end), a 450 hanging first line under a 900 indent, and lines exactly
+#      600 apart, each within 2 px; a character typed into the last paragraph (its own
+#      spacing and right indent) and Ctrl+S save it with its w:spacing and w:ind as they
+#      were and every other paragraph byte for byte.
+#  32. borders and shading: borders.docx (written by /tmp/borders.py, Liberation Sans 11
+#      pt, a one-cell table whose border is the column) measured in a screenshot: the
+#      résumé's title rule (half a point, 1 pt from the text) lies 1 px under the text's
+#      line box (two plain lines' pitch) and spans the column; a shaded paragraph's box is
+#      its fill colour (#FFE599), spans the column, and is as tall as its line; a box of 1
+#      pt lines 4 pt from the text draws all four 7 px outside the line box and the
+#      column, its sides joining its top and bottom lines; a paragraph with nil borders
+#      and an automatic fill (as Google Docs writes them) draws nothing but its text; each
+#      within 2 px. A character typed into the last paragraph and Ctrl+S keep every other
+#      paragraph, borders and shading included, byte for byte.
+#  33. list markers: lists.docx (written by /tmp/lists.py: Letter with 0.5″ margins,
+#      Liberation Sans 11 pt, a one-cell table whose border is the column) measured in a
+#      screenshot: a bullet of Google Docs' (its level exactly as Google Docs writes it,
+#      360 twips in, hanging 360) draws its "●" with its ink at the column's edge and its
+#      text 24 px in, the bullet a filled circle about an x-height tall (not a small "•");
+#      a second-level bullet's ○ starts 48 px in and its text 72; numbers 1. and 2. start
+#      24 px in and their text 48; right-justified roman numbers end 48 px in, their text
+#      at 72; each within 2 px; the accessible text holds the paragraphs, not the markers.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -588,6 +643,319 @@ for y in range(max(0, (rule_y or 0) - 60), rule_y or 0):
         text = max(text, dark[-1] - dark[0] + 1)
 print(f"rule {rule} text {text} off {rule_x + rule // 2 - w // 2}")
 PY
+# SLATE-23: `page.py PATH [MARGIN]` writes a Word document of a long word that wraps (its
+# lines as wide as the column) and a one-cell table (its border the column exactly), on
+# Letter with MARGIN twips left and right; without MARGIN it has no w:sectPr.
+cat > /tmp/page.py <<"PY"
+import sys
+import zipfile
+
+W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+PKG = "http://schemas.openxmlformats.org/package/2006/relationships"
+CT = "http://schemas.openxmlformats.org/package/2006/content-types"
+OOXML = "application/vnd.openxmlformats-officedocument.wordprocessingml"
+HEAD = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"""
+
+path, word = sys.argv[1], "x" * 800
+body = ("""<w:p><w:r><w:t>Page</w:t></w:r></w:p>"""
+        f"""<w:p><w:r><w:t>{word}</w:t></w:r></w:p>"""
+        """<w:tbl><w:tr><w:tc><w:p><w:r><w:t>c</w:t></w:r></w:p></w:tc></w:tr></w:tbl><w:p/>""")
+if len(sys.argv) > 2:
+    m = sys.argv[2]
+    body += (f"""<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="{m}" w:right="{m}" """
+             f"""w:bottom="{m}" w:left="{m}" w:header="0" w:footer="0" w:gutter="0"/></w:sectPr>""")
+with zipfile.ZipFile(path, "w") as z:
+    z.writestr("[Content_Types].xml", HEAD + f"""<Types xmlns="{CT}">"""
+               """<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"""
+               """<Default Extension="xml" ContentType="application/xml"/>"""
+               f"""<Override PartName="/word/document.xml" ContentType="{OOXML}.document.main+xml"/></Types>""")
+    z.writestr("_rels/.rels", HEAD + f"""<Relationships xmlns="{PKG}"><Relationship Id="rId1" """
+               f"""Type="{REL}/officeDocument" Target="word/document.xml"/></Relationships>""")
+    z.writestr("word/document.xml", HEAD + f"""<w:document xmlns:w="{W}"><w:body>{body}</w:body></w:document>""")
+PY
+# SLATE-24: `make PATH` writes tabs.docx: Letter with 0.5″ margins (a 720 px column),
+# Liberation Serif 11 pt, w:defaultTabStop 720 in its settings, four tabbed lines (see
+# section 29), a one-cell table (its border the column exactly), and "Z"; `measure PNG`
+# measures the lines above the table in a screenshot.
+cat > /tmp/tabs.py <<"PY"
+import os
+import sys
+import zipfile
+
+W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+PKG = "http://schemas.openxmlformats.org/package/2006/relationships"
+CT = "http://schemas.openxmlformats.org/package/2006/content-types"
+OOXML = "application/vnd.openxmlformats-officedocument.wordprocessingml"
+HEAD = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"""
+RIGHT, CENTRE, LEADER, DEFAULT = 10800, 5400, 7200, 720
+
+def para(texts, tabs=""):
+    runs = "<w:r><w:tab/></w:r>".join(f"""<w:r><w:t xml:space="preserve">{t}</w:t></w:r>""" for t in texts)
+    ppr = f"<w:pPr><w:tabs>{tabs}</w:tabs></w:pPr>" if tabs else ""
+    return f"<w:p>{ppr}{runs}</w:p>"
+
+def make(path):
+    body = (para(["NAVA", "Remote"], f"""<w:tab w:val="right" w:pos="{RIGHT}"/>""")
+            + para(["Lead Product Manager", "", "", "X"])
+            + para(["A", "Middle"], f"""<w:tab w:val="center" w:pos="{CENTRE}"/>""")
+            + para(["Contents", "42"], f"""<w:tab w:val="right" w:leader="dot" w:pos="{LEADER}"/>""")
+            + """<w:tbl><w:tr><w:tc><w:p><w:r><w:t>c</w:t></w:r></w:p></w:tc></w:tr></w:tbl>"""
+            + para(["Z"])
+            + """<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="720" w:right="720" """
+            """w:bottom="720" w:left="720" w:header="0" w:footer="0" w:gutter="0"/></w:sectPr>""")
+    styles = ("""<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Liberation Serif" """
+              """w:hAnsi="Liberation Serif"/><w:sz w:val="22"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr>"""
+              """<w:spacing w:before="0" w:after="120"/></w:pPr></w:pPrDefault></w:docDefaults>"""
+              """<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>""")
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("[Content_Types].xml", HEAD + f"""<Types xmlns="{CT}">"""
+                   """<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"""
+                   """<Default Extension="xml" ContentType="application/xml"/>"""
+                   f"""<Override PartName="/word/document.xml" ContentType="{OOXML}.document.main+xml"/>"""
+                   f"""<Override PartName="/word/styles.xml" ContentType="{OOXML}.styles+xml"/>"""
+                   f"""<Override PartName="/word/settings.xml" ContentType="{OOXML}.settings+xml"/></Types>""")
+        z.writestr("_rels/.rels", HEAD + f"""<Relationships xmlns="{PKG}"><Relationship Id="rId1" """
+                   f"""Type="{REL}/officeDocument" Target="word/document.xml"/></Relationships>""")
+        z.writestr("word/_rels/document.xml.rels", HEAD + f"""<Relationships xmlns="{PKG}">"""
+                   f"""<Relationship Id="rId1" Type="{REL}/styles" Target="styles.xml"/>"""
+                   f"""<Relationship Id="rId2" Type="{REL}/settings" Target="settings.xml"/></Relationships>""")
+        z.writestr("word/styles.xml", HEAD + f"""<w:styles xmlns:w="{W}">{styles}</w:styles>""")
+        z.writestr("word/settings.xml", HEAD + f"""<w:settings xmlns:w="{W}">"""
+                   f"""<w:defaultTabStop w:val="{DEFAULT}"/></w:settings>""")
+        z.writestr("word/document.xml", HEAD + f"""<w:document xmlns:w="{W}"><w:body>{body}</w:body></w:document>""")
+
+def measure(png):
+    import gi
+    gi.require_version("GdkPixbuf", "2.0")
+    from gi.repository import GdkPixbuf
+    p = GdkPixbuf.Pixbuf.new_from_file(png)
+    w, h, rs, n, px = p.get_width(), p.get_height(), p.get_rowstride(), p.get_n_channels(), p.get_pixels()
+    # The border of the table, as col.py finds it: the longest run of its grey on a row.
+    rule, rule_y, left = 0, h, 0
+    for y in range(h):
+        row = px[y * rs:y * rs + w * n]
+        run = 0
+        for x in range(w):
+            if all(abs(row[x * n + i] - c) <= 6 for i, c in enumerate((0xC0, 0xBF, 0xBC))):
+                run += 1
+                if run > rule:
+                    rule, rule_y, left = run, y, x - run + 1
+            else:
+                run = 0
+    print(f"column: {left} {rule}")
+    dark = lambda x, y: sum(px[y * rs + x * n:y * rs + x * n + 3]) < 300
+    # Bands of rows with ink above the table, each with its ink by column.
+    bands, cur = [], None
+    for y in range(int(os.environ["TOP"]), rule_y - 2):
+        xs = [x for x in range(left, left + rule) if dark(x, y)]
+        if xs:
+            if cur is None:
+                cur = {"top": y, "rows": {}}
+            cur["bottom"] = y
+            cur["rows"][y] = xs
+        elif cur is not None:
+            bands.append(cur)
+            cur = None
+    print(f"lines: {len(bands)}")
+    if len(bands) != 4:
+        return
+    def clusters(xs, gap=8):
+        out = []
+        for x in sorted(set(xs)):
+            if out and x - out[-1][1] <= gap:
+                out[-1][1] = x
+            else:
+                out.append([x, x])
+        return out
+    def ink(band, rows=None):
+        return [x for y, xs in band["rows"].items() if rows is None or y in rows for x in xs]
+    def report(label, got, want):
+        print(f"{label}: {got} (want {want}) " + ("ok" if abs(got - want) <= 2 else "off"))
+    a, b, c, d = bands
+    # Ink ends one past its last dark column; the right edge of the column is left + rule.
+    words = clusters(ink(a))
+    print("remote words: " + " ".join(f"{l}-{r}" for l, r in words))
+    report("remote right edge", words[-1][1] + 1 - left, rule)
+    words = clusters(ink(b))
+    first = words[0][1] + 1 - left
+    stop = (first // 48 + 3) * 48
+    print(f"manager ends at {first}")
+    report("x after three default tabs", words[-1][0] - left, stop)
+    words = clusters(ink(c))
+    report("middle centre", (words[-1][0] + words[-1][1] + 1) / 2 - left, CENTRE // 15)
+    # Letters and digits reach above the 4 rows of the baseline; leader dots do not.
+    bottom = d["bottom"]
+    tall = clusters(ink(d, range(d["top"], bottom - 3)))
+    print(f"leader line tall clusters: {len(tall)}")
+    if len(tall) != 2:
+        return
+    report("42 right edge", tall[1][1] + 1 - left, LEADER // 15)
+    gap = range(tall[0][1] + 5, tall[1][0] - 4)
+    low = set(ink(d, range(bottom - 3, bottom + 1)))
+    dots = [x for x in gap if x in low]
+    holes, run = 0, 0
+    for x in gap:
+        run = 0 if x in low else run + 1
+        holes = max(holes, run)
+    print(f"leader gap: {len(gap)} px, dotted {len(dots)} px, widest hole {holes} px")
+    print("leader fills the gap on the baseline: " + ("yes" if len(gap) > 100 and len(dots) * 4 >= len(gap) and holes <= 6 else "no"))
+
+make(sys.argv[2]) if sys.argv[1] == "make" else measure(sys.argv[2])
+PY
+# SLATE-25: `make PATH MODE` writes a document embedding Cardo (MODE plain: a .ttf with a
+# zero key; obfuscated: an .odttf with KEY); `measure PNG` measures the lines of its screenshot
+# against Pango at 96 dpi (Cardo added from its file for this process); `kept ORIGINAL
+# SAVED` compares the font parts.
+cat > /tmp/embed.py <<"PY"
+import os
+import sys
+import zipfile
+
+# DejaVu Serif and Sans, the container serif and sans, differ by 17 px on this line.
+TEXT = "Embedded: illicit fillip, little lilies, jilting fiji"
+FONT = "/docx/fonts/Cardo-Regular.ttf"
+KEY = "{6C2F5D8A-91E3-4B07-A2C4-3F1E9D8B7A65}"
+ZERO = "{00000000-0000-0000-0000-000000000000}"
+# Each line: its name, its run font, and the family Pango measures it in.
+LINES = [("embedded", "Cardo", "Cardo"), ("roman", "Nosuchfont Serifish", "serif"),
+         ("swiss", "Nosuchfont Sansish", "sans-serif")]
+FONT_PARTS = ("word/fontTable.xml", "word/_rels/fontTable.xml.rels")
+W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+PKG = "http://schemas.openxmlformats.org/package/2006/relationships"
+CT = "http://schemas.openxmlformats.org/package/2006/content-types"
+OOXML = "application/vnd.openxmlformats-officedocument.wordprocessingml"
+HEAD = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"""
+
+def obfuscate(data, key):
+    # ECMA-376 Part 1, 17.8.1: the GUID bytes, last hex pair first, XOR the first 32 bytes.
+    hexes = key.strip("{}").replace("-", "")
+    k = bytes.fromhex(hexes)[::-1]
+    head = bytes(b ^ k[i % 16] for i, b in enumerate(data[:32]))
+    return head + data[32:]
+
+def para(font, text):
+    rpr = f"""<w:rPr><w:rFonts w:ascii="{font}" w:hAnsi="{font}"/></w:rPr>""" if font else ""
+    return f"""<w:p><w:r>{rpr}<w:t xml:space="preserve">{text}</w:t></w:r></w:p>"""
+
+def make(path, mode):
+    font = open(FONT, "rb").read()
+    if mode == "plain":
+        part, key, data = "fonts/font1.ttf", ZERO, font
+    else:
+        part, key, data = "fonts/font1.odttf", KEY, obfuscate(font, KEY)
+        assert data[:4] != font[:4]
+    table = (f"""<w:fonts xmlns:w="{W}" xmlns:r="{REL}">"""
+             """<w:font w:name="Liberation Sans"><w:family w:val="swiss"/></w:font>"""
+             """<w:font w:name="Cardo"><w:family w:val="roman"/><w:pitch w:val="variable"/>"""
+             f"""<w:embedRegular w:fontKey="{key}" r:id="rId1" w:subsetted="0"/></w:font>"""
+             """<w:font w:name="Nosuchfont Serifish"><w:family w:val="roman"/><w:pitch w:val="variable"/></w:font>"""
+             """<w:font w:name="Nosuchfont Sansish"><w:family w:val="swiss"/><w:pitch w:val="variable"/></w:font>"""
+             "</w:fonts>")
+    styles = (f"""<w:styles xmlns:w="{W}"><w:docDefaults><w:rPrDefault><w:rPr>"""
+              """<w:rFonts w:ascii="Liberation Sans" w:hAnsi="Liberation Sans"/><w:sz w:val="22"/>"""
+              """</w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:before="0" w:after="0" """
+              """w:line="240" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>"""
+              """<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/>"""
+              """</w:style></w:styles>""")
+    body = "".join(para(f, TEXT) for _, f, _ in LINES) + para(None, "Z")
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", HEAD + f"""<Types xmlns="{CT}">"""
+                   """<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"""
+                   """<Default Extension="xml" ContentType="application/xml"/>"""
+                   """<Default Extension="ttf" ContentType="application/x-font-ttf"/>"""
+                   """<Default Extension="odttf" ContentType="application/vnd.openxmlformats-officedocument.obfuscatedFont"/>"""
+                   f"""<Override PartName="/word/document.xml" ContentType="{OOXML}.document.main+xml"/>"""
+                   f"""<Override PartName="/word/styles.xml" ContentType="{OOXML}.styles+xml"/>"""
+                   f"""<Override PartName="/word/fontTable.xml" ContentType="{OOXML}.fontTable+xml"/></Types>""")
+        z.writestr("_rels/.rels", HEAD + f"""<Relationships xmlns="{PKG}"><Relationship Id="rId1" """
+                   f"""Type="{REL}/officeDocument" Target="word/document.xml"/></Relationships>""")
+        z.writestr("word/_rels/document.xml.rels", HEAD + f"""<Relationships xmlns="{PKG}">"""
+                   f"""<Relationship Id="rId1" Type="{REL}/styles" Target="styles.xml"/>"""
+                   f"""<Relationship Id="rId2" Type="{REL}/fontTable" Target="fontTable.xml"/></Relationships>""")
+        z.writestr("word/_rels/fontTable.xml.rels", HEAD + f"""<Relationships xmlns="{PKG}">"""
+                   f"""<Relationship Id="rId1" Type="{REL}/font" Target="{part}"/></Relationships>""")
+        z.writestr("word/" + part, data)
+        z.writestr("word/fontTable.xml", HEAD + table)
+        z.writestr("word/styles.xml", HEAD + styles)
+        z.writestr("word/document.xml", HEAD + f"""<w:document xmlns:w="{W}"><w:body>"""
+                   + body + "</w:body></w:document>")
+
+def pango_widths():
+    import cairo
+    import gi
+    gi.require_version("Pango", "1.0")
+    gi.require_version("PangoCairo", "1.0")
+    from gi.repository import Pango, PangoCairo
+    fm = PangoCairo.FontMap.get_default()
+    # Cardo for this process only, as Slate loads it (Pango 1.56).
+    fm.add_font_file(FONT)
+    out = {}
+    for name, _, family in LINES:
+        ctx = fm.create_context()
+        PangoCairo.context_set_resolution(ctx, 96)
+        options = cairo.FontOptions()
+        options.set_hint_metrics(cairo.HINT_METRICS_OFF)
+        PangoCairo.context_set_font_options(ctx, options)
+        ctx.set_round_glyph_positions(False)
+        desc = Pango.FontDescription.from_string(family + " 11")
+        layout = Pango.Layout.new(ctx)
+        layout.set_font_description(desc)
+        layout.set_text(TEXT, -1)
+        face = fm.load_font(ctx, desc).describe().get_family()
+        out[name] = (layout.get_pixel_extents()[0].width, face)
+    return out
+
+def measure(png):
+    import gi
+    gi.require_version("GdkPixbuf", "2.0")
+    from gi.repository import GdkPixbuf
+    p = GdkPixbuf.Pixbuf.new_from_file(png)
+    w, h, rs, n, px = p.get_width(), p.get_height(), p.get_rowstride(), p.get_n_channels(), p.get_pixels()
+    bands, cur = [], None
+    for y in range(int(os.environ["TOP"]), h - 10):
+        row = px[y * rs:y * rs + w * n]
+        xs = [x for x in range(40, w - 40) if row[x * n] + row[x * n + 1] + row[x * n + 2] < 600]
+        if xs:
+            if cur is None:
+                cur = [y, y, xs[0], xs[-1]]
+            cur[1], cur[2], cur[3] = y, min(cur[2], xs[0]), max(cur[3], xs[-1])
+        elif cur is not None:
+            bands.append(cur)
+            cur = None
+    print("bands: " + " ".join(f"{b[0]}-{b[1]}@{b[2]}-{b[3]}" for b in bands))
+    if len(bands) < 4:
+        print("too few lines")
+        return
+    want = pango_widths()
+    shots = {}
+    for (name, font, family), b in zip(LINES, bands):
+        shot = b[3] - b[2] + 1
+        width, face = want[name]
+        shots[name] = shot
+        verdict = "ok" if abs(shot - width) <= 2 else "off"
+        print(f"{name} {font}: shot {shot} pango {family} {width} face {face} {verdict}")
+    e, r, s = shots["embedded"], shots["roman"], shots["swiss"]
+    print("embedded differs from serif: " + ("yes" if abs(e - r) > 2 else "no"))
+    print("serif differs from sans: " + ("yes" if abs(r - s) > 2 else "no"))
+
+def kept(original, saved):
+    a, b = zipfile.ZipFile(original), zipfile.ZipFile(saved)
+    names = [n for n in a.namelist() if n.startswith("word/fonts/") or n in FONT_PARTS]
+    same = all(n in b.namelist() and a.read(n) == b.read(n) for n in names)
+    edited = a.read("word/document.xml") != b.read("word/document.xml")
+    yes = {True: "yes", False: "no"}
+    print(f"font parts kept: {yes[same]} {len(names)}, document edited: {yes[edited]}")
+
+if sys.argv[1] == "make":
+    make(sys.argv[2], sys.argv[3])
+elif sys.argv[1] == "measure":
+    measure(sys.argv[2])
+else:
+    kept(sys.argv[2], sys.argv[3])
+PY
 # SLATE-20: `make PATH` writes fonts.docx; `measure PNG` measures its screenshot: each
 # band of ink (a line of text) and its left and right edges, against Pango at 96 dpi and
 # the twips of the styles.
@@ -727,6 +1095,463 @@ def measure(png):
 
 make(sys.argv[2]) if sys.argv[1] == "make" else measure(sys.argv[2])
 PY
+# SLATE-26: `make PATH` writes own.docx, whose paragraphs set their spacing and indents in
+# their own w:pPr over a style (Decoy) that sets others; `measure PNG` measures its
+# screenshot as fonts.py does; `kept ORIGINAL SAVED` checks that the edited last paragraph
+# keeps its w:pPr and the others are as they were.
+cat > /tmp/own.py <<"PY"
+import os
+import re
+import sys
+import zipfile
+
+BEFORE, AFTER, LEFT, HANG, EXACT, RIGHT = 450, 300, 900, 450, 600, 1500
+W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+PKG = "http://schemas.openxmlformats.org/package/2006/relationships"
+CT = "http://schemas.openxmlformats.org/package/2006/content-types"
+OOXML = "application/vnd.openxmlformats-officedocument.wordprocessingml"
+HEAD = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"""
+# The last paragraph, Z: its own look, which saving an edit in it keeps.
+LAST = f"""<w:spacing w:before="0" w:after="0"/><w:ind w:left="0" w:right="{RIGHT}"/>"""
+
+def para(text, own="", style="Normal", jc=""):
+    jc = f"""<w:jc w:val="{jc}"/>""" if jc else ""
+    return (f"""<w:p><w:pPr><w:pStyle w:val="{style}"/>{own}{jc}</w:pPr>"""
+            f"""<w:r><w:t xml:space="preserve">{text}</w:t></w:r></w:p>""")
+
+def spacing(before=0, after=0, line="""w:line="240" w:lineRule="auto\""""):
+    return f"""<w:spacing w:before="{before}" w:after="{after}" {line}/>"""
+
+def ind(left=0, first="""w:firstLine="0\""""):
+    return f"""<w:ind w:left="{left}" w:right="0" {first}/>"""
+
+def make(path):
+    styles = (
+        """<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Liberation Sans" """
+        """w:hAnsi="Liberation Sans"/><w:sz w:val="22"/></w:rPr></w:rPrDefault><w:pPrDefault>"""
+        """<w:pPr><w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/></w:pPr>"""
+        """</w:pPrDefault></w:docDefaults>"""
+        """<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>"""
+        """<w:style w:type="paragraph" w:styleId="Decoy"><w:name w:val="Decoy"/><w:basedOn w:val="Normal"/>"""
+        """<w:pPr><w:spacing w:before="150" w:after="150" w:line="300" w:lineRule="exact"/>"""
+        """<w:ind w:left="300" w:right="600" w:firstLine="300"/></w:pPr></w:style>""")
+    exact = f"""w:line="{EXACT}" w:lineRule="exact\""""
+    paras = [
+        para("Hamburg one"),
+        para("Hamburg two", spacing(BEFORE, AFTER) + ind(), "Decoy"),
+        para("Hamburg three"),
+        para("Hamburg four", spacing() + ind(LEFT), "Decoy"),
+        para("Hamburg right", jc="right"),
+        para("Hamburg right", f"""<w:ind w:right="{RIGHT}"/>""", jc="right"),
+        para(" ".join(["Hamburg"] * 20), spacing() + ind(LEFT, f"""w:hanging="{HANG}\""""), "Decoy"),
+        para(" ".join(["Hamburg"] * 30), spacing(line=exact) + ind(), "Decoy"),
+        para("Z", LAST),
+    ]
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("[Content_Types].xml", HEAD + f"""<Types xmlns="{CT}">"""
+                   """<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"""
+                   """<Default Extension="xml" ContentType="application/xml"/>"""
+                   f"""<Override PartName="/word/document.xml" ContentType="{OOXML}.document.main+xml"/>"""
+                   f"""<Override PartName="/word/styles.xml" ContentType="{OOXML}.styles+xml"/></Types>""")
+        z.writestr("_rels/.rels", HEAD + f"""<Relationships xmlns="{PKG}"><Relationship Id="rId1" """
+                   f"""Type="{REL}/officeDocument" Target="word/document.xml"/></Relationships>""")
+        z.writestr("word/_rels/document.xml.rels", HEAD + f"""<Relationships xmlns="{PKG}">"""
+                   f"""<Relationship Id="rId1" Type="{REL}/styles" Target="styles.xml"/></Relationships>""")
+        z.writestr("word/styles.xml", HEAD + f"""<w:styles xmlns:w="{W}">{styles}</w:styles>""")
+        z.writestr("word/document.xml", HEAD + f"""<w:document xmlns:w="{W}"><w:body>"""
+                   + "".join(paras) + "</w:body></w:document>")
+
+def measure(png):
+    import gi
+    gi.require_version("GdkPixbuf", "2.0")
+    from gi.repository import GdkPixbuf
+    p = GdkPixbuf.Pixbuf.new_from_file(png)
+    w, h, rs, n, px = p.get_width(), p.get_height(), p.get_rowstride(), p.get_n_channels(), p.get_pixels()
+    bands, cur = [], None
+    for y in range(int(os.environ["TOP"]), h - 10):
+        row = px[y * rs:y * rs + w * n]
+        xs = [x for x in range(40, w - 40) if row[x * n] + row[x * n + 1] + row[x * n + 2] < 600]
+        if xs:
+            if cur is None:
+                cur = [y, y, xs[0], xs[-1]]
+            cur[1], cur[2], cur[3] = y, min(cur[2], xs[0]), max(cur[3], xs[-1])
+        elif cur is not None:
+            bands.append(cur)
+            cur = None
+    print("bands: " + " ".join(f"{b[0]}-{b[1]}@{b[2]}-{b[3]}" for b in bands))
+    if len(bands) < 12:
+        print("too few lines")
+        return
+    one, two, three, four, right, inset = bands[:6]
+    rest, left0, hanging = bands[6:-1], three[2], []
+    while rest and rest[0][2] - left0 > 15:
+        hanging.append(rest.pop(0))
+    line = four[0] - three[0]
+    print(f"plain line: {line}")
+    def report(label, got, want):
+        verdict = "ok" if abs(got - want) <= 2 else "off"
+        print(f"{label}: {got} (want {want}) {verdict}")
+    report("own space before", two[0] - one[0] - line, BEFORE // 15)
+    report("own space after", three[0] - two[0] - line, AFTER // 15)
+    report("own left indent", four[2] - left0, LEFT // 15)
+    report("own right indent", right[3] - inset[3], RIGHT // 15)
+    report("own hanging first line", hanging[0][2] - left0 if hanging else -1, (LEFT - HANG) // 15)
+    report("own hanging next line", hanging[1][2] - left0 if len(hanging) > 1 else -1, LEFT // 15)
+    pitches = [b2[0] - b1[0] for b1, b2 in zip(rest, rest[1:])]
+    print("own exact pitches: " + " ".join(map(str, pitches)))
+    worst = max(pitches, key=lambda p: abs(p - EXACT // 15)) if len(pitches) > 1 else -1
+    report("own exact line", worst, EXACT // 15)
+
+def kept(original, saved):
+    def split(path):
+        with zipfile.ZipFile(path) as z:
+            xml = z.read("word/document.xml").decode()
+        at = [m.start() for m in re.finditer(r"<w:p[ >]", xml)][-1]
+        return xml[:at], xml[at:]
+    (a, _), (b, last) = split(original), split(saved)
+    edited = "Z!" in last
+    print(f"last saved: own look {LAST in last}, edit {edited}; others kept: {a == b}")
+
+if sys.argv[1] == "make":
+    make(sys.argv[2])
+elif sys.argv[1] == "measure":
+    measure(sys.argv[2])
+else:
+    kept(sys.argv[2], sys.argv[3])
+PY
+# SLATE-27: `make PATH` writes borders.docx (Liberation Sans 11 pt, 16 px after each
+# paragraph but the first): two plain HAMBURG lines (the pitch of a line box), the title
+# rule of the résumé, a shaded line, a boxed line, a line with the nil borders and
+# automatic fill of Google Docs, and a one-cell table (its border is the column); `measure
+# PNG` measures its screenshot; `kept ORIGINAL SAVED` checks that saving an edit in the last
+# paragraph keeps every other paragraph byte for byte.
+cat > /tmp/borders.py <<"PY"
+import os
+import re
+import sys
+import zipfile
+
+W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+PKG = "http://schemas.openxmlformats.org/package/2006/relationships"
+CT = "http://schemas.openxmlformats.org/package/2006/content-types"
+OOXML = "application/vnd.openxmlformats-officedocument.wordprocessingml"
+HEAD = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"""
+TEXT = "HAMBURG"
+RULE = """<w:pBdr><w:bottom w:color="000000" w:space="1" w:sz="4" w:val="single"/></w:pBdr>"""
+YELLOW = (0xFF, 0xE5, 0x99)
+SHADE = """<w:shd w:val="clear" w:color="auto" w:fill="FFE599"/>"""
+BLUE = (0x2F, 0x54, 0x96)
+BOX = "<w:pBdr>" + "".join(f"""<w:{s} w:val="single" w:sz="8" w:space="4" w:color="2F5496"/>"""
+                           for s in ("top", "left", "bottom", "right")) + "</w:pBdr>"
+NIL = ("<w:pBdr>" + "".join(f"""<w:{s} w:space="0" w:sz="0" w:val="nil"/>"""
+                            for s in ("top", "left", "bottom", "right", "between"))
+       + """</w:pBdr><w:shd w:fill="auto" w:val="clear"/>""")
+
+def para(text, own=""):
+    return (f"""<w:p><w:pPr>{own}</w:pPr>"""
+            f"""<w:r><w:t xml:space="preserve">{text}</w:t></w:r></w:p>""")
+
+def make(path):
+    styles = (
+        """<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Liberation Sans" """
+        """w:hAnsi="Liberation Sans"/><w:sz w:val="22"/></w:rPr></w:rPrDefault><w:pPrDefault>"""
+        """<w:pPr><w:spacing w:before="0" w:after="240" w:line="240" w:lineRule="auto"/></w:pPr>"""
+        """</w:pPrDefault></w:docDefaults>"""
+        """<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>""")
+    cell = para(TEXT)
+    paras = [
+        para(TEXT, """<w:spacing w:after="0"/>"""), para(TEXT), para(TEXT, RULE), para(TEXT, SHADE),
+        para(TEXT, BOX), para(TEXT, NIL),
+        """<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/></w:tblPr><w:tblGrid><w:gridCol w:w="9360"/>"""
+        f"""</w:tblGrid><w:tr><w:tc>{cell}</w:tc></w:tr></w:tbl>""",
+        para("Z"),
+    ]
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("[Content_Types].xml", HEAD + f"""<Types xmlns="{CT}">"""
+                   """<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"""
+                   """<Default Extension="xml" ContentType="application/xml"/>"""
+                   f"""<Override PartName="/word/document.xml" ContentType="{OOXML}.document.main+xml"/>"""
+                   f"""<Override PartName="/word/styles.xml" ContentType="{OOXML}.styles+xml"/></Types>""")
+        z.writestr("_rels/.rels", HEAD + f"""<Relationships xmlns="{PKG}"><Relationship Id="rId1" """
+                   f"""Type="{REL}/officeDocument" Target="word/document.xml"/></Relationships>""")
+        z.writestr("word/_rels/document.xml.rels", HEAD + f"""<Relationships xmlns="{PKG}">"""
+                   f"""<Relationship Id="rId1" Type="{REL}/styles" Target="styles.xml"/></Relationships>""")
+        z.writestr("word/styles.xml", HEAD + f"""<w:styles xmlns:w="{W}">{styles}</w:styles>""")
+        z.writestr("word/document.xml", HEAD + f"""<w:document xmlns:w="{W}"><w:body>"""
+                   + "".join(paras) + "</w:body></w:document>")
+
+def measure(png):
+    import gi
+    gi.require_version("GdkPixbuf", "2.0")
+    from gi.repository import GdkPixbuf
+    p = GdkPixbuf.Pixbuf.new_from_file(png)
+    w, h, rs, n, px = p.get_width(), p.get_height(), p.get_rowstride(), p.get_n_channels(), p.get_pixels()
+    top = int(os.environ["TOP"])
+    def at(x, y):
+        i = y * rs + x * n
+        return (px[i], px[i + 1], px[i + 2])
+    def report(label, got, want):
+        verdict = "ok" if abs(got - want) <= 2 else "off"
+        print(f"{label}: {got} (want {want}) {verdict}")
+    def rows(colour):
+        """Rows with more than 400 pixels of `colour`: [(y, first x, last x)]."""
+        out = []
+        for y in range(top, h - 10):
+            xs = [x for x in range(w) if at(x, y) == colour]
+            if len(xs) > 400:
+                out.append((y, xs[0], xs[-1]))
+        return out
+    table = rows((0xC0, 0xBF, 0xBC))
+    if len(table) < 2:
+        print("no table")
+        return
+    left, right = table[0][1], table[0][2]
+    print(f"column: {left}-{right}")
+    # Bands of rows with the ink of text (dark and grey), inside the column.
+    def ink(x, y):
+        r, g, b = at(x, y)
+        return r + g + b < 450 and abs(r - g) < 30 and abs(g - b) < 30
+    bands, cur = [], None
+    for y in range(top, h - 10):
+        xs = [x for x in range(left + 2, right - 1) if ink(x, y)]
+        if xs and len(xs) < 400:
+            if cur is None:
+                cur = [y, y, xs[0], xs[-1]]
+            cur[1], cur[2], cur[3] = y, min(cur[2], xs[0]), max(cur[3], xs[-1])
+        elif cur is not None:
+            bands.append(cur)
+            cur = None
+    print("bands: " + " ".join(f"{b[0]}-{b[1]}@{b[2]}-{b[3]}" for b in bands))
+    if len(bands) < 8:
+        print("too few lines")
+        return
+    one, two, title, shaded, boxed, nil = bands[:6]
+    pitch = two[0] - one[0]
+    print(f"line box: {pitch}")
+    yellow = rows(YELLOW)
+    if not yellow:
+        print("no fill")
+        return
+    # How far the ink of the text starts below its line box, from the fill (which starts
+    # at the line box).
+    ascent = shaded[0] - yellow[0][0]
+    print(f"ink below line top: {ascent}")
+    rule = rows((0, 0, 0))
+    if rule:
+        y, x0, x1 = rule[0]
+        report("rule below the line box", y - (title[0] - ascent + pitch), 1)
+        report("rule left edge from the column", x0 - left, 0)
+        report("rule right edge from the column", x1 - right, 0)
+        print(f"rule rows: {len(rule)}")
+    else:
+        print("no rule")
+    colour = "".join(f"{c:02X}" for c in at((left + right) // 2, yellow[0][0]))
+    print(f"fill colour: {colour}")
+    report("fill left edge from the column", yellow[0][1] - left, 0)
+    report("fill right edge from the column", yellow[0][2] - right, 0)
+    report("fill height", len(yellow), pitch)
+    blue = rows(BLUE)
+    if len(blue) >= 2:
+        (ty, tx0, tx1), (by, _, _) = blue[0], blue[-1]
+        line_top = boxed[0] - ascent
+        report("box top line above the line box", line_top - ty, 7)
+        report("box bottom line below the line box", by + 1 - (line_top + pitch), 7)
+        report("box left line outside the column", left - tx0, 7)
+        report("box right line outside the column", tx1 - right, 7)
+        sides = [x for x in (tx0, tx1) if all(at(x, y) == BLUE for y in range(ty, by + 1))]
+        print(f"box sides from top to bottom: {len(sides)}")
+    else:
+        print("no box")
+    # Below the box and above the table: nothing but the text of the nil paragraph (and
+    # its anti-aliased edges, 2 px around its ink).
+    start, end = (blue[-1][0] + 1 if blue else nil[0] - 20), table[0][0]
+    def text(x, y):
+        return nil[0] - 2 <= y <= nil[1] + 2 and nil[2] - 2 <= x <= nil[3] + 2
+    extra = sum(1 for y in range(start, end) for x in range(40, w - 40)
+                if at(x, y) != (255, 255, 255) and not text(x, y))
+    print(f"nil paragraph extra pixels: {extra}")
+
+def kept(original, saved):
+    def split(path):
+        with zipfile.ZipFile(path) as z:
+            xml = z.read("word/document.xml").decode()
+        at = [m.start() for m in re.finditer(r"<w:p[ >]", xml)][-1]
+        return xml[:at], xml[at:]
+    (a, _), (b, last) = split(original), split(saved)
+    edited = "Z!" in last
+    print(f"borders saved: edit {edited}; others kept: {a == b}; "
+          f"rule {RULE in b}, box {BOX in b}, nil {NIL in b}, shade {SHADE in b}")
+
+if sys.argv[1] == "make":
+    make(sys.argv[2])
+elif sys.argv[1] == "measure":
+    measure(sys.argv[2])
+else:
+    kept(sys.argv[2], sys.argv[3])
+PY
+# SLATE-28: `make PATH` writes lists.docx (Letter with 0.5″ margins, so a 720 px column;
+# Liberation Sans 11 pt, 8 px after each paragraph): a plain HAMBURG line, a line of x (the
+# x-height), the bullet levels 0 and 1 of Google Docs exactly as it writes them (● at 0, text at
+# 360 twips; ○ at 720, text at 1080), two decimal items (numbers at 360, text at 720),
+# three right-justified upper roman items (ending at 720, text at 1080), and a one-cell
+# table (its border is the column); `measure PNG` measures its screenshot.
+cat > /tmp/lists.py <<"PY"
+import os
+import sys
+import zipfile
+
+W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+PKG = "http://schemas.openxmlformats.org/package/2006/relationships"
+CT = "http://schemas.openxmlformats.org/package/2006/content-types"
+OOXML = "application/vnd.openxmlformats-officedocument.wordprocessingml"
+HEAD = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"""
+TEXT = "HAMBURG"
+
+def level(ilvl, fmt, text, left, hanging, jc="left"):
+    return (f"""<w:lvl w:ilvl="{ilvl}"><w:numFmt w:val="{fmt}"/><w:lvlText w:val="{text}"/>"""
+            f"""<w:lvlJc w:val="{jc}"/><w:pPr><w:ind w:left="{left}" w:hanging="{hanging}"/>"""
+            """</w:pPr><w:rPr><w:u w:val="none"/></w:rPr></w:lvl>""")
+
+NUMBERING = (
+    f"""<w:numbering xmlns:w="{W}">"""
+    # The bullet levels of Google Docs, exactly as it writes them.
+    f"""<w:abstractNum w:abstractNumId="0">{level(0, "bullet", "●", 360, 360)}"""
+    f"""{level(1, "bullet", "○", 1080, 360)}</w:abstractNum>"""
+    f"""<w:abstractNum w:abstractNumId="1">{level(0, "decimal", "%1.", 720, 360)}</w:abstractNum>"""
+    f"""<w:abstractNum w:abstractNumId="2">{level(0, "upperRoman", "%1.", 1080, 360, "right")}"""
+    """</w:abstractNum>"""
+    + "".join(f"""<w:num w:numId="{n + 1}"><w:abstractNumId w:val="{n}"/></w:num>""" for n in range(3))
+    + "</w:numbering>")
+
+def para(text, num=None, ilvl=0):
+    numpr = (f"""<w:numPr><w:ilvl w:val="{ilvl}"/><w:numId w:val="{num}"/></w:numPr>"""
+             if num else "")
+    return (f"""<w:p><w:pPr>{numpr}</w:pPr>"""
+            f"""<w:r><w:t xml:space="preserve">{text}</w:t></w:r></w:p>""")
+
+def make(path):
+    styles = (
+        """<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Liberation Sans" """
+        """w:hAnsi="Liberation Sans"/><w:sz w:val="22"/></w:rPr></w:rPrDefault><w:pPrDefault>"""
+        """<w:pPr><w:spacing w:before="0" w:after="120" w:line="240" w:lineRule="auto"/></w:pPr>"""
+        """</w:pPrDefault></w:docDefaults>"""
+        """<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>""")
+    paras = [
+        para(TEXT), para("xxxxxxxx"),
+        para(TEXT, 1, 0), para(TEXT, 1, 1),
+        para(TEXT, 2), para(TEXT, 2),
+        para(TEXT, 3), para(TEXT, 3), para(TEXT, 3),
+        """<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/></w:tblPr><w:tblGrid><w:gridCol w:w="10800"/>"""
+        f"""</w:tblGrid><w:tr><w:tc>{para(TEXT)}</w:tc></w:tr></w:tbl>""",
+        para("Z"),
+    ]
+    sect = ("""<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="720" w:right="720" """
+            """w:bottom="720" w:left="720" w:header="360" w:footer="360" w:gutter="0"/></w:sectPr>""")
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("[Content_Types].xml", HEAD + f"""<Types xmlns="{CT}">"""
+                   """<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"""
+                   """<Default Extension="xml" ContentType="application/xml"/>"""
+                   f"""<Override PartName="/word/document.xml" ContentType="{OOXML}.document.main+xml"/>"""
+                   f"""<Override PartName="/word/styles.xml" ContentType="{OOXML}.styles+xml"/>"""
+                   f"""<Override PartName="/word/numbering.xml" ContentType="{OOXML}.numbering+xml"/></Types>""")
+        z.writestr("_rels/.rels", HEAD + f"""<Relationships xmlns="{PKG}"><Relationship Id="rId1" """
+                   f"""Type="{REL}/officeDocument" Target="word/document.xml"/></Relationships>""")
+        z.writestr("word/_rels/document.xml.rels", HEAD + f"""<Relationships xmlns="{PKG}">"""
+                   f"""<Relationship Id="rId1" Type="{REL}/styles" Target="styles.xml"/>"""
+                   f"""<Relationship Id="rId2" Type="{REL}/numbering" Target="numbering.xml"/></Relationships>""")
+        z.writestr("word/styles.xml", HEAD + f"""<w:styles xmlns:w="{W}">{styles}</w:styles>""")
+        z.writestr("word/numbering.xml", HEAD + NUMBERING)
+        z.writestr("word/document.xml", HEAD + f"""<w:document xmlns:w="{W}"><w:body>"""
+                   + "".join(paras) + sect + "</w:body></w:document>")
+
+def measure(png):
+    import gi
+    gi.require_version("GdkPixbuf", "2.0")
+    from gi.repository import GdkPixbuf
+    p = GdkPixbuf.Pixbuf.new_from_file(png)
+    w, h, rs, n, px = p.get_width(), p.get_height(), p.get_rowstride(), p.get_n_channels(), p.get_pixels()
+    top = int(os.environ["TOP"])
+    def at(x, y):
+        i = y * rs + x * n
+        return (px[i], px[i + 1], px[i + 2])
+    def ink(x, y):
+        return sum(at(x, y)) < 600
+    def report(label, got, want):
+        verdict = "ok" if abs(got - want) <= 2 else "off"
+        print(f"{label}: {got} (want {want}) {verdict}")
+    table = [y for y in range(top, h - 10)
+             if sum(1 for x in range(w) if at(x, y) == (0xC0, 0xBF, 0xBC)) > 400]
+    if not table:
+        print("no table")
+        return
+    row = table[0]
+    cols = [x for x in range(w) if at(x, row) == (0xC0, 0xBF, 0xBC)]
+    left, right = cols[0], cols[-1]
+    print(f"column: {left}-{right} ({right - left + 1} px)")
+    # Bands of rows with ink inside the column, above the table: one a line, and in a
+    # band its pieces of ink apart by 5 px or more (a marker, then the text).
+    bands, cur = [], None
+    for y in range(top, row - 2):
+        xs = [x for x in range(left - 30, right) if ink(x, y)]
+        if xs:
+            if cur is None:
+                cur = [y, y]
+            cur[1] = y
+        elif cur is not None:
+            bands.append(cur)
+            cur = None
+    def pieces(band):
+        y0, y1 = band
+        xs = sorted({x for y in range(y0, y1 + 1) for x in range(left - 30, right) if ink(x, y)})
+        out = []
+        for x in xs:
+            if out and x - out[-1][1] < 5:
+                out[-1][1] = x
+            else:
+                out.append([x, x])
+        return out
+    print("bands: " + " ".join(f"{b[0]}-{b[1]}:" + ",".join(f"{a}-{z}" for a, z in pieces(b))
+                               for b in bands))
+    if len(bands) < 9:
+        print("too few lines")
+        return
+    plain, xs, google, second, one, two, *romans = bands[:9]
+    xheight = xs[1] - xs[0] + 1
+    def item(name, band, marker_at, text_at, end=False):
+        ps = pieces(band)
+        if len(ps) < 2:
+            print(f"{name}: no marker")
+            return None
+        m, t = ps[0], ps[-1]
+        side = "end" if end else "start"
+        report(f"{name} marker {side} from the column",
+               (m[1] + 1 if end else m[0]) - left, marker_at)
+        if text_at is not None:
+            report(f"{name} text from the column", t[0] - left, text_at)
+        return m
+    print(f"plain text from the column: {pieces(plain)[0][0] - left}")
+    bullet = item("google bullet", google, 0, 24)
+    item("second level bullet", second, 48, 72)
+    item("number 1", one, 24, 48)
+    item("number 2", two, 24, 48)
+    for i, band in enumerate(romans, 1):
+        item(f"roman {i}", band, 48, 72 if i == 1 else None, end=True)
+    if bullet:
+        x0, x1 = bullet
+        rows = [y for y in range(google[0], google[1] + 1) if any(ink(x, y) for x in range(x0, x1 + 1))]
+        y0, y1 = rows[0], rows[-1]
+        bw, bh = x1 - x0 + 1, y1 - y0 + 1
+        dark = sum(1 for y in range(y0, y1 + 1) for x in range(x0, x1 + 1) if sum(at(x, y)) < 384)
+        filled = dark / (bw * bh)
+        print(f"google bullet box: {bw}x{bh}, x-height {xheight}, filled {filled:.2f}")
+        circle = abs(bw - bh) <= 2 and bh >= 0.85 * xheight and bh <= 2 * xheight and filled >= 0.5
+        print("google bullet is a filled circle: " + ("yes" if circle else "no"))
+
+make(sys.argv[2]) if sys.argv[1] == "make" else measure(sys.argv[2])
+PY
 # SLATE-21: `make PATH` writes bar.docx (styles Normal, Heading 2, and a custom Fancy);
 # `line PNG` measures the first line of text below the format bar in a screenshot: the
 # left and right edges of its ink and how far its middle is from the middle of the window.
@@ -857,10 +1682,10 @@ session() {
       echo "$1 $t.md: $(python3 /tmp/col.py /shots/$1-$t.png)"
     done
   }
-  # F10 in col-a, Text Width (past New, Open, Save, Save As, Close Window), the Nth width
-  # (1 Narrow, 2 Medium, 3 Wide, 4 Full).
+  # F10 in window TITLE (default col-a), Text Width (past New, Open, Save, Save As, Close
+  # Window), the Nth width (1 Page, 2 Narrow, 3 Medium, 4 Wide, 5 Full).
   text_width() {
-    swaymsg "[title=col-a] focus" >/dev/null; sleep 1
+    swaymsg "[title=${2:-col-a}] focus" >/dev/null; sleep 1
     keys -k F10; for i in 1 2 3 4 5; do keys -k Down; done; keys -k Return
     for i in $(seq $1); do keys -k Down; done
     keys -k Return; sleep 1
@@ -906,10 +1731,11 @@ session() {
   slate /tmp/col-a.md /tmp/col-b.md >>/tmp/app.log 2>&1 & sleep 4
   slate /tmp/col-c.md >>/tmp/app.log 2>&1 & other=$!; sleep 4
   swaymsg "[title=col-a] focus, layout tabbed" >/dev/null; sleep 1
-  titles; measure medium
-  text_width 1; measure narrow
-  text_width 3; measure wide
-  text_width 4; measure full
+  titles; measure page
+  text_width 2; measure narrow
+  text_width 3; measure medium
+  text_width 4; measure wide
+  text_width 5; measure full
   kill $other; sleep 1
   echo "== 9 restart"
   swaymsg "[title=col-a] focus" >/dev/null; sleep 1
@@ -919,10 +1745,10 @@ session() {
   slate /tmp/col-a.md >>/tmp/app.log 2>&1 & sleep 4
   measure restart col-a
   echo "== 10 narrow window"
-  text_width 3; measure wide1280 col-a
+  text_width 4; measure wide1280 col-a
   swaymsg "[title=col-a] floating enable, resize set width 640 px height 600 px, move position center" >/dev/null; sleep 1
   measure wide640 col-a
-  text_width 1; measure narrow640 col-a
+  text_width 2; measure narrow640 col-a
   quit
   echo "== 11 page break"
   slate /tmp/fixture.docx >>/tmp/app.log 2>&1 & sleep 4
@@ -1247,6 +2073,85 @@ t = sorted({float(l) for l in open(\"/tmp/rec.times\")})
 gap = min((b - a for a, b in zip(t, t[1:])), default=0)
 print(f\"typing for 20 s: first journal after ${first:-0} ms, writes {len(t)}, shortest gap {gap * 1000:.0f} ms\")"
   quit
+  echo "== 28 page width"
+  rm -f /tmp/config/slate/settings
+  python3 /tmp/page.py /tmp/page-75.docx 720; python3 /tmp/page.py /tmp/page-none.docx
+  slate /tmp/page-75.docx /tmp/page-none.docx >>/tmp/app.log 2>&1 & sleep 5
+  swaymsg "[title=page-75] focus, layout tabbed" >/dev/null; sleep 1
+  titles
+  # Screenshot each window named (focused in turn) and measure it: "LABEL NAME: rule ...".
+  pages() {
+    local label=$1; shift
+    for t in "$@"; do
+      swaymsg "[title=$t] focus" >/dev/null; sleep 1; shot $label-$t
+      echo "$label $t.docx: $(python3 /tmp/col.py /shots/$label-$t.png)"
+    done
+  }
+  pages page page-75 page-none
+  text_width 3 page-75; pages medium page-75 page-none
+  text_width 1 page-75; pages page-again page-75
+  echo "settings: $(cat /tmp/config/slate/settings 2>/dev/null)"
+  slate /tmp/col-a.md >>/tmp/app.log 2>&1 & sleep 4
+  measure pagemd col-a
+  quit
+  echo "== 29 tab stops"
+  python3 /tmp/tabs.py make /tmp/tabs.docx
+  printf "Tabbed\tline\n" > /tmp/tab.md
+  slate /tmp/tabs.docx >>/tmp/app.log 2>&1 & sleep 4
+  titles
+  # The caret on the last line, Z, below the table the measurements stop at.
+  keys -M ctrl -k End -m ctrl; sleep 1; shot tabs
+  python3 /tmp/tabs.py measure /shots/tabs.png 2>&1; quit
+  slate /tmp/tab.md >>/tmp/app.log 2>&1 & sleep 4
+  titles | sed "s/^/md-/"; a11y page tab.md | sed "s/^/md-tab /"; shot tab-md; quit
+  echo "== 30 embedded fonts"
+  echo "cardo installed: $(fc-list | grep -ci cardo)"
+  for mode in plain obfuscated; do
+    python3 /tmp/embed.py make /tmp/embed-$mode.docx $mode
+    cp /tmp/embed-$mode.docx /tmp/save/embed-$mode.docx
+    slate /tmp/save/embed-$mode.docx >>/tmp/app.log 2>&1 & sleep 4
+    titles | sed "s/^/$mode-/"
+    # The caret on the last line, Z, which the measurements leave out.
+    keys -M ctrl -k End -m ctrl; sleep 1; shot embed-$mode
+    python3 /tmp/embed.py measure /shots/embed-$mode.png 2>&1 | sed "s/^/$mode /"
+    keys "!"; keys -M ctrl s -m ctrl; sleep 1; saved
+    python3 /tmp/embed.py kept /tmp/embed-$mode.docx /tmp/save/embed-$mode.docx 2>&1 | sed "s/^/$mode /"
+    quit
+  done
+  echo "private fonts: $(ls /tmp/rt/slate/fonts | wc -l) mode $(stat -c %a /tmp/rt/slate/fonts)"
+  echo "cardo installed after: $(fc-list | grep -ci cardo)"
+  echo "user font files: $(find ~/.local/share/fonts ~/.fonts -type f 2>/dev/null | wc -l)"
+  echo "== 31 own spacing"
+  python3 /tmp/own.py make /tmp/own.docx
+  cp /tmp/own.docx /tmp/save/own.docx
+  slate /tmp/save/own.docx >>/tmp/app.log 2>&1 & sleep 4
+  titles | sed "s/^/own-/"
+  # The caret on the last line, Z, which the measurements leave out.
+  keys -M ctrl -k End -m ctrl; sleep 1; shot own
+  python3 /tmp/own.py measure /shots/own.png 2>&1
+  keys "!"; keys -M ctrl s -m ctrl; sleep 1; saved
+  python3 /tmp/own.py kept /tmp/own.docx /tmp/save/own.docx 2>&1
+  quit
+  echo "== 32 borders"
+  python3 /tmp/borders.py make /tmp/borders.docx
+  cp /tmp/borders.docx /tmp/save/borders.docx
+  slate /tmp/save/borders.docx >>/tmp/app.log 2>&1 & sleep 4
+  titles | sed "s/^/borders-/"
+  # The caret on the last line, Z, below the table the measurements stop at.
+  keys -M ctrl -k End -m ctrl; sleep 1; shot borders
+  python3 /tmp/borders.py measure /shots/borders.png 2>&1
+  keys "!"; keys -M ctrl s -m ctrl; sleep 1; saved
+  python3 /tmp/borders.py kept /tmp/borders.docx /tmp/save/borders.docx 2>&1
+  quit
+  echo "== 33 list markers"
+  python3 /tmp/lists.py make /tmp/lists.docx
+  slate /tmp/lists.docx >>/tmp/app.log 2>&1 & sleep 4
+  titles | sed "s/^/lists-/"
+  # The caret on the last line, Z, below the table the measurements stop at.
+  keys -M ctrl -k End -m ctrl; sleep 1; shot lists
+  python3 /tmp/lists.py measure /shots/lists.png 2>&1
+  a11y page lists.docx | sed "s/^/lists /"
+  quit
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -1301,7 +2206,7 @@ if [ "$(section "7 bad" | grep -c "^after close: slate exited$")" = 2 ]; then
 else
   echo "FAIL 7: the window closes after the alert"; fail=1
 fi
-for w in medium:624 narrow:480 wide:816 full:1232; do
+for w in page:624 narrow:480 medium:624 wide:816 full:1232; do
   for t in col-a col-b col-c; do
     column "8: ${w%%:*} in $t.md measures ${w#*:} px" "8 width" "${w%%:*} $t\.md" "${w#*:}"
   done
@@ -1522,6 +2427,94 @@ check "27: Discard after a crash keeps the file as it is" "27 recovery" "^discar
 check "27: and leaves no recovery data either" "27 recovery" "^journals after discarding: 0$"
 check "27: typing, the journal is written 5 s after the first edit, then at most every 5 s" \
   "27 recovery" "^typing for 20 s: first journal after (4[5-9]|[5-8][0-9])[0-9]{2} ms, writes [234], shortest gap ([5-9][0-9]{3}|[0-9]{5}) ms$"
+check "28: both Word documents open in their own windows" "28 page width" "^titles: .*page-75\.docx.*page-none\.docx"
+column "28: under Page, the default, Letter with 0.5″ margins measures 720 px" "28 page width" "page page-75\.docx" 720
+column "28: under Page, a .docx without w:sectPr measures 624 px (Letter, 1″ margins)" "28 page width" \
+  "page page-none\.docx" 624
+column "28: Medium makes the 7.5″ page 624 px" "28 page width" "medium page-75\.docx" 624
+column "28: Medium leaves the 6.5″ page 624 px" "28 page width" "medium page-none\.docx" 624
+column "28: Page again restores 720 px" "28 page width" "page-again page-75\.docx" 720
+check "28: the settings file says page" "28 page width" "^settings: text-width=page$"
+column "28: a Markdown window under Page measures Medium's 624 px" "28 page width" "pagemd col-a\.md" 624
+check "29: tabs.docx opens" "29 tab stops" "^titles: .*tabs\.docx"
+check "29: the column is the page's 720 px" "29 tab stops" "^column: [0-9]+ (719|720|721)$"
+check "29: a right stop at the text width ends Remote at the column's right edge" "29 tab stops" \
+  "^remote right edge: .* ok$"
+check "29: text after three default tabs starts at a multiple of the default stop" "29 tab stops" \
+  "^x after three default tabs: .* ok$"
+check "29: a centre stop centres its text on it" "29 tab stops" "^middle centre: .* ok$"
+check "29: a right stop with a leader ends its text at the stop" "29 tab stops" "^42 right edge: .* ok$"
+check "29: the dot leader fills the gap on the baseline, nothing above it" "29 tab stops" \
+  "^leader fills the gap on the baseline: yes$"
+check "29: a Markdown file with a tab opens" "29 tab stops" "^md-titles: .*tab\.md"
+check "29: and reads as written" "29 tab stops" "^md-tab page: Tabbed.line$"
+check "30: Cardo isn't installed in the container" "30 embedded fonts" "^cardo installed: 0$"
+for mode in plain obfuscated; do
+  check "30: ($mode) the document opens" "30 embedded fonts" "^$mode-titles: .*embed-$mode\.docx"
+  check "30: ($mode) the embedded Cardo line measures as Pango measures Cardo, within 2 px" \
+    "30 embedded fonts" "^$mode embedded Cardo: .* face Cardo ok$"
+  check "30: ($mode) ... unlike the system serif" "30 embedded fonts" "^$mode embedded differs from serif: yes$"
+  check "30: ($mode) a roman font neither installed nor embedded draws in the system serif" \
+    "30 embedded fonts" "^$mode roman Nosuchfont Serifish: .* ok$"
+  check "30: ($mode) a swiss one in the system sans" "30 embedded fonts" "^$mode swiss Nosuchfont Sansish: .* ok$"
+  check "30: ($mode) ... which differ" "30 embedded fonts" "^$mode serif differs from sans: yes$"
+  check "30: ($mode) saving an edit keeps fontTable.xml, its relationships, and the font part" \
+    "30 embedded fonts" "^$mode font parts kept: yes 3, document edited: yes$"
+done
+check "30: the face is written once, to a private directory" "30 embedded fonts" "^private fonts: 1 mode 700$"
+check "30: and isn't installed for the user" "30 embedded fonts" "^cardo installed after: 0$"
+check "30: nothing goes in the user's font directories" "30 embedded fonts" "^user font files: 0$"
+s31="31 own spacing"
+check "31: the document opens" "$s31" "^own-titles: .*own\.docx"
+check "31: a paragraph's own space before goes over its style's" "$s31" "^own space before: .* ok$"
+check "31: ... and its own space after" "$s31" "^own space after: .* ok$"
+check "31: its own left indent moves the text in" "$s31" "^own left indent: .* ok$"
+check "31: its own right indent ends right-aligned text that far in" "$s31" "^own right indent: .* ok$"
+check "31: its own hanging first line starts left of its indent" "$s31" "^own hanging first line: .* ok$"
+check "31: ... and its next line at the indent" "$s31" "^own hanging next line: .* ok$"
+check "31: its own exact line spacing sets every line's pitch" "$s31" "^own exact line: .* ok$"
+check "31: an edited paragraph saves with its own spacing and indents, the others as they were" \
+  "$s31" "^last saved: own look True, edit True; others kept: True$"
+s32="32 borders"
+check "32: the document opens" "$s32" "^borders-titles: .*borders\.docx"
+check "32: the résumé's rule lies its space and width under the text's line box" "$s32" \
+  "^rule below the line box: .* ok$"
+check "32: ... from the column's left edge" "$s32" "^rule left edge from the column: .* ok$"
+check "32: ... to its right edge" "$s32" "^rule right edge from the column: .* ok$"
+check "32: ... one pixel thick" "$s32" "^rule rows: 1$"
+check "32: a shaded paragraph's box is its fill colour" "$s32" "^fill colour: FFE599$"
+check "32: ... from the column's left edge" "$s32" "^fill left edge from the column: .* ok$"
+check "32: ... to its right edge" "$s32" "^fill right edge from the column: .* ok$"
+check "32: ... as tall as its line" "$s32" "^fill height: .* ok$"
+check "32: a box's top line lies its space above the text" "$s32" "^box top line above the line box: .* ok$"
+check "32: ... its bottom line below" "$s32" "^box bottom line below the line box: .* ok$"
+check "32: ... its left line outside the column's edge" "$s32" "^box left line outside the column: .* ok$"
+check "32: ... and its right line" "$s32" "^box right line outside the column: .* ok$"
+check "32: ... its sides run from its top line to its bottom" "$s32" "^box sides from top to bottom: 2$"
+check "32: nil borders and an automatic fill draw nothing" "$s32" "^nil paragraph extra pixels: 0$"
+check "32: saving an edit keeps every other paragraph's borders and shading byte for byte" \
+  "$s32" "^borders saved: edit True; others kept: True; rule True, box True, nil True, shade True$"
+s33="33 list markers"
+check "33: the document opens" "$s33" "^lists-titles: .*lists\.docx"
+check "33: its column is the page's 720 px" "$s33" "^column: .* \(720 px\)$"
+check "33: the Google Docs bullet's ink starts at its first line's start (360 - 360 twips)" \
+  "$s33" "^google bullet marker start from the column: .* ok$"
+check "33: ... its text at its left indent, 24 px" "$s33" "^google bullet text from the column: .* ok$"
+check "33: ... the bullet is a filled circle, about an x-height tall" "$s33" \
+  "^google bullet is a filled circle: yes$"
+check "33: a second-level bullet sits at its indent" "$s33" \
+  "^second level bullet marker start from the column: .* ok$"
+check "33: ... its text at its own" "$s33" "^second level bullet text from the column: .* ok$"
+check "33: numbers 1. and 2. sit at their level's first line" "$s33" \
+  "^number 1 marker start from the column: .* ok$"
+check "33: ... both" "$s33" "^number 2 marker start from the column: .* ok$"
+check "33: ... their text at the level's left indent" "$s33" "^number 2 text from the column: .* ok$"
+check "33: right-justified roman numbers end at their first line's start" "$s33" \
+  "^roman 1 marker end from the column: .* ok$"
+check "33: ... II." "$s33" "^roman 2 marker end from the column: .* ok$"
+check "33: ... III." "$s33" "^roman 3 marker end from the column: .* ok$"
+check "33: markers aren't in the accessible text" "$s33" \
+  "^lists page: HAMBURG\|xxxxxxxx(\|HAMBURG){8}\|Z$"
 if [ $fail = 0 ]; then echo "SLATE OK"; else
   echo "SLATE CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

@@ -2,6 +2,27 @@
 
 Releases are added by the ship-it skill.
 
+## Slate v0.3.0 (2026-10-14)
+
+Word documents keep the layout their authors made. A Word document opens at its page's text width (View → Text Width → Page, the new default), so lines wrap and tab-aligned dates and places land where they do in Word and Google Docs. Tabs go to the document's own tab stops, with leaders. Fonts a .docx carries are used to draw it, and a missing font falls back to serif or sans as the document describes it. A paragraph's own spacing, indents, borders, and shading are drawn and saved, and list bullets and numbers are the ones the document defines, at its indents.
+
+- SLATE-23: Open Word documents at their page's text width
+- SLATE-24: Lay out tabs at the document's tab stops
+- SLATE-25: Draw Word documents in their embedded fonts
+- SLATE-26: Draw and save a paragraph's own spacing and indents
+- SLATE-27: Draw and save paragraph borders and shading
+- SLATE-28: Draw Word list markers from their numbering levels
+
+## Slate v0.2.0 (2026-10-14)
+
+Word documents look like themselves. Slate draws each one in its own fonts and paragraph styles (custom styles included), with their spacing, indents, and line spacing. A metric-compatible font stands in when one isn't installed: Carlito for Calibri, Caladea for Cambria, Liberation for Arial, Times New Roman, and Courier New. A format bar over the page sets the paragraph style, font, size, bold, italic, underline, strikethrough, colour, and alignment, and saving a .docx keeps them. After a crash, Slate offers back the unsaved edits of every open document.
+
+- SLATE-19: Read each document's style sheet and fonts from the .docx
+- SLATE-20: Draw each document's own fonts, paragraph spacing, indents, and line spacing
+- SLATE-21: Add a format bar for style, font, size, looks, colour, and alignment
+- SLATE-22: Save the format bar's fonts, styles, and looks in .docx
+- SLATE-17: Journal unsaved edits and offer them back after a crash
+
 ## Slate v0.1.2 (2026-10-13)
 
 Find and replace: Ctrl+F opens a find bar that highlights every match in the document, table cells included, and counts them; Enter and Shift+Enter step through them, and Match Case makes case matter. Ctrl+H adds Replace and Replace All, and one undo takes back a Replace All.

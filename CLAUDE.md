@@ -1,16 +1,17 @@
 # CLAUDE.md
 
-Cronkite: a Linux-native office suite in Rust: one Cargo workspace, three apps. Repo: `github.com/avdrav1/cronkite`; web pages: `sites/<name>/` (cronkite.cc, brick.cronkite.cc, slate.cronkite.cc, frame.cronkite.cc). Suite architecture: `docs/architecture/overview.md`; suite ADRs: `docs/adr/`.
+Cronkite: a Linux-native office suite in Rust: one Cargo workspace, four apps. Repo: `github.com/avdrav1/cronkite`; web pages: `sites/<name>/` (cronkite.cc, brick.cronkite.cc, slate.cronkite.cc, frame.cronkite.cc). Suite architecture: `docs/architecture/overview.md`; suite ADRs: `docs/adr/`.
 
 - **Brick** (`apps/brick`, command `brick`): a fast, lightweight spreadsheet. V0.1 is the best large-CSV editor on Linux; Excel compatibility comes later. Product spec: `apps/brick/docs/SPEC.md`. Work queue: `BACKLOG.md`.
 - **Slate** (`apps/slate`, command `slate`): pageless word processor for .txt, .md, and .docx: one endless column, never paginated, drawn by its own Pango flow. Spec: `docs/specs/slate.md`; design: `docs/adr/0003-slate-document-model.md`, `docs/adr/0005-slate-is-pageless.md`, `docs/adr/0007-slate-editing-engine.md`. SL0 builds a read-only viewer.
 - **Frame** (`apps/frame`, command `frame`): presentation app for .pptx, easier to use than PowerPoint: direct editing with one inspector, plus an outline view. Spec: `docs/specs/frame.md`; design: `docs/adr/0004-frame-presentation-model.md`, `docs/adr/0006-frame-editor.md`. FR0 builds a viewer with a slideshow.
+- **Etch** (`apps/etch`, command `etch`): raster image editor, closer to Paint than to Photoshop: pencil, brush, eraser, fill, shapes, text, selection, crop, resize, rotate; PNG, JPEG, BMP, edited as one RGBA8 image with tiled undo. Spec: `docs/specs/etch.md`; design: `docs/adr/0010-etch-image-model.md`. ET0 builds a canvas prototype.
 
 Everything below about stories, invariants, crates, benchmarks, and ADRs is Brick's unless it says otherwise.
 
 ## How we work
 
-- Build one story at a time with the `next-story` skill. Ship releases with the `ship-it` skill.
+- Build one story at a time with the `next-story` skill (`scripts/backlog.py next <app>`: each app has its own milestone chain in `BACKLOG.md`). Ship releases with the `ship-it` skill (`scripts/ship.sh <app> …`).
 - A story is done only when its acceptance criterion is proven by a test or a benchmark, not by reading the code.
 - Commit format: `<STORY-ID>: <imperative summary>`. One story per branch: `story/<id>-<slug>`.
 - Never push, merge, tag, or deploy without asking first.
@@ -61,11 +62,11 @@ Slate's crates, in `apps/slate/crates/`:
 
 | Crate | Owns |
 | --- | --- |
-| `document-model` | Slate's document model (ADR 0003): blocks, runs as direct formatting over their paragraph's style, style sheets (ADR 0008: each style's resolved font, size, looks, alignment, spacing, line spacing, indents; Slate's built-in sheet for Markdown and text), plain-text reader with encoding and line-ending detection, Markdown reader (`pulldown-cmark`); writers: plain text in the file's encoding and line endings, Markdown copying unedited blocks' bytes from the source |
-| `docx` | DOCX reader: `word/document.xml` with styles (every paragraph style, custom ones included, through based-on and docDefaults, with theme fonts), numbering, hyperlinks, pictures, and tables into the document model; saving by patching the package read: unedited blocks' XML copied, edited and new ones written with the document's own styles and runs' direct formatting, every other part copied; the built-in blank document (`data/blank.docx`) |
+| `document-model` | Slate's document model (ADR 0003): blocks, runs as direct formatting over their paragraph's style, style sheets (ADR 0008: each style's resolved font, size, looks, alignment, spacing, line spacing, indents, tab stops, borders, shading; Slate's built-in sheet for Markdown and text), tab stops and their merging (ADR 0009), a Word document's page text width, default tab stop, and font table with embedded faces, Word numbering levels and their markers (Symbol and Wingdings mapped to Unicode), plain-text reader with encoding and line-ending detection, Markdown reader (`pulldown-cmark`); writers: plain text in the file's encoding and line endings, Markdown copying unedited blocks' bytes from the source |
+| `docx` | DOCX reader: `word/document.xml` with styles (every paragraph style, custom ones included, through based-on and docDefaults, with theme fonts), tab stops and `w:defaultTabStop`, a paragraph's own spacing, indents, borders, and shading, the last section's page text width, the font table with embedded fonts (Word's obfuscated .odttf de-obfuscated), numbering with each level's marker text, alignment, suffix, indents, and look, hyperlinks, pictures, and tables into the document model; saving by patching the package read: unedited blocks' XML copied, edited and new ones written with the document's own styles and runs' direct formatting, every other part copied; the built-in blank document (`data/blank.docx`) |
 | `document-edit` | edits as undoable commands on the document model (ADR 0007), in the document's blocks or a table cell's: text replacements holding the removed and inserted text, paragraph looks (style, alignment), run looks (font, size, bold, italic, underline, strikethrough, colour), the looks summary at the caret or over a selection, list numbering, history that joins typing a word at a time; find (cancellable, case-folding) and replacing one match or all of them as one step; replacing the whole document as one step (crash recovery) |
-| `flow` | the pageless flow's layout state (ADR 0007), toolkit-free: per-block heights in a Fenwick index, estimates replaced by time-sliced measuring (metrics per font, size, and weight), scroll anchoring, paragraph space, indents, and line spacing from each paragraph's style (ADR 0008), tables and pictures, hit-testing, selection, plain and accessible text, splicing in edited blocks; shapes text through a `Shaper` trait |
-| `slate` (`apps/slate`) | the GTK 4 window: open, drop, alerts, menus, the format bar (style, font, size, B/I/U/S, colour, alignment; ADR 0008), the find bar, save and save as (atomic, off the UI thread, asking before closing with changes), crash recovery (journals of unsaved edits written off the UI thread, offered back after a crash), and the page, which draws the flow (snapshot, Pango; each run in its style's font, size, and looks with its own on top) and edits it: caret, input method, keys, undo, drag selection, copy, find's highlights and searches off the UI thread, and accessible text |
+| `flow` | the pageless flow's layout state (ADR 0007), toolkit-free: per-block heights in a Fenwick index, estimates replaced by time-sliced measuring (metrics per font, size, and weight), scroll anchoring, paragraph space, indents, line spacing, tab stops, borders, and shading from each paragraph's style and its own, list markers placed by their numbering level (ADR 0008, 0009), tables and pictures, hit-testing, selection, plain and accessible text, splicing in edited blocks; shapes text through a `Shaper` trait |
+| `slate` (`apps/slate`) | the GTK 4 window: open, drop, alerts, menus (Text Width, Page by default: a Word document's page width; ADR 0009), the format bar (style, font, size, B/I/U/S, colour, alignment; ADR 0008), the find bar, save and save as (atomic, off the UI thread, asking before closing with changes), crash recovery (journals of unsaved edits written off the UI thread, offered back after a crash), embedded fonts loaded for the process through fontconfig and fallbacks by the font table's family, and the page, which draws the flow (snapshot, Pango; each run in its style's font, size, and looks with its own on top; tab stops with leaders) and edits it: caret, input method, keys, undo, drag selection, copy, find's highlights and searches off the UI thread, and accessible text |
 
 Frame's crates, in `apps/frame/crates/`:
 
@@ -76,13 +77,20 @@ Frame's crates, in `apps/frame/crates/`:
 | `deck-edit` | edits as undoable commands on the presentation model (ADR 0006): text edits (typing, delete, Enter, line breaks), slide edits (new on a layout, duplicate, delete, move), shape box edits (move, resize) and snapping with smart guides, formatting (text and paragraph looks, fill, outline, background), layout changes, inserting (text boxes, shapes, pictures into placeholders or centred, tables) and deleting shapes, shrink to fit, the outline (projection and its edits), the canvas's keyboard flow (Ctrl+Enter's next placeholder, Tab and Shift+Tab levels), undo history with amended steps; toolkit-free |
 | `frame` (`apps/frame`) | windows, slide list and slide commands, canvas and its slide renderer (GTK 4 snapshot, Pango), text editing on the canvas with PowerPoint's keyboard flow (caret in new slides' titles, Ctrl+Enter, Tab), selecting, dragging, resizing, and nudging shapes, the inspector sidebar, the Insert menu, picture drop and paste, shrinking text to fit, the outline view, save and save as, dialogs |
 
+Etch's crates, in `apps/etch/crates/`:
+
+| Crate | Owns |
+| --- | --- |
+| `image-model` | Etch's image model (ADR 0010): the RGBA8 `Image` (straight alpha, at most 16384 px a side), `Color`, pixel `Rect`s, the pencil (Bresenham lines stamped with a disc) and the eraser (the same tip writing transparent pixels), and `Document`: operations applied to the image, each returning the rect it changed, with undo (the 64-px tiles an operation replaced) and redo (replaying the operation); no dependencies |
+| `etch` (`apps/etch`) | windows (one per image) with the menu bar, the tool column (`tools.rs`: the tools, their keys, and icons drawn from paths, driving the `win.tool` action), and the status bar (pointer position, zoom, size), New Image, the canvas (tile textures rebuilt only where an operation changed pixels, nearest neighbour from 100%, checkerboard, boundary), its toolkit-free view math (`view.rs`: zoom steps 10%–3200% around a point, pan limits), the pencil and eraser, pan by wheel, middle button, or Space, Ctrl+wheel zoom, undo and redo, `--bench-stroke` |
+
 ## Commands
 
 ```sh
 cargo fmt --all
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace
-cargo run -p brick                       # or -p slate, -p frame
+cargo run -p brick                       # or -p slate, -p frame, -p etch
 cargo test --release --workspace -- --ignored  # perf acceptance tests (timing asserted in release only)
 python3 scripts/gen_corpus.py            # builds corpus/ (gitignored)
 python3 scripts/fetch_delimiter_sample.py  # 50 real-world files into corpus/realworld/ (ENG-4 test)
@@ -90,8 +98,8 @@ python3 scripts/lo_navigation.py         # re-record GRID-3's checklist from Lib
 python3 scripts/lo_functions.py          # re-record formula results from LibreOffice (FML-5..8)
 python3 scripts/lo_formats.py            # re-record number format results from LibreOffice (STYLE-2)
 python3 scripts/lo_xlsx.py fixture|dump FILE  # LibreOffice fixture workbook and dumps (XLSX-*)
-python3 scripts/lo_docx.py fixture|dump FILE  # Slate's LibreOffice fixture document and paragraph dumps (SLATE-3)
-scripts/check_slate.sh [BINARY]          # Slate GUI check in docker: open, drop, show, refuse, text widths, select and copy, editing, tables, input method, accessibility, saving .txt, .md, and .docx, new documents, a .docx's fonts and paragraph spacing measured against Pango, the format bar and saving its looks, find and replace, crash recovery (SLATE-4, -10, -11, -6, -12, -13, -14, -15, -7, -8, -18, -20, -21, -22, -16, -17; scripts/ime_helpers.py is the input method)
+python3 scripts/lo_docx.py fixture|dump|spacing|borders|lists FILE  # Slate's LibreOffice fixture document, paragraph dumps (SLATE-3), and the corpus documents for paragraphs' own spacing and indents (SLATE-26), borders and shading (SLATE-27), and list markers (SLATE-28)
+scripts/check_slate.sh [BINARY]          # Slate GUI check in docker: open, drop, show, refuse, text widths, select and copy, editing, tables, input method, accessibility, saving .txt, .md, and .docx, new documents, a .docx's fonts and paragraph spacing measured against Pango, the format bar and saving its looks, find and replace, crash recovery, page width, tab stops, embedded fonts, paragraphs' own spacing and indents, borders and shading, list markers (SLATE-4, -10, -11, -6, -12, -13, -14, -15, -7, -8, -18, -20, -21, -22, -16, -17, -23, -24, -25, -26, -27, -28; scripts/ime_helpers.py is the input method)
 scripts/ship.sh slate build && scripts/ship.sh slate verify  # Slate's release tarball (dist/), started on Arch, Ubuntu 24.04, Fedora; scripts/check_install_slate.sh: its installer there, .docx and .md opening with it (SLATE-9)
 scripts/ship.sh frame build && scripts/ship.sh frame verify  # Frame's release tarball (dist/), opening and drawing a deck on Arch, Ubuntu 24.04, Fedora; scripts/check_install_frame.sh: its installer there, .pptx opening with it
 cargo run --release -p xlsx --example gen_corpus_xlsx  # corpus/rows_1m.xlsx (BENCH-2)
@@ -103,7 +111,9 @@ scripts/site_shots.sh [OUTDIR]          # cronkite.cc's gallery: the latest rele
 scripts/check_frame.sh [BINARY]          # Frame in a container: decks, drawing, Ctrl+O, drop, alerts, slideshow, editing, slides, save, shapes, inspector, insert, outline, new deck, with undo; the reference task counted against PowerPoint, read back by LibreOffice; the installer and a .pptx double-click (FRAME-4 to FRAME-15)
 python3 -m unittest discover -s scripts  # script tests (corpus generator, backlog helper)
 cargo bench                              # prints the apps/brick/docs/BENCHMARKS.md table (needs corpus/)
-python3 scripts/backlog.py next [brick|slate|frame]|status   # backlog helper; one milestone chain per app
+python3 scripts/backlog.py next [brick|slate|frame|etch]|status   # backlog helper; one milestone chain per app
+(cd video && npm ci && node render.mjs)   # the explainer video (docs/video/explainer-script.md) from HTML scenes, with a synthesised techno soundtrack (video/soundtrack.js) and a voiceover in Microsoft's Irish voice, Connor (video/voice.mjs, cached in video/.voice/; needs the network) -> dist/video/; --serve previews, --still SCENE@SEC checks a frame, --voice NAME picks the narrator
+scripts/check_etch.sh [BINARY]           # Etch GUI check in docker: blank canvas, pencil, undo and redo, window resize, zoom around the pointer and sharp pixels, panning, New Image, the stroke benchmark (ETCH-2), the eraser over the checkerboard and the tool column (ETCH-3)
 ```
 
 ## Performance

@@ -1,0 +1,137 @@
+/* Brick: GTK 4 on Adwaita light, at GTK's own px inside a zoomed window.
+   Grid colours are the theme foreground (rgb 0 0 6) at the alphas grid_view.rs uses. */
+.brick-cam { position: absolute; inset: 0; transform-origin: 0 0; }
+.brick-stat { position: absolute; left: 50%; top: 440px; z-index: 40; opacity: 0; padding: 22px 44px 24px; border-radius: 22px; background: rgba(13, 20, 17, 0.9); color: #3fbf91; font: 500 52px var(--brand); white-space: nowrap; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35); }
+.brick-stat b { font-weight: 800; color: #e6ede9; }
+
+.brick-win .win-body { background: #fafafa; }
+.brick-win .hb-title { font-variant-numeric: tabular-nums; }
+.brick-hb-dd { gap: 4px; padding: 0 8px 0 11px; font-weight: 400; }
+.brick-hb-dd.insensitive { opacity: 0.5; }
+.brick-hb-toggle { font-weight: 600; }
+
+/* format bar (format_bar.rs: spacing 2, margins 6/6/4) */
+.brick-fmt { flex: none; display: flex; align-items: center; gap: 2px; padding: 4px 6px; white-space: nowrap; overflow: hidden; }
+.brick-fmt .sep-v { margin: 6px 4px; }
+.brick-flat { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 34px; height: 34px; padding: 0 9px; border-radius: 6px; color: var(--win-fg); flex: none; }
+.brick-flat.text { font-weight: 600; padding: 0 10px; }
+.brick-flat.on { background: rgba(0, 0, 6, 0.1); }
+.brick-flat.hover { background: rgba(0, 0, 6, 0.07); }
+.brick-font { width: 170px; flex: none; }
+.brick-font .v, .brick-num .v { overflow: hidden; text-overflow: ellipsis; }
+.brick-spin { display: inline-flex; align-items: center; height: 34px; border-radius: 6px; background: rgba(0, 0, 6, 0.06); flex: none; }
+.brick-spin .v { width: 46px; padding: 0 8px; font-variant-numeric: tabular-nums; }
+.brick-spin b { width: 34px; height: 34px; display: grid; place-items: center; font-weight: 400; font-size: 18px; border-left: 1px solid rgba(0, 0, 6, 0.08); }
+.brick-colorbtn { width: 46px; height: 34px; border-radius: 6px; background: rgba(0, 0, 6, 0.08); display: grid; place-items: center; flex: none; }
+.brick-colorbtn i { width: 22px; height: 14px; border-radius: 3px; box-shadow: 0 0 0 1px rgba(0, 0, 6, 0.2); }
+.brick-num { width: 118px; flex: none; }
+
+/* formula bar (formula_bar.rs: spacing 8, margins 6/4) */
+.brick-fbar { flex: none; display: flex; align-items: center; gap: 8px; padding: 4px 6px; }
+.brick-name { width: 140px; flex: none; font-variant-numeric: tabular-nums; }
+.brick-fx { font-style: italic; }
+.brick-input { flex: 1; min-width: 0; }
+
+/* the grid and its scrollbars */
+.brick-mid { flex: 1; min-height: 0; display: flex; }
+.brick-grid { position: relative; flex: 1; min-width: 0; overflow: hidden; font: 400 14.67px/18px var(--ui); font-feature-settings: "tnum"; color: rgba(0, 0, 6, 0.8); --gw: 64px; }
+.brick-grid.xl .brick-c { font-family: "Carlito", var(--ui); }
+.brick-body { position: absolute; left: 0; right: 0; top: 24px; bottom: 0; overflow: hidden; }
+.brick-rows { position: absolute; left: 0; top: 0; }
+.brick-row { display: flex; height: 22px; }
+.brick-rn, .brick-corner { flex: none; width: var(--gw); height: 22px; padding: 3px 0 0 6px; background: rgba(0, 0, 6, 0.07); box-shadow: inset -1px -1px 0 rgba(0, 0, 6, 0.15); white-space: nowrap; overflow: hidden; }
+.brick-rn.mark, .brick-ch.mark { background-image: linear-gradient(rgba(54, 133, 227, 0.25), rgba(54, 133, 227, 0.25)); }
+.brick-c { flex: none; width: 120px; height: 22px; padding: 3px 4px 0; box-shadow: inset -1px -1px 0 rgba(0, 0, 6, 0.15); white-space: pre; overflow: hidden; }
+.brick-row.odd .brick-c { background-color: rgba(0, 0, 6, 0.035); }
+.brick-c.r { text-align: right; }
+.brick-c.ctr { text-align: center; }
+.brick-c.b { font-weight: 700; }
+.brick-c.dimc { color: rgba(0, 0, 6, 0.5); }
+.brick-head { position: absolute; left: 0; top: 0; height: 24px; display: flex; background: #fafafa; }
+.brick-corner { height: 24px; padding: 4px 0 0; text-align: center; color: rgba(0, 0, 6, 0.5); }
+.brick-ch { position: relative; flex: none; width: 120px; height: 24px; background-color: rgba(0, 0, 6, 0.07); box-shadow: inset -1px -1px 0 rgba(0, 0, 6, 0.15); white-space: nowrap; }
+.brick-ch .ttl { position: absolute; left: 4px; top: 4px; overflow: hidden; }
+.brick-ch .ttl i { font-style: normal; color: rgba(0, 0, 6, 0.5); margin-right: 6px; }
+.brick-ch .tag { position: absolute; right: 20px; top: 4px; color: rgba(0, 0, 6, 0.5); }
+.brick-ch .flt { position: absolute; right: 2px; top: 3px; width: 14px; color: rgba(0, 0, 6, 0.5); }
+.brick-ch .tag.blue, .brick-ch .flt.blue { color: #3685e3; }
+.brick-cursor { position: absolute; box-shadow: inset 0 0 0 2px #3685e3; pointer-events: none; }
+.brick-range { position: absolute; background: rgba(54, 133, 227, 0.18); pointer-events: none; }
+.brick-editor { position: absolute; display: flex; align-items: center; padding: 0 3px; background: #fff; box-shadow: inset 0 0 0 2px rgba(53, 132, 228, 0.5); white-space: pre; overflow: hidden; }
+.brick-note { position: absolute; color: rgba(0, 0, 6, 0.5); }
+.brick-vs { flex: none; width: 14px; position: relative; background: #fafafa; box-shadow: inset 1px 0 0 rgba(0, 0, 6, 0.08); }
+.brick-vs i, .brick-hs i { position: absolute; border-radius: 10px; background: rgba(0, 0, 6, 0.32); }
+.brick-vs i { left: 3px; width: 8px; height: 40px; }
+.brick-vs i.held, .brick-hs i.held { background: rgba(0, 0, 6, 0.55); }
+.brick-hs { flex: none; height: 14px; position: relative; margin-right: 14px; background: #fafafa; box-shadow: inset 0 1px 0 rgba(0, 0, 6, 0.08); }
+.brick-hs i { top: 3px; height: 8px; left: 0; }
+
+/* find bar: a revealer that slides up under the grid (main.rs FindBar) */
+.brick-find { flex: none; height: 0; overflow: hidden; position: relative; }
+.brick-findrow { position: absolute; left: 0; right: 0; top: 0; height: 42px; display: flex; align-items: center; gap: 8px; padding: 4px 6px; }
+.brick-search { flex: 1; min-width: 0; }
+.brick-search .ph { color: var(--dim); }
+.brick-note-l { width: 186px; text-align: right; flex: none; color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.brick-scope { flex: none; }
+
+/* sheet tabs (sheets.rs: flat toggles, spacing 2, margins 6) */
+.brick-tabs { flex: none; display: flex; align-items: center; gap: 2px; padding: 6px; }
+.brick-tab { display: inline-flex; align-items: center; height: 34px; padding: 0 12px; border-radius: 6px; font-weight: 600; white-space: nowrap; }
+.brick-tab.on { background: rgba(0, 0, 6, 0.1); }
+.brick-tab.hover { background: rgba(0, 0, 6, 0.06); }
+
+/* status bar (main.rs StatusBar: spacing 18, margins 10/3, caption labels) */
+.brick-status { flex: none; display: flex; align-items: center; gap: 18px; padding: 3px 10px; min-height: 24px; font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.brick-status .r { flex: 1; }
+.brick-status .cancel { font-size: 14.67px; font-weight: 600; height: 34px; display: inline-flex; align-items: center; padding: 0 10px; border-radius: 6px; }
+
+/* the grid's right-click menu (a PopoverMenu with no arrow) */
+.brick-menu { position: absolute; z-index: 30; }
+.brick-menu .popover { position: static; min-width: 0; }
+
+/* the cold open's terminal */
+.brick-term .term-body { font-size: 15px; }
+
+/* ---- LibreOffice Calc (gtk3 VCL, Colibre icons) ------------------------- */
+.brick-lo { position: absolute; display: flex; flex-direction: column; background: #f6f5f4; border-radius: 12px 12px 0 0; overflow: hidden; box-shadow: var(--shadow), 0 0 0 1px rgba(0,0,0,.14); font: 400 14.67px/1.3 var(--ui); color: #2e3436; }
+.brick-lo-title { flex: none; height: 46px; display: flex; align-items: center; justify-content: center; position: relative; background: #ebebeb; border-bottom: 1px solid #d8d8d8; font-weight: 700; }
+.brick-lo-title .x { position: absolute; right: 10px; top: 11px; width: 24px; height: 24px; border-radius: 50%; background: rgba(0,0,0,.08); display: grid; place-items: center; }
+.brick-lo-title .mm { position: absolute; top: 11px; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; }
+.brick-lo-menu { flex: none; display: flex; gap: 2px; height: 28px; align-items: center; padding: 0 4px; font-size: 14px; }
+.brick-lo-menu span { padding: 3px 7px; }
+.brick-lo-tb { flex: none; display: flex; align-items: center; gap: 2px; height: 36px; padding: 0 6px; border-top: 1px solid #e3e2e0; }
+.brick-lo-tb .ic { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 4px; }
+.brick-lo-tb .ic.on { background: #d6d3cf; }
+.brick-lo-tb .sep { width: 1px; height: 22px; margin: 0 5px; background: #cfccc8; }
+.brick-lo-tb .combo { height: 26px; display: flex; align-items: center; justify-content: space-between; padding: 0 6px 0 8px; background: #fff; border: 1px solid #c8c5c1; border-radius: 4px; font-size: 13.5px; }
+.brick-lo-fx { flex: none; display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 6px; border-top: 1px solid #e3e2e0; }
+.brick-lo-fx .nb { width: 110px; height: 26px; background: #fff; border: 1px solid #c8c5c1; border-radius: 4px; padding: 3px 7px; font-size: 13.5px; }
+.brick-lo-fx .in { flex: 1; height: 26px; background: #fff; border: 1px solid #c8c5c1; border-radius: 4px; padding: 3px 7px; font-size: 13.5px; }
+.brick-lo-fx .fi { font: italic 600 15px "Caladea", serif; color: #444; padding: 0 4px; }
+.brick-lo-main { flex: 1; min-height: 0; display: flex; }
+.brick-lo-sheet { position: relative; flex: 1; overflow: hidden; background: #fff; font: 400 14.67px/1 "Carlito", sans-serif; color: #000; }
+.brick-lo-side { flex: none; width: 36px; border-left: 1px solid #d6d3cf; background: #f6f5f4; display: flex; flex-direction: column; align-items: center; gap: 8px; padding-top: 8px; }
+.brick-lo-side i { width: 22px; height: 22px; border-radius: 4px; background: #d0ccc7; }
+.brick-lo-side i:first-child { background: #8fb2e0; }
+.brick-lo-colh { position: absolute; top: 0; height: 21px; display: flex; align-items: center; justify-content: center; background: #f0efee; border-right: 1px solid #c9c7c4; border-bottom: 1px solid #c9c7c4; font: 400 12.5px var(--ui); color: #333; }
+.brick-lo-rowh { position: absolute; left: 0; width: 40px; display: flex; align-items: center; justify-content: center; background: #f0efee; border-right: 1px solid #c9c7c4; border-bottom: 1px solid #c9c7c4; font: 400 12.5px var(--ui); color: #333; }
+.brick-lo-colh.on, .brick-lo-rowh.on { background: #c5d7ee; color: #000; }
+.brick-lo-cell { position: absolute; padding: 0 3px; display: flex; align-items: flex-end; padding-bottom: 3px; border-right: 1px solid #d3d3d3; border-bottom: 1px solid #d3d3d3; white-space: pre; overflow: visible; }
+.brick-lo-cell.r { justify-content: flex-end; }
+.brick-lo-cell.b { font-weight: 700; }
+.brick-lo-cell .ind { position: absolute; right: 0; top: 0; width: 6px; height: 6px; background: #ff0000; }
+.brick-lo-cur { position: absolute; border: 2px solid #000; box-sizing: border-box; }
+.brick-lo-chart { position: absolute; background: #fff; border: 1px solid #b3b3b3; }
+.brick-lo-note { position: absolute; width: 230px; padding: 6px 8px; background: #ffffc0; border: 1px solid #555; font: 400 13.5px/1.35 var(--ui); color: #000; box-shadow: 1px 2px 4px rgba(0,0,0,.25); }
+.brick-lo-note b { display: block; margin-bottom: 2px; }
+.brick-lo-noteline { position: absolute; height: 1px; background: #555; transform-origin: 0 0; }
+.brick-lo-tabs { flex: none; height: 30px; display: flex; align-items: stretch; gap: 0; padding: 0 6px; background: #f6f5f4; border-top: 1px solid #d6d3cf; font-size: 13.5px; }
+.brick-lo-tabs .nav { display: flex; align-items: center; gap: 4px; padding-right: 8px; color: #555; }
+.brick-lo-tabs .tab { display: flex; align-items: center; padding: 0 14px; border-right: 1px solid #d6d3cf; color: #333; }
+.brick-lo-tabs .tab.on { background: #fff; font-weight: 700; border-bottom: 3px solid #3584e4; }
+.brick-lo-status { flex: none; height: 26px; display: flex; align-items: center; gap: 0; padding: 0 8px; background: #f6f5f4; border-top: 1px solid #d6d3cf; font-size: 12.5px; color: #333; white-space: nowrap; }
+.brick-lo-status span { padding: 0 12px; border-right: 1px solid #d6d3cf; }
+.brick-lo-status .grow { flex: 1; text-align: center; }
+.brick-lo-zoom { display: flex; align-items: center; gap: 8px; padding-left: 12px; }
+.brick-lo-zoom b { width: 110px; height: 3px; background: #aaa; position: relative; }
+.brick-lo-zoom b::after { content: ""; position: absolute; left: 50%; top: -5px; width: 4px; height: 13px; background: #555; }

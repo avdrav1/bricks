@@ -7,7 +7,7 @@ use document_edit::{
     text_len, toggle, toggle_list, Change, Container, Edit, Flag, History, Pos,
 };
 use document_model::{
-    read_markdown, Block, Document, ListKind, RunStyle, Style, StyleSheet, Table,
+    read_markdown, Block, Document, ListKind, ParaOverrides, RunStyle, Style, StyleSheet, Table,
 };
 use Container::Top;
 
@@ -984,4 +984,56 @@ fn editing_the_docx_fixtures_table() {
         history.redo(&mut doc).expect("a step to redo");
         assert_eq!(doc, *state, "redoing step {}", i - 1);
     }
+}
+
+/// The own looks of a paragraph or list item block.
+fn own(doc: &Document, block: usize) -> ParaOverrides {
+    match &doc.blocks[block] {
+        Block::Paragraph(p) => p.own,
+        Block::ListItem(item) => item.paragraph.own,
+        other => panic!("no paragraph: {other:?}"),
+    }
+}
+
+/// SLATE-26: a paragraph's own spacing and indents go to both halves of Enter, as in
+/// Word; joining or leaving a list, or moving to another level, leaves its indents to the
+/// list's levels and keeps its spacing; undo gives them all back.
+#[test]
+fn own_paragraph_looks_follow_enter_and_lists_take_their_indents() {
+    let mut doc = md("Alpha beta\n\n- item\n");
+    let mine = ParaOverrides {
+        space_before: Some(120),
+        indent_left: Some(720),
+        indent_first: Some(-360),
+        ..ParaOverrides::default()
+    };
+    for block in &mut doc.blocks {
+        match block {
+            Block::Paragraph(p) => p.own = mine,
+            Block::ListItem(item) => item.paragraph.own = mine,
+            _ => {}
+        }
+    }
+    let original = doc.clone();
+    let spacing = mine.without_indents();
+    let mut history = History::new();
+    let edit = split(&doc, pos(0, 5), pos(0, 5)).unwrap();
+    history.apply(&mut doc, edit);
+    assert_eq!((txt(&doc, 0), own(&doc, 0)), ("Alpha".into(), mine));
+    assert_eq!((txt(&doc, 1), own(&doc, 1)), (" beta".into(), mine));
+    let i = find(&doc, "item");
+    let edit = indent(&doc, Top, i..i + 1, 1).unwrap();
+    history.apply(&mut doc, edit);
+    assert_eq!((item(&doc, i).1, own(&doc, i)), (1, spacing));
+    let edit = toggle_list(&doc, Top, 0..1, false).unwrap();
+    history.apply(&mut doc, edit);
+    assert_eq!(own(&doc, 0), spacing);
+    let edit = join_backward(&doc, pos(0, 0)).unwrap();
+    history.apply(&mut doc, edit);
+    assert!(matches!(doc.blocks[0], Block::Paragraph(_)));
+    assert_eq!(own(&doc, 0), spacing);
+    while history.can_undo() {
+        history.undo(&mut doc);
+    }
+    assert_eq!(doc, original);
 }

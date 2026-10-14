@@ -1,0 +1,12 @@
+/* Vendored from Google Fonts (SIL Open Font License 1.1), latin subsets.
+   Inter stands in for GNOME's Adwaita Sans; Carlito and Caladea are the
+   metric-compatible Calibri and Cambria that Slate draws Word documents with. */
+@font-face { font-family: "League Spartan"; font-weight: 100 900; font-display: block; src: url(fonts/LeagueSpartan.woff2) format("woff2"); }
+@font-face { font-family: "Inter"; font-weight: 100 900; font-display: block; src: url(fonts/Inter.woff2) format("woff2"); }
+@font-face { font-family: "JetBrains Mono"; font-weight: 100 800; font-display: block; src: url(fonts/JetBrainsMono.woff2) format("woff2"); }
+@font-face { font-family: "Carlito"; font-weight: 400; font-display: block; src: url(fonts/Carlito-400.woff2) format("woff2"); }
+@font-face { font-family: "Carlito"; font-weight: 400; font-style: italic; font-display: block; src: url(fonts/Carlito-400i.woff2) format("woff2"); }
+@font-face { font-family: "Carlito"; font-weight: 700; font-display: block; src: url(fonts/Carlito-700.woff2) format("woff2"); }
+@font-face { font-family: "Caladea"; font-weight: 400; font-display: block; src: url(fonts/Caladea-400.woff2) format("woff2"); }
+@font-face { font-family: "Caladea"; font-weight: 400; font-style: italic; font-display: block; src: url(fonts/Caladea-400i.woff2) format("woff2"); }
+@font-face { font-family: "Caladea"; font-weight: 700; font-display: block; src: url(fonts/Caladea-700.woff2) format("woff2"); }

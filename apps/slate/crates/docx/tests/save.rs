@@ -367,7 +367,7 @@ fn every_paragraph_of_the_corpus_takes_an_edit() {
             Document {
                 blocks: blocks.to_vec(),
                 styles: StyleSheet::builtin(),
-                format: document_model::Format::Docx,
+                format: document_model::Format::Docx(Default::default()),
             }
             .visit_text(&mut |t| n += t.matches(" ✎").count());
             n
@@ -453,6 +453,24 @@ fn a_list_in_a_document_without_numbering_gets_numbering() {
         kinds,
         [ordered(1), ordered(2), None, Some(ListKind::Bullet)]
     );
+    // The items Slate started now name the instances saving gave them; one list's two.
+    let nums: Vec<Option<u32>> = back[..4]
+        .iter()
+        .map(|b| match b {
+            Block::ListItem(i) => i.numbering.as_ref().map(|n| n.num),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        nums[0].is_some() && nums[0] == nums[1] && nums[3].is_some(),
+        "{nums:?}"
+    );
+    let mut back = back;
+    for b in &mut back {
+        if let Block::ListItem(i) = b {
+            i.numbering = None;
+        }
+    }
     assert_eq!(back, doc.blocks);
 }
 
@@ -573,7 +591,7 @@ fn libreoffice_reads_the_edits_and_everything_else_as_before() {
             // The heading style added in Word's look, based on the default style.
             let text = "A right-aligned paragraph.";
             want.push(format!(
-                "para\tHeading 4\t-\t\"\"\tend\t240\t120\tauto:100\t0\t0\t\"{text}\""
+                "para\tHeading 4\t-\t\"\"\tend\t240\t120\tauto:100\t0\t0\t0\t0\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t\"{text}\""
             ));
             let run = lines.next().unwrap();
             let font = run.split('\t').nth(2).unwrap();
@@ -976,7 +994,7 @@ fn libreoffice_shows_a_colour_cleared_in_a_coloured_style_as_the_styles() {
     let dest = auto_and_red_cleared("libreoffice-auto");
     assert_eq!(
         lo_dump(&dest, 2183),
-        "para\tFancy\t-\t\"\"\tstart\t0\t0\tauto:100\t0\t0\t\"Auto red\"\n\
+        "para\tFancy\t-\t\"\"\tstart\t0\t0\tauto:100\t0\t0\t0\t0\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t\"Auto red\"\n\
          run\t-\tLiberation Sans\t13\t2E74B5\t\"Auto red\"\n"
     );
 }

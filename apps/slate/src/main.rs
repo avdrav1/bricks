@@ -17,6 +17,7 @@
 
 mod bench;
 mod find_bar;
+mod fonts;
 mod format_bar;
 mod open;
 mod recovery;
@@ -703,7 +704,7 @@ fn show(
         text_width(app)
     };
     let plain = matches!(opened.doc.format, document_model::Format::Text(_));
-    let page = view::Page::new(opened.doc, opened.textures, setting);
+    let page = view::Page::new(opened.doc, opened.textures, &opened.fonts, setting);
     PAGES.with_borrow_mut(|pages| pages.push(page.downgrade()));
     page.update_property(&[gtk::accessible::Property::Label(name)]);
     let scrolled = gtk::ScrolledWindow::builder()

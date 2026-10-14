@@ -71,6 +71,16 @@ Word documents look like themselves, and their fonts and styles can be chosen ([
   - Ubuntu and Debian: `fonts-crosextra-carlito fonts-crosextra-caladea fonts-liberation`
   - Fedora: `google-carlito-fonts google-crosextra-caladea-fonts liberation-sans-fonts liberation-serif-fonts liberation-mono-fonts`
 
+## SL4: Word fidelity (planned)
+
+A Word document keeps the layout its author made, in Slate's pageless column ([ADR 0009](../adr/0009-slate-word-fidelity.md), user decisions). Prompted by a Google Docs résumé whose tab-aligned dates wrapped, whose embedded font fell back to sans, and whose title rule, spacing, and bullets were missing.
+
+- **Page width (SLATE-23).** View → Text Width gains Page, the new default: a Word document's column is its page's width minus its margins (7.5″ = 720 px for Letter with 0.5″ margins); Markdown and text use Medium. Slate stays pageless: Page only borrows the width.
+- **Tab stops (SLATE-24).** Tabs go to the paragraph's own stops (left, centre, right, decimal, with leaders) and then to the document's default stop (0.5″ unless the file says otherwise).
+- **Embedded fonts (SLATE-25).** Fonts a .docx carries are used to draw it. A font that's neither installed nor embedded falls back to serif or sans as the file describes it, so a serif document stays serif.
+- **A paragraph's own spacing, indents, borders, and shading (SLATE-26, SLATE-27).** Set on the paragraph itself or through its style, they're drawn and saved back.
+- **List markers (SLATE-28).** Bullets and numbers are the ones the document defines ("●", "○", "■", symbol-font glyphs) at its indents.
+
 ## Non-goals for now
 
 Track changes, comments, mail merge, macros, fields, collaboration. Pages: a page layout view, page setup, headers and footers, page numbers, and paginated printing or PDF export ([ADR 0005](../adr/0005-slate-is-pageless.md)).

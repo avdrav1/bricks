@@ -1,7 +1,9 @@
 //! Reading a file into a document, off the UI thread (SLATE-4): which reader its name
-//! picks, what Slate refuses and why, the pictures decoded for the document, and what a
-//! save needs to write it back (`saving::Target`).
+//! picks, what Slate refuses and why, the pictures decoded for the document, its embedded
+//! fonts written out (`fonts::write`), and what a save needs to write it back
+//! (`saving::Target`).
 
+use crate::fonts::{self, FontFile};
 use crate::saving::{Docx, Original, Target};
 use crate::view::{texture_key, Textures};
 use document_model::{Block, Document, Format, ImageFormat, ImageSource, MarkdownSource};
@@ -21,6 +23,8 @@ pub struct Opened {
     /// The file's size and modification time as read (`None` for a new document): crash
     /// recovery puts edits back only onto the same file.
     pub identity: Option<(u64, u64)>,
+    /// Its embedded fonts' faces, written out for fontconfig.
+    pub fonts: Vec<FontFile>,
 }
 
 /// Where the blocks came from, for a save.
@@ -140,15 +144,16 @@ fn ready(mut doc: Document, mut source: Source) -> Opened {
         Source::Markdown(s) => s.set_blocks(doc.blocks.clone()),
         Source::Docx(s, _) => s.set_blocks(doc.blocks.clone()),
     }
-    let target = match (doc.format, source) {
-        (Format::Markdown(info), Source::Markdown(source)) => Target::Markdown(info, Some(source)),
-        (Format::Docx, Source::Docx(source, original)) => Target::Docx(Docx {
+    let target = match (&doc.format, source) {
+        (Format::Markdown(info), Source::Markdown(source)) => Target::Markdown(*info, Some(source)),
+        (Format::Docx(_), Source::Docx(source, original)) => Target::Docx(Docx {
             source,
             original: Arc::new(original),
         }),
-        (Format::Text(info), _) => Target::Text(info),
+        (Format::Text(info), _) => Target::Text(*info),
         (format, _) => unreachable!("{format:?} read without its source"),
     };
+    let fonts = doc.format.fonts().map(fonts::write).unwrap_or_default();
     let mut textures = Textures::new();
     decode_pictures(&doc.blocks, &mut textures);
     let words = doc.word_count();
@@ -158,6 +163,7 @@ fn ready(mut doc: Document, mut source: Source) -> Opened {
         words,
         target,
         identity: None,
+        fonts,
     }
 }
 

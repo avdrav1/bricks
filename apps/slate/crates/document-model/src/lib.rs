@@ -9,15 +9,24 @@
 //! DOCX in the `docx` crate. Writers convert it back: plain text ([`write_text`]) and
 //! Markdown ([`write_markdown`]).
 
+mod fonts;
 mod markdown;
 mod matching;
+mod numbering;
 mod styles;
+mod tabs;
 mod text;
 mod write;
 
+pub use fonts::{EmbeddedFace, FaceKind, Font, FontFamily, FontPitch, FontTable};
 pub use markdown::{load_linked_images, read_markdown, read_markdown_source, MarkdownSource};
 pub use matching::{match_blocks, match_blocks_by};
-pub use styles::{LineSpacing, Look, ParaLook, Style, StyleSheet};
+pub use numbering::{symbol_text, ListLevel, ListNumbering, MarkerAlign, MarkerSuffix, Numbering};
+pub use styles::{
+    Border, BorderOverrides, BorderStyle, Borders, LineSpacing, Look, ParaLook, ParaOverrides,
+    ParaSpacing, Shading, Style, StyleSheet,
+};
+pub use tabs::{effective_tabs, merge_tabs, TabAlign, TabLeader, TabStop};
 pub use text::{decode, read_text, Encoding, LineEnding, TextInfo};
 pub use write::{encode, write_markdown, write_text, Unencodable};
 
@@ -36,11 +45,11 @@ pub struct Document {
 }
 
 /// The format a document was read from, with what a save needs to write it the same way.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Format {
     Text(TextInfo),
     Markdown(TextInfo),
-    Docx,
+    Docx(DocxInfo),
 }
 
 impl Format {
@@ -49,7 +58,85 @@ impl Format {
         match self {
             Format::Text(_) => "Plain text",
             Format::Markdown(_) => "Markdown",
-            Format::Docx => "Word document",
+            Format::Docx(_) => "Word document",
+        }
+    }
+
+    /// The page's text width in twips, for a format that has pages (ADR 0009).
+    pub fn page_text_width(&self) -> Option<u32> {
+        match self {
+            Format::Docx(info) => Some(info.text_width),
+            Format::Text(_) | Format::Markdown(_) => None,
+        }
+    }
+
+    /// The default tab stop's interval in twips, for a format that sets one (ADR 0009);
+    /// Markdown and text have four spaces' width.
+    pub fn default_tab(&self) -> Option<u32> {
+        match self {
+            Format::Docx(info) => Some(info.default_tab),
+            Format::Text(_) | Format::Markdown(_) => None,
+        }
+    }
+
+    /// The document's font table, for a format that has one (ADR 0009).
+    pub fn fonts(&self) -> Option<&FontTable> {
+        match self {
+            Format::Docx(info) => Some(&info.fonts),
+            Format::Text(_) | Format::Markdown(_) => None,
+        }
+    }
+
+    /// The level a list item of a document in this format lays out with (ADR 0009): in a
+    /// Word document, its numbering instance's level when that exists and is bulleted as
+    /// the item is (as saving keeps the instance only then), else Slate's own level
+    /// ([`ListLevel::slate`]); `None` in Markdown and text, whose lists the viewer lays
+    /// out.
+    pub fn list_level(&self, item: &ListItem) -> Option<&ListLevel> {
+        let Format::Docx(info) = self else {
+            return None;
+        };
+        let bullet = !matches!(item.kind, ListKind::Ordered { .. });
+        let level = item.level.min(8);
+        item.numbering
+            .as_ref()
+            .and_then(|n| info.numbering.level(n.num, level))
+            .filter(|l| l.bulleted() == bullet)
+            .or_else(|| Some(ListLevel::slate(bullet, level)))
+    }
+}
+
+/// A Word document's page layout, as Slate's pageless column borrows it, and its fonts
+/// (ADR 0009).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocxInfo {
+    /// The last section's page width less its left and right margins and gutter, in
+    /// twips (1/1440″).
+    pub text_width: u32,
+    /// Past a paragraph's last tab stop, tabs advance to multiples of this from the text's
+    /// left edge (`w:defaultTabStop` in `word/settings.xml`), in twips.
+    pub default_tab: u32,
+    /// `word/fontTable.xml`: each font's class and embedded faces; shared, as documents
+    /// are cloned for crash recovery.
+    pub fonts: Arc<FontTable>,
+    /// `word/numbering.xml`: each list level's marker and indents; shared as `fonts`.
+    pub numbering: Arc<Numbering>,
+}
+
+impl DocxInfo {
+    /// Letter (8.5″) with 1″ margins: 6.5″, Word's page when a document gives none.
+    pub const LETTER_TEXT_WIDTH: u32 = 12_240 - 2 * 1_440;
+    /// Word's default tab stop when its settings give none: 0.5″.
+    pub const DEFAULT_TAB: u32 = 720;
+}
+
+impl Default for DocxInfo {
+    fn default() -> Self {
+        Self {
+            text_width: Self::LETTER_TEXT_WIDTH,
+            default_tab: Self::DEFAULT_TAB,
+            fonts: Arc::default(),
+            numbering: Arc::default(),
         }
     }
 }
@@ -77,6 +164,14 @@ pub struct Paragraph {
     /// paragraphs continue (1 = inside a first-level item), or the quote depth beyond one.
     pub indent: u8,
     pub runs: Vec<Run>,
+    /// Its own tab stops, on top of its style's ([`StyleSheet::tab_stops`]), clears
+    /// included, in position order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tabs: Vec<TabStop>,
+    /// Its own spacing, indents, borders, and shading, on top of its style's
+    /// ([`StyleSheet::spacing`], [`StyleSheet::borders`], [`StyleSheet::shading`]).
+    #[serde(default, skip_serializing_if = "ParaOverrides::is_empty")]
+    pub own: ParaOverrides,
 }
 
 impl Paragraph {
@@ -167,6 +262,25 @@ pub struct ListItem {
     /// Nesting level, 0 for a top-level item.
     pub level: u8,
     pub paragraph: Paragraph,
+    /// A Word list item's numbering instance and paragraph mark ([`Format::list_level`]);
+    /// `None` in Markdown and text, and for lists Slate starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub numbering: Option<ListNumbering>,
+}
+
+impl ListItem {
+    /// Its marker's text: with a Word level `level` ([`Format::list_level`]), a bullet's
+    /// level text or a number's label; without one, the viewer's (bullets by level, the
+    /// label, task boxes).
+    pub fn marker<'a>(&'a self, level: Option<&'a ListLevel>) -> &'a str {
+        match (&self.kind, level) {
+            (ListKind::Bullet, Some(level)) => &level.text,
+            (ListKind::Bullet, None) => ["•", "◦", "▪"][usize::from(self.level) % 3],
+            (ListKind::Ordered { label, .. }, _) => label,
+            (ListKind::Task { checked: true }, _) => "☑",
+            (ListKind::Task { checked: false }, _) => "☐",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -181,17 +181,19 @@ pub fn attributes(
     Some((unit.start + chars(s), unit.start + chars(e), looks))
 }
 
-/// A font's family, size in points, weight, and style.
+/// A font's family (the first of a fallback list, the document's name), size in points,
+/// weight, and style.
 fn font_attributes(font: &pango::FontDescription) -> Looks {
     let style = match font.style() {
         pango::Style::Italic => "italic",
         pango::Style::Oblique => "oblique",
         _ => "normal",
     };
+    let family = font.family().unwrap_or_default();
     vec![
         (
             "family-name",
-            font.family().map(|f| f.to_string()).unwrap_or_default(),
+            family.split(',').next().unwrap_or_default().to_owned(),
         ),
         (
             "size",

@@ -2,14 +2,29 @@
 //! nodes of their own), with the viewer's spacing rules, measuring through a [`Shaper`],
 //! estimating without one, and walking it to paint and to hit-test.
 //!
-//! A paragraph's space above and below, its left and first-line indents, and its line
-//! spacing come from its style ([`ParaLook`]); lists, code blocks, tables, rules, and page
-//! breaks keep the viewer's own spacing.
+//! A paragraph's space above and below, its left, right, and first-line indents, and its
+//! line spacing are its style's with its own on top ([`StyleSheet::spacing`], ADR 0009),
+//! and contextual spacing drops the space between two paragraphs of one style. A Word list
+//! item's are too, with its level's indents between them; its marker and text go where
+//! Word puts them ([`Content::place`]), which takes the marker's width, so they are placed
+//! again when it is measured. A Markdown or text list item keeps the viewer's list spacing
+//! and its level's indent unless it has its own; code blocks, tables, rules, and page breaks
+//! keep the viewer's own spacing.
+//!
+//! A paragraph's borders and shading ([`StyleSheet::borders`], [`StyleSheet::shading`])
+//! frame it as Word does: its top and bottom lines lie their space from the text, and they
+//! and their spaces add to its height, inside its space before and after; its left and
+//! right lines lie their space outside its indents. Paragraphs bordered together
+//! ([`StyleSheet::bordered_together`]) share one box: the top line above the first, the
+//! bottom line below the last, the between line above each of the others, and the box
+//! (its sides and its shading) runs on through the space between them. Shading fills the
+//! box to its lines; without borders, the text's indented lines.
 
-use crate::content::{code_text, floor_boundary, Content};
-use crate::{LayoutKey, LeafId, Located, Look, Metrics, Paint, Position, Shaper, MONOSPACE};
+use crate::content::{code_text, floor_boundary, Content, MarkerWidth};
+use crate::{Dash, LayoutKey, LeafId, Located, Look, Metrics, Paint, Position, Shaper, MONOSPACE};
 use document_model::{
-    Block, Document, Format, Image, LineSpacing, ParaLook, Paragraph, Style, StyleSheet,
+    Block, Border, BorderStyle, Document, Format, Image, LineSpacing, Paragraph, Rgb, Style,
+    StyleSheet,
 };
 use std::ops::Range;
 
@@ -154,10 +169,12 @@ pub(crate) struct TextBox {
     pub above: i32,
     pub below: i32,
     /// The text's left edge from the box's: the paragraph's left indent, less a hanging
-    /// first line's.
+    /// first line's ([`Content::place`]).
     pub indent: i32,
-    /// A list item: its marker hangs in the indent's last level.
-    pub marker: bool,
+    /// The text's right edge from the box's: the paragraph's right indent.
+    pub right: i32,
+    /// A list item's marker's left edge from the box's.
+    pub marker: Option<f64>,
     /// A code block: its band starts this far in.
     pub band: Option<i32>,
     /// Its first run's look ([`Looks`]), for estimates.
@@ -166,6 +183,27 @@ pub(crate) struct TextBox {
     pub line: LineSpacing,
     /// The text's height measured at `laid`.
     pub text_height: i32,
+    /// A paragraph's borders and shading, when it has any.
+    pub frame: Option<Frame>,
+}
+
+/// A paragraph's borders and shading as laid out around its text (ADR 0009). Its space
+/// before is `above` less `zone.0`, its space after `below` less `zone.1`.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Frame {
+    /// The line drawn above the text: its top line, or a group's between line above each
+    /// paragraph but the first.
+    pub top: Border,
+    /// The line drawn below the text: its bottom line, the last of a group's only.
+    pub bottom: Border,
+    pub left: Border,
+    pub right: Border,
+    pub fill: Option<Rgb>,
+    /// How far the box reaches out from the text, in pixels: above, below, left, right.
+    pub zone: (i32, i32, i32, i32),
+    /// The box runs on through the space before into the paragraph above's (a group's
+    /// paragraphs but the first), and through the space after into the one below's.
+    pub open: (bool, bool),
 }
 
 #[derive(Debug)]
@@ -213,7 +251,11 @@ pub(crate) struct Builder<'a> {
     /// Top-level blocks holding a page break, in order.
     pub break_tops: Vec<usize>,
     styles: &'a StyleSheet,
+    /// The document's format, which gives list items their levels.
+    format: &'a Format,
     plain: bool,
+    /// The document's default tab stop ([`Content::Paragraph`]'s `default_tab`).
+    default_tab: Option<u32>,
     /// The first leaf's number: leaves before the stretch built.
     base: u32,
     /// The next layout key.
@@ -227,7 +269,9 @@ impl<'a> Builder<'a> {
             page_breaks: 0,
             break_tops: Vec::new(),
             styles: &doc.styles,
+            format: &doc.format,
             plain: matches!(doc.format, Format::Text(_)),
+            default_tab: doc.format.default_tab(),
             base: base as u32,
             keys,
         }
@@ -236,7 +280,10 @@ impl<'a> Builder<'a> {
     /// Nodes for top-level blocks `range` of `all`, their looks numbered in `looks`.
     pub fn tops(&mut self, looks: &mut Looks, all: &[Block], range: Range<usize>) -> Vec<Node> {
         range
-            .map(|i| self.block(looks, &all[i], all.get(i + 1), vec![i as u32], false))
+            .map(|i| {
+                let (prev, next) = neighbours(all, i);
+                self.block(looks, &all[i], prev, next, vec![i as u32], false)
+            })
             .collect()
     }
 
@@ -252,7 +299,8 @@ impl<'a> Builder<'a> {
         for (i, block) in blocks.iter().enumerate() {
             let mut path = prefix.to_vec();
             path.push(i as u32);
-            nodes.push(self.block(looks, block, blocks.get(i + 1), path, header));
+            let (prev, next) = neighbours(blocks, i);
+            nodes.push(self.block(looks, block, prev, next, path, header));
         }
         nodes
     }
@@ -287,6 +335,7 @@ impl<'a> Builder<'a> {
         &mut self,
         looks: &mut Looks,
         block: &Block,
+        prev: Option<&Block>,
         next: Option<&Block>,
         path: Vec<u32>,
         header: bool,
@@ -297,19 +346,17 @@ impl<'a> Builder<'a> {
                     paragraph: p,
                     styles: self.styles,
                     list: None,
+                    level: None,
                     header,
+                    default_tab: self.default_tab,
                 };
                 let leaf = self.leaf(path, Some(&content.text()));
                 let style = self.styles.style_of(&p.style);
-                let mut b = TextBox::paragraph(leaf, looks, p, style, header);
-                let para: &ParaLook = &style.para;
-                // Plain text's paragraphs are the file's lines, without space between.
-                if !self.plain {
-                    b.above = px(i64::from(para.space_before));
-                    b.below = px(i64::from(para.space_after));
-                }
-                let left = i32::from(p.indent) * LEVEL_INDENT + px(i64::from(para.indent_left));
-                b.indent = (left + content.first_indent().min(0)).max(0);
+                let line = content.line_spacing();
+                let mut b = TextBox::paragraph(leaf, looks, p, style, line, header);
+                self.place(&mut b, block, prev, next);
+                b.indent = content.place(MarkerWidth::default()).left;
+                b.right = content.text_right();
                 Kind::Text(b)
             }
             Block::ListItem(item) => {
@@ -317,14 +364,19 @@ impl<'a> Builder<'a> {
                     paragraph: &item.paragraph,
                     styles: self.styles,
                     list: Some(item),
+                    level: self.format.list_level(item),
                     header,
+                    default_tab: self.default_tab,
                 };
                 let leaf = self.leaf(path, Some(&content.text()));
                 let style = self.styles.style_of(&item.paragraph.style);
-                let mut b = TextBox::paragraph(leaf, looks, &item.paragraph, style, header);
-                b.below = self.item_below(next);
-                b.indent = i32::from(item.level) * LEVEL_INDENT + LEVEL_INDENT;
-                b.marker = true;
+                let line = content.line_spacing();
+                let mut b = TextBox::paragraph(leaf, looks, &item.paragraph, style, line, header);
+                self.place(&mut b, block, prev, next);
+                let place = content.place(MarkerWidth::default());
+                b.indent = place.left;
+                b.right = content.text_right();
+                b.marker = place.marker;
                 Kind::Text(b)
             }
             Block::CodeBlock(code) => {
@@ -424,21 +476,173 @@ impl<'a> Builder<'a> {
         }
     }
 
-    /// Give a top-level list item's node the space its new `next` block calls for, keeping
-    /// its measurement. False if it isn't a list item.
-    pub fn respace(&self, node: &mut Node, next: Option<&Block>) -> bool {
-        let Kind::Text(b) = &mut node.kind else {
-            return false;
+    /// The space above and below paragraph or list item `block`, between `prev` and `next`
+    /// (ADR 0009): a paragraph's or Word list item's, its style's with its own on top; a
+    /// Markdown or text list item's own, else the viewer's list spacing. With contextual
+    /// spacing, none against a paragraph or list item in the same style. Plain text's
+    /// paragraphs are the file's lines, without space between. `None` for other blocks.
+    fn around(
+        &self,
+        block: &Block,
+        prev: Option<&Block>,
+        next: Option<&Block>,
+    ) -> Option<(i32, i32)> {
+        let (p, list) = match block {
+            Block::Paragraph(p) => (p, false),
+            Block::ListItem(item) => (&item.paragraph, self.format.list_level(item).is_none()),
+            _ => return None,
         };
-        if !b.marker {
-            return false;
+        if self.plain {
+            return Some((0, 0));
         }
-        let below = self.item_below(next);
-        let by = below - b.below;
-        b.below = below;
+        let s = self.styles.spacing(p);
+        let style = self.styles.style_of(&p.style);
+        let joined = |other: Option<&Block>| {
+            s.contextual
+                && other
+                    .and_then(paragraph_of)
+                    .is_some_and(|o| std::ptr::eq(self.styles.style_of(&o.style), style))
+        };
+        let (before, after) = if list {
+            (p.own.space_before, p.own.space_after)
+        } else {
+            (Some(s.space_before), Some(s.space_after))
+        };
+        let above = match before {
+            Some(t) if !joined(prev) => px(i64::from(t)),
+            _ => 0,
+        };
+        let below = match after {
+            Some(_) if joined(next) => 0,
+            Some(t) => px(i64::from(t)),
+            None => self.item_below(next),
+        };
+        Some((above, below))
+    }
+
+    /// Set text box `b`'s space above and below and its frame, for paragraph or list item
+    /// `block` between `prev` and `next`: the frame's lines and their spaces go inside the
+    /// space before and after.
+    fn place(&self, b: &mut TextBox, block: &Block, prev: Option<&Block>, next: Option<&Block>) {
+        let (above, below) = self.around(block, prev, next).unwrap_or_default();
+        b.frame = self.frame(block, prev, next);
+        let (top, bottom) = b.frame.as_ref().map_or((0, 0), |f| (f.zone.0, f.zone.1));
+        (b.above, b.below) = (above + top, below + bottom);
+    }
+
+    /// The borders and shading of paragraph or list item `block` between `prev` and `next`
+    /// (ADR 0009), grouped with the paragraphs it is bordered together with; `None` without
+    /// any, in plain text, and for other blocks.
+    fn frame(&self, block: &Block, prev: Option<&Block>, next: Option<&Block>) -> Option<Frame> {
+        if self.plain {
+            return None;
+        }
+        let p = paragraph_of(block)?;
+        let borders = self.styles.borders(p);
+        let fill = self.styles.shading(p).fill;
+        if !borders.any() && fill.is_none() {
+            return None;
+        }
+        let open_above = prev
+            .and_then(paragraph_of)
+            .is_some_and(|o| self.styles.bordered_together(o, p));
+        let open_below = next
+            .and_then(paragraph_of)
+            .is_some_and(|o| self.styles.bordered_together(p, o));
+        let top = if open_above {
+            borders.between
+        } else {
+            borders.top
+        };
+        let bottom = if open_below {
+            Border::default()
+        } else {
+            borders.bottom
+        };
+        Some(Frame {
+            zone: (
+                reach(&top),
+                reach(&bottom),
+                reach(&borders.left),
+                reach(&borders.right),
+            ),
+            top,
+            bottom,
+            left: borders.left,
+            right: borders.right,
+            fill,
+            open: (open_above, open_below),
+        })
+    }
+
+    /// Give a top-level paragraph's or list item's node the space and frame its neighbours
+    /// `prev` and `next` now call for (they were inserted or removed), keeping its
+    /// measurement; how much taller it got.
+    pub fn respace(
+        &self,
+        node: &mut Node,
+        block: &Block,
+        prev: Option<&Block>,
+        next: Option<&Block>,
+    ) -> i32 {
+        let Kind::Text(b) = &mut node.kind else {
+            return 0;
+        };
+        if paragraph_of(block).is_none() {
+            return 0;
+        }
+        let (above, below) = (b.above, b.below);
+        self.place(b, block, prev, next);
+        let by = b.above - above + b.below - below;
         node.height += by;
         node.laid_height += by;
-        true
+        by
+    }
+}
+
+/// The thickness of a border line's strokes in whole pixels at 96 dpi, at least 1: a
+/// double line's two strokes each are, with a gap as wide between them.
+fn stroke(b: &Border) -> i32 {
+    let eighths = match b.style {
+        BorderStyle::Thick => 2 * u32::from(b.width),
+        _ => u32::from(b.width),
+    };
+    // An eighth of a point is 1/6 px.
+    ((f64::from(eighths) / 6.0).round() as i32).max(1)
+}
+
+/// How far border `b`'s strokes and gaps reach, in pixels.
+fn strokes(b: &Border) -> i32 {
+    match b.style {
+        BorderStyle::Double => 3 * stroke(b),
+        _ => stroke(b),
+    }
+}
+
+/// How far border `b` reaches out from the text, its space and its lines, in whole pixels
+/// (never less than its strokes); 0 without a line.
+fn reach(b: &Border) -> i32 {
+    if b.is_drawn() {
+        px(i64::from(b.reach())).max(strokes(b))
+    } else {
+        0
+    }
+}
+
+/// The blocks before and after block `i` of `blocks`.
+pub(crate) fn neighbours(blocks: &[Block], i: usize) -> (Option<&Block>, Option<&Block>) {
+    (
+        i.checked_sub(1).and_then(|j| blocks.get(j)),
+        blocks.get(i + 1),
+    )
+}
+
+/// The paragraph of a paragraph or list item.
+fn paragraph_of(block: &Block) -> Option<&Paragraph> {
+    match block {
+        Block::Paragraph(p) => Some(p),
+        Block::ListItem(item) => Some(&item.paragraph),
+        _ => None,
     }
 }
 
@@ -504,11 +708,9 @@ pub(crate) fn text_place(
     width: i32,
 ) -> Option<(i32, f64, i32)> {
     match &node.kind {
-        Kind::Text(b) if b.leaf == leaf => Some((
-            x + b.indent,
-            y + f64::from(b.above),
-            (width - b.indent).max(1),
-        )),
+        Kind::Text(b) if b.leaf == leaf => {
+            Some((x + b.indent, y + f64::from(b.above), b.wrap(width)))
+        }
         Kind::Table(table) => {
             let top = y + f64::from(TABLE_MARGIN);
             table.rows.iter().find_map(|row| {
@@ -552,21 +754,24 @@ impl TextBox {
             above: 0,
             below: 0,
             indent: 0,
-            marker: false,
+            right: 0,
+            marker: None,
             band: None,
             look,
             line: LineSpacing::default(),
             text_height: 1,
+            frame: None,
         }
     }
 
     /// The box of paragraph `p` in `style` (in a table's header row: `header`): its first
-    /// run's look, as the shaper draws it, and the style's line spacing.
+    /// run's look, as the shaper draws it, and its line spacing `line`.
     fn paragraph(
         leaf: LeafId,
         looks: &mut Looks,
         p: &Paragraph,
         style: &Style,
+        line: LineSpacing,
         header: bool,
     ) -> Self {
         let look = &style.run;
@@ -583,9 +788,14 @@ impl TextBox {
             None => looks.id(&look.font, look.size, look.bold || header),
         };
         TextBox {
-            line: style.para.line,
+            line,
             ..TextBox::new(leaf, id)
         }
+    }
+
+    /// The width its text wraps at in a box `width` wide: between its indents.
+    pub(crate) fn wrap(&self, width: i32) -> i32 {
+        (width - self.indent - self.right).max(1)
     }
 }
 
@@ -615,18 +825,23 @@ pub(crate) fn block_at<'a>(doc: &'a Document, path: &[u32]) -> (&'a Block, bool)
 /// The leaf at `path` as a shaper lays it out; `None` for a page break or rule, and for a
 /// picture (which is shown, or labelled through [`Content::PictureLabel`]).
 pub(crate) fn content_at<'a>(doc: &'a Document, path: &[u32]) -> Option<Content<'a>> {
+    let default_tab = doc.format.default_tab();
     match block_at(doc, path) {
         (Block::Paragraph(p), header) => Some(Content::Paragraph {
             paragraph: p,
             styles: &doc.styles,
             list: None,
+            level: None,
             header,
+            default_tab,
         }),
         (Block::ListItem(item), header) => Some(Content::Paragraph {
             paragraph: &item.paragraph,
             styles: &doc.styles,
             list: Some(item),
+            level: doc.format.list_level(item),
             header,
+            default_tab,
         }),
         (Block::CodeBlock(code), _) => Some(Content::Code(code)),
         (Block::Raw(raw), _) => Some(Content::Raw(raw)),
@@ -693,7 +908,17 @@ pub(crate) fn measure(node: &mut Node, width: i32, cx: &mut Cx<'_>) -> i32 {
         Kind::Text(b) => {
             let leaf = &mut cx.leaves[b.leaf.index()];
             let content = content_at(cx.doc, &leaf.path).expect("a text leaf has content");
-            let wrap = (width - b.indent).max(1);
+            // A Word list item's text goes where its marker, as wide as it is, sends it.
+            if let Some(marker) = content
+                .measures_marker()
+                .then(|| content.marker())
+                .flatten()
+            {
+                let place = content.place(cx.shaper.marker_width(&marker));
+                b.indent = place.left;
+                b.marker = place.marker;
+            }
+            let wrap = b.wrap(width);
             leaf.wrap = wrap;
             b.text_height = cx.shaper.shape(leaf.key, content, wrap).max(1);
             b.above + b.text_height + b.below
@@ -762,7 +987,7 @@ pub(crate) fn estimate(node: &Node, width: i32, leaves: &[Leaf], looks: &Looks) 
     let height = match &node.kind {
         Kind::Text(b) => {
             let m = looks.metrics(b.look);
-            let text = estimate_text(&leaves[b.leaf.index()], m, b.line, width - b.indent);
+            let text = estimate_text(&leaves[b.leaf.index()], m, b.line, b.wrap(width));
             b.above + text + b.below
         }
         Kind::Picture { leaf, natural, .. } => match natural.flatten() {
@@ -879,6 +1104,9 @@ pub(crate) fn selected_bytes(
 pub(crate) fn paint<'a>(node: &'a Node, x: i32, y: f64, width: i32, cx: &mut PaintCx<'a, '_>) {
     match &node.kind {
         Kind::Text(b) => {
+            if let Some(frame) = &b.frame {
+                paint_frame(frame, b, node.height, (x, y, width), &mut *cx.f);
+            }
             if let Some(band) = b.band {
                 (cx.f)(Paint::Band {
                     x: x + band,
@@ -896,8 +1124,8 @@ pub(crate) fn paint<'a>(node: &'a Node, x: i32, y: f64, width: i32, cx: &mut Pai
                 content,
                 x: x + b.indent,
                 y: y + f64::from(b.above),
-                width: (width - b.indent).max(1),
-                marker: b.marker,
+                width: b.wrap(width),
+                marker: b.marker.map(|m| f64::from(x) + m),
                 selected,
             });
         }
@@ -924,7 +1152,7 @@ pub(crate) fn paint<'a>(node: &'a Node, x: i32, y: f64, width: i32, cx: &mut Pai
                     x,
                     y,
                     width: width.max(1),
-                    marker: false,
+                    marker: None,
                     selected: selected.then(|| 0..crate::content::picture_label(image).len()),
                 }),
             }
@@ -975,6 +1203,80 @@ pub(crate) fn paint<'a>(node: &'a Node, x: i32, y: f64, width: i32, cx: &mut Pai
     }
 }
 
+/// Paint frame `f` of text box `b` in a node `height` tall, whose box starts at (`x`, `y`)
+/// and is `width` wide: its shading, then its lines, each drawn inward from the box's edge.
+fn paint_frame<'a>(
+    f: &Frame,
+    b: &TextBox,
+    height: i32,
+    (x, y, width): (i32, f64, i32),
+    out: &mut dyn FnMut(Paint<'a>),
+) {
+    let (top, bottom, left, right) = f.zone;
+    let (before, after) = (b.above - top, b.below - bottom);
+    let x0 = x + b.indent - left;
+    let x1 = x + b.indent + b.wrap(width) + right;
+    let y0 = if f.open.0 { 0 } else { before };
+    let y1 = if f.open.1 { height } else { height - after };
+    if let Some(color) = f.fill {
+        out(Paint::Fill {
+            x: x0,
+            y: y + f64::from(y0),
+            width: x1 - x0,
+            height: y1 - y0,
+            color,
+        });
+    }
+    // The strokes of line `l`, as offsets from the box's edge towards the text: a double
+    // line's second lies a stroke's width inside its first.
+    let offsets = |l: &Border| {
+        let t = stroke(l);
+        let n = match l.style {
+            BorderStyle::None => 0,
+            BorderStyle::Double => 2,
+            _ => 1,
+        };
+        (0..n).map(move |i| i * 2 * t)
+    };
+    let dash = |l: &Border| match l.style {
+        BorderStyle::Dotted => Dash::Dotted,
+        BorderStyle::Dashed => Dash::Dashed,
+        _ => Dash::Solid,
+    };
+    for (l, inward) in [(&f.top, true), (&f.bottom, false)] {
+        let t = stroke(l);
+        for o in offsets(l) {
+            let sy = if inward {
+                before + o
+            } else {
+                height - after - o - t
+            };
+            out(Paint::Stroke {
+                x: x0,
+                y: y + f64::from(sy),
+                width: x1 - x0,
+                height: t,
+                dash: dash(l),
+                color: l.color,
+            });
+        }
+    }
+    for (l, inward) in [(&f.left, true), (&f.right, false)] {
+        let t = stroke(l);
+        for o in offsets(l) {
+            let sx = if inward { x0 + o } else { x1 - o - t };
+            out(Paint::Stroke {
+                x: sx,
+                y: y + f64::from(y0),
+                width: t,
+                height: y1 - y0,
+                dash: dash(l),
+                color: l.color,
+            });
+        }
+    }
+}
+
 /// Where (`x`, `y`) in `node`'s box falls, the box `width` wide.
 pub(crate) fn hit(
     node: &Node,
@@ -989,7 +1291,7 @@ pub(crate) fn hit(
         Kind::Text(b) => {
             let leaf = &leaves[b.leaf.index()];
             let content = content_at(doc, &leaf.path).expect("text leaf");
-            let wrap = (width - b.indent).max(1);
+            let wrap = b.wrap(width);
             let ty = (y - f64::from(b.above)).clamp(0.0, f64::from(b.text_height - 1).max(0.0));
             let h = shaper.hit(leaf.key, content, wrap, x - f64::from(b.indent), ty);
             let text = content.text();

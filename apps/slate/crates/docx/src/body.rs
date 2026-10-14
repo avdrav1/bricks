@@ -18,12 +18,12 @@
 //! between them (section properties, bookmarks, content controls' tags) isn't an element.
 
 use crate::numbering::{format_number, Counters, Numbering};
-use crate::styles::{ParaProps, RunProps, Styles};
+use crate::styles::{ParaProps, RunProps, Section, Styles};
 use crate::xml::{self, XmlReader};
 use crate::{DocxError, Package, Rel};
 use document_model::{
-    Block, Image, ImageFormat, ImageSource, ListItem, Paragraph, RunStyle, Table, TableCell,
-    TableRow,
+    Block, Image, ImageFormat, ImageSource, ListItem, ListNumbering, Paragraph, RunStyle, Table,
+    TableCell, TableRow,
 };
 use quick_xml::events::{BytesStart, Event};
 use std::collections::HashMap;
@@ -71,15 +71,24 @@ pub(crate) struct CellSpan {
     pub content: Container,
 }
 
-/// Read the body of `word/document.xml` (`xml`): its blocks, and where they came from
-/// (`None` without a `w:body`).
+/// What [`read`] read of the body.
+pub(crate) struct Parsed {
+    pub blocks: Vec<Block>,
+    /// Where the blocks came from (`None` without a `w:body`).
+    pub body: Option<Container>,
+    /// The text width of the last section (its last `w:sectPr`), in twips; `None` without
+    /// one.
+    pub text_width: Option<u32>,
+}
+
+/// Read the body of `word/document.xml` (`xml`).
 pub(crate) fn read<R: Read + Seek>(
     xml: &str,
     styles: &Styles,
     numbering: &Numbering,
     rels: &HashMap<String, Rel>,
     package: &mut Package<R>,
-) -> Result<(Vec<Block>, Option<Container>), DocxError> {
+) -> Result<Parsed, DocxError> {
     let mut body = Body {
         r: xml::reader(xml),
         styles,
@@ -93,15 +102,26 @@ pub(crate) fn read<R: Read + Seek>(
         endnotes: 0,
         pictures: Vec::new(),
         num: None,
+        text_width: None,
     };
     let mut out = Vec::new();
     loop {
         match body.r.read_event()? {
             Event::Start(e) if xml::local(&e) == b"body" => {
                 let container = body.blocks(b"body", &mut out, None)?;
-                return Ok((out, Some(container)));
+                return Ok(Parsed {
+                    blocks: out,
+                    body: Some(container),
+                    text_width: body.text_width,
+                });
             }
-            Event::Eof => return Ok((out, None)),
+            Event::Eof => {
+                return Ok(Parsed {
+                    blocks: out,
+                    body: None,
+                    text_width: None,
+                })
+            }
             _ => {}
         }
     }
@@ -148,6 +168,8 @@ struct Body<'a, 'x, R> {
     pictures: Vec<Option<Range<usize>>>,
     /// The list numbering instance of the paragraph just read.
     num: Option<u32>,
+    /// The text width of the last section properties read (`w:sectPr`), in twips.
+    text_width: Option<u32>,
 }
 
 /// The deepest nesting of tables kept as tables; the content of tables nested deeper
@@ -226,7 +248,7 @@ impl<R: Read + Seek> Body<'_, '_, R> {
                         }
                     }
                     b"sectPr" => {
-                        xml::skip(&mut self.r, &e)?;
+                        self.text_width = Some(Section::read(&mut self.r)?.text_width);
                         container.sect = Some(before..self.pos());
                     }
                     name if wrapper(name) => {}
@@ -337,11 +359,13 @@ impl<R: Read + Seek> Body<'_, '_, R> {
     }
 
     /// An empty paragraph in the style `direct` names, with the alignment it and the
-    /// styles give it.
+    /// styles give it, and its own tab stops, spacing, and indents.
     fn paragraph_of(&self, direct: &ParaProps) -> Paragraph {
         let ppr = self.styles.paragraph_props(direct);
         let mut p = Paragraph::new(self.styles.paragraph_id(direct.style.as_deref()));
         p.align = ppr.align.unwrap_or_default();
+        p.tabs.clone_from(&direct.tabs);
+        p.own = direct.overrides();
         p
     }
 
@@ -410,7 +434,7 @@ impl<R: Read + Seek> Body<'_, '_, R> {
                 .iter()
                 .any(|p| p.iter().any(|i| matches!(i, Item::Text(..))));
         // An empty paragraph that ends a section is the section's mark, not a paragraph.
-        let section_mark = ppr.section_break.is_some()
+        let section_mark = ppr.section.is_some()
             && pieces
                 .iter()
                 .flatten()
@@ -447,12 +471,19 @@ impl<R: Read + Seek> Body<'_, '_, R> {
                     kind,
                     level,
                     paragraph: p,
+                    numbering: self.num.map(|num| ListNumbering {
+                        num,
+                        mark: self.styles.overrides(&direct.mark),
+                    }),
                 })),
                 None => out.push(Block::Paragraph(p)),
             }
         }
-        if ppr.section_break == Some(true) {
-            out.push(Block::PageBreak);
+        if let Some(section) = ppr.section {
+            if section.starts_page {
+                out.push(Block::PageBreak);
+            }
+            self.text_width = Some(section.text_width);
         }
     }
 

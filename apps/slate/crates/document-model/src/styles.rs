@@ -4,15 +4,18 @@
 //!
 //! A paragraph names its style by id; a run holds only its direct formatting
 //! ([`RunStyle`]'s overrides), so the look drawn is the style's with the run's overrides on
-//! top ([`StyleSheet::look`]). Markdown and plain text get Slate's built-in sheet
-//! ([`StyleSheet::builtin`]); a DOCX file's is its `styles.xml`.
+//! top ([`StyleSheet::look`]). A paragraph's own spacing, indents, borders, and shading go
+//! over its style's the same way ([`ParaOverrides`], [`StyleSheet::spacing`],
+//! [`StyleSheet::borders`], [`StyleSheet::shading`]; ADR 0009). Markdown and plain text
+//! get Slate's built-in sheet ([`StyleSheet::builtin`]); a DOCX file's is its `styles.xml`.
 
-use crate::{Align, Rgb, RunStyle};
+use crate::{effective_tabs, merge_tabs, Align, ListLevel, Paragraph, Rgb, RunStyle, TabStop};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
 /// A run's resolved look.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Look {
     /// The font family's name.
     pub font: String,
@@ -26,8 +29,36 @@ pub struct Look {
     pub color: Option<Rgb>,
 }
 
+impl Look {
+    /// This look with the run overrides `run` on top.
+    pub fn with(mut self, run: &RunStyle) -> Look {
+        if let Some(font) = &run.font {
+            self.font.clone_from(font);
+        }
+        if let Some(size) = run.size {
+            self.size = size;
+        }
+        if let Some(b) = run.bold {
+            self.bold = b;
+        }
+        if let Some(i) = run.italic {
+            self.italic = i;
+        }
+        if let Some(u) = run.underline {
+            self.underline = u;
+        }
+        if let Some(s) = run.strike {
+            self.strike = s;
+        }
+        if run.color.is_some() {
+            self.color = run.color;
+        }
+        self
+    }
+}
+
 /// How far apart a paragraph's lines are.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum LineSpacing {
     /// A multiple of the font's line height: 1.0 is single spacing.
     Auto(f32),
@@ -43,16 +74,219 @@ impl Default for LineSpacing {
     }
 }
 
-/// A paragraph's resolved look. Distances are in twips (1/20 pt, 1/1440 in).
+/// A paragraph's spacing and indents, in twips (1/20 pt, 1/1440 in): its style's, or its
+/// style's with its own on top ([`StyleSheet::spacing`]).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct ParaLook {
-    pub align: Align,
+pub struct ParaSpacing {
     pub space_before: u32,
     pub space_after: u32,
     pub line: LineSpacing,
     pub indent_left: i32,
+    pub indent_right: i32,
     /// The first line's indent from `indent_left`; negative is a hanging indent.
     pub indent_first: i32,
+    /// Word's contextual spacing: no space before the paragraph when the one before is in
+    /// the same style, none after it when the next one is.
+    pub contextual: bool,
+}
+
+/// A paragraph border's line (ADR 0009). Word's other line styles draw as the nearest of
+/// these: dot-dash ones dashed, triple and thin-thick ones double, wavy, 3-D, inset, outset,
+/// and art borders single.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum BorderStyle {
+    /// No line (Word's `nil` and `none`).
+    #[default]
+    None,
+    Single,
+    /// One line twice the width (Word's `thick`, as LibreOffice reads it).
+    Thick,
+    /// Two lines of the width with a gap of the width between them.
+    Double,
+    Dotted,
+    Dashed,
+}
+
+/// One side of a paragraph's border (`w:top`, `w:bottom`, `w:left`, `w:right`, or
+/// `w:between` in `w:pBdr`; ADR 0009).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct Border {
+    pub style: BorderStyle,
+    /// Each line's width in eighths of a point (`w:sz`).
+    pub width: u16,
+    /// How far it is from the text, in points (`w:space`).
+    pub space: u16,
+    /// `None` is automatic: the text's colour.
+    pub color: Option<Rgb>,
+}
+
+impl Border {
+    /// Whether it draws a line.
+    pub fn is_drawn(&self) -> bool {
+        self.style != BorderStyle::None
+    }
+
+    /// Its lines and the gaps between them, in eighths of a point; 0 without a line.
+    pub fn line_width(&self) -> u32 {
+        let w = u32::from(self.width);
+        match self.style {
+            BorderStyle::None => 0,
+            BorderStyle::Double => 3 * w,
+            BorderStyle::Thick => 2 * w,
+            BorderStyle::Single | BorderStyle::Dotted | BorderStyle::Dashed => w,
+        }
+    }
+
+    /// How far it reaches out from the text, its space and its lines, in twips; 0 without
+    /// a line.
+    pub fn reach(&self) -> u32 {
+        if self.is_drawn() {
+            u32::from(self.space) * 20 + (self.line_width() * 5).div_ceil(2)
+        } else {
+            0
+        }
+    }
+}
+
+/// A paragraph's borders, each side without a line when it has none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Borders {
+    pub top: Border,
+    pub bottom: Border,
+    pub left: Border,
+    pub right: Border,
+    /// Between it and the next paragraph of a group with the same borders.
+    pub between: Border,
+}
+
+impl Borders {
+    /// Whether any side draws a line.
+    pub fn any(&self) -> bool {
+        [self.top, self.bottom, self.left, self.right, self.between]
+            .iter()
+            .any(Border::is_drawn)
+    }
+}
+
+/// A paragraph's own border sides over its style's, side by side: `None` leaves the
+/// style's, a side without a line (Word's `nil`) removes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BorderOverrides {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top: Option<Border>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bottom: Option<Border>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub left: Option<Border>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub right: Option<Border>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub between: Option<Border>,
+}
+
+impl BorderOverrides {
+    /// Whether it sets no side.
+    pub fn is_empty(&self) -> bool {
+        *self == BorderOverrides::default()
+    }
+
+    /// `borders` with these sides on top.
+    pub fn over(&self, mut borders: Borders) -> Borders {
+        for (to, from) in [
+            (&mut borders.top, self.top),
+            (&mut borders.bottom, self.bottom),
+            (&mut borders.left, self.left),
+            (&mut borders.right, self.right),
+            (&mut borders.between, self.between),
+        ] {
+            if let Some(b) = from {
+                *to = b;
+            }
+        }
+        borders
+    }
+}
+
+/// A paragraph's shading (`w:shd`; ADR 0009): the colour that fills its box, `None` for
+/// none (Word's `auto` fill).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct Shading {
+    pub fill: Option<Rgb>,
+}
+
+/// A paragraph's own spacing, indents, borders, and shading over its style's (ADR 0009),
+/// as [`RunStyle`] is a run's look over its style's: each `None` leaves the style's.
+/// Distances in twips.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ParaOverrides {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub space_before: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub space_after: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<LineSpacing>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub indent_left: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub indent_right: Option<i32>,
+    /// The first line's indent from the left one; negative is a hanging indent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub indent_first: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contextual: Option<bool>,
+    #[serde(skip_serializing_if = "BorderOverrides::is_empty")]
+    pub borders: BorderOverrides,
+    /// Its own shading replaces its style's whole: an automatic fill removes it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shading: Option<Shading>,
+}
+
+impl ParaOverrides {
+    /// Whether it sets nothing.
+    pub fn is_empty(&self) -> bool {
+        *self == ParaOverrides::default()
+    }
+
+    /// `spacing` with these overrides' spacing and indents on top.
+    pub fn over(&self, mut spacing: ParaSpacing) -> ParaSpacing {
+        fn set<T: Copy>(to: &mut T, from: Option<T>) {
+            if let Some(v) = from {
+                *to = v;
+            }
+        }
+        set(&mut spacing.space_before, self.space_before);
+        set(&mut spacing.space_after, self.space_after);
+        set(&mut spacing.line, self.line);
+        set(&mut spacing.indent_left, self.indent_left);
+        set(&mut spacing.indent_right, self.indent_right);
+        set(&mut spacing.indent_first, self.indent_first);
+        set(&mut spacing.contextual, self.contextual);
+        spacing
+    }
+
+    /// These overrides without the indents: what a paragraph keeps when it joins or leaves
+    /// a list, whose levels indent it.
+    pub fn without_indents(self) -> ParaOverrides {
+        ParaOverrides {
+            indent_left: None,
+            indent_right: None,
+            indent_first: None,
+            ..self
+        }
+    }
+}
+
+/// A paragraph's resolved look.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ParaLook {
+    pub align: Align,
+    pub spacing: ParaSpacing,
+    /// Its tab stops, in position order, without clears (ADR 0009).
+    pub tabs: Vec<TabStop>,
+    pub borders: Borders,
+    pub shading: Shading,
 }
 
 /// A paragraph style.
@@ -152,7 +386,10 @@ impl StyleSheet {
             color: None,
         };
         let para = ParaLook {
-            space_after: PARAGRAPH_SPACE * TWIPS_PER_PX,
+            spacing: ParaSpacing {
+                space_after: PARAGRAPH_SPACE * TWIPS_PER_PX,
+                ..ParaSpacing::default()
+            },
             ..ParaLook::default()
         };
         let scaled = |scale: f32| (f32::from(BUILTIN_SIZE) * scale).round() as u16;
@@ -164,7 +401,7 @@ impl StyleSheet {
             outline: None,
             title: false,
             run: normal.clone(),
-            para,
+            para: para.clone(),
         };
         let mut styles = vec![Style {
             based_on: None,
@@ -179,8 +416,11 @@ impl StyleSheet {
                 ..normal.clone()
             },
             para: ParaLook {
-                space_after: TITLE_BELOW * TWIPS_PER_PX,
-                ..para
+                spacing: ParaSpacing {
+                    space_after: TITLE_BELOW * TWIPS_PER_PX,
+                    ..para.spacing
+                },
+                ..para.clone()
             },
             ..derived("Title", "Title")
         });
@@ -194,9 +434,12 @@ impl StyleSheet {
                     ..normal.clone()
                 },
                 para: ParaLook {
-                    space_before: HEADING_ABOVE[i] * TWIPS_PER_PX,
-                    space_after: HEADING_BELOW * TWIPS_PER_PX,
-                    ..para
+                    spacing: ParaSpacing {
+                        space_before: HEADING_ABOVE[i] * TWIPS_PER_PX,
+                        space_after: HEADING_BELOW * TWIPS_PER_PX,
+                        ..para.spacing
+                    },
+                    ..para.clone()
                 },
                 ..derived(&format!("Heading{n}"), &format!("Heading {n}"))
             });
@@ -208,8 +451,11 @@ impl StyleSheet {
                 ..normal.clone()
             },
             para: ParaLook {
-                indent_left: LEVEL_INDENT * TWIPS_PER_PX as i32,
-                ..para
+                spacing: ParaSpacing {
+                    indent_left: LEVEL_INDENT * TWIPS_PER_PX as i32,
+                    ..para.spacing
+                },
+                ..para.clone()
             },
             ..derived("Quote", "Quote")
         });
@@ -274,29 +520,70 @@ impl StyleSheet {
     /// The look of a run with direct formatting `run` in a paragraph of style `style_id`:
     /// the style's run look with the run's overrides on top.
     pub fn look(&self, style_id: &str, run: &RunStyle) -> Look {
-        let mut look = self.style_of(style_id).run.clone();
-        if let Some(font) = &run.font {
-            look.font.clone_from(font);
+        self.style_of(style_id).run.clone().with(run)
+    }
+
+    /// The look of the marker of a Word list item of paragraph `p` at level `level`
+    /// (ADR 0009): the paragraph mark's run look `mark` over the paragraph's style, with
+    /// the level's on top.
+    pub fn marker_look(&self, p: &Paragraph, mark: &RunStyle, level: &ListLevel) -> Look {
+        self.look(&p.style, mark).with(&level.look)
+    }
+
+    /// The stops paragraph `p`'s tabs advance to: its style's with its own on top, in
+    /// position order (ADR 0009).
+    pub fn tab_stops(&self, p: &Paragraph) -> Vec<TabStop> {
+        effective_tabs(&self.style_of(&p.style).para.tabs, &p.tabs)
+    }
+
+    /// Paragraph `p`'s spacing and indents: its style's with its own on top (ADR 0009).
+    pub fn spacing(&self, p: &Paragraph) -> ParaSpacing {
+        p.own.over(self.style_of(&p.style).para.spacing)
+    }
+
+    /// The spacing and indents of a Word list item's paragraph `p` at level `level`: its
+    /// style's, then the level's indents, then its own (ADR 0009).
+    pub fn list_spacing(&self, p: &Paragraph, level: &ListLevel) -> ParaSpacing {
+        let mut s = self.style_of(&p.style).para.spacing;
+        if let Some(left) = level.indent_left {
+            s.indent_left = left;
         }
-        if let Some(size) = run.size {
-            look.size = size;
+        if let Some(first) = level.indent_first {
+            s.indent_first = first;
         }
-        if let Some(b) = run.bold {
-            look.bold = b;
-        }
-        if let Some(i) = run.italic {
-            look.italic = i;
-        }
-        if let Some(u) = run.underline {
-            look.underline = u;
-        }
-        if let Some(s) = run.strike {
-            look.strike = s;
-        }
-        if run.color.is_some() {
-            look.color = run.color;
-        }
-        look
+        p.own.over(s)
+    }
+
+    /// The stops a Word list item's paragraph `p` at level `level` advances to: its
+    /// style's, then the level's, then its own (ADR 0009).
+    pub fn list_tabs(&self, p: &Paragraph, level: &ListLevel) -> Vec<TabStop> {
+        let mut under = self.style_of(&p.style).para.tabs.clone();
+        merge_tabs(&mut under, &level.tabs);
+        effective_tabs(&under, &p.tabs)
+    }
+
+    /// Paragraph `p`'s borders: its style's with its own sides on top (ADR 0009).
+    pub fn borders(&self, p: &Paragraph) -> Borders {
+        p.own.borders.over(self.style_of(&p.style).para.borders)
+    }
+
+    /// Paragraph `p`'s shading: its own, else its style's (ADR 0009).
+    pub fn shading(&self, p: &Paragraph) -> Shading {
+        p.own
+            .shading
+            .unwrap_or(self.style_of(&p.style).para.shading)
+    }
+
+    /// Whether paragraphs `a` and `b`, one after the other, are bordered together, as Word
+    /// groups them: they have lines and the same borders, and the same left and right
+    /// indents. A group draws its top line above its first paragraph, its bottom line
+    /// below its last, and its between line between each two (ADR 0009).
+    pub fn bordered_together(&self, a: &Paragraph, b: &Paragraph) -> bool {
+        let borders = self.borders(a);
+        let (sa, sb) = (self.spacing(a), self.spacing(b));
+        borders.any()
+            && borders == self.borders(b)
+            && (sa.indent_left, sa.indent_right) == (sb.indent_left, sb.indent_right)
     }
 }
 
@@ -341,6 +628,91 @@ mod tests {
         // A quote's own colour stays without an override; an unknown id is Normal's.
         assert_eq!(sheet.look("Quote", &RunStyle::default()).color, Some(QUOTE));
         assert_eq!(sheet.look("Nope", &run).size, 22);
+    }
+
+    #[test]
+    fn a_paragraphs_own_spacing_goes_over_its_styles() {
+        let sheet = StyleSheet::builtin();
+        let mut p = Paragraph::new("Heading1");
+        let heading = sheet.style_of("Heading1").para.spacing;
+        assert_eq!(sheet.spacing(&p), heading);
+        p.own = ParaOverrides {
+            space_after: Some(0),
+            indent_right: Some(720),
+            indent_first: Some(-360),
+            ..ParaOverrides::default()
+        };
+        assert_eq!(
+            sheet.spacing(&p),
+            ParaSpacing {
+                space_after: 0,
+                indent_right: 720,
+                indent_first: -360,
+                ..heading
+            }
+        );
+        assert_eq!(
+            p.own.without_indents(),
+            ParaOverrides {
+                space_after: Some(0),
+                ..ParaOverrides::default()
+            }
+        );
+    }
+
+    #[test]
+    fn a_paragraphs_own_border_sides_and_shading_go_over_its_styles() {
+        let line = |style, width, space| Border {
+            style,
+            width,
+            space,
+            color: Some([0x2F, 0x54, 0x96]),
+        };
+        let boxed = Style {
+            id: "Boxed".into(),
+            name: "Boxed".into(),
+            para: ParaLook {
+                borders: Borders {
+                    top: line(BorderStyle::Single, 8, 4),
+                    bottom: line(BorderStyle::Single, 8, 4),
+                    ..Borders::default()
+                },
+                shading: Shading {
+                    fill: Some([0xDE, 0xEA, 0xF6]),
+                },
+                ..ParaLook::default()
+            },
+            ..StyleSheet::builtin().default_style().clone()
+        };
+        let sheet = StyleSheet::new(vec![boxed.clone()], "Boxed");
+        let mut p = Paragraph::new("Boxed");
+        assert_eq!(sheet.borders(&p), boxed.para.borders);
+        assert_eq!(sheet.shading(&p), boxed.para.shading);
+        // Its own nil top removes the style's, its own left adds one, its automatic fill
+        // removes the style's.
+        p.own.borders = BorderOverrides {
+            top: Some(Border::default()),
+            left: Some(line(BorderStyle::Double, 4, 1)),
+            ..BorderOverrides::default()
+        };
+        p.own.shading = Some(Shading::default());
+        let borders = sheet.borders(&p);
+        assert!(!borders.top.is_drawn());
+        assert_eq!(borders.bottom, boxed.para.borders.bottom);
+        assert_eq!(borders.left.line_width(), 12);
+        // 1 pt and three half-point lines: 20 + 30 twips.
+        assert_eq!(borders.left.reach(), 50);
+        assert_eq!(sheet.shading(&p).fill, None);
+        assert_eq!(p.own.without_indents().borders, p.own.borders);
+
+        // Bordered together: the same borders and indents.
+        let mut q = Paragraph::new("Boxed");
+        q.own = p.own;
+        assert!(sheet.bordered_together(&p, &q));
+        q.own.indent_left = Some(720);
+        assert!(!sheet.bordered_together(&p, &q));
+        let plain = StyleSheet::builtin();
+        assert!(!plain.bordered_together(&Paragraph::new("Normal"), &Paragraph::new("Normal")));
     }
 
     #[test]

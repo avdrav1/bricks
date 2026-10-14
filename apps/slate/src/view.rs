@@ -32,7 +32,7 @@ use document_edit::{
     Change, Container, Edit, Flag, Fragment, History, LookPatch, Looks, Match, Pos, SizeChange,
 };
 use document_model::{Align, RunStyle};
-use flow::{Flow, Located, Paint, Splice, LEVEL_INDENT};
+use flow::{Flow, Located, Paint, Splice};
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{gdk, gio, glib, graphene, gsk, pango};
@@ -80,13 +80,14 @@ pub fn texture_key(bytes: &Arc<[u8]>) -> usize {
     Arc::as_ptr(bytes) as *const u8 as usize
 }
 
-/// The text column's width for `setting` in a view `view_width` pixels wide: the setting's
-/// width, or the view's less a margin each side when that is narrower (Full always), but
-/// never under [`MIN_COLUMN`].
-pub fn column_width(setting: TextWidth, view_width: i32) -> i32 {
+/// The text column's width for `setting` in a view `view_width` pixels wide, for a
+/// document whose page's text width is `page_twips` (see [`TextWidth::pixels`]): the
+/// setting's width, or the view's less a margin each side when that is narrower (Full
+/// always), but never under [`MIN_COLUMN`].
+pub fn column_width(setting: TextWidth, page_twips: Option<u32>, view_width: i32) -> i32 {
     let room = view_width - 2 * MIN_MARGIN;
     setting
-        .pixels()
+        .pixels(page_twips)
         .map_or(room, |px| px.min(room))
         .max(MIN_COLUMN)
 }
@@ -182,6 +183,8 @@ mod imp {
     pub struct Page {
         pub(super) state: RefCell<Option<State>>,
         pub(super) setting: Cell<TextWidth>,
+        /// The document's page's text width in twips; `None` when it has no pages.
+        pub(super) page_twips: Cell<Option<u32>>,
         hadj: RefCell<Option<gtk::Adjustment>>,
         vadj: RefCell<Option<gtk::Adjustment>>,
         /// The scroll policies as set; `None` is `Minimum`.
@@ -394,7 +397,7 @@ mod imp {
                     let natural = self
                         .setting
                         .get()
-                        .pixels()
+                        .pixels(self.page_twips.get())
                         .map_or(min, |px| px + 2 * MIN_MARGIN);
                     (min, natural.max(min), -1, -1)
                 }
@@ -403,7 +406,7 @@ mod imp {
         }
 
         fn size_allocate(&self, width: i32, height: i32, _baseline: i32) {
-            let column = column_width(self.setting.get(), width);
+            let column = column_width(self.setting.get(), self.page_twips.get(), width);
             let mut lines = Vec::new();
             let mut relayout = false;
             let mut caret_box = None;
@@ -1720,12 +1723,21 @@ glib::wrapper! {
 
 impl Page {
     /// The page showing `doc`, whose runs [`document_edit::normalize`] has merged so undo
-    /// gives each paragraph back exactly.
-    pub fn new(doc: document_model::Document, textures: Textures, setting: TextWidth) -> Self {
+    /// gives each paragraph back exactly. Its embedded fonts' `fonts` are added to
+    /// fontconfig first, and each of its fonts gets its family ([`crate::fonts`]).
+    pub fn new(
+        doc: document_model::Document,
+        textures: Textures,
+        fonts: &[crate::fonts::FontFile],
+        setting: TextWidth,
+    ) -> Self {
         let page: Self = glib::Object::new();
         let imp = page.imp();
         imp.setting.set(setting);
-        let shaper = PangoShaper::new(page.pango_context(), &doc.styles, textures);
+        imp.page_twips.set(doc.format.page_text_width());
+        let context = page.pango_context();
+        let families = crate::fonts::families(&doc.format, fonts, context.font_map().as_ref());
+        let shaper = PangoShaper::new(context, &doc.styles, textures, families);
         let plain = matches!(doc.format, document_model::Format::Text(_));
         let flow = Flow::new(doc);
         let lines = (0..flow.page_break_count())
@@ -1893,6 +1905,11 @@ impl Page {
         }
     }
 
+    /// The document's page's text width in twips; `None` when it has no pages.
+    pub fn page_text_width(&self) -> Option<u32> {
+        self.imp().page_twips.get()
+    }
+
     /// The column's width, 0 before the page is first allocated.
     pub fn column(&self) -> i32 {
         self.imp()
@@ -2045,18 +2062,19 @@ fn draw(
             ..
         } => {
             let (x, y) = at(x, y);
-            if marker {
-                if let flow::Content::Paragraph {
-                    list: Some(item), ..
-                } = content
-                {
+            let layout = shaper.layout(key, content, width).clone();
+            // A list item's marker, on its first line's baseline.
+            if let (Some(mx), Some(m)) = (marker, content.marker()) {
+                if !m.text.is_empty() {
+                    let colour = m.look.color.map_or(INK, shaper::hex);
+                    let marker = shaper.marker(&m);
+                    let drop = (layout.baseline() - marker.baseline()) as f32 / pango::SCALE as f32;
                     snapshot.save();
-                    snapshot.translate(&graphene::Point::new(x - LEVEL_INDENT as f32, y));
-                    snapshot.append_layout(shaper.marker(item), &rgba(INK));
+                    snapshot.translate(&graphene::Point::new(left + mx as f32, y + drop));
+                    snapshot.append_layout(marker, &rgba(colour));
                     snapshot.restore();
                 }
             }
-            let layout = shaper.layout(key, content, width);
             snapshot.save();
             snapshot.translate(&graphene::Point::new(x, y));
             if let Some((found, flow)) = found {
@@ -2066,13 +2084,19 @@ fn draw(
                     } else {
                         FOUND
                     };
-                    highlight(snapshot, layout, m.from.offset..m.to.offset, colour);
+                    highlight(snapshot, &layout, m.from.offset..m.to.offset, colour);
                 }
             }
             if let Some(range) = selected {
-                highlight(snapshot, layout, range, SELECTION);
+                highlight(snapshot, &layout, range, SELECTION);
             }
-            snapshot.append_layout(layout, &rgba(INK));
+            snapshot.append_layout(&layout, &rgba(INK));
+            for leader in shaper.leaders(&layout, content) {
+                snapshot.save();
+                snapshot.translate(&graphene::Point::new(leader.x, leader.y));
+                snapshot.append_layout(&leader.layout, &rgba(leader.color.unwrap_or(INK)));
+                snapshot.restore();
+            }
             snapshot.restore();
         }
         Paint::Band {
@@ -2117,6 +2141,40 @@ fn draw(
             let (x, y) = at(x, y);
             let outline = gsk::RoundedRect::from_rect(rect(x, y, width as f32, height as f32), 0.0);
             snapshot.append_border(&outline, &[1.0; 4], &[rgba(LINE); 4]);
+        }
+        Paint::Fill {
+            x,
+            y,
+            width,
+            height,
+            color,
+        } => {
+            let (x, y) = at(x, y);
+            let bounds = rect(x, y, width as f32, height as f32);
+            snapshot.append_color(&rgba(shaper::hex(color)), &bounds);
+        }
+        Paint::Stroke {
+            x,
+            y,
+            width,
+            height,
+            dash,
+            color,
+        } => {
+            let (x, y) = at(x, y);
+            let colour = rgba(color.map_or(INK, shaper::hex));
+            // Dots and dashes run along the stroke's longer side.
+            if width >= height {
+                for (at, length) in dash.pieces(width, height) {
+                    let piece = rect(x + at as f32, y, length as f32, height as f32);
+                    snapshot.append_color(&colour, &piece);
+                }
+            } else {
+                for (at, length) in dash.pieces(height, width) {
+                    let piece = rect(x, y + at as f32, width as f32, length as f32);
+                    snapshot.append_color(&colour, &piece);
+                }
+            }
         }
     }
 }
@@ -2178,43 +2236,51 @@ mod tests {
 
     #[test]
     fn a_wide_window_gets_the_settings_width() {
-        for (setting, px) in [
-            (TextWidth::Narrow, 480),
-            (TextWidth::Medium, 624),
-            (TextWidth::Wide, 816),
+        for (setting, page, px) in [
+            (TextWidth::Narrow, None, 480),
+            (TextWidth::Medium, None, 624),
+            (TextWidth::Wide, None, 816),
+            (TextWidth::Page, None, 624),
+            (TextWidth::Page, Some(10_800), 720),
+            (TextWidth::Medium, Some(10_800), 624),
         ] {
-            assert_eq!(column_width(setting, 1280), px);
+            assert_eq!(column_width(setting, page, 1280), px);
             // Exactly room for it and a margin each side.
-            assert_eq!(column_width(setting, px + 2 * MIN_MARGIN), px);
+            assert_eq!(column_width(setting, page, px + 2 * MIN_MARGIN), px);
         }
     }
 
     #[test]
     fn full_is_the_window_less_a_margin_each_side() {
-        assert_eq!(column_width(TextWidth::Full, 1280), 1232);
-        assert_eq!(column_width(TextWidth::Full, 900), 852);
-        assert_eq!(column_width(TextWidth::Full, 3840), 3792);
+        assert_eq!(column_width(TextWidth::Full, None, 1280), 1232);
+        assert_eq!(column_width(TextWidth::Full, Some(10_800), 900), 852);
+        assert_eq!(column_width(TextWidth::Full, None, 3840), 3792);
     }
 
     #[test]
     fn a_narrower_window_narrows_the_column() {
         assert_eq!(
-            column_width(TextWidth::Medium, 624 + 2 * MIN_MARGIN - 1),
+            column_width(TextWidth::Medium, None, 624 + 2 * MIN_MARGIN - 1),
             623
         );
-        assert_eq!(column_width(TextWidth::Wide, 640), 592);
-        assert_eq!(column_width(TextWidth::Narrow, 500), 452);
+        assert_eq!(column_width(TextWidth::Wide, None, 640), 592);
+        assert_eq!(column_width(TextWidth::Narrow, None, 500), 452);
+        // A page wider than the window.
+        assert_eq!(column_width(TextWidth::Page, Some(10_800), 640), 592);
+        assert_eq!(column_width(TextWidth::Page, Some(31_680), 1280), 1232);
     }
 
     #[test]
     fn the_column_never_gets_narrower_than_the_minimum() {
         for setting in TextWidth::ALL {
-            assert_eq!(
-                column_width(setting, MIN_COLUMN + 2 * MIN_MARGIN),
-                MIN_COLUMN
-            );
-            assert_eq!(column_width(setting, 100), MIN_COLUMN);
-            assert_eq!(column_width(setting, 0), MIN_COLUMN);
+            for page in [None, Some(10_800), Some(0)] {
+                assert_eq!(
+                    column_width(setting, page, MIN_COLUMN + 2 * MIN_MARGIN),
+                    MIN_COLUMN
+                );
+                assert_eq!(column_width(setting, page, 100), MIN_COLUMN);
+                assert_eq!(column_width(setting, page, 0), MIN_COLUMN);
+            }
         }
     }
 }

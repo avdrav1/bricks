@@ -8,6 +8,7 @@
 # Generated test data and release artifacts
 /dist
 /corpus
+/video/node_modules
 
 # Release secrets and tooling state
 .env.ship
@@ -27,3 +28,6 @@ Thumbs.db
 
 # Python
 __pycache__/
+
+# The voiceover, made by voice.mjs
+/video/.voice

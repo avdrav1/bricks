@@ -506,13 +506,24 @@ pub(crate) fn code_text(text: &str) -> &str {
     text.strip_suffix('\n').unwrap_or(text)
 }
 
-/// `p`'s looks without its runs.
+/// `p`'s looks without its runs: what both halves of a split paragraph keep.
 pub(crate) fn bare(p: &Paragraph) -> Paragraph {
     Paragraph {
         style: p.style.clone(),
         align: p.align,
         indent: p.indent,
         runs: Vec::new(),
+        tabs: p.tabs.clone(),
+        own: p.own,
+    }
+}
+
+/// `p`'s looks without its runs and its own indents, for a paragraph joining or leaving a
+/// list: the list's levels indent its items.
+pub(crate) fn relisted(p: &Paragraph) -> Paragraph {
+    Paragraph {
+        own: p.own.without_indents(),
+        ..bare(p)
     }
 }
 
@@ -525,6 +536,7 @@ pub(crate) fn shell(block: &Block) -> Block {
             kind: item.kind.clone(),
             level: item.level,
             paragraph: bare(&item.paragraph),
+            numbering: item.numbering.clone(),
         }),
         Block::CodeBlock(code) => Block::CodeBlock(CodeBlock {
             language: code.language.clone(),
