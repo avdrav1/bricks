@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # SLATE-4, SLATE-10, SLATE-11, SLATE-6, SLATE-12, SLATE-13, SLATE-20, SLATE-21, SLATE-22,
-# SLATE-23, and SLATE-24 acceptance: the window opens, shows, and refuses documents, its
-# pageless column follows View → Text Width and a Word document's page, its text selects
-# and copies, it edits with undo, table cells included, it composes through an input
-# method, it draws a Word document's fonts, paragraph looks, and tab stops, its format bar
-# sets them, and they save.
+# SLATE-23, SLATE-24, and SLATE-25 acceptance: the window opens, shows, and refuses
+# documents, its pageless column follows View → Text Width and a Word document's page, its
+# text selects and copies, it edits with undo, table cells included, it composes through an
+# input method, it draws a Word document's fonts (embedded ones and fallbacks by class),
+# paragraph looks, and tab stops, its format bar sets them, and they save.
 #
 #   scripts/check_slate.sh [BINARY]   (default target/release/slate)
 #
@@ -160,6 +160,17 @@
 #      leader ends "42" 480 px in, with dots along the gap after "Contents" on the baseline
 #      and no ink above it; each within 2 px. tab.md, a Markdown line with a tab, opens and
 #      reads as written.
+#  30. embedded fonts: embed-plain.docx and embed-obfuscated.docx (written by /tmp/embed.py)
+#      embed Cardo (OFL, a Latin subset, apps/slate/crates/docx/tests/data/fonts; not
+#      installed in the container), one as a plain .ttf with a zero w:fontKey, the other as
+#      Word's obfuscated .odttf with a key, and run the same line in Cardo, in "Nosuchfont
+#      Serifish" (font table: roman), and in "Nosuchfont Sansish" (swiss): in a screenshot
+#      the Cardo line's ink is as wide as Pango measures it in Cardo loaded from the file,
+#      the roman one as in the system serif, and the swiss one as in sans, each within 2 px
+#      (and the three differ); a typed character and Ctrl+S keep fontTable.xml, its
+#      relationships, and the font part byte for byte. The face is written once to
+#      $XDG_RUNTIME_DIR/slate/fonts (mode 700) and never installed: fc-list doesn't list
+#      Cardo afterwards and the user's font directories stay empty.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -765,6 +776,158 @@ def measure(png):
     print("leader fills the gap on the baseline: " + ("yes" if len(gap) > 100 and len(dots) * 4 >= len(gap) and holes <= 6 else "no"))
 
 make(sys.argv[2]) if sys.argv[1] == "make" else measure(sys.argv[2])
+PY
+# SLATE-25: `make PATH MODE` writes a document embedding Cardo (MODE plain: a .ttf with a
+# zero key; obfuscated: an .odttf with KEY); `measure PNG` measures the lines of its screenshot
+# against Pango at 96 dpi (Cardo added from its file for this process); `kept ORIGINAL
+# SAVED` compares the font parts.
+cat > /tmp/embed.py <<"PY"
+import os
+import sys
+import zipfile
+
+# DejaVu Serif and Sans, the container serif and sans, differ by 17 px on this line.
+TEXT = "Embedded: illicit fillip, little lilies, jilting fiji"
+FONT = "/docx/fonts/Cardo-Regular.ttf"
+KEY = "{6C2F5D8A-91E3-4B07-A2C4-3F1E9D8B7A65}"
+ZERO = "{00000000-0000-0000-0000-000000000000}"
+# Each line: its name, its run font, and the family Pango measures it in.
+LINES = [("embedded", "Cardo", "Cardo"), ("roman", "Nosuchfont Serifish", "serif"),
+         ("swiss", "Nosuchfont Sansish", "sans-serif")]
+FONT_PARTS = ("word/fontTable.xml", "word/_rels/fontTable.xml.rels")
+W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+PKG = "http://schemas.openxmlformats.org/package/2006/relationships"
+CT = "http://schemas.openxmlformats.org/package/2006/content-types"
+OOXML = "application/vnd.openxmlformats-officedocument.wordprocessingml"
+HEAD = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"""
+
+def obfuscate(data, key):
+    # ECMA-376 Part 1, 17.8.1: the GUID bytes, last hex pair first, XOR the first 32 bytes.
+    hexes = key.strip("{}").replace("-", "")
+    k = bytes.fromhex(hexes)[::-1]
+    head = bytes(b ^ k[i % 16] for i, b in enumerate(data[:32]))
+    return head + data[32:]
+
+def para(font, text):
+    rpr = f"""<w:rPr><w:rFonts w:ascii="{font}" w:hAnsi="{font}"/></w:rPr>""" if font else ""
+    return f"""<w:p><w:r>{rpr}<w:t xml:space="preserve">{text}</w:t></w:r></w:p>"""
+
+def make(path, mode):
+    font = open(FONT, "rb").read()
+    if mode == "plain":
+        part, key, data = "fonts/font1.ttf", ZERO, font
+    else:
+        part, key, data = "fonts/font1.odttf", KEY, obfuscate(font, KEY)
+        assert data[:4] != font[:4]
+    table = (f"""<w:fonts xmlns:w="{W}" xmlns:r="{REL}">"""
+             """<w:font w:name="Liberation Sans"><w:family w:val="swiss"/></w:font>"""
+             """<w:font w:name="Cardo"><w:family w:val="roman"/><w:pitch w:val="variable"/>"""
+             f"""<w:embedRegular w:fontKey="{key}" r:id="rId1" w:subsetted="0"/></w:font>"""
+             """<w:font w:name="Nosuchfont Serifish"><w:family w:val="roman"/><w:pitch w:val="variable"/></w:font>"""
+             """<w:font w:name="Nosuchfont Sansish"><w:family w:val="swiss"/><w:pitch w:val="variable"/></w:font>"""
+             "</w:fonts>")
+    styles = (f"""<w:styles xmlns:w="{W}"><w:docDefaults><w:rPrDefault><w:rPr>"""
+              """<w:rFonts w:ascii="Liberation Sans" w:hAnsi="Liberation Sans"/><w:sz w:val="22"/>"""
+              """</w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:before="0" w:after="0" """
+              """w:line="240" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>"""
+              """<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/>"""
+              """</w:style></w:styles>""")
+    body = "".join(para(f, TEXT) for _, f, _ in LINES) + para(None, "Z")
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", HEAD + f"""<Types xmlns="{CT}">"""
+                   """<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"""
+                   """<Default Extension="xml" ContentType="application/xml"/>"""
+                   """<Default Extension="ttf" ContentType="application/x-font-ttf"/>"""
+                   """<Default Extension="odttf" ContentType="application/vnd.openxmlformats-officedocument.obfuscatedFont"/>"""
+                   f"""<Override PartName="/word/document.xml" ContentType="{OOXML}.document.main+xml"/>"""
+                   f"""<Override PartName="/word/styles.xml" ContentType="{OOXML}.styles+xml"/>"""
+                   f"""<Override PartName="/word/fontTable.xml" ContentType="{OOXML}.fontTable+xml"/></Types>""")
+        z.writestr("_rels/.rels", HEAD + f"""<Relationships xmlns="{PKG}"><Relationship Id="rId1" """
+                   f"""Type="{REL}/officeDocument" Target="word/document.xml"/></Relationships>""")
+        z.writestr("word/_rels/document.xml.rels", HEAD + f"""<Relationships xmlns="{PKG}">"""
+                   f"""<Relationship Id="rId1" Type="{REL}/styles" Target="styles.xml"/>"""
+                   f"""<Relationship Id="rId2" Type="{REL}/fontTable" Target="fontTable.xml"/></Relationships>""")
+        z.writestr("word/_rels/fontTable.xml.rels", HEAD + f"""<Relationships xmlns="{PKG}">"""
+                   f"""<Relationship Id="rId1" Type="{REL}/font" Target="{part}"/></Relationships>""")
+        z.writestr("word/" + part, data)
+        z.writestr("word/fontTable.xml", HEAD + table)
+        z.writestr("word/styles.xml", HEAD + styles)
+        z.writestr("word/document.xml", HEAD + f"""<w:document xmlns:w="{W}"><w:body>"""
+                   + body + "</w:body></w:document>")
+
+def pango_widths():
+    import cairo
+    import gi
+    gi.require_version("Pango", "1.0")
+    gi.require_version("PangoCairo", "1.0")
+    from gi.repository import Pango, PangoCairo
+    fm = PangoCairo.FontMap.get_default()
+    # Cardo for this process only, as Slate loads it (Pango 1.56).
+    fm.add_font_file(FONT)
+    out = {}
+    for name, _, family in LINES:
+        ctx = fm.create_context()
+        PangoCairo.context_set_resolution(ctx, 96)
+        options = cairo.FontOptions()
+        options.set_hint_metrics(cairo.HINT_METRICS_OFF)
+        PangoCairo.context_set_font_options(ctx, options)
+        ctx.set_round_glyph_positions(False)
+        desc = Pango.FontDescription.from_string(family + " 11")
+        layout = Pango.Layout.new(ctx)
+        layout.set_font_description(desc)
+        layout.set_text(TEXT, -1)
+        face = fm.load_font(ctx, desc).describe().get_family()
+        out[name] = (layout.get_pixel_extents()[0].width, face)
+    return out
+
+def measure(png):
+    import gi
+    gi.require_version("GdkPixbuf", "2.0")
+    from gi.repository import GdkPixbuf
+    p = GdkPixbuf.Pixbuf.new_from_file(png)
+    w, h, rs, n, px = p.get_width(), p.get_height(), p.get_rowstride(), p.get_n_channels(), p.get_pixels()
+    bands, cur = [], None
+    for y in range(int(os.environ["TOP"]), h - 10):
+        row = px[y * rs:y * rs + w * n]
+        xs = [x for x in range(40, w - 40) if row[x * n] + row[x * n + 1] + row[x * n + 2] < 600]
+        if xs:
+            if cur is None:
+                cur = [y, y, xs[0], xs[-1]]
+            cur[1], cur[2], cur[3] = y, min(cur[2], xs[0]), max(cur[3], xs[-1])
+        elif cur is not None:
+            bands.append(cur)
+            cur = None
+    print("bands: " + " ".join(f"{b[0]}-{b[1]}@{b[2]}-{b[3]}" for b in bands))
+    if len(bands) < 4:
+        print("too few lines")
+        return
+    want = pango_widths()
+    shots = {}
+    for (name, font, family), b in zip(LINES, bands):
+        shot = b[3] - b[2] + 1
+        width, face = want[name]
+        shots[name] = shot
+        verdict = "ok" if abs(shot - width) <= 2 else "off"
+        print(f"{name} {font}: shot {shot} pango {family} {width} face {face} {verdict}")
+    e, r, s = shots["embedded"], shots["roman"], shots["swiss"]
+    print("embedded differs from serif: " + ("yes" if abs(e - r) > 2 else "no"))
+    print("serif differs from sans: " + ("yes" if abs(r - s) > 2 else "no"))
+
+def kept(original, saved):
+    a, b = zipfile.ZipFile(original), zipfile.ZipFile(saved)
+    names = [n for n in a.namelist() if n.startswith("word/fonts/") or n in FONT_PARTS]
+    same = all(n in b.namelist() and a.read(n) == b.read(n) for n in names)
+    edited = a.read("word/document.xml") != b.read("word/document.xml")
+    yes = {True: "yes", False: "no"}
+    print(f"font parts kept: {yes[same]} {len(names)}, document edited: {yes[edited]}")
+
+if sys.argv[1] == "make":
+    make(sys.argv[2], sys.argv[3])
+elif sys.argv[1] == "measure":
+    measure(sys.argv[2])
+else:
+    kept(sys.argv[2], sys.argv[3])
 PY
 # SLATE-20: `make PATH` writes fonts.docx; `measure PNG` measures its screenshot: each
 # band of ink (a line of text) and its left and right edges, against Pango at 96 dpi and
@@ -1457,6 +1620,23 @@ print(f\"typing for 20 s: first journal after ${first:-0} ms, writes {len(t)}, s
   python3 /tmp/tabs.py measure /shots/tabs.png 2>&1; quit
   slate /tmp/tab.md >>/tmp/app.log 2>&1 & sleep 4
   titles | sed "s/^/md-/"; a11y page tab.md | sed "s/^/md-tab /"; shot tab-md; quit
+  echo "== 30 embedded fonts"
+  echo "cardo installed: $(fc-list | grep -ci cardo)"
+  for mode in plain obfuscated; do
+    python3 /tmp/embed.py make /tmp/embed-$mode.docx $mode
+    cp /tmp/embed-$mode.docx /tmp/save/embed-$mode.docx
+    slate /tmp/save/embed-$mode.docx >>/tmp/app.log 2>&1 & sleep 4
+    titles | sed "s/^/$mode-/"
+    # The caret on the last line, Z, which the measurements leave out.
+    keys -M ctrl -k End -m ctrl; sleep 1; shot embed-$mode
+    python3 /tmp/embed.py measure /shots/embed-$mode.png 2>&1 | sed "s/^/$mode /"
+    keys "!"; keys -M ctrl s -m ctrl; sleep 1; saved
+    python3 /tmp/embed.py kept /tmp/embed-$mode.docx /tmp/save/embed-$mode.docx 2>&1 | sed "s/^/$mode /"
+    quit
+  done
+  echo "private fonts: $(ls /tmp/rt/slate/fonts | wc -l) mode $(stat -c %a /tmp/rt/slate/fonts)"
+  echo "cardo installed after: $(fc-list | grep -ci cardo)"
+  echo "user font files: $(find ~/.local/share/fonts ~/.fonts -type f 2>/dev/null | wc -l)"
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -1753,6 +1933,22 @@ check "29: the dot leader fills the gap on the baseline, nothing above it" "29 t
   "^leader fills the gap on the baseline: yes$"
 check "29: a Markdown file with a tab opens" "29 tab stops" "^md-titles: .*tab\.md"
 check "29: and reads as written" "29 tab stops" "^md-tab page: Tabbed.line$"
+check "30: Cardo isn't installed in the container" "30 embedded fonts" "^cardo installed: 0$"
+for mode in plain obfuscated; do
+  check "30: ($mode) the document opens" "30 embedded fonts" "^$mode-titles: .*embed-$mode\.docx"
+  check "30: ($mode) the embedded Cardo line measures as Pango measures Cardo, within 2 px" \
+    "30 embedded fonts" "^$mode embedded Cardo: .* face Cardo ok$"
+  check "30: ($mode) ... unlike the system serif" "30 embedded fonts" "^$mode embedded differs from serif: yes$"
+  check "30: ($mode) a roman font neither installed nor embedded draws in the system serif" \
+    "30 embedded fonts" "^$mode roman Nosuchfont Serifish: .* ok$"
+  check "30: ($mode) a swiss one in the system sans" "30 embedded fonts" "^$mode swiss Nosuchfont Sansish: .* ok$"
+  check "30: ($mode) ... which differ" "30 embedded fonts" "^$mode serif differs from sans: yes$"
+  check "30: ($mode) saving an edit keeps fontTable.xml, its relationships, and the font part" \
+    "30 embedded fonts" "^$mode font parts kept: yes 3, document edited: yes$"
+done
+check "30: the face is written once, to a private directory" "30 embedded fonts" "^private fonts: 1 mode 700$"
+check "30: and isn't installed for the user" "30 embedded fonts" "^cardo installed after: 0$"
+check "30: nothing goes in the user's font directories" "30 embedded fonts" "^user font files: 0$"
 if [ $fail = 0 ]; then echo "SLATE OK"; else
   echo "SLATE CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

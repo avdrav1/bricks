@@ -1723,13 +1723,21 @@ glib::wrapper! {
 
 impl Page {
     /// The page showing `doc`, whose runs [`document_edit::normalize`] has merged so undo
-    /// gives each paragraph back exactly.
-    pub fn new(doc: document_model::Document, textures: Textures, setting: TextWidth) -> Self {
+    /// gives each paragraph back exactly. Its embedded fonts' `fonts` are added to
+    /// fontconfig first, and each of its fonts gets its family ([`crate::fonts`]).
+    pub fn new(
+        doc: document_model::Document,
+        textures: Textures,
+        fonts: &[crate::fonts::FontFile],
+        setting: TextWidth,
+    ) -> Self {
         let page: Self = glib::Object::new();
         let imp = page.imp();
         imp.setting.set(setting);
         imp.page_twips.set(doc.format.page_text_width());
-        let shaper = PangoShaper::new(page.pango_context(), &doc.styles, textures);
+        let context = page.pango_context();
+        let families = crate::fonts::families(&doc.format, fonts, context.font_map().as_ref());
+        let shaper = PangoShaper::new(context, &doc.styles, textures, families);
         let plain = matches!(doc.format, document_model::Format::Text(_));
         let flow = Flow::new(doc);
         let lines = (0..flow.page_break_count())

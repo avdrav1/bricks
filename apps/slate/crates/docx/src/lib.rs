@@ -13,9 +13,11 @@
 //! and field codes are not read (field results are). The last section's page width less
 //! its margins (`w:sectPr`) is the document's text width, and `word/settings.xml`'s
 //! `w:defaultTabStop` its default tab stop (ADR 0009); paragraphs' and styles' own stops
-//! (`w:tabs`) merge as Word layers them.
+//! (`w:tabs`) merge as Word layers them. The font table gives each font's class and the
+//! faces the package embeds, de-obfuscated (`fonts.rs`).
 
 mod body;
+mod fonts;
 mod numbering;
 mod save;
 mod styles;
@@ -126,6 +128,7 @@ fn read_package<R: Read + Seek>(reader: R) -> Result<(Document, MainPart), DocxE
     let rels = package.rels(&main)?;
     let (styles, numbering) = package.styles_and_numbering(&rels)?;
     let default_tab = package.default_tab(&rels)?;
+    let fonts = package.font_table(&rels)?;
     let bytes = package.bytes(&main)?.ok_or(DocxError::NotDocx)?;
     let (bom, bytes) = match bytes.strip_prefix(b"\xEF\xBB\xBF") {
         Some(rest) => (true, rest.to_vec()),
@@ -144,6 +147,7 @@ fn read_package<R: Read + Seek>(reader: R) -> Result<(Document, MainPart), DocxE
         format: Format::Docx(DocxInfo {
             text_width: text_width.unwrap_or(DocxInfo::LETTER_TEXT_WIDTH),
             default_tab,
+            fonts: Arc::new(fonts),
         }),
     };
     let main = MainPart {

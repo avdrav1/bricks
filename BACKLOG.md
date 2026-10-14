@@ -143,7 +143,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | SLATE-22 | SL3 | P0 | done | SLATE-21 | Save fonts, styles, and looks in .docx | A .docx edited through the format bar (a custom style, a font, a size cleared and set, underline, strikethrough, colour, alignment) reopens in LibreOffice with exactly those, every other part unchanged; Markdown keeps headings and quotes and drops what it can't hold |
 | SLATE-23 | SL4 | P0 | done | SLATE-22 | Text Width → Page: Word documents open at their page's text width (ADR 0009) | Text Width gains Page (the default): a .docx's column is its last section's page width minus its margins (Letter, 1″ margins when there's none), at 96 dpi, and Markdown and text get Medium; the setting is saved and shared as the others are; a 7.5″ document's column measures 720 px in the GUI check and a Letter 1″ one 624 px |
 | SLATE-24 | SL4 | P0 | done | SLATE-23 | Tab stops: default stop and each paragraph's own (ADR 0009) | Tabs advance to the paragraph's stops (left, centre, right, decimal, with leaders; `clear` removes an inherited one), then to `w:defaultTabStop` multiples (0.5″ when absent); in the GUI check a right-aligned stop at the text width ends "Remote" at the column's right edge within 2 px, text after runs of default tabs starts at a multiple of the default stop (twips / 15 px) within 2 px, a centre stop centres its text on it, and a dot leader fills to its stop; the model reads and saves stops unchanged |
-| SLATE-25 | SL4 | P0 | todo | SLATE-23 | Embedded fonts and family fallbacks (ADR 0009) | A .docx's embedded fonts (plain .ttf and Word's obfuscated .odttf, de-obfuscated with `w:fontKey`) draw its runs: a run in an embedded family measures as Pango measures that font within 2 px; a family neither installed nor embedded falls back by the font table's `w:family` (a `roman` font draws in the system serif, a `swiss` one in sans); saving keeps the font parts byte for byte |
+| SLATE-25 | SL4 | P0 | done | SLATE-23 | Embedded fonts and family fallbacks (ADR 0009) | A .docx's embedded fonts (plain .ttf and Word's obfuscated .odttf, de-obfuscated with `w:fontKey`) draw its runs: a run in an embedded family measures as Pango measures that font within 2 px; a family neither installed nor embedded falls back by the font table's `w:family` (a `roman` font draws in the system serif, a `swiss` one in sans); saving keeps the font parts byte for byte |
 | SLATE-26 | SL4 | P0 | todo | SLATE-23 | A paragraph's own spacing and indents (ADR 0009) | `w:spacing` and `w:ind` on a paragraph override its style's: LibreOffice's dump of each paragraph's own space before and after, line spacing, and left, right, and first-line indents matches Slate's model over the corpus; they draw (flow tests to the pixel) and save back unchanged, and an edited paragraph keeps them |
 | SLATE-27 | SL4 | P0 | todo | SLATE-26 | Paragraph borders and shading (ADR 0009) | `w:pBdr` (top, bottom, left, right, between; single, double, dotted, dashed; width, space, colour) and `w:shd` fills, a paragraph's own and its style's, draw around and behind the paragraph: in the GUI check a bottom border lies under the text by its space and width within 2 px and a shaded paragraph's box is its fill colour; LibreOffice's dump of borders and shading matches the model; they save back unchanged |
 | SLATE-28 | SL4 | P0 | todo | SLATE-26 | List markers from the numbering (ADR 0009) | Each list item's marker is its level's `w:lvlText` in the level's run font (Symbol and Wingdings glyphs mapped to Unicode), at the level's left and hanging indents with the tab after it: the corpus' markers match LibreOffice's list labels and the GUI check draws "●" bullets at their indent within 2 px |
@@ -167,6 +167,35 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 
 Story notes, decisions made mid-story, and follow-ups go here, newest first.
 
+- **2026-10-14 SLATE-25:** embedded fonts and family fallbacks (ADR 0009). A subagent built it; it was integrated and verified here.
+  - Model: `document_model::fonts` (`FontTable`, `Font` with family class, pitch, altName, and embedded faces as `Arc<[u8]>`). `DocxInfo.fonts` holds the table, `Format::fonts()` returns it, and `DocxInfo` and `Format` are no longer `Copy`.
+  - docx `fonts.rs` reads `fontTable.xml` through its relationship, its `.rels`, and the content types. A face is de-obfuscated when it's `.odttf`, has the obfuscatedFont content type, or isn't already a font: the GUID's bytes reversed, XORed over the first 32 bytes. A face is kept only if it then starts with an sfnt header.
+  - Saving copies the font parts and `fontTable.xml` raw, and tests check they stay byte for byte.
+  - App `src/fonts.rs`: the open worker writes each face once to `$XDG_RUNTIME_DIR/slate/fonts` (or the cache dir), mode 0700, named `<fnv1a64>-<len>.ttf`, atomically. `Page::new` adds new faces with `FcConfigAppFontAddFile` on the page font map's config, reads their families from the application set, and calls `pango_fc_font_map_config_changed` once.
+  - The FFI is raw `extern "C"` against libfontconfig and libpangoft2, which GTK already ships; Pango 1.50+ is enough, and the Ubuntu 24.04 release image has both. No new crates.
+  - Family mapping per font-table entry:
+    - An embedded font keeps its name, or maps to the face's real family.
+    - An installed font is left unchanged.
+    - Anything else becomes `Name,generic`, by `w:family`: roman serif, swiss sans-serif, modern monospace, the rest serif.
+    - Calibri still gets Carlito, because fontconfig's alias comes before the generic.
+  - Deviations:
+    - Embedded fonts stay loaded for the process, since fontconfig can't remove one.
+    - Fonts missing from the table keep fontconfig's default.
+    - altName and pitch are read but not used.
+    - The format bar's style-list previews use the raw font name.
+  - Test data: `apps/slate/crates/docx/tests/data/fonts/Cardo-Regular.ttf`, a 24 KB Latin subset of google/fonts ofl/cardo, with `OFL.txt`. The OFL reserves no font name.
+  - Acceptance: `scripts/check_slate.sh` SLATE OK, 247 checks, 18 of them new in section 30. Plain (zero key) and obfuscated (.odttf) Cardo, a roman missing font, and a swiss one are measured against Pango at 96 dpi within 2 px:
+    - Cardo: 310 against 311.
+    - Roman: 367 against serif 368.
+    - Swiss: 364 against sans 364.
+    - After an edit and save, the font parts are byte for byte the same.
+    - There's one private font file, in a 0700 directory, and no font is installed for the user.
+  - Tests: docx de-obfuscation (GUID order, a reference vector, a round trip against an independent implementation, zero key, junk), `tests/fonts.rs`, family mapping, file writing.
+  - `flow_perf`, within noise of SLATE-24:
+    - Word document: whole 316 ms, first frame 8.6 ms, scroll p99 5.9 ms, typing p99 18.4 ms.
+    - Markdown: whole 283 ms, typing p99 19.0 ms.
+    - Find: first match 14.0 ms.
+  - The user's résumé now draws its Cardo line in Cardo instead of sans. Its title's Georgia, not installed here, falls back to the system serif.
 - **2026-10-14 SLATE-24:** tab stops (ADR 0009). A subagent built it; it was integrated and verified here.
   - Model: `document_model::tabs` (`TabStop` with position in twips from the margin, `TabAlign` including Clear, `TabLeader`; `merge_tabs`, `effective_tabs`). `Paragraph.tabs` holds the paragraph's own stops, clears included; serde default keeps old journals loading. `ParaLook.tabs` holds a style's merged stops, so `ParaLook` is no longer `Copy`. `StyleSheet::tab_stops(&Paragraph)`. `DocxInfo.default_tab` is `w:defaultTabStop` from the settings part, 720 when missing or 0.
   - docx: `w:tabs` is read from paragraphs, styles, and pPrDefault, merged along `basedOn`. start and end read as left and right, `num` as left, `bar` is skipped.

@@ -9,6 +9,7 @@
 //! DOCX in the `docx` crate. Writers convert it back: plain text ([`write_text`]) and
 //! Markdown ([`write_markdown`]).
 
+mod fonts;
 mod markdown;
 mod matching;
 mod styles;
@@ -16,6 +17,7 @@ mod tabs;
 mod text;
 mod write;
 
+pub use fonts::{EmbeddedFace, FaceKind, Font, FontFamily, FontPitch, FontTable};
 pub use markdown::{load_linked_images, read_markdown, read_markdown_source, MarkdownSource};
 pub use matching::{match_blocks, match_blocks_by};
 pub use styles::{LineSpacing, Look, ParaLook, Style, StyleSheet};
@@ -38,7 +40,7 @@ pub struct Document {
 }
 
 /// The format a document was read from, with what a save needs to write it the same way.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Format {
     Text(TextInfo),
     Markdown(TextInfo),
@@ -71,10 +73,19 @@ impl Format {
             Format::Text(_) | Format::Markdown(_) => None,
         }
     }
+
+    /// The document's font table, for a format that has one (ADR 0009).
+    pub fn fonts(&self) -> Option<&FontTable> {
+        match self {
+            Format::Docx(info) => Some(&info.fonts),
+            Format::Text(_) | Format::Markdown(_) => None,
+        }
+    }
 }
 
-/// A Word document's page layout, as Slate's pageless column borrows it (ADR 0009).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A Word document's page layout, as Slate's pageless column borrows it, and its fonts
+/// (ADR 0009).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocxInfo {
     /// The last section's page width less its left and right margins and gutter, in
     /// twips (1/1440″).
@@ -82,6 +93,9 @@ pub struct DocxInfo {
     /// Past a paragraph's last tab stop, tabs advance to multiples of this from the text's
     /// left edge (`w:defaultTabStop` in `word/settings.xml`), in twips.
     pub default_tab: u32,
+    /// `word/fontTable.xml`: each font's class and embedded faces; shared, as documents
+    /// are cloned for crash recovery.
+    pub fonts: Arc<FontTable>,
 }
 
 impl DocxInfo {
@@ -96,6 +110,7 @@ impl Default for DocxInfo {
         Self {
             text_width: Self::LETTER_TEXT_WIDTH,
             default_tab: Self::DEFAULT_TAB,
+            fonts: Arc::default(),
         }
     }
 }

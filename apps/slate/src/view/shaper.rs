@@ -6,13 +6,16 @@
 //! on top ([`StyleSheet::look`](document_model::StyleSheet::look)), family and size
 //! included, whatever the format (Markdown and plain text have Slate's built-in sheet).
 //! Pango resolves the family through fontconfig, so Calibri draws as Carlito where that
-//! is installed. A paragraph's style also gives its first-line indent and line spacing
-//! (its space and left indent are the flow's), and its tab stops with the paragraph's own
-//! ([`Content::tabs`]); Pango draws no leaders, so [`PangoShaper::leaders`] lays them out.
+//! is installed; a Word document's fonts go to Pango as their [`Families`] give them
+//! (embedded faces' families, fallbacks by class; ADR 0009). A paragraph's style also
+//! gives its first-line indent and line spacing (its space and left indent are the
+//! flow's), and its tab stops with the paragraph's own ([`Content::tabs`]); Pango draws no
+//! leaders, so [`PangoShaper::leaders`] lays them out.
 //! Slate's own looks go on top: code and raw source in monospace, links in the link
 //! colour, a table's header row bold.
 
 use super::{texture_key, Textures};
+use crate::fonts::Families;
 use document_model::{
     Align, Image, ImageSource, LineSpacing, ListKind, Look as RunLook, RunStyle, StyleSheet,
     TabAlign, TabLeader,
@@ -70,6 +73,8 @@ pub struct PangoShaper {
     /// Its family and size (half-points), which runs leave unset in their attributes.
     base_font: String,
     base_size: u16,
+    /// What Pango is given for each of the document's font names.
+    families: Families,
     textures: Textures,
     cache: HashMap<LayoutKey, Entry>,
     cached_bytes: usize,
@@ -79,16 +84,22 @@ pub struct PangoShaper {
 }
 
 impl PangoShaper {
-    pub fn new(context: pango::Context, styles: &StyleSheet, textures: Textures) -> Self {
+    pub fn new(
+        context: pango::Context,
+        styles: &StyleSheet,
+        textures: Textures,
+        families: Families,
+    ) -> Self {
         let run = &styles.default_style().run;
         let mut base = pango::FontDescription::new();
-        base.set_family(&run.font);
+        base.set_family(families.get(&run.font));
         base.set_size(half_points(run.size));
         PangoShaper {
             context,
             base,
             base_font: run.font.clone(),
             base_size: run.size,
+            families,
             textures,
             cache: HashMap::new(),
             cached_bytes: 0,
@@ -263,7 +274,14 @@ impl PangoShaper {
                 let mut start = 0;
                 for run in &paragraph.runs {
                     let end = start + run.text.len();
-                    run_looks(style, &run.style, start as u32, end as u32, &attrs);
+                    run_looks(
+                        style,
+                        &run.style,
+                        start as u32,
+                        end as u32,
+                        &attrs,
+                        &self.families,
+                    );
                     start = end;
                 }
                 match paragraph.align {
@@ -301,7 +319,7 @@ impl PangoShaper {
     /// aren't the document's font's, and what it turns on.
     fn style_looks(&self, look: &RunLook, all: &impl Fn(pango::Attribute)) {
         if look.font != self.base_font {
-            all(pango::AttrString::new_family(&look.font).into());
+            all(pango::AttrString::new_family(self.families.get(&look.font)).into());
         }
         if look.size != self.base_size {
             all(pango::AttrSize::new(half_points(look.size)).into());
@@ -359,7 +377,7 @@ impl PangoShaper {
     /// The font of a run look: its family, size, weight, and style.
     fn font_of(&self, look: &RunLook) -> pango::FontDescription {
         let mut font = self.base.clone();
-        font.set_family(&look.font);
+        font.set_family(self.families.get(&look.font));
         font.set_size(half_points(look.size));
         if look.bold {
             font.set_weight(pango::Weight::Bold);
@@ -494,12 +512,19 @@ fn foreground(hex: u32) -> pango::Attribute {
 /// A run's looks over bytes `start..end`, over its paragraph style's look `style` (set on
 /// the whole paragraph): the overrides `s` that differ from it (as
 /// [`StyleSheet::look`] puts them on top), and Slate's own looks (code, raw source,
-/// links).
-fn run_looks(style: &RunLook, s: &RunStyle, start: u32, end: u32, attrs: &pango::AttrList) {
+/// links). Font names go to Pango as `families` gives them.
+fn run_looks(
+    style: &RunLook,
+    s: &RunStyle,
+    start: u32,
+    end: u32,
+    attrs: &pango::AttrList,
+    families: &Families,
+) {
     let add = |a: pango::Attribute| insert(attrs, a, start, end);
     let changed = |set: Option<bool>, styled: bool| set.filter(|&on| on != styled);
     if let Some(font) = s.font.as_deref().filter(|&f| f != style.font) {
-        add(pango::AttrString::new_family(font).into());
+        add(pango::AttrString::new_family(families.get(font)).into());
     }
     if let Some(size) = s.size.filter(|&h| h != style.size) {
         add(pango::AttrSize::new(half_points(size)).into());
@@ -552,7 +577,7 @@ fn run_looks(style: &RunLook, s: &RunStyle, start: u32, end: u32, attrs: &pango:
 impl Shaper for PangoShaper {
     fn metrics(&mut self, look: &Look) -> Metrics {
         let mut font = self.base.clone();
-        font.set_family(&look.font);
+        font.set_family(self.families.get(&look.font));
         font.set_size(half_points(look.size));
         if look.bold {
             font.set_weight(pango::Weight::Bold);

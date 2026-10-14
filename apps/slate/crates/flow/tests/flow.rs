@@ -1033,7 +1033,7 @@ fn markdown_and_text_tabs_are_four_spaces_and_code_keeps_the_shapers() {
         let mut flow = Flow::new(Document {
             blocks,
             styles: StyleSheet::builtin(),
-            format,
+            format: format.clone(),
         });
         flow.set_width(400, &mut fake);
         flow.layout_slice(&mut fake, &mut || true);
