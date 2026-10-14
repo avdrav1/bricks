@@ -293,6 +293,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "etch"
+version = "0.1.0"
+dependencies = [
+ "gtk4",
+ "image-model",
+ "suite-core",
+ "suite-platform",
+ "suite-ui",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "event-listener"
 version = "5.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

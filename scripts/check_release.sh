@@ -4,14 +4,18 @@
 #   scripts/check_release.sh dist/brick-X.Y.Z-x86_64-linux/brick
 #   scripts/check_release.sh dist/slate-X.Y.Z-x86_64-linux/slate
 #   scripts/check_release.sh dist/frame-X.Y.Z-x86_64-linux/frame
+#   scripts/check_release.sh dist/etch-X.Y.Z-x86_64-linux/etch
 #
 # For each distro: a fresh container gets only what a user would install (GTK 4's runtime,
 # from the distro's own packages), then the binary opens a small file under GTK's Broadway
 # backend. Brick opens a CSV and must report its first frame and quit (`--bench-open`);
 # Slate opens a Markdown file and must still be running 8 s later; Frame opens the fixture
 # deck, draws its densest slide, and must report the frames drawn and quit
-# (`--bench-draw`). That loads every library it links against and opens a window. Also
-# checks that no glibc symbol it needs is newer than Ubuntu 24.04's 2.39. Needs docker.
+# (`--bench-draw`); Etch draws a few stroke segments on an 8K image and must report them
+# and quit (`--bench-stroke`; it opens no file yet, and Broadway's slow frames without a
+# browser need the longer limit). That loads every library it links against and opens a
+# window. Also checks that no glibc symbol it needs is newer than Ubuntu 24.04's 2.39.
+# Needs docker.
 set -euo pipefail
 bin=$(realpath "${1:?usage: check_release.sh BINARY}")
 app=$(basename "$bin")
@@ -31,6 +35,8 @@ case $app in
     open="slate /tmp/t.md 2>&1; echo exit \$?"; opened='^exit 124$' ;;
   frame) ext=pptx; deck="$(dirname "$0")/../apps/frame/crates/pptx/tests/data/fixture.pptx"
     open="frame /tmp/t.pptx --bench-draw 5 2>&1"; opened='^{"slide":' ;;
+  etch) ext=txt; content='unused\n'
+    open="etch --bench-stroke 5 2>&1"; opened='^{"image":' ;;
   *) echo "unknown app $app"; exit 1 ;;
 esac
 file=$(mktemp --suffix=".$ext"); trap 'rm -f "$file"' EXIT
@@ -46,7 +52,7 @@ checks=(
 fail=0
 for c in "${checks[@]}"; do
   IFS='|' read -r name image install <<<"$c"
-  limit=60; [ "$app" = slate ] && limit=8
+  limit=60; [ "$app" = slate ] && limit=8; [ "$app" = etch ] && limit=120
   out=$(docker run --rm -v "$bin:/usr/local/bin/$app:ro" -v "$file:/tmp/t.$ext:ro" "$image" sh -c "
     $install || exit 3
     gtk4-broadwayd :5 >/dev/null 2>&1 & sleep 1
@@ -56,6 +62,7 @@ for c in "${checks[@]}"; do
     case $app in
       brick) echo "ok   $name: $(grep '^FIRST_FRAME ' <<<"$out" | cut -c1-80)" ;;
       frame) echo "ok   $name: $(grep '^{"slide":' <<<"$out" | cut -c1-100)" ;;
+      etch) echo "ok   $name: $(grep '^{"image":' <<<"$out" | cut -c1-100)" ;;
       *) echo "ok   $name: $app opened t.$ext and was still running after ${limit}s" ;;
     esac
   else
