@@ -18,7 +18,8 @@
 #      many black pixels, still at 100%;
 #   5. Ctrl+wheel up zooms in a step a notch, keeping the pixel under the pointer (the
 #      status position doesn't move) through 150% to 800%; at 800% the stroke's pixels are
-#      sharp squares: no pixel between black and white around it;
+#      sharp squares: no pixel between black and white around it (away from the pointer,
+#      where the tip's ring is);
 #   6. the wheel pans: a notch down moves the image 48 screen px, 6 image px at 800%;
 #      Shift+wheel sideways; a middle-button drag and a drag with Space held move the image
 #      with the pointer (the pixel grabbed ends under it); Space's drag draws nothing: after
@@ -33,6 +34,12 @@
 #      Eraser turns it on (and Pencil off), and the same drag erases the line: no black
 #      left, and the checkerboard's grey shows through where it was; Ctrl+Z gives the
 #      line back (as many black pixels, no grey); the P and E keys pick the tools.
+# ETCH-4 acceptance: colours and sizes.
+#  10. the colour row shows black on white; a click on Red makes red the foreground and a
+#      right-click on Indigo makes indigo the background; Size 7 and a sideways drag
+#      draw a red line 7 px thick (the canvas column through it); X swaps the colours,
+#      and the next line is indigo, 7 px; the eraser keeps its own size (9) and the
+#      pencil its 7.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -135,6 +142,28 @@ elif cmd == "checker":
     at, l, t, w, h = image(sys.argv[2])
     print(sum(1 for y in range(t + 2, t + h - 2) for x in range(l + 2, l + w - 2)
               if all(195 <= c <= 213 for c in at(x, y))))
+elif cmd == "column":
+    # Pixels of colour HEX in the image column at screen X.
+    at, l, t, w, h = image(sys.argv[2])
+    x, want = int(sys.argv[3]), sys.argv[4]
+    wc = tuple(int(want[i:i + 2], 16) for i in (0, 2, 4))
+    print(sum(1 for y in range(t, t + h) if all(abs(a - b) <= 8 for a, b in zip(at(x, y), wc))))
+elif cmd == "where":
+    # The centre of the first widget named NAME, to click.
+    desktop = Atspi.get_desktop(0)
+    stack = [desktop.get_child_at_index(i) for i in range(desktop.get_child_count())]
+    stack = [a for a in stack if a is not None and a.get_name() == "etch"]
+    while stack:
+        n = stack.pop(0)
+        if n is None:
+            continue
+        if n.get_name() == sys.argv[2] and n.get_component_iface() is not None:
+            e = n.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+            if e.width > 0:
+                print(e.x + e.width // 2, e.y + e.height // 2)
+                sys.exit(0)
+        stack.extend(n.get_child_at_index(i) for i in range(n.get_child_count()))
+    sys.exit("nothing named " + sys.argv[2])
 PY
 session() {
   WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 sway --unsupported-gpu -c /tmp/sway.conf >/tmp/sway.log 2>&1 &
@@ -197,7 +226,8 @@ session() {
     ctrl_wheel $mx $my -1
     echo "zoom $(zoom): $(same "$before" "$(pos)")"
   done
-  shot zoomed; echo "sharp: $(px sharp /tmp/shot.png $mx $my 80)"
+  # On the stroke, 200 px left of the pointer: clear of the tip ring around the pointer.
+  shot zoomed; echo "sharp: $(px sharp /tmp/shot.png $((mx - 200)) $((my - 107)) 40)"
 
   echo "== 6 pan"
   point $mx $my; read x0 y0 <<<"$(pos)"
@@ -248,7 +278,28 @@ session() {
   echo "unerased: $(same $drawn $(px black /tmp/shot.png)) grey $(px checker /tmp/shot.png)"
   keys p; echo "key p: pencil $(tool Pencil) eraser $(tool Eraser)"
   keys e; echo "key e: pencil $(tool Pencil) eraser $(tool Eraser)"
-  pkill -x etch
+  pkill -x etch; sleep 1
+
+  echo "== 10 colours"
+  etch >>/tmp/app.log 2>&1 & sleep 3
+  keys -M ctrl 0 -m ctrl
+  colours() { python3 /tmp/a11y.py text | grep "^Foreground" | sed "s/^/$1: /"; }
+  colours start
+  python3 /tmp/a11y.py press Red; sleep 0.5; colours red
+  read x y <<<"$(px where Indigo)"; python3 /scripts/dnd_helpers.py click $x $y 1 right; colours indigo
+  # Alt+S, the mnemonic of the Size label, puts the keys in the size field.
+  keys -M alt s -m alt
+  keys -M ctrl a -m ctrl; keys 7; keys -k Return
+  echo "size: $(python3 /tmp/a11y.py text | grep -A1 "^Size$" | tail -1)"
+  read mx my <<<"$(px centre)"
+  python3 /scripts/dnd_helpers.py drag $((mx - 150)) $my $((mx + 150)) $my; sleep 0.5
+  shot red; echo "red column: $(px column /tmp/shot.png $mx ED1C24)"
+  keys x; colours swapped
+  python3 /scripts/dnd_helpers.py drag $((mx - 150)) $((my + 60)) $((mx + 150)) $((my + 60)); sleep 0.5
+  shot indigo; echo "indigo column: $(px column /tmp/shot.png $mx 3F48CC)"
+  echo "red still: $(px column /tmp/shot.png $mx ED1C24)"
+  keys e; echo "eraser size: $(python3 /tmp/a11y.py text | grep -A1 "^Size$" | tail -1)"
+  keys p; echo "pencil size: $(python3 /tmp/a11y.py text | grep -A1 "^Size$" | tail -1)"
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -302,6 +353,17 @@ check "9: erasing the line leaves no black, the checkerboard showing through" "9
 check "9: Ctrl+Z gives the line back over white" "9 eraser" "^unerased: yes grey 0$"
 check "9: P picks the pencil" "9 eraser" "^key p: pencil on eraser off$"
 check "9: E picks the eraser" "9 eraser" "^key e: pencil off eraser on$"
+# ETCH-4: colours and sizes.
+check "10: the colour row starts black on white" "10 colours" "^start: Foreground #000000, background #FFFFFF$"
+check "10: a click on Red makes it the foreground" "10 colours" "^red: Foreground #ED1C24, background #FFFFFF$"
+check "10: a right-click on Indigo makes it the background" "10 colours" "^indigo: Foreground #ED1C24, background #3F48CC$"
+check "10: the size takes 7" "10 colours" "^size: 7$"
+check "10: the pencil draws a red line 7 px thick" "10 colours" "^red column: 7$"
+check "10: X swaps the colours" "10 colours" "^swapped: Foreground #3F48CC, background #ED1C24$"
+check "10: ... and the next line is indigo, 7 px thick" "10 colours" "^indigo column: 7$"
+check "10: ... beside the red one" "10 colours" "^red still: 7$"
+check "10: the eraser keeps its own size" "10 colours" "^eraser size: 9$"
+check "10: ... and the pencil its" "10 colours" "^pencil size: 7$"
 absent "the app logs no errors or panics" "app log" "^etch:|panicked|CRITICAL"
 bench=$(section "8 bench" | sed -n "s/^bench: //p")
 if [ -z "$bench" ]; then echo "FAIL 8: --bench-stroke printed nothing"; fail=1; else

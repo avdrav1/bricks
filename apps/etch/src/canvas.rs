@@ -11,12 +11,11 @@
 //! pointer. The widget emits `changed` whenever what the status bar or the Edit menu shows
 //! may have changed: the view, the history, or the pixel under the pointer.
 
-use crate::tools::Tool;
 use crate::view::View;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{gdk, glib, graphene, gsk};
-use image_model::{Document, Image, Rect};
+use image_model::{Document, Image, Pencil, Rect};
 use std::time::Instant;
 
 /// The side of a tile texture, in image pixels.
@@ -29,6 +28,8 @@ const CHECK_DARK: gdk::RGBA = gdk::RGBA::new(0.8, 0.8, 0.8, 1.0);
 const BOUNDARY: gdk::RGBA = gdk::RGBA::new(0.0, 0.0, 0.0, 0.35);
 /// How far one wheel notch pans, in widget pixels.
 const NOTCH_PX: f64 = 48.0;
+/// The tip's outline shows once the tip is this many screen pixels across.
+const OUTLINE_MIN_PX: f64 = 4.0;
 const CHANGED: &str = "changed";
 
 /// What a drag in progress does.
@@ -66,7 +67,7 @@ mod imp {
         /// Whether the next allocation should show the image at 100% rather than fitted.
         pub actual_size: Cell<bool>,
         /// What a primary-button drag draws with.
-        pub tool: Cell<Tool>,
+        pub tip: Cell<Option<Pencil>>,
     }
 
     #[glib::object_subclass]
@@ -144,12 +145,42 @@ mod imp {
                 self.checkerboard(snapshot, &visible, (ox, oy));
                 self.draw_tiles(snapshot, &view, &visible);
             }
+            self.draw_tip_outline(snapshot, &view);
             snapshot.pop();
             self.last_ms.set(t0.elapsed().as_secs_f64() * 1e3);
         }
     }
 
     impl Canvas {
+        /// The tip's size around the pointer, where a drag would draw, once it's larger
+        /// than a few screen pixels: a dark ring on a light one, seen on any colour. Not
+        /// while panning.
+        fn draw_tip_outline(&self, snapshot: &gtk::Snapshot, view: &View) {
+            let (Some(tip), Some(p)) = (self.tip.get(), self.pointer.get()) else {
+                return;
+            };
+            let w = tip.width.max(1) as f64;
+            let panning = self.space.get() || matches!(self.drag.get(), Drag::Pan { .. });
+            if w * view.zoom < OUTLINE_MIN_PX || panning {
+                return;
+            }
+            // The disc's centre: the pixel's centre for odd widths, its corner for even ones
+            // (they lean right and down).
+            let (x, y) = view.to_image(p);
+            let shift = if tip.width % 2 == 0 { 1.0 } else { 0.5 };
+            let centre = view.to_widget((x.floor() + shift, y.floor() + shift));
+            let builder = gsk::PathBuilder::new();
+            builder.add_circle(
+                &graphene::Point::new(centre.0 as f32, centre.1 as f32),
+                (w * view.zoom / 2.0) as f32,
+            );
+            let path = builder.to_path();
+            let light = gdk::RGBA::new(1.0, 1.0, 1.0, 0.7);
+            let dark = gdk::RGBA::new(0.0, 0.0, 0.0, 0.8);
+            snapshot.append_stroke(&path, &gsk::Stroke::new(3.0), &light);
+            snapshot.append_stroke(&path, &gsk::Stroke::new(1.0), &dark);
+        }
+
         fn checkerboard(
             &self,
             snapshot: &gtk::Snapshot,
@@ -333,9 +364,10 @@ impl Canvas {
         self.change_view(View::fit);
     }
 
-    /// The tool a primary-button drag draws with.
-    pub fn set_tool(&self, tool: Tool) {
-        self.imp().tool.set(tool);
+    /// What a primary-button drag draws with.
+    pub fn set_tip(&self, tip: Pencil) {
+        self.imp().tip.set(Some(tip));
+        self.queue_draw();
     }
 
     /// Space held or let go: while held, a primary-button drag pans.
@@ -361,7 +393,9 @@ impl Canvas {
     /// Starts a pencil stroke at widget point `at`.
     pub fn draw_begin(&self, at: (f64, f64)) {
         let Some(view) = self.view() else { return };
-        let tip = self.imp().tool.get().tip();
+        let Some(tip) = self.imp().tip.get() else {
+            return;
+        };
         let changed = self.with_doc(|d| d.begin_stroke(tip, view.to_image(at)));
         self.imp().drag.set(Drag::Draw);
         self.invalidate(changed);
@@ -516,6 +550,7 @@ impl Canvas {
             move |_: &gtk::EventControllerMotion, x: f64, y: f64| {
                 if let Some(canvas) = canvas.upgrade() {
                     canvas.imp().pointer.set(Some((x, y)));
+                    canvas.redraw_outline();
                     canvas.emit_changed();
                 }
             }
@@ -527,11 +562,22 @@ impl Canvas {
             move |_| {
                 if let Some(canvas) = canvas.upgrade() {
                     canvas.imp().pointer.set(None);
+                    canvas.redraw_outline();
                     canvas.emit_changed();
                 }
             }
         });
         self.add_controller(motion);
+    }
+
+    /// Redraws when the pointer moved and the tip's outline follows it.
+    fn redraw_outline(&self) {
+        let (tip, view) = (self.imp().tip.get(), self.view());
+        if let (Some(tip), Some(view)) = (tip, view) {
+            if tip.width as f64 * view.zoom >= OUTLINE_MIN_PX {
+                self.queue_draw();
+            }
+        }
     }
 
     /// Ctrl+wheel: each notch down a step out, up a step in, around the pointer; a

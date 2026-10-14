@@ -10,10 +10,12 @@
                                        so no real input device is needed. Needs the
                                        generated `wlr_proto` package (pywayland scanner) on
                                        the path.
-  dnd_helpers.py click X Y [N]         the same pointer: a quick click at (X, Y), as a
+  dnd_helpers.py click X Y [N] [BUTTON]
+                                       the same pointer: a quick click at (X, Y), as a
                                        hand makes one (GTK takes a press held past the
                                        double-click time as a long press); N clicks in a
-                                       row (1) make a double or triple click
+                                       row (1) make a double or triple click; BUTTON
+                                       left (the default), middle, or right
   dnd_helpers.py wheel X Y NOTCHES     the same pointer at (X, Y) turns a mouse wheel
                                        NOTCHES notches down (negative: up)
   dnd_helpers.py hold X Y SECONDS      a second pointer that moves to (X, Y) and stays
@@ -25,7 +27,7 @@ import sys
 import time
 
 # Linux input event codes.
-BUTTONS = {"left": 0x110, "middle": 0x112}
+BUTTONS = {"left": 0x110, "right": 0x111, "middle": 0x112}
 
 
 def source(path):
@@ -126,13 +128,13 @@ def drag(x1, y1, x2, y2, hold=0.5, which="left"):
     done()
 
 
-def click(x, y, times=1):
+def click(x, y, times=1, which="left"):
     move, button, _, done = pointer()
     move(x, y)
     time.sleep(0.3)
     for _ in range(int(times)):
-        button(True, hold=0.05)
-        button(False, hold=0.08)
+        button(True, hold=0.05, code=BUTTONS[which])
+        button(False, hold=0.08, code=BUTTONS[which])
     time.sleep(0.3)
     done()
 
@@ -162,7 +164,7 @@ if __name__ == "__main__":
     elif sys.argv[1] == "drag":
         drag(*map(float, sys.argv[2:7]), *sys.argv[7:8])
     elif sys.argv[1] == "click":
-        click(*map(float, sys.argv[2:5]))
+        click(*map(float, sys.argv[2:5]), *sys.argv[5:6])
     elif sys.argv[1] == "wheel":
         wheel(float(sys.argv[2]), float(sys.argv[3]), int(sys.argv[4]))
     elif sys.argv[1] == "hold":
