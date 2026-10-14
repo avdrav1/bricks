@@ -7,6 +7,7 @@ Your data stays your data. Zero zero one two three stays zero zero one two three
 Past your data, the sheet keeps going, like Excel and Calc. Type anywhere, and the rows are there.
 It opens Excel workbooks too, with formulas, multiple sheets, and cell styles. When you save, Brick patches the original file rather than rewriting it, so charts, comments, and conditional formatting come through untouched.
 Slate is the word processor. You'll notice there are no pages. Slate gives you one endless page, so you write instead of fighting margins. And Word documents look like themselves, in their own fonts and styles.
+Word layouts come through too: the page's own width, tab stops with leaders, borders and shading, embedded fonts, and Word's own list markers.
 Choose how wide you want the column. That's a setting for you; it doesn't change the document. Typing, headings, lists, tables, and copy and paste all work as you'd expect, with full undo.
 When you want more, a slim format bar holds the document's own styles, fonts, sizes, and colours. No ribbon.
 Find and replace reaches into tables, and Replace All undoes in one step. Control N starts a new Word document.

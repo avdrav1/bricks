@@ -8,8 +8,12 @@
 (() => {
   const { icon, btn, textBtn } = V.ui;
   const Z = 1.25; // the desktop's scale
-  const MEDIUM = 624; // settings.rs: Narrow 480, Medium 624, Wide 816, Full = width - 2×24
-  const WIDTHS = { Narrow: 480, Medium: 624, Wide: 816 };
+  // settings.rs: Page (the default) is a Word document's page width less its margins,
+  // then Narrow 480, Medium 624, Wide 816, Full = width - 2×24. report.docx is Letter
+  // with 1″ margins, so Page gives it 624 px.
+  const PAGE = 624;
+  const TEXT_WIDTHS = ["Page", "Narrow", "Medium", "Wide", "Full"];
+  const WIDTHS = { Page: PAGE, Narrow: 480, Medium: 624, Wide: 816 };
   // Where the main window sits: about 1600 px wide, clear of the captions' band.
   const SW = { x: 160, y: 62, w: 1600, h: 880 };
 
@@ -75,6 +79,37 @@
     { k: "mh2", h: "After the release" },
     { k: "p", h: "Post the notes on the website and close the milestone." },
   ];
+
+  // invoice.docx, for SL4's Word fidelity (ADR 0009): A4 with Word's narrow 0.5″ margins,
+  // so Text Width → Page gives (11906 − 2 × 720) / 15 ≈ 698 px. The letterhead is in an
+  // embedded font (League Spartan, carried in word/fonts/), the section headings are
+  // shaded with a bottom border, lines use a right stop at the text width, a left stop
+  // at 1.25″, and dot leaders; one paragraph has its own indents; bullets are the
+  // numbering's "●" at Word's 0.25″/0.5″ indents.
+  const INVOICE_PAGE = 698;
+  const tabs = (...cells) => cells.join('<span class="slate-tab"></span>');
+  const lead = (item, amount) => `<span>${item}</span><span class="slate-dots">${".".repeat(160)}</span><span>${amount}</span>`;
+  const stop = (label, text) => `<span class="slate-stop">${label}</span><span>${text}</span>`;
+  const INVOICE = [
+    { k: "lhead", h: '<span class="slate-lhead-t">HARBOUR &amp; STONE</span>' },
+    { k: "lsub", h: tabs("Architects · 14 Quay Street, Bristol BS1 4DB", "0117 496 0321") },
+    { k: "tabrow", h: tabs("<b>Invoice 2026-114</b>", "14 October 2026") },
+    { k: "stoprow", h: stop("Billed to", "Northfield Community Trust") },
+    { k: "stoprow", h: stop("", "2 Mill Lane, Ashford TN23 1HP") },
+    { k: "shade", h: "SERVICES" },
+    { k: "leadrow", h: lead("Site survey, Ashford", "£1,200.00") },
+    { k: "leadrow", h: lead("Planning drawings, two sites", "£3,450.00") },
+    { k: "leadrow", h: lead("Structural consultation", "£860.00") },
+    { k: "leadrow slate-total", h: lead("<b>Total due</b>", "<b>£5,510.00</b>") },
+    { k: "shade", h: "PAYMENT" },
+    { k: "indent", h: "Please pay within 30 days of the invoice date, quoting the invoice number. Payments received late may be charged interest at 4% above the Bank of England base rate." },
+    { k: "wli", h: '<span class="slate-wmark">●</span>Harbour Mutual · sort code 20-45-77' },
+    { k: "wli", h: '<span class="slate-wmark">●</span>Account 4401 8823 · Harbour &amp; Stone Ltd' },
+    { k: "wli", h: '<span class="slate-wmark">●</span>Questions to accounts@harbourstone.co.uk' },
+    { k: "thanks", h: "Thank you for your business." },
+  ];
+  const INVOICE_BODY = { style: "Normal", font: "Calibri", size: "11", align: "left" };
+  const INVOICE_HEAD = { style: "Title", font: "League Spartan", size: "26", b: true, align: "left" };
 
   // ---- the document as HTML ------------------------------------------------
   const CHAR_RE = /[.*+?^${}()|[\]\\]/g;
@@ -172,12 +207,12 @@
 
   const REPORT_TOP = { style: "Title", font: "Calibri", size: "28", align: "left" };
 
-  function windowHTML({ id = "", x, y, w, h, title = "report.docx", kind = "docx", width = MEDIUM, blocks = REPORT, fmt = REPORT_TOP, find = false }) {
+  function windowHTML({ id = "", x, y, w, h, title = "report.docx", kind = "docx", width = PAGE, blocks = REPORT, fmt = REPORT_TOP, find = false, cls = "" }) {
     const colW = width === "full" ? w / Z - 48 : width;
     const body = `
       ${find ? findBarHTML() : ""}
       ${fmtBarHTML()}
-      <div class="slate-page"><div class="slate-scroll"><div class="slate-col slate-${kind}" style="width:${colW}px">${docHTML(blocks).html}</div></div><div class="slate-sb"></div></div>
+      <div class="slate-page"><div class="slate-scroll"><div class="slate-col slate-${kind} ${cls}" style="width:${colW}px">${docHTML(blocks).html}</div></div><div class="slate-sb"></div></div>
       <div class="sep-h"></div>
       <div class="slate-status caption">${statusText(kind, blocks)}</div>`;
     const html = V.ui.win({ id, x, y, w, h, cls: "slate-win", start: btn("document-open", "slate-open"), title: `<span class="slate-t">${title}</span>`, end: btn("open-menu", "slate-menu"), body });
@@ -290,7 +325,7 @@
     "-", ["Quit", "Ctrl+Q"],
   ];
   const widthMenu = (current) =>
-    V.ui.menu(["Narrow", "Medium", "Wide", "Full"].map((l) => ({ label: l, radio: l === current })), { cls: "slate-submenu" }).replace(
+    V.ui.menu(TEXT_WIDTHS.map((l) => ({ label: l, radio: l === current })), { cls: "slate-submenu" }).replace(
       '<div class="popover slate-submenu">',
       `<div class="popover slate-submenu"><div class="mi slate-subhead"><span class="slate-back">${back}</span><span class="mi-label">Text Width</span></div><div class="mi-sep"></div>`,
     );
@@ -325,6 +360,22 @@
     { name: "photo.jpg", size: "2.4 MB", when: "Oct 2" },
     { name: "report.docx", size: "38.4 kB", when: "10:20" },
   ];
+
+  // The window `slate` shows without a file (main.rs start_window), with the sessions a
+  // crash left (recovery.rs start_section): name, "unsaved edits · 10:23", Discard, Restore.
+  const startWindowHTML = (id, { x, y, w, h }, crashed) =>
+    V.ui.win({
+      id, x, y, w, h, cls: "slate-win slate-startwin",
+      start: btn("document-open"), title: "Slate", end: btn("open-menu"),
+      body: `<div class="slate-start">
+        <div class="slate-title2">Open a document</div>
+        <div class="dim-label">Slate shows .txt, .md, and .docx files. Drop one here, choose Open, or start a new one.</div>
+        <div class="slate-startbtns">${textBtn("Open…", "suggested")}${textBtn("New Document")}</div>
+        <div class="slate-crashed"><div class="slate-heading">Unsaved edits from a crash</div>
+          ${crashed.map((c) => `<div class="slate-crow"><span>${c.name}</span><span class="dim-label slate-grow">unsaved edits · ${c.when}</span>${textBtn("Discard", "slate-flatbtn")}${textBtn("Restore", "suggested slate-restore")}</div>`).join("")}
+        </div>
+      </div>`,
+    });
   const saveDialogHTML = (id, x, y) =>
     V.ui.win({
       id, x, y, w: 1180, h: 740, cls: "slate-dialog slate-filedlg",
@@ -501,30 +552,109 @@
   });
 
   // =====================================================================================
-  // Menu → Text Width: Narrow, then Wide, then Full; the column reflows each time.
+  // A Word invoice at Text Width → Page (ADR 0009): the page's text width, tab stops
+  // with leaders, a bordered and shaded heading, an embedded font, Word's "●" bullets.
+  V.scene({
+    id: "slate-fidelity",
+    beats: [{ say: "Word layouts come through too: the page's own width, tab stops with leaders, borders and shading, embedded fonts, and Word's own list markers.", min: 12.5 }],
+    build(root, s) {
+      const IW = { x: 160, y: 62, w: 1600, h: 880 };
+      root.innerHTML = `<div class="slate-cam">${V.ui.desktop()}${windowHTML({ id: "slfi-win", ...IW, title: "invoice.docx", width: INVOICE_PAGE, blocks: INVOICE, fmt: INVOICE_BODY, cls: "slate-inv" })}
+        ${popHTML("slfi-main", V.ui.menu(MAIN_MENU, { cls: "slate-mainmenu" }))}${popHTML("slfi-sub", widthMenu("Page"))}</div>`;
+      const cam = root.querySelector(".slate-cam");
+      const winEl = root.querySelector("#slfi-win");
+      const w = bind(winEl, IW.w);
+      const main = root.querySelector(".slfi-main");
+      const sub = root.querySelector(".slfi-sub");
+      const q = (sel) => w.col.querySelector(sel);
+      const T = { appear: 0.1, open: 0.6, sub: 1.3 };
+      T.close = Math.max(2.4, s.at(0, "the page's own width") + 0.6);
+      T.tabs = Math.max(T.close + 0.3, s.at(0, "tab stops"));
+      T.borders = Math.max(T.tabs + 1.1, s.at(0, "borders"));
+      T.fonts = Math.max(T.borders + 1.1, s.at(0, "embedded fonts"));
+      T.markers = Math.max(T.fonts + 1.1, s.at(0, "list markers"));
+      // Where each detail is, measured now, before anything moves.
+      const pt = (el, ax, ay) => {
+        const [x, y] = at(el, ax, ay);
+        return { x, y };
+      };
+      const tabRow = pt(q(".slate-tabrow"), 0.5, 0.5);
+      const leaders = pt(q(".slate-leadrow"), 0.5, 0.5);
+      const services = pt(q(".slate-shade"), 0.5, 0.5);
+      const head = pt(q(".slate-lhead"), 0.5, 0.5);
+      const bullets = pt(q(".slate-wli"), 0.3, 0.5);
+      const keys = [
+        [0, { x: 960, y: 540, s: 1 }],
+        [T.close + 0.1, { x: 960, y: 540, s: 1 }],
+        // Tabs, leaders, and the shaded heading share one view; the camera drifts
+        // toward the heading as the narrator reaches borders and shading.
+        [T.tabs + 0.7, { x: leaders.x, y: (tabRow.y + leaders.y) / 2, s: 1.5 }],
+        [T.borders, { x: leaders.x, y: (tabRow.y + leaders.y) / 2 + 6, s: 1.52 }],
+        [T.borders + 0.8, { x: services.x, y: services.y + 20, s: 1.62 }],
+        [T.fonts - 0.1, { x: services.x, y: services.y + 22, s: 1.63 }],
+        [T.fonts + 0.6, { x: head.x - 60, y: head.y - 30, s: 1.6 }],
+        [T.markers - 0.1, { x: head.x - 60, y: head.y - 30, s: 1.61 }],
+        [T.markers + 0.7, { x: bullets.x + 80, y: bullets.y - 60, s: 1.7 }],
+        [s.dur, { x: bullets.x + 80, y: bullets.y - 56, s: 1.74 }],
+      ];
+      return (t) => {
+        camera(cam, V.track(t, keys));
+        V.ui.appear(winEl, t, T.appear);
+        // The caret starts on the invoice line; a click in the letterhead shows its font.
+        const inHead = t >= T.fonts + 0.25;
+        const blocks = inHead
+          ? withBlock(INVOICE, 0, { h: INVOICE[0].h.replace("STONE", `STO${caret(t - T.fonts)}NE`) })
+          : withBlock(INVOICE, 2, { h: caret(t, t >= T.appear + 0.3) + INVOICE[2].h });
+        draw(w, { blocks, fmt: inHead ? INVOICE_HEAD : INVOICE_BODY, words: INVOICE });
+        // Menu → Text Width: Page is the default; picking it again closes the menu.
+        const [mx, my] = at(w.menuBtn, 0.5, 1);
+        V.cls(w.menuBtn, "on", t >= T.open && t < T.close);
+        placePop(main, t >= T.open && t < T.sub, mx, my);
+        placePop(sub, t >= T.sub && t < T.close, mx, my);
+        const tw = findLabel(root, "slfi-main", "Text Width");
+        const page = findLabel(root, "slfi-sub", "Page");
+        V.cls(tw, "hot", t >= T.sub - 0.35 && t < T.sub);
+        V.cls(page, "hot", t >= T.close - 0.35 && t < T.close);
+        const [tx, ty] = at(tw, 0.35, 0.5);
+        const [px, py] = at(page, 0.35, 0.5);
+        const [hx, hy] = at(q(".slate-lhead-t"), 0.84, 0.55);
+        V.pointer(t, [
+          [0, 1500, 760], [T.open - 0.4, mx, my - 18], [T.open, mx, my - 18, { click: true }],
+          [T.sub - 0.3, tx, ty], [T.sub, tx, ty, { click: true }],
+          [T.close - 0.35, px, py], [T.close, px, py, { click: true }],
+          [T.close + 0.8, 1700, 640], [T.fonts - 0.6, 1700, 640], [T.fonts + 0.15, hx, hy], [T.fonts + 0.25, hx, hy, { click: true }],
+          [T.markers + 0.4, 1760, 620],
+        ]);
+      };
+    },
+  });
+
+  // =====================================================================================
+  // Menu → Text Width: from Page (the default) to Narrow, then Wide, then Full; the
+  // column reflows each time.
   V.scene({
     id: "slate-width",
     beats: [{ say: "Choose how wide you want the column. That's a setting for you; it doesn't change the document.", min: 11 }],
     build(root, s) {
       root.innerHTML = `${V.ui.desktop()}${windowHTML({ id: "slw-win", ...SW })}
         ${popHTML("slw-main", V.ui.menu(MAIN_MENU, { cls: "slate-mainmenu" }))}
-        ${["Narrow", "Medium", "Wide", "Full"].map((l) => popHTML(`slw-sub slw-sub-${l}`, widthMenu(l))).join("")}`;
+        ${TEXT_WIDTHS.map((l) => popHTML(`slw-sub slw-sub-${l}`, widthMenu(l))).join("")}`;
       const w = bind(root.querySelector("#slw-win"), SW.w);
       const main = root.querySelector(".slw-main");
-      const subs = Object.fromEntries(["Narrow", "Medium", "Wide", "Full"].map((l) => [l, root.querySelector(`.slw-sub-${l}`)]));
+      const subs = Object.fromEntries(TEXT_WIDTHS.map((l) => [l, root.querySelector(`.slw-sub-${l}`)]));
       // Three rounds: open the menu, Text Width, pick a width.
       const rounds = [["Narrow", 0.5], ["Wide", 3.7], ["Full", 6.9]].map(([pick, t0]) => ({ pick, open: t0 + 0.4, sub: t0 + 1.3, choose: t0 + 2.2 }));
       const widthAt = (t) => {
-        let wd = MEDIUM;
+        let wd = PAGE;
         for (const [i, r] of rounds.entries()) {
-          const from = i === 0 ? MEDIUM : rounds[i - 1].pick === "Full" ? w.pageW - 48 : WIDTHS[rounds[i - 1].pick];
+          const from = i === 0 ? PAGE : rounds[i - 1].pick === "Full" ? w.pageW - 48 : WIDTHS[rounds[i - 1].pick];
           const to = r.pick === "Full" ? w.pageW - 48 : WIDTHS[r.pick];
           if (t >= r.choose) wd = V.tw(t, r.choose + 0.05, r.choose + 0.45, from, to, V.ease.inOut);
         }
         return wd;
       };
       const current = (t) => {
-        let c = "Medium";
+        let c = "Page";
         for (const r of rounds) if (t >= r.choose) c = r.pick;
         return c;
       };
@@ -547,7 +677,7 @@
         const path = [[0, 1300, 620]];
         for (const r of rounds) {
           const [tx, ty] = at(tw, 0.35, 0.5);
-          const pickEl = findLabel(root, `slw-sub-${t >= r.sub ? cur : "Medium"}`, r.pick);
+          const pickEl = findLabel(root, `slw-sub-${cur}`, r.pick);
           const [px, py] = pickEl ? at(pickEl, 0.35, 0.5) : [tx, ty + 80];
           path.push([r.open - 0.35, mx, my - 18], [r.open, mx, my - 18, { click: true }], [r.sub - 0.3, tx, ty], [r.sub, tx, ty, { click: true }], [r.choose - 0.35, px, py], [r.choose, px, py, { click: true }]);
         }
@@ -732,6 +862,68 @@
         draw(w, { blocks, scroll: 0, title: t >= T.type ? "• Untitled" : "Untitled", fmt: inHead ? { style: "Heading 1", font: "Calibri", size: "16", b: true, align: "left" } : { style: "Normal", font: "Calibri", size: "11", align: "left" } });
         V.keys(t, [[T.n, "Ctrl+N"], [T.h1, "Ctrl+1"], [T.enter, "Enter"], [T.save, "Ctrl+S"]]);
         camera(cam, V.track(t, [[0, { x: 960, y: 540, s: 1 }], [T.open + 0.3, { x: 960, y: 540, s: 1 }], [T.h1 + 0.4, { x: 820, y: 380, s: 1.4 }], [T.save - 0.1, { x: 830, y: 385, s: 1.42 }], [T.save + 0.6, { x: 960, y: 540, s: 1 }]]));
+      };
+    },
+  });
+
+  // =====================================================================================
+  // Unsaved edits; kill -9 in a Console; slate again: the start window offers them back
+  // (recovery.rs start_section); Restore: • report.docx with the edit.
+  V.scene({
+    id: "slate-crash",
+    beats: [
+      { say: "And if Slate ever crashes, your unsaved edits are waiting when you come back.", min: 7.2 },
+      { say: "Brick does the same.", min: 3.6 },
+    ],
+    build(root, s) {
+      const edit = { k: "p", h: "Both new sites passed their first fire inspection in September." };
+      const edited = insertBlock(REPORT, B.p1 + 1, edit);
+      const TW = { x: 1210, y: 470, w: 680, h: 420 };
+      const STW = { x: 270, y: 190, w: 900, h: 650 };
+      root.innerHTML = `<div class="slate-cam">${V.ui.desktop()}
+        ${windowHTML({ id: "slc-win", ...SW, title: "• report.docx", blocks: edited, fmt: FMT.normal })}
+        ${V.ui.terminal({ id: "slc-term", ...TW, title: "you@linux: ~" })}
+        ${startWindowHTML("slc-start", STW, [{ name: "report.docx", when: "10:23" }])}
+        ${windowHTML({ id: "slc-back", ...SW, title: "• report.docx", blocks: edited, fmt: FMT.normal })}</div>`;
+      const cam = root.querySelector(".slate-cam");
+      const winEl = root.querySelector("#slc-win");
+      const w = bind(winEl, SW.w);
+      const term = root.querySelector("#slc-term");
+      const start = root.querySelector("#slc-start");
+      const backEl = root.querySelector("#slc-back");
+      const back = bind(backEl, SW.w);
+      const restore = start.querySelector(".slate-restore");
+      const cmd = "kill -9 $(pgrep -x slate)";
+      const T = { type: 0.6 };
+      T.enter = Math.max(V.typedEnd(cmd, T.type, 20) + 0.25, s.at(0, "crashes"));
+      T.type2 = T.enter + 0.8;
+      T.enter2 = V.typedEnd("slate", T.type2, 12) + 0.3;
+      T.start = T.enter2 + 0.55;
+      T.click = Math.max(T.start + 1.6, s.at(0, "when you come back"));
+      T.back = T.click + 0.3;
+      const editAt = edited.indexOf(edit);
+      // The restored window sits where the killed one was: aim at its edit now, while
+      // nothing is scaled or hidden.
+      const [ex, ey] = at(w.col.querySelector(`[data-b="${editAt}"]`), 0.4, 0.5);
+      const keys = [[0, { x: 960, y: 540, s: 1 }], [T.back + 0.4, { x: 960, y: 540, s: 1 }], [T.back + 1.6, { x: ex, y: ey - 150, s: 1.45 }], [s.dur, { x: ex, y: ey - 146, s: 1.48 }]];
+      const [rx, ry] = at(restore);
+      return (t) => {
+        // The Slate process: its window until the kill, the start window once relaunched,
+        // and the restored document after Restore (the start window then closes).
+        V.show(winEl, t < T.enter + 0.12);
+        V.ui.appear(start, t, T.start);
+        if (t >= T.back) V.css(start, { display: "none" });
+        V.ui.appear(backEl, t, T.back);
+        const withCaret = withBlock(edited, editAt, { h: edit.h + caret(t) });
+        draw(w, { blocks: withCaret });
+        draw(back, { blocks: t >= T.back ? withCaret : edited });
+        const lines = [V.ui.prompt(V.typed(cmd, t, T.type, 20))];
+        if (t >= T.enter) lines.push(V.ui.prompt(V.typed("slate", t, T.type2, 12)));
+        if (t >= T.enter2) lines.push("");
+        V.ui.term(term, lines, t);
+        V.keys(t, [[T.enter, "Enter"], [T.enter2, "Enter"]]);
+        camera(cam, V.track(t, keys));
+        V.pointer(t, [[0, 1560, 860], [T.start + 0.4, 1560, 860], [T.click - 0.15, rx, ry], [T.click, rx, ry, { click: true }], [T.back + 1.0, 1640, 860]]);
       };
     },
   });

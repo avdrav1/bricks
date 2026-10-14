@@ -54,7 +54,9 @@
 .slate-docx .slate-subtitle { font: 400 14.67px/1.3 Carlito, Calibri, sans-serif; color: #5a5a5a; letter-spacing: 1px; }
 .slate-docx .slate-h1 { font: 700 21.33px/1.2 Carlito, Calibri, sans-serif; color: #2f5496; margin: 16px 0 4px; }
 .slate-docx .slate-h2 { font: 700 17.33px/1.2 Carlito, Calibri, sans-serif; color: #2f5496; margin: 6px 0 4px; }
-.slate-docx .slate-li { position: relative; padding-left: 28px; margin-bottom: 3px; }
+/* Word list items: the numbering level's marker at its 0.25″/0.5″ indents (SLATE-28) */
+.slate-docx .slate-li { position: relative; padding-left: 48px; margin-bottom: 3px; }
+.slate-docx .slate-dot { left: 24px; }
 .slate-docx .slate-li:has(+ :not(.slate-li)) { margin-bottom: 10.67px; }
 .slate-dot { position: absolute; left: 9px; }
 .slate-docx .slate-quote { font-style: italic; color: #404040; margin-left: 57.6px; margin-right: 57.6px; margin-top: 13px; }
@@ -67,6 +69,23 @@
 /* the blank document's looks (blank.docx: Calibri 11 pt, Heading 1 bold 16 pt #2F5496) */
 .slate-docx .slate-bp { font: 14.67px/1.3 Carlito, Calibri, sans-serif; }
 .slate-docx .slate-bh1 { font: 700 21.33px/1.25 Carlito, Calibri, sans-serif; color: #2f5496; margin: 16px 0 6px; }
+
+/* invoice.docx (ADR 0009): Calibri body, an embedded letterhead font, tab stops,
+   leaders, shaded and bordered headings, a paragraph's own indents, "●" bullets */
+.slate-docx.slate-inv { font: 14.67px/1.3 Carlito, Calibri, sans-serif; }
+.slate-inv .slate-b { margin: 0 0 5px; }
+.slate-lhead { font: 700 34.67px/1.15 "League Spartan", sans-serif; letter-spacing: 3px; color: #1f3864; }
+.slate-tabrow, .slate-stoprow, .slate-leadrow, .slate-lsub { display: flex; white-space: nowrap; }
+.slate-inv .slate-lsub { font-size: 12px; color: #595959; padding-bottom: 5px; border-bottom: 1px solid #1f3864; margin-bottom: 18px; }
+.slate-tab { flex: 1; }
+.slate-stop { flex: none; width: 120px; }
+.slate-dots { flex: 1 1 0; min-width: 0; overflow: hidden; padding: 0 4px 0 3px; letter-spacing: 0.5px; }
+.slate-inv .slate-shade { background: #dce6f2; border-bottom: 2px solid #1f3864; padding: 2px 5px 3px; font-weight: 700; letter-spacing: 1.5px; color: #1f3864; margin: 18px 0 8px; }
+.slate-inv .slate-total { margin-top: 6px; }
+.slate-inv .slate-indent { margin: 4px 48px 12px; }
+.slate-wli { position: relative; padding-left: 48px; }
+.slate-wmark { position: absolute; left: 24px; font-size: 0.8em; }
+.slate-inv .slate-thanks { margin-top: 16px; font-style: italic; }
 
 /* Markdown: Slate's built-in sheet, Liberation Sans 11 pt */
 .slate-md .slate-b { margin: 0 0 8px; }
@@ -152,3 +171,13 @@
 .slate-lo-side { flex: none; width: 34px; display: flex; flex-direction: column; align-items: center; gap: 14px; padding-top: 12px; background: #f6f5f4; border-left: 1px solid #d6d5d4; color: #555; font-size: 16px; }
 .slate-lo-status { flex: none; display: flex; gap: 26px; align-items: center; height: 24px; padding: 0 12px; font-size: 12.5px; background: #f6f5f4; border-top: 1px solid #d6d5d4; }
 .slate-lo-grow { flex: 1; }
+
+/* the start window (main.rs start_window) and a crash's unsaved edits (recovery.rs) */
+.slate-start { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; }
+.slate-title2 { font-size: 20px; font-weight: 800; }
+.slate-startbtns { display: flex; gap: 12px; justify-content: center; }
+.slate-crashed { align-self: stretch; display: flex; flex-direction: column; gap: 6px; margin: 12px 32px 0; }
+.slate-heading { font-weight: 700; }
+.slate-crow { display: flex; align-items: center; gap: 8px; text-align: left; }
+.slate-grow { flex: 1; }
+.slate-flatbtn { background: transparent; }
