@@ -30,6 +30,7 @@ One RGBA8 raster per document (straight alpha), whatever the file format: JPEG's
 ## Files
 
 - New, Open, Save, Save As, Export, Close, and recent files. PNG, JPEG, and BMP; WebP if the codec comes for free. New images save as PNG by default.
+- Installing Etch makes it the default app for PNG, JPEG, and BMP, so double-clicking an image opens it in Etch (user decision); uninstalling gives the types back.
 - **New Image** asks for width and height in pixels (remembered from the last new image) and a background: white, transparent, or the current background colour. Presets (1920×1080, 1280×720, 1024×1024) may come later.
 - Unsaved changes are tracked; closing an edited image asks Save, Discard, or Cancel. Work is never silently dropped. Saving is atomic through `suite-file`; autosave and crash recovery come in ET3.
 
@@ -107,7 +108,7 @@ Built (ETCH-2 to ETCH-5):
 - **Pencil.** Dragging draws a line of the foreground colour at the pencil's size through every pixel the pointer crossed (a click draws one dot); each drag is one undo step.
 - **Eraser.** Dragging erases a line at the eraser's size to transparency, whatever the image was; the canvas's checkerboard shows through. Each drag is one undo step.
 - **Undo.** Ctrl+Z undoes the last stroke, Ctrl+Shift+Z and Ctrl+Y redo it; a new stroke after undoing drops what was undone.
-- **Install.** A per-user curl installer, as the other apps have (`sites/etch/install.sh`: `curl -fsSL https://etch.cronkite.cc/install.sh | sh`, `| sh -s -- --uninstall`), with no sudo. It checks the release against its sha256 and puts `etch` in `~/.local/bin` and its menu entry and icon (`dev.cronkite.Etch`, the app ID) in `~/.local/share`. Etch opens no files yet, so the installer takes over no file types and never touches `mimeapps.list`; the entry gets image types once opening works (ETCH-6), without making Etch anyone's default. GTK 4 comes from the system; without it, the installer says how to get it. The download page is `sites/etch/` (etch.cronkite.cc), and cronkite.cc lists Etch as an early preview.
+- **Install.** A per-user curl installer, as the other apps have (`sites/etch/install.sh`: `curl -fsSL https://etch.cronkite.cc/install.sh | sh`, `| sh -s -- --uninstall`), with no sudo. It checks the release against its sha256 and puts `etch` in `~/.local/bin` and its menu entry and icon (`dev.cronkite.Etch`, the app ID) in `~/.local/share`. Etch opens no files yet, so the installer takes over no file types and never touches `mimeapps.list` yet; once opening works (ETCH-6), installing makes Etch the default app for PNG, JPEG, and BMP (user decision), as the other apps are for their files. GTK 4 comes from the system; without it, the installer says how to get it. The download page is `sites/etch/` (etch.cronkite.cc), and cronkite.cc lists Etch as an early preview.
 
 ## Non-goals for V0.1
 
