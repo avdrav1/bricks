@@ -28,7 +28,7 @@ fn fixtures(extension: &str) -> Vec<PathBuf> {
 fn text_info(doc: &document_model::Document) -> TextInfo {
     match doc.format {
         Format::Text(info) | Format::Markdown(info) => info,
-        Format::Docx => panic!("not text"),
+        Format::Docx(_) => panic!("not text"),
     }
 }
 

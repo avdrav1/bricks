@@ -40,7 +40,7 @@ pub struct Document {
 pub enum Format {
     Text(TextInfo),
     Markdown(TextInfo),
-    Docx,
+    Docx(DocxInfo),
 }
 
 impl Format {
@@ -49,7 +49,36 @@ impl Format {
         match self {
             Format::Text(_) => "Plain text",
             Format::Markdown(_) => "Markdown",
-            Format::Docx => "Word document",
+            Format::Docx(_) => "Word document",
+        }
+    }
+
+    /// The page's text width in twips, for a format that has pages (ADR 0009).
+    pub fn page_text_width(&self) -> Option<u32> {
+        match self {
+            Format::Docx(info) => Some(info.text_width),
+            Format::Text(_) | Format::Markdown(_) => None,
+        }
+    }
+}
+
+/// A Word document's page layout, as Slate's pageless column borrows it (ADR 0009).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DocxInfo {
+    /// The last section's page width less its left and right margins and gutter, in
+    /// twips (1/1440″).
+    pub text_width: u32,
+}
+
+impl DocxInfo {
+    /// Letter (8.5″) with 1″ margins: 6.5″, Word's page when a document gives none.
+    pub const LETTER_TEXT_WIDTH: u32 = 12_240 - 2 * 1_440;
+}
+
+impl Default for DocxInfo {
+    fn default() -> Self {
+        Self {
+            text_width: Self::LETTER_TEXT_WIDTH,
         }
     }
 }

@@ -391,7 +391,7 @@ fn flow(app: &gtk::Application, page: &Page, words: usize) {
                 } else {
                     TextWidth::Full
                 };
-                let target = view::column_width(setting, page.width());
+                let target = view::column_width(setting, page.page_text_width(), page.width());
                 if setting == TextWidth::Full {
                     r.columns.1 = target;
                 } else {

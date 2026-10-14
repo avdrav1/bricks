@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# SLATE-4, SLATE-10, SLATE-11, SLATE-6, SLATE-12, SLATE-13, SLATE-20, SLATE-21, and
-# SLATE-22 acceptance: the window opens, shows, and refuses documents, its pageless column
-# follows View → Text Width, its text selects and copies, it edits with undo, table cells
-# included, it composes through an input method, it draws a Word document's fonts and
-# paragraph looks, its format bar sets them, and they save.
+# SLATE-4, SLATE-10, SLATE-11, SLATE-6, SLATE-12, SLATE-13, SLATE-20, SLATE-21, SLATE-22,
+# and SLATE-23 acceptance: the window opens, shows, and refuses documents, its pageless
+# column follows View → Text Width and a Word document's page, its text selects and
+# copies, it edits with undo, table cells included, it composes through an input method,
+# it draws a Word document's fonts and paragraph looks, its format bar sets them, and they
+# save.
 #
 #   scripts/check_slate.sh [BINARY]   (default target/release/slate)
 #
@@ -29,10 +30,11 @@
 #      is gone and slate has exited.
 #   8. col-a.md and col-b.md (a long word that wraps, a rule, a table) in two windows of one
 #      slate process and col-c.md in another process, tabbed: each window measured in a
-#      screenshot at Medium, then after F10 → Text Width → Narrow, Wide, and Full in col-a's
-#      menu: the rule (the column's width exactly) and the widest line of text above it
-#      measure 480, 624, 816, and 1232 px (the 1280 px screen less 24 px a side) in all
-#      three windows, centred;
+#      screenshot at the default, Page (Markdown has no page: Medium's 624), then after
+#      F10 → Text Width → Narrow, Medium, Wide, and Full in col-a's menu: the rule (the
+#      column's width exactly) and the widest line of text above it measure 624, 480, 624,
+#      816, and 1232 px (the 1280 px screen less 24 px a side) in all three windows,
+#      centred;
 #   9. after Ctrl+Q the settings file says full, and slate relaunched shows a Full column;
 #  10. Wide in a window resized to 640 px (floating) narrows the column to 592; Narrow
 #      there stays 480;
@@ -143,6 +145,12 @@
 #      leaves no journal. An edit crashed and discarded leaves the file and no journal.
 #      Typing a letter every half second for 20 s, the journal shows up about 5 s after the
 #      first and is rewritten at least 5 s apart.
+#  28. Page width, without a settings file (the default, Page): page-75.docx (written by
+#      /tmp/page.py: Letter with 0.5″ left and right margins, a long word that wraps, and a
+#      one-cell table, whose border is the column's width exactly) and page-none.docx (the
+#      same without w:sectPr), tabbed, measure as col.py measures in 8: 720 px (7.5″ at 96
+#      dpi) and 624 (Letter with 1″ margins); Medium from the menu makes page-75 624, and
+#      Page again 720; the settings file says page, and col-a.md opened then measures 624.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -588,6 +596,37 @@ for y in range(max(0, (rule_y or 0) - 60), rule_y or 0):
         text = max(text, dark[-1] - dark[0] + 1)
 print(f"rule {rule} text {text} off {rule_x + rule // 2 - w // 2}")
 PY
+# SLATE-23: `page.py PATH [MARGIN]` writes a Word document of a long word that wraps (its
+# lines as wide as the column) and a one-cell table (its border the column exactly), on
+# Letter with MARGIN twips left and right; without MARGIN it has no w:sectPr.
+cat > /tmp/page.py <<"PY"
+import sys
+import zipfile
+
+W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+PKG = "http://schemas.openxmlformats.org/package/2006/relationships"
+CT = "http://schemas.openxmlformats.org/package/2006/content-types"
+OOXML = "application/vnd.openxmlformats-officedocument.wordprocessingml"
+HEAD = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"""
+
+path, word = sys.argv[1], "x" * 800
+body = ("""<w:p><w:r><w:t>Page</w:t></w:r></w:p>"""
+        f"""<w:p><w:r><w:t>{word}</w:t></w:r></w:p>"""
+        """<w:tbl><w:tr><w:tc><w:p><w:r><w:t>c</w:t></w:r></w:p></w:tc></w:tr></w:tbl><w:p/>""")
+if len(sys.argv) > 2:
+    m = sys.argv[2]
+    body += (f"""<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="{m}" w:right="{m}" """
+             f"""w:bottom="{m}" w:left="{m}" w:header="0" w:footer="0" w:gutter="0"/></w:sectPr>""")
+with zipfile.ZipFile(path, "w") as z:
+    z.writestr("[Content_Types].xml", HEAD + f"""<Types xmlns="{CT}">"""
+               """<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"""
+               """<Default Extension="xml" ContentType="application/xml"/>"""
+               f"""<Override PartName="/word/document.xml" ContentType="{OOXML}.document.main+xml"/></Types>""")
+    z.writestr("_rels/.rels", HEAD + f"""<Relationships xmlns="{PKG}"><Relationship Id="rId1" """
+               f"""Type="{REL}/officeDocument" Target="word/document.xml"/></Relationships>""")
+    z.writestr("word/document.xml", HEAD + f"""<w:document xmlns:w="{W}"><w:body>{body}</w:body></w:document>""")
+PY
 # SLATE-20: `make PATH` writes fonts.docx; `measure PNG` measures its screenshot: each
 # band of ink (a line of text) and its left and right edges, against Pango at 96 dpi and
 # the twips of the styles.
@@ -857,10 +896,10 @@ session() {
       echo "$1 $t.md: $(python3 /tmp/col.py /shots/$1-$t.png)"
     done
   }
-  # F10 in col-a, Text Width (past New, Open, Save, Save As, Close Window), the Nth width
-  # (1 Narrow, 2 Medium, 3 Wide, 4 Full).
+  # F10 in window TITLE (default col-a), Text Width (past New, Open, Save, Save As, Close
+  # Window), the Nth width (1 Page, 2 Narrow, 3 Medium, 4 Wide, 5 Full).
   text_width() {
-    swaymsg "[title=col-a] focus" >/dev/null; sleep 1
+    swaymsg "[title=${2:-col-a}] focus" >/dev/null; sleep 1
     keys -k F10; for i in 1 2 3 4 5; do keys -k Down; done; keys -k Return
     for i in $(seq $1); do keys -k Down; done
     keys -k Return; sleep 1
@@ -906,10 +945,11 @@ session() {
   slate /tmp/col-a.md /tmp/col-b.md >>/tmp/app.log 2>&1 & sleep 4
   slate /tmp/col-c.md >>/tmp/app.log 2>&1 & other=$!; sleep 4
   swaymsg "[title=col-a] focus, layout tabbed" >/dev/null; sleep 1
-  titles; measure medium
-  text_width 1; measure narrow
-  text_width 3; measure wide
-  text_width 4; measure full
+  titles; measure page
+  text_width 2; measure narrow
+  text_width 3; measure medium
+  text_width 4; measure wide
+  text_width 5; measure full
   kill $other; sleep 1
   echo "== 9 restart"
   swaymsg "[title=col-a] focus" >/dev/null; sleep 1
@@ -919,10 +959,10 @@ session() {
   slate /tmp/col-a.md >>/tmp/app.log 2>&1 & sleep 4
   measure restart col-a
   echo "== 10 narrow window"
-  text_width 3; measure wide1280 col-a
+  text_width 4; measure wide1280 col-a
   swaymsg "[title=col-a] floating enable, resize set width 640 px height 600 px, move position center" >/dev/null; sleep 1
   measure wide640 col-a
-  text_width 1; measure narrow640 col-a
+  text_width 2; measure narrow640 col-a
   quit
   echo "== 11 page break"
   slate /tmp/fixture.docx >>/tmp/app.log 2>&1 & sleep 4
@@ -1247,6 +1287,27 @@ t = sorted({float(l) for l in open(\"/tmp/rec.times\")})
 gap = min((b - a for a, b in zip(t, t[1:])), default=0)
 print(f\"typing for 20 s: first journal after ${first:-0} ms, writes {len(t)}, shortest gap {gap * 1000:.0f} ms\")"
   quit
+  echo "== 28 page width"
+  rm -f /tmp/config/slate/settings
+  python3 /tmp/page.py /tmp/page-75.docx 720; python3 /tmp/page.py /tmp/page-none.docx
+  slate /tmp/page-75.docx /tmp/page-none.docx >>/tmp/app.log 2>&1 & sleep 5
+  swaymsg "[title=page-75] focus, layout tabbed" >/dev/null; sleep 1
+  titles
+  # Screenshot each window named (focused in turn) and measure it: "LABEL NAME: rule ...".
+  pages() {
+    local label=$1; shift
+    for t in "$@"; do
+      swaymsg "[title=$t] focus" >/dev/null; sleep 1; shot $label-$t
+      echo "$label $t.docx: $(python3 /tmp/col.py /shots/$label-$t.png)"
+    done
+  }
+  pages page page-75 page-none
+  text_width 3 page-75; pages medium page-75 page-none
+  text_width 1 page-75; pages page-again page-75
+  echo "settings: $(cat /tmp/config/slate/settings 2>/dev/null)"
+  slate /tmp/col-a.md >>/tmp/app.log 2>&1 & sleep 4
+  measure pagemd col-a
+  quit
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -1301,7 +1362,7 @@ if [ "$(section "7 bad" | grep -c "^after close: slate exited$")" = 2 ]; then
 else
   echo "FAIL 7: the window closes after the alert"; fail=1
 fi
-for w in medium:624 narrow:480 wide:816 full:1232; do
+for w in page:624 narrow:480 medium:624 wide:816 full:1232; do
   for t in col-a col-b col-c; do
     column "8: ${w%%:*} in $t.md measures ${w#*:} px" "8 width" "${w%%:*} $t\.md" "${w#*:}"
   done
@@ -1522,6 +1583,15 @@ check "27: Discard after a crash keeps the file as it is" "27 recovery" "^discar
 check "27: and leaves no recovery data either" "27 recovery" "^journals after discarding: 0$"
 check "27: typing, the journal is written 5 s after the first edit, then at most every 5 s" \
   "27 recovery" "^typing for 20 s: first journal after (4[5-9]|[5-8][0-9])[0-9]{2} ms, writes [234], shortest gap ([5-9][0-9]{3}|[0-9]{5}) ms$"
+check "28: both Word documents open in their own windows" "28 page width" "^titles: .*page-75\.docx.*page-none\.docx"
+column "28: under Page, the default, Letter with 0.5″ margins measures 720 px" "28 page width" "page page-75\.docx" 720
+column "28: under Page, a .docx without w:sectPr measures 624 px (Letter, 1″ margins)" "28 page width" \
+  "page page-none\.docx" 624
+column "28: Medium makes the 7.5″ page 624 px" "28 page width" "medium page-75\.docx" 624
+column "28: Medium leaves the 6.5″ page 624 px" "28 page width" "medium page-none\.docx" 624
+column "28: Page again restores 720 px" "28 page width" "page-again page-75\.docx" 720
+check "28: the settings file says page" "28 page width" "^settings: text-width=page$"
+column "28: a Markdown window under Page measures Medium's 624 px" "28 page width" "pagemd col-a\.md" 624
 if [ $fail = 0 ]; then echo "SLATE OK"; else
   echo "SLATE CHECK FAILED"; [ -n "${VERBOSE:-}" ] || echo "(VERBOSE=1 for the transcript)"
   exit 1

@@ -17,8 +17,11 @@ const TEXT_WIDTH_KEY: &str = "text-width";
 /// How wide the text column is (View → Text Width).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TextWidth {
-    Narrow,
+    /// A Word document's page width less its margins; Medium's for other documents
+    /// (ADR 0009).
     #[default]
+    Page,
+    Narrow,
     Medium,
     Wide,
     /// The window's width less the margins.
@@ -26,11 +29,18 @@ pub enum TextWidth {
 }
 
 impl TextWidth {
-    pub const ALL: [TextWidth; 4] = [Self::Narrow, Self::Medium, Self::Wide, Self::Full];
+    pub const ALL: [TextWidth; 5] = [
+        Self::Page,
+        Self::Narrow,
+        Self::Medium,
+        Self::Wide,
+        Self::Full,
+    ];
 
     /// The name in the settings file and the `app.text-width` action's state.
     pub fn id(self) -> &'static str {
         match self {
+            Self::Page => "page",
             Self::Narrow => "narrow",
             Self::Medium => "medium",
             Self::Wide => "wide",
@@ -45,6 +55,7 @@ impl TextWidth {
     /// The menu's name for it.
     pub fn label(self) -> &'static str {
         match self {
+            Self::Page => "Page",
             Self::Narrow => "Narrow",
             Self::Medium => "Medium",
             Self::Wide => "Wide",
@@ -52,11 +63,15 @@ impl TextWidth {
         }
     }
 
-    /// The column's width in pixels; `None` for Full, which follows the window.
-    pub fn pixels(self) -> Option<i32> {
+    /// The column's width in pixels for a document whose page's text width is
+    /// `page_twips` (`None`: it has no pages); `None` for Full, which follows the window.
+    /// Page is the page's text width at 96 dpi (15 twips a pixel).
+    pub fn pixels(self, page_twips: Option<u32>) -> Option<i32> {
+        const MEDIUM: i32 = 624;
         match self {
+            Self::Page => Some(page_twips.map_or(MEDIUM, |t| (f64::from(t) / 15.0).round() as i32)),
             Self::Narrow => Some(480),
-            Self::Medium => Some(624),
+            Self::Medium => Some(MEDIUM),
             Self::Wide => Some(816),
             Self::Full => None,
         }
@@ -184,7 +199,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_or_bad_values_mean_medium() {
+    fn missing_or_bad_values_mean_page() {
         for text in [
             "",
             "text-width",
@@ -194,7 +209,7 @@ mod tests {
         ] {
             assert_eq!(
                 Settings::parse(text).text_width,
-                TextWidth::Medium,
+                TextWidth::Page,
                 "{text:?}"
             );
         }
@@ -208,12 +223,24 @@ mod tests {
 
     #[test]
     fn widths_are_the_adrs() {
-        let px: Vec<_> = TextWidth::ALL.iter().map(|w| w.pixels()).collect();
-        assert_eq!(px, [Some(480), Some(624), Some(816), None]);
-        assert_eq!(TextWidth::default(), TextWidth::Medium);
+        let px: Vec<_> = TextWidth::ALL.iter().map(|w| w.pixels(None)).collect();
+        assert_eq!(px, [Some(624), Some(480), Some(624), Some(816), None]);
+        assert_eq!(TextWidth::default(), TextWidth::Page);
         for w in TextWidth::ALL {
             assert_eq!(TextWidth::from_id(w.id()), Some(w));
         }
+    }
+
+    #[test]
+    fn page_is_a_word_documents_text_width_at_96_dpi() {
+        // Letter with 0.5″ margins: 7.5″; with 1″ margins: 6.5″.
+        assert_eq!(TextWidth::Page.pixels(Some(10_800)), Some(720));
+        assert_eq!(TextWidth::Page.pixels(Some(9_360)), Some(624));
+        // A4 with 1″ margins: 9026 twips, 601.7 px, rounded.
+        assert_eq!(TextWidth::Page.pixels(Some(11_906 - 2_880)), Some(602));
+        // The other widths don't follow the page.
+        assert_eq!(TextWidth::Medium.pixels(Some(10_800)), Some(624));
+        assert_eq!(TextWidth::Full.pixels(Some(10_800)), None);
     }
 
     #[test]

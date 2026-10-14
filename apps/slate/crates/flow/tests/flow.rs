@@ -121,7 +121,7 @@ fn doc(blocks: Vec<Block>) -> Document {
     Document {
         blocks,
         styles: StyleSheet::builtin(),
-        format: Format::Docx,
+        format: Format::Docx(Default::default()),
     }
 }
 
@@ -717,7 +717,7 @@ fn flow_of(styles: StyleSheet, blocks: Vec<Block>, width: i32, shaper: &mut Fake
     let mut flow = Flow::new(Document {
         blocks,
         styles,
-        format: Format::Docx,
+        format: Format::Docx(Default::default()),
     });
     flow.set_width(width, shaper);
     flow.layout_slice(shaper, &mut || true);
@@ -817,7 +817,7 @@ fn exact_and_least_line_spacing_set_each_lines_height() {
         let mut flow = Flow::new(Document {
             blocks,
             styles,
-            format: Format::Docx,
+            format: Format::Docx(Default::default()),
         });
         flow.set_width(100, &mut fake);
         let estimated = flow.content_height();

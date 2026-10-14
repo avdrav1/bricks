@@ -10,7 +10,8 @@
 //! run holds its character style's and its own formatting as overrides. List kinds,
 //! levels, and numbers resolve through `word/numbering.xml`, and hyperlinks and pictures
 //! through the part's relationships. Headers, footers, footnotes, comments, text boxes,
-//! and field codes are not read (field results are).
+//! and field codes are not read (field results are). The last section's page width less
+//! its margins (`w:sectPr`) is the document's text width (ADR 0009).
 
 mod body;
 mod numbering;
@@ -20,7 +21,7 @@ mod xml;
 
 pub use save::{save, DocxSource};
 
-use document_model::{Document, Format};
+use document_model::{Document, DocxInfo, Format};
 use std::collections::HashMap;
 use std::fmt;
 use std::fs::File;
@@ -128,11 +129,17 @@ fn read_package<R: Read + Seek>(reader: R) -> Result<(Document, MainPart), DocxE
     };
     let xml =
         String::from_utf8(bytes).map_err(|_| DocxError::Xml(format!("{main} isn't UTF-8")))?;
-    let (blocks, body) = body::read(&xml, &styles, &numbering, &rels, &mut package)?;
+    let body::Parsed {
+        blocks,
+        body,
+        text_width,
+    } = body::read(&xml, &styles, &numbering, &rels, &mut package)?;
     let doc = Document {
         blocks,
         styles: styles.sheet(),
-        format: Format::Docx,
+        format: Format::Docx(DocxInfo {
+            text_width: text_width.unwrap_or(DocxInfo::LETTER_TEXT_WIDTH),
+        }),
     };
     let main = MainPart {
         name: main,
@@ -320,7 +327,86 @@ fn resolve(dir: &str, target: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve;
+    use super::{read_from, resolve, DocxInfo, Format};
+    use std::io::{Cursor, Write};
+
+    /// The text width read from a package whose document's body is `body`.
+    fn text_width(body: &str) -> u32 {
+        let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        zip.start_file(
+            "word/document.xml",
+            zip::write::SimpleFileOptions::default(),
+        )
+        .unwrap();
+        write!(
+            zip,
+            "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">\
+             <w:body>{body}</w:body></w:document>"
+        )
+        .unwrap();
+        let bytes = zip.finish().unwrap().into_inner();
+        match read_from(Cursor::new(bytes)).unwrap().format {
+            Format::Docx(info) => info.text_width,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    const P: &str = "<w:p><w:r><w:t>Text</w:t></w:r></w:p>";
+
+    #[test]
+    fn the_text_width_is_the_page_less_its_margins_and_gutter() {
+        // Letter with 0.5″ margins: 7.5″.
+        let half_inch = "<w:sectPr><w:pgSz w:w=\"12240\" w:h=\"15840\"/>\
+             <w:pgMar w:top=\"720\" w:right=\"720\" w:bottom=\"720\" w:left=\"720\" \
+             w:header=\"0\" w:footer=\"0\" w:gutter=\"0\"/></w:sectPr>";
+        assert_eq!(text_width(&format!("{P}{half_inch}")), 10_800);
+        // A4 with 1″ margins and a 0.5″ gutter.
+        let gutter = "<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/>\
+             <w:pgMar w:left=\"1440\" w:right=\"1440\" w:gutter=\"720\"/></w:sectPr>";
+        assert_eq!(text_width(&format!("{P}{gutter}")), 11_906 - 2_880 - 720);
+        // What a section doesn't say is Letter's with 1″ margins.
+        assert_eq!(
+            text_width(&format!(
+                "{P}<w:sectPr><w:pgMar w:left=\"720\"/></w:sectPr>"
+            )),
+            12_240 - 720 - 1_440
+        );
+        assert_eq!(
+            text_width(&format!("{P}<w:sectPr/>")),
+            DocxInfo::LETTER_TEXT_WIDTH
+        );
+        // Margins wider than the page leave no width, not a wrapped-around one.
+        assert_eq!(text_width("<w:sectPr><w:pgSz w:w=\"1000\"/></w:sectPr>"), 0);
+    }
+
+    #[test]
+    fn the_last_section_gives_the_width() {
+        let section = |w: u32| {
+            format!(
+                "<w:sectPr><w:pgSz w:w=\"{w}\"/><w:pgMar w:left=\"0\" w:right=\"0\"/></w:sectPr>"
+            )
+        };
+        // An earlier section ends at a paragraph; the body's own is the last.
+        let body = format!(
+            "<w:p><w:pPr>{}</w:pPr><w:r><w:t>One</w:t></w:r></w:p>{P}{}",
+            section(16_838),
+            section(11_906)
+        );
+        assert_eq!(text_width(&body), 11_906);
+        // Without the body's own, the last paragraph's.
+        let body = format!(
+            "<w:p><w:pPr>{}</w:pPr></w:p><w:p><w:pPr>{}</w:pPr></w:p>{P}",
+            section(16_838),
+            section(11_906)
+        );
+        assert_eq!(text_width(&body), 11_906);
+    }
+
+    #[test]
+    fn a_document_without_a_section_is_letter_with_inch_margins() {
+        assert_eq!(text_width(P), 9_360);
+        assert_eq!(DocxInfo::LETTER_TEXT_WIDTH, 9_360);
+    }
 
     #[test]
     fn targets_resolve_against_the_source_part() {

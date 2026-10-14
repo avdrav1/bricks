@@ -80,13 +80,14 @@ pub fn texture_key(bytes: &Arc<[u8]>) -> usize {
     Arc::as_ptr(bytes) as *const u8 as usize
 }
 
-/// The text column's width for `setting` in a view `view_width` pixels wide: the setting's
-/// width, or the view's less a margin each side when that is narrower (Full always), but
-/// never under [`MIN_COLUMN`].
-pub fn column_width(setting: TextWidth, view_width: i32) -> i32 {
+/// The text column's width for `setting` in a view `view_width` pixels wide, for a
+/// document whose page's text width is `page_twips` (see [`TextWidth::pixels`]): the
+/// setting's width, or the view's less a margin each side when that is narrower (Full
+/// always), but never under [`MIN_COLUMN`].
+pub fn column_width(setting: TextWidth, page_twips: Option<u32>, view_width: i32) -> i32 {
     let room = view_width - 2 * MIN_MARGIN;
     setting
-        .pixels()
+        .pixels(page_twips)
         .map_or(room, |px| px.min(room))
         .max(MIN_COLUMN)
 }
@@ -182,6 +183,8 @@ mod imp {
     pub struct Page {
         pub(super) state: RefCell<Option<State>>,
         pub(super) setting: Cell<TextWidth>,
+        /// The document's page's text width in twips; `None` when it has no pages.
+        pub(super) page_twips: Cell<Option<u32>>,
         hadj: RefCell<Option<gtk::Adjustment>>,
         vadj: RefCell<Option<gtk::Adjustment>>,
         /// The scroll policies as set; `None` is `Minimum`.
@@ -394,7 +397,7 @@ mod imp {
                     let natural = self
                         .setting
                         .get()
-                        .pixels()
+                        .pixels(self.page_twips.get())
                         .map_or(min, |px| px + 2 * MIN_MARGIN);
                     (min, natural.max(min), -1, -1)
                 }
@@ -403,7 +406,7 @@ mod imp {
         }
 
         fn size_allocate(&self, width: i32, height: i32, _baseline: i32) {
-            let column = column_width(self.setting.get(), width);
+            let column = column_width(self.setting.get(), self.page_twips.get(), width);
             let mut lines = Vec::new();
             let mut relayout = false;
             let mut caret_box = None;
@@ -1725,6 +1728,7 @@ impl Page {
         let page: Self = glib::Object::new();
         let imp = page.imp();
         imp.setting.set(setting);
+        imp.page_twips.set(doc.format.page_text_width());
         let shaper = PangoShaper::new(page.pango_context(), &doc.styles, textures);
         let plain = matches!(doc.format, document_model::Format::Text(_));
         let flow = Flow::new(doc);
@@ -1891,6 +1895,11 @@ impl Page {
         if self.imp().setting.replace(setting) != setting {
             self.queue_resize();
         }
+    }
+
+    /// The document's page's text width in twips; `None` when it has no pages.
+    pub fn page_text_width(&self) -> Option<u32> {
+        self.imp().page_twips.get()
     }
 
     /// The column's width, 0 before the page is first allocated.
@@ -2178,43 +2187,51 @@ mod tests {
 
     #[test]
     fn a_wide_window_gets_the_settings_width() {
-        for (setting, px) in [
-            (TextWidth::Narrow, 480),
-            (TextWidth::Medium, 624),
-            (TextWidth::Wide, 816),
+        for (setting, page, px) in [
+            (TextWidth::Narrow, None, 480),
+            (TextWidth::Medium, None, 624),
+            (TextWidth::Wide, None, 816),
+            (TextWidth::Page, None, 624),
+            (TextWidth::Page, Some(10_800), 720),
+            (TextWidth::Medium, Some(10_800), 624),
         ] {
-            assert_eq!(column_width(setting, 1280), px);
+            assert_eq!(column_width(setting, page, 1280), px);
             // Exactly room for it and a margin each side.
-            assert_eq!(column_width(setting, px + 2 * MIN_MARGIN), px);
+            assert_eq!(column_width(setting, page, px + 2 * MIN_MARGIN), px);
         }
     }
 
     #[test]
     fn full_is_the_window_less_a_margin_each_side() {
-        assert_eq!(column_width(TextWidth::Full, 1280), 1232);
-        assert_eq!(column_width(TextWidth::Full, 900), 852);
-        assert_eq!(column_width(TextWidth::Full, 3840), 3792);
+        assert_eq!(column_width(TextWidth::Full, None, 1280), 1232);
+        assert_eq!(column_width(TextWidth::Full, Some(10_800), 900), 852);
+        assert_eq!(column_width(TextWidth::Full, None, 3840), 3792);
     }
 
     #[test]
     fn a_narrower_window_narrows_the_column() {
         assert_eq!(
-            column_width(TextWidth::Medium, 624 + 2 * MIN_MARGIN - 1),
+            column_width(TextWidth::Medium, None, 624 + 2 * MIN_MARGIN - 1),
             623
         );
-        assert_eq!(column_width(TextWidth::Wide, 640), 592);
-        assert_eq!(column_width(TextWidth::Narrow, 500), 452);
+        assert_eq!(column_width(TextWidth::Wide, None, 640), 592);
+        assert_eq!(column_width(TextWidth::Narrow, None, 500), 452);
+        // A page wider than the window.
+        assert_eq!(column_width(TextWidth::Page, Some(10_800), 640), 592);
+        assert_eq!(column_width(TextWidth::Page, Some(31_680), 1280), 1232);
     }
 
     #[test]
     fn the_column_never_gets_narrower_than_the_minimum() {
         for setting in TextWidth::ALL {
-            assert_eq!(
-                column_width(setting, MIN_COLUMN + 2 * MIN_MARGIN),
-                MIN_COLUMN
-            );
-            assert_eq!(column_width(setting, 100), MIN_COLUMN);
-            assert_eq!(column_width(setting, 0), MIN_COLUMN);
+            for page in [None, Some(10_800), Some(0)] {
+                assert_eq!(
+                    column_width(setting, page, MIN_COLUMN + 2 * MIN_MARGIN),
+                    MIN_COLUMN
+                );
+                assert_eq!(column_width(setting, page, 100), MIN_COLUMN);
+                assert_eq!(column_width(setting, page, 0), MIN_COLUMN);
+            }
         }
     }
 }

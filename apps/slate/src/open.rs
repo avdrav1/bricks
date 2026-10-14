@@ -142,7 +142,7 @@ fn ready(mut doc: Document, mut source: Source) -> Opened {
     }
     let target = match (doc.format, source) {
         (Format::Markdown(info), Source::Markdown(source)) => Target::Markdown(info, Some(source)),
-        (Format::Docx, Source::Docx(source, original)) => Target::Docx(Docx {
+        (Format::Docx(_), Source::Docx(source, original)) => Target::Docx(Docx {
             source,
             original: Arc::new(original),
         }),

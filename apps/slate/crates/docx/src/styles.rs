@@ -188,9 +188,8 @@ pub(crate) struct ParaProps {
     pub num_id: Option<u32>,
     pub level: Option<u8>,
     pub page_break_before: Option<bool>,
-    /// The paragraph ends a section (`w:pPr/w:sectPr`): `true` if the next section starts
-    /// on a new page (any section type but `continuous`).
-    pub section_break: Option<bool>,
+    /// The paragraph ends a section (`w:pPr/w:sectPr`).
+    pub section: Option<Section>,
 }
 
 impl ParaProps {
@@ -214,7 +213,7 @@ impl ParaProps {
             self.level = over.level;
         }
         set(&mut self.page_break_before, &over.page_break_before);
-        set(&mut self.section_break, &over.section_break);
+        set(&mut self.section, &over.section);
     }
 
     /// Read the children of a `w:pPr` just started, up to its end. The paragraph mark's
@@ -226,7 +225,7 @@ impl ParaProps {
                 Event::Empty(e) => p.property(&e),
                 Event::Start(e) => match xml::local(&e) {
                     b"numPr" => p.numbering(r)?,
-                    b"sectPr" => p.section_break = Some(section_starts_page(r)?),
+                    b"sectPr" => p.section = Some(Section::read(r)?),
                     _ => {
                         p.property(&e);
                         xml::skip(r, &e)?;
@@ -308,18 +307,53 @@ impl ParaProps {
     }
 }
 
-/// Read a `w:sectPr` just started: whether its section starts on a new page.
-fn section_starts_page(r: &mut XmlReader<'_>) -> Result<bool, DocxError> {
-    let mut page = true;
-    loop {
-        match r.read_event()? {
-            Event::Empty(e) if xml::local(&e) == b"type" => {
-                page = xml::val(&e).as_deref() != Some("continuous");
+/// A section's properties (`w:sectPr`), as far as Slate uses them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Section {
+    /// The section starts on a new page (any section type but `continuous`).
+    pub starts_page: bool,
+    /// Its page's width (`w:pgSz w:w`) less its left and right margins and gutter
+    /// (`w:pgMar`), in twips; Letter with 1″ margins for what it doesn't say.
+    pub text_width: u32,
+}
+
+impl Section {
+    /// Read a `w:sectPr` just started, up to its end.
+    pub fn read(r: &mut XmlReader<'_>) -> Result<Self, DocxError> {
+        let mut starts_page = true;
+        let (mut page, mut left, mut right, mut gutter) = (12_240i64, 1_440i64, 1_440i64, 0i64);
+        loop {
+            let (e, empty) = match r.read_event()? {
+                Event::Empty(e) => (e, true),
+                Event::Start(e) => (e, false),
+                Event::End(e) if e.local_name().as_ref() == b"sectPr" => {
+                    let width = page - left.max(0) - right.max(0) - gutter.max(0);
+                    return Ok(Self {
+                        starts_page,
+                        text_width: width.clamp(0, u32::MAX.into()) as u32,
+                    });
+                }
+                Event::Eof => return Err(DocxError::Xml("unclosed w:sectPr".into())),
+                _ => continue,
+            };
+            let twips = |name: &[u8], to: &mut i64| {
+                if let Some(v) = xml::num::<i64>(&e, name) {
+                    *to = v;
+                }
+            };
+            match xml::local(&e) {
+                b"type" => starts_page = xml::val(&e).as_deref() != Some("continuous"),
+                b"pgSz" => twips(b"w", &mut page),
+                b"pgMar" => {
+                    twips(b"left", &mut left);
+                    twips(b"right", &mut right);
+                    twips(b"gutter", &mut gutter);
+                }
+                _ => {}
             }
-            Event::Start(e) => xml::skip(r, &e)?,
-            Event::End(e) if e.local_name().as_ref() == b"sectPr" => return Ok(page),
-            Event::Eof => return Err(DocxError::Xml("unclosed w:sectPr".into())),
-            _ => {}
+            if !empty {
+                xml::skip(r, &e)?;
+            }
         }
     }
 }

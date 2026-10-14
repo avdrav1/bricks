@@ -367,7 +367,7 @@ fn every_paragraph_of_the_corpus_takes_an_edit() {
             Document {
                 blocks: blocks.to_vec(),
                 styles: StyleSheet::builtin(),
-                format: document_model::Format::Docx,
+                format: document_model::Format::Docx(Default::default()),
             }
             .visit_text(&mut |t| n += t.matches(" ✎").count());
             n
