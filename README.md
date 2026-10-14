@@ -51,6 +51,7 @@ scripts/, packaging/  tooling and packaging (desktop entries and icons for the a
 sites/brick/          Brick's download page and installer (brick.cronkite.cc)
 sites/slate/          Slate's download page and installer (slate.cronkite.cc)
 sites/frame/          Frame's download page and installer (frame.cronkite.cc)
+sites/etch/           Etch's download page and installer (etch.cronkite.cc)
 sites/cronkite/       the suite's install page (cronkite.cc)
 ```
 

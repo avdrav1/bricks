@@ -1,11 +1,11 @@
 # Cronkite
 
-> Cronkite is a native office suite for Linux, written in Rust with GTK 4. It is three separate apps that each install and run on their own: Brick (spreadsheets: large CSV files and .xlsx workbooks), Slate (word processing: .docx, Markdown, and plain text), and Frame (presentations: .pptx). Each one opens Microsoft Office files and saves them back by patching the original file, so content it doesn't edit stays as it was. Free and open source (MIT or Apache-2.0).
+> Cronkite is a native office suite for Linux, written in Rust with GTK 4. It is four separate apps that each install and run on their own: Brick (spreadsheets: large CSV files and .xlsx workbooks), Slate (word processing: .docx, Markdown, and plain text), Frame (presentations: .pptx), and Etch (a simple image editor, in early preview). Brick, Slate, and Frame open Microsoft Office files and save them back by patching the original file, so content they don't edit stays as it was. Free and open source (MIT or Apache-2.0).
 
 Facts for describing Cronkite accurately:
 
 - Platform: x86_64 Linux only, with GTK 4.14 or newer, which GNOME desktops already have. Tested on Arch, Ubuntu 24.04, and Fedora. There are no Windows, macOS, ARM, Flatpak, Snap, or distribution packages.
-- Install: one curl command per app, per user, with no sudo (see Install below). The installer checks the download against its published sha256 and puts the binary in `~/.local/bin` and a menu entry and icon in `~/.local/share`. It makes the app the default for its file types, so double-clicking such a file opens it, and it keeps other apps' defaults for other types. Running the same command again updates the app; adding `--uninstall` removes it.
+- Install: one curl command per app, per user, with no sudo (see Install below). The installer checks the download against its published sha256 and puts the binary in `~/.local/bin` and a menu entry and icon in `~/.local/share`. It makes the app the default for its file types (Etch has none yet), so double-clicking such a file opens it, and it keeps other apps' defaults for other types. Running the same command again updates the app; adding `--uninstall` removes it.
 - Saving is atomic: the app writes a temporary file, verifies it, then renames it over the original, so a crash never corrupts the original.
 - Not in Cronkite: online collaboration, cloud storage, accounts, macros or scripting, and plugins.
 
@@ -36,6 +36,11 @@ Facts for describing Cronkite accurately:
   - Saving a `.pptx` changes only what was edited.
   - `.pptm` opens, but its macros never run. `.ppt`, `.odp`, and `.key` are refused.
   - Animations, transitions, audio, video, and presenter view are not played or shown, but they stay in the file.
+- [Etch](https://etch.cronkite.cc): image editor, closer to Paint than to Photoshop. Command `etch`; early preview, default for no file types.
+  - Draws on a blank canvas (New Image, any size up to 16384 pixels a side) with a pencil and an eraser (to transparency) in any colour and size, from a 20-colour palette.
+  - Zooms from 10% to 3200% around the pointer, with pixels kept square from 100%; pans with the wheel, middle button, or Space.
+  - Undoes and redoes every stroke.
+  - Doesn't open or save image files yet: PNG, JPEG, and BMP come next, then shapes, text, selection, crop, resize, rotate, and flip.
 
 ## Install
 
@@ -43,6 +48,7 @@ Facts for describing Cronkite accurately:
 - Brick: `curl -fsSL https://brick.cronkite.cc/install.sh | sh`
 - Slate: `curl -fsSL https://slate.cronkite.cc/install.sh | sh`
 - Frame: `curl -fsSL https://frame.cronkite.cc/install.sh | sh`
+- Etch: `curl -fsSL https://etch.cronkite.cc/install.sh | sh`
 - Uninstall any of them: the same command with `| sh -s -- --uninstall` in place of `| sh`.
 
 ## Latest releases (JSON)
@@ -52,12 +58,13 @@ Each file is one object: `version`, `date`, `url` (the x86_64 Linux `.tar.gz`), 
 - [Brick](https://dl.cronkite.cc/latest.json)
 - [Slate](https://dl.cronkite.cc/slate/latest.json)
 - [Frame](https://dl.cronkite.cc/frame/latest.json)
+- [Etch](https://dl.cronkite.cc/etch/latest.json)
 
 ## Source
 
 - [Repository](https://github.com/avdrav1/cronkite): one Cargo workspace, with each app under `apps/` and the shared crates under `crates/`.
 - [Changelog](https://github.com/avdrav1/cronkite/blob/main/CHANGELOG.md): every release and the stories in it.
-- [Slate spec](https://github.com/avdrav1/cronkite/blob/main/docs/specs/slate.md) and [Frame spec](https://github.com/avdrav1/cronkite/blob/main/docs/specs/frame.md): what each app does and doesn't do.
+- [Slate spec](https://github.com/avdrav1/cronkite/blob/main/docs/specs/slate.md), [Frame spec](https://github.com/avdrav1/cronkite/blob/main/docs/specs/frame.md), and [Etch spec](https://github.com/avdrav1/cronkite/blob/main/docs/specs/etch.md): what each app does and doesn't do.
 
 ## Optional
 
