@@ -113,7 +113,7 @@ scripts/check_frame.sh [BINARY]          # Frame in a container: decks, drawing,
 python3 -m unittest discover -s scripts  # script tests (corpus generator, backlog helper)
 cargo bench                              # prints the apps/brick/docs/BENCHMARKS.md table (needs corpus/)
 python3 scripts/backlog.py next [brick|slate|frame|etch]|status   # backlog helper; one milestone chain per app
-(cd video && npm ci && node render.mjs)   # the explainer video (docs/video/explainer-script.md) from HTML scenes, with a synthesised techno soundtrack (video/soundtrack.js) and a voiceover in Microsoft's Irish voice, Connor (video/voice.mjs, cached in video/.voice/; needs the network) -> dist/video/; --cut short renders the under-a-minute cut (video/short.js), --serve previews (?cut=short for the short one), --still SCENE@SEC checks a frame, --voice NAME picks the narrator
+(cd video && npm ci && node render.mjs)   # the explainer video (docs/video/explainer-script.md) from HTML scenes, with a synthesised techno soundtrack (video/soundtrack.js) and a voiceover in Microsoft's Irish voice, Connor (video/voice.mjs, cached in video/.voice/; needs the network) -> dist/video/; --cut short renders the under-a-minute cut (video/short.js; --cut short-hi for the Hindi one, narrated by Microsoft's hi-IN-MadhurNeural), --serve previews (?cut=short or ?cut=short-hi), --still SCENE@SEC checks a frame, --voice NAME picks the narrator
 scripts/check_etch.sh [BINARY]           # Etch GUI check in docker: blank canvas, pencil, undo and redo, window resize, zoom around the pointer and sharp pixels, panning, New Image, the stroke benchmark (ETCH-2), the eraser over the checkerboard and the tool column (ETCH-3), palette colours, X, and sizes (ETCH-4)
 ```
 

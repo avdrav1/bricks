@@ -4,9 +4,9 @@
   /* cronkite.cc */
   --paper: #fbfcfb; --ink: #14201a; --muted: #5b6b62; --rule: #d5ded8;
   --accent: #0b7a5a; --accent-tint: #e3f2ec;
-  --brand: "League Spartan", "Helvetica Neue", Arial, sans-serif;
+  --brand: "League Spartan", "Noto Sans Devanagari", "Helvetica Neue", Arial, sans-serif;
   /* GNOME, light (libadwaita) */
-  --ui: "Inter", "Adwaita Sans", "Cantarell", sans-serif;
+  --ui: "Inter", "Noto Sans Devanagari", "Adwaita Sans", "Cantarell", sans-serif;
   --mono: "JetBrains Mono", "Adwaita Mono", monospace;
   --win-bg: #ffffff; --view-bg: #ffffff; --head-bg: #ebebed; --head-border: #d8d8dc;
   --win-fg: rgba(0, 0, 6, 0.8); --dim: rgba(0, 0, 6, 0.55);

@@ -62,7 +62,7 @@ V.scene({
   build(root, s) {
     const cmd = "curl -fsSL https://slate.cronkite.cc/install.sh | sh";
     root.innerHTML = `${V.ui.desktop()}${V.ui.terminal({ id: "t", x: 260, y: 130, w: 1400, h: 600, title: "you@linux: ~" })}
-      <div class="notes">${["Just for you: ~/.local", "No sudo", "No package manager", "Checked against its sha256"].map((x) => `<span>${x}</span>`).join("")}</div>`;
+      <div class="notes">${V.tr("install-notes", ["Just for you: ~/.local", "No sudo", "No package manager", "Checked against its sha256"]).map((x) => `<span>${x}</span>`).join("")}</div>`;
     const term = root.querySelector("#t");
     const notes = [...root.querySelectorAll(".notes span")];
     const noteAt = [s.at(0, "for your user"), s.at(0, "No sudo"), s.at(0, "no package"), s.at(0, "the download is checked")];
@@ -130,7 +130,7 @@ V.scene({
       <div class="paper close">
         <div class="close-icons">${["brick", "slate", "frame"].map((a) => V.ui.appIcon(a, 168)).join("")}</div>
         <h1 class="close-url">cronkite.cc</h1>
-        <p class="close-line">Brick, Slate, and Frame · Available now · Open source</p>
+        <p class="close-line">${V.tr("close-line", "Brick, Slate, and Frame · Available now · Open source")}</p>
         <div class="close-black"></div>
       </div>`;
     const icons = [...root.querySelectorAll(".close-icons svg")];

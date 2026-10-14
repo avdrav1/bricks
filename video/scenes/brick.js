@@ -277,7 +277,7 @@
       const cam = stageWith(root, V.ui.terminal({ id: "brick-co-term", x: 150, y: 150, w: 1080, h: 560, title: "you@linux: ~" }));
       cam.querySelector("#brick-co-term").classList.add("brick-term");
       const w = brickWindow(cam, { id: "brick-co-win" });
-      const stat = root.appendChild(V.html('<div class="brick-stat"><b>1 GB</b> CSV open in <b>314 ms</b></div>'));
+      const stat = root.appendChild(V.html(`<div class="brick-stat">${V.tr("open-stat", "<b>1 GB</b> CSV open in <b>314 ms</b>")}</div>`));
       const termEl = cam.querySelector("#brick-co-term");
       const cmd = "brick big.csv";
       const typeAt = 1.5, enter = 2.9;

@@ -355,12 +355,24 @@
       const buffers = new Map(
         await Promise.all(files.map(async (f) => [f, await ctx.decodeAudioData(await (await fetch(`.voice/${f}`)).arrayBuffer())])),
       );
+      // Every sentence at the same loudness, whoever speaks it: RMS to Connor's
+      // average (-19.6 dBFS), within ±6 dB so a short word isn't blown up.
+      const TARGET = 0.105;
+      const level = (buffer) => {
+        const x = buffer.getChannelData(0);
+        let sum = 0;
+        for (let i = 0; i < x.length; i++) sum += x[i] * x[i];
+        return V.clamp(TARGET / Math.sqrt(sum / x.length || 1e-9), 0.5, 2);
+      };
+      const levels = new Map([...buffers].map(([f, b]) => [f, level(b)]));
       const talk = [];
       for (const c of clips) {
         const buffer = buffers.get(c.file);
         const src = ctx.createBufferSource();
+        const gain = ctx.createGain();
         src.buffer = buffer;
-        src.connect(vo);
+        gain.gain.value = levels.get(c.file);
+        src.connect(gain).connect(vo);
         src.start(c.start);
         const end = c.start + buffer.duration;
         const last = talk[talk.length - 1];
