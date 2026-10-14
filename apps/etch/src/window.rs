@@ -1,8 +1,10 @@
-//! Windows: one per image, with the app's menu bar, the canvas, and a status bar; the
-//! New Image dialog; and the stroke benchmark (`--bench-stroke`).
+//! Windows: one per image, with the app's menu bar, the tool column, the canvas, and the
+//! colour row and status bar below; the New Image dialog; and the stroke benchmark
+//! (`--bench-stroke`).
 
 use crate::canvas::Canvas;
-use crate::tools::{self, Tool};
+use crate::colours;
+use crate::tools::{self, Settings, Tool};
 use gtk::prelude::*;
 use gtk::{gdk, gio, glib};
 use image_model::{Color, Image, MAX_SIDE};
@@ -20,8 +22,9 @@ thread_local! {
     static LAST_SIZE: Cell<(u32, u32)> = const { Cell::new(DEFAULT_SIZE) };
 }
 
-/// The app's actions, shortcuts, and menu bar (every window shows it).
+/// The app's actions, shortcuts, menu bar (every window shows it), and style.
 pub fn install_app_actions(app: &gtk::Application) {
+    colours::install_style();
     let new = gio::ActionEntry::builder("new")
         .activate(|app: &gtk::Application, _, _| ask_new_image(app))
         .build();
@@ -168,9 +171,87 @@ impl Status {
     }
 }
 
+/// What the tool column, the colour row, the size, and the keys set, and the widgets that
+/// show it: the canvas draws with its tip.
+struct Controls {
+    settings: Cell<Settings>,
+    canvas: Canvas,
+    indicator: colours::Indicator,
+    size: gtk::SpinButton,
+}
+
+impl Controls {
+    fn update(&self, f: impl FnOnce(&mut Settings)) {
+        let mut s = self.settings.get();
+        f(&mut s);
+        self.settings.set(s);
+        self.show();
+    }
+
+    fn show(&self) {
+        let s = self.settings.get();
+        self.canvas.set_tip(s.tip());
+        self.indicator.set(s.foreground, s.background);
+        if self.size.value() as u32 != s.width() {
+            self.size.set_value(s.width() as f64);
+        }
+    }
+}
+
+/// The colour row and the size, left of the status: the colours, the palette, and the
+/// current tool's size.
+fn colour_row(controls: &Rc<Controls>) -> gtk::Box {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    row.append(&controls.indicator);
+    let pick: Rc<dyn Fn(Color, bool)> = {
+        let controls = Rc::downgrade(controls);
+        Rc::new(move |colour, background| {
+            if let Some(c) = controls.upgrade() {
+                c.update(|s| match background {
+                    true => s.background = colour,
+                    false => s.foreground = colour,
+                });
+            }
+        })
+    };
+    let palette = colours::palette(pick);
+    palette.set_valign(gtk::Align::Center);
+    row.append(&palette);
+    let label = gtk::Label::with_mnemonic("_Size");
+    label.set_mnemonic_widget(Some(&controls.size));
+    row.append(&label);
+    controls.size.set_valign(gtk::Align::Center);
+    controls
+        .size
+        .update_property(&[gtk::accessible::Property::Label("Size")]);
+    controls.size.connect_value_changed({
+        let controls = Rc::downgrade(controls);
+        move |spin| {
+            if let Some(c) = controls.upgrade() {
+                c.update(|s| s.set_width(spin.value() as u32));
+            }
+        }
+    });
+    row.append(&controls.size);
+    row.append(&gtk::Label::new(Some("px")));
+    row
+}
+
 fn show(app: &gtk::Application, image: Image, bench: Option<u32>) {
     let canvas = Canvas::new(image, bench.is_some());
+    let controls = Rc::new(Controls {
+        settings: Cell::new(Settings::default()),
+        canvas: canvas.clone(),
+        indicator: colours::Indicator::new(),
+        size: gtk::SpinButton::with_range(
+            *tools::SIZES.start() as f64,
+            *tools::SIZES.end() as f64,
+            1.0,
+        ),
+    });
+    controls.show();
     let (bar, status) = Status::new();
+    bar.prepend(&colour_row(&controls));
     let middle = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     middle.append(&tools::column());
     middle.append(&gtk::Separator::new(gtk::Orientation::Vertical));
@@ -212,12 +293,12 @@ fn show(app: &gtk::Application, image: Image, bench: Option<u32>) {
             }
         })
         .change_state({
-            let canvas = canvas.clone();
+            let controls = controls.clone();
             move |_: &gtk::ApplicationWindow, action, state| {
                 let picked = state.and_then(|s| s.str()).and_then(Tool::from_id);
                 if let (Some(t), Some(state)) = (picked, state) {
                     action.set_state(state);
-                    canvas.set_tool(t);
+                    controls.update(|s| s.tool = t);
                 }
             }
         })
@@ -225,12 +306,21 @@ fn show(app: &gtk::Application, image: Image, bench: Option<u32>) {
     window.add_action_entries([tool]);
 
     // Space held: dragging pans. Ctrl+Shift+Z redoes (shifted, z may arrive as Z; Edit →
-    // Redo's accelerator is Ctrl+Y). A tool's key, unmodified, picks it.
+    // Redo's accelerator is Ctrl+Y). Unmodified, a tool's key picks it and X swaps the
+    // colours. None of them while a text field (the size) has the keys.
     let keys = gtk::EventControllerKey::new();
     keys.set_propagation_phase(gtk::PropagationPhase::Capture);
     keys.connect_key_pressed({
-        let (canvas, window) = (canvas.clone(), window.downgrade());
+        let (canvas, window, controls) = (canvas.clone(), window.downgrade(), controls.clone());
         move |_, key, _, state| {
+            let Some(window) = window.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
+            let typing = GtkWindowExt::focus(&window)
+                .is_some_and(|f| f.is::<gtk::Text>() || f.is::<gtk::TextView>());
+            if typing {
+                return glib::Propagation::Proceed;
+            }
             let mods = state & gtk::accelerator_get_default_mod_mask();
             let redo = gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK;
             if key == gdk::Key::space {
@@ -241,13 +331,20 @@ fn show(app: &gtk::Application, image: Image, bench: Option<u32>) {
                 canvas.redo();
                 return glib::Propagation::Stop;
             }
+            if !mods.is_empty() {
+                return glib::Propagation::Proceed;
+            }
+            if matches!(key, gdk::Key::x | gdk::Key::X) {
+                controls.update(Settings::swap);
+                return glib::Propagation::Stop;
+            }
             let picked = key.to_unicode().and_then(|c| {
                 Tool::ALL
                     .into_iter()
                     .find(|t| t.key() == c.to_ascii_uppercase())
             });
-            if let (true, Some(t), Some(w)) = (mods.is_empty(), picked, window.upgrade()) {
-                ActionGroupExt::activate_action(&w, "tool", Some(&t.id().to_variant()));
+            if let Some(t) = picked {
+                ActionGroupExt::activate_action(&window, "tool", Some(&t.id().to_variant()));
                 return glib::Propagation::Stop;
             }
             glib::Propagation::Proceed

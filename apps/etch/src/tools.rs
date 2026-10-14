@@ -7,8 +7,8 @@ use gtk::subclass::prelude::*;
 use gtk::{glib, graphene, gsk};
 use image_model::{Color, Pencil};
 
-/// ET0's eraser width (ETCH-4 makes sizes adjustable).
-const ERASER_WIDTH: u32 = 9;
+/// The widths a tool's size can take, in image pixels.
+pub const SIZES: std::ops::RangeInclusive<u32> = 1..=100;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Tool {
@@ -47,17 +47,6 @@ impl Tool {
         }
     }
 
-    /// What a drag with the tool draws with.
-    pub fn tip(self) -> Pencil {
-        match self {
-            Tool::Pencil => Pencil {
-                color: Color::BLACK,
-                width: 1,
-            },
-            Tool::Eraser => Pencil::eraser(ERASER_WIDTH),
-        }
-    }
-
     /// The icon: an SVG path on a 16-unit square, stroked.
     fn icon(self) -> &'static str {
         match self {
@@ -67,6 +56,65 @@ impl Tool {
             Tool::Eraser => {
                 "M 2 9.5 L 8 3.5 L 13 8.5 L 8 13.5 L 6 13.5 Z M 5 6.5 L 10 11.5 M 8 13.5 L 14.5 13.5"
             }
+        }
+    }
+}
+
+/// What drawing uses: the tool, the foreground and background colours, and each tool's
+/// own size (switching tools keeps each one's).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Settings {
+    pub tool: Tool,
+    pub foreground: Color,
+    pub background: Color,
+    pencil_width: u32,
+    eraser_width: u32,
+}
+
+impl Default for Settings {
+    fn default() -> Settings {
+        Settings {
+            tool: Tool::Pencil,
+            foreground: Color::BLACK,
+            background: Color::WHITE,
+            pencil_width: 1,
+            eraser_width: 9,
+        }
+    }
+}
+
+impl Settings {
+    /// The current tool's size.
+    pub fn width(&self) -> u32 {
+        match self.tool {
+            Tool::Pencil => self.pencil_width,
+            Tool::Eraser => self.eraser_width,
+        }
+    }
+
+    /// Sets the current tool's size, kept within [`SIZES`].
+    pub fn set_width(&mut self, width: u32) {
+        let w = width.clamp(*SIZES.start(), *SIZES.end());
+        match self.tool {
+            Tool::Pencil => self.pencil_width = w,
+            Tool::Eraser => self.eraser_width = w,
+        }
+    }
+
+    /// X: the foreground becomes the background and the background the foreground.
+    pub fn swap(&mut self) {
+        std::mem::swap(&mut self.foreground, &mut self.background);
+    }
+
+    /// What a drag with the current tool draws with: the pencil in the foreground, the
+    /// eraser to transparency, each at its size.
+    pub fn tip(&self) -> Pencil {
+        match self.tool {
+            Tool::Pencil => Pencil {
+                color: self.foreground,
+                width: self.pencil_width,
+            },
+            Tool::Eraser => Pencil::eraser(self.eraser_width),
         }
     }
 }
@@ -164,5 +212,35 @@ mod tests {
             assert_eq!(Tool::from_id(t.id()), Some(t));
             assert!(gsk::Path::parse(t.icon()).is_ok(), "{t:?}'s icon parses");
         }
+    }
+
+    #[test]
+    fn each_tool_keeps_its_own_size() {
+        let mut s = Settings::default();
+        assert_eq!(s.width(), 1);
+        s.set_width(7);
+        s.tool = Tool::Eraser;
+        assert_eq!(s.width(), 9);
+        s.set_width(500);
+        assert_eq!(s.width(), 100);
+        s.set_width(0);
+        assert_eq!(s.width(), 1);
+        s.tool = Tool::Pencil;
+        assert_eq!(s.tip().width, 7);
+    }
+
+    #[test]
+    fn the_pencil_draws_in_the_foreground_and_the_eraser_ignores_both() {
+        let red = Color::rgb(237, 28, 36);
+        let mut s = Settings {
+            foreground: red,
+            ..Settings::default()
+        };
+        assert_eq!(s.tip().color, red);
+        s.swap();
+        assert_eq!((s.foreground, s.background), (Color::WHITE, red));
+        assert_eq!(s.tip().color, Color::WHITE);
+        s.tool = Tool::Eraser;
+        assert_eq!(s.tip().color, Color::TRANSPARENT);
     }
 }

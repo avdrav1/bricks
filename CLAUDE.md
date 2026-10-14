@@ -82,7 +82,7 @@ Etch's crates, in `apps/etch/crates/`:
 | Crate | Owns |
 | --- | --- |
 | `image-model` | Etch's image model (ADR 0010): the RGBA8 `Image` (straight alpha, at most 16384 px a side), `Color`, pixel `Rect`s, the pencil (Bresenham lines stamped with a disc) and the eraser (the same tip writing transparent pixels), and `Document`: operations applied to the image, each returning the rect it changed, with undo (the 64-px tiles an operation replaced) and redo (replaying the operation); no dependencies |
-| `etch` (`apps/etch`) | windows (one per image) with the menu bar, the tool column (`tools.rs`: the tools, their keys, and icons drawn from paths, driving the `win.tool` action), and the status bar (pointer position, zoom, size), New Image, the canvas (tile textures rebuilt only where an operation changed pixels, nearest neighbour from 100%, checkerboard, boundary), its toolkit-free view math (`view.rs`: zoom steps 10%–3200% around a point, pan limits), the pencil and eraser, pan by wheel, middle button, or Space, Ctrl+wheel zoom, undo and redo, `--bench-stroke` |
+| `etch` (`apps/etch`) | windows (one per image) with the menu bar, the tool column (`tools.rs`: the tools, their keys, icons drawn from paths, driving the `win.tool` action, and `Settings`: tool, foreground and background, each tool's size, the tip they make), the colour row (`colours.rs`: foreground/background indicator, Paint's palette, the size) and status bar (pointer position, zoom, size), New Image, the canvas (tile textures rebuilt only where an operation changed pixels, nearest neighbour from 100%, checkerboard, boundary, the tip's ring at the pointer), its toolkit-free view math (`view.rs`: zoom steps 10%–3200% around a point, pan limits), the pencil and eraser, pan by wheel, middle button, or Space, Ctrl+wheel zoom, undo and redo, `--bench-stroke` |
 
 ## Commands
 
@@ -113,7 +113,7 @@ python3 -m unittest discover -s scripts  # script tests (corpus generator, backl
 cargo bench                              # prints the apps/brick/docs/BENCHMARKS.md table (needs corpus/)
 python3 scripts/backlog.py next [brick|slate|frame|etch]|status   # backlog helper; one milestone chain per app
 (cd video && npm ci && node render.mjs)   # the explainer video (docs/video/explainer-script.md) from HTML scenes, with a synthesised techno soundtrack (video/soundtrack.js) and a voiceover in Microsoft's Irish voice, Connor (video/voice.mjs, cached in video/.voice/; needs the network) -> dist/video/; --serve previews, --still SCENE@SEC checks a frame, --voice NAME picks the narrator
-scripts/check_etch.sh [BINARY]           # Etch GUI check in docker: blank canvas, pencil, undo and redo, window resize, zoom around the pointer and sharp pixels, panning, New Image, the stroke benchmark (ETCH-2), the eraser over the checkerboard and the tool column (ETCH-3)
+scripts/check_etch.sh [BINARY]           # Etch GUI check in docker: blank canvas, pencil, undo and redo, window resize, zoom around the pointer and sharp pixels, panning, New Image, the stroke benchmark (ETCH-2), the eraser over the checkerboard and the tool column (ETCH-3), palette colours, X, and sizes (ETCH-4)
 ```
 
 ## Performance

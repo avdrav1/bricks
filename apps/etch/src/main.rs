@@ -10,6 +10,7 @@
 //! FRAMES frames and prints how long each took (ETCH-2's acceptance test).
 
 mod canvas;
+mod colours;
 mod tools;
 mod view;
 mod window;

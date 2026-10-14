@@ -77,8 +77,9 @@ Every change undoes and redoes: strokes, erasing, fills, shapes, text, crop, res
 | Ctrl+0 | Actual Size (100%) |
 | Ctrl+9 | Fit to Window |
 | P, B, E, F, I, T, R, L, S | Pencil, Brush, Eraser, Fill, Colour picker, Text, Rectangle, Line, Selection (Ellipse: O) |
+| X | Swap the foreground and background colours |
 
-Tool keys work only while no text is being typed.
+Tool keys and X work only while no text is being typed (the size field included).
 
 ## Status bar
 
@@ -95,15 +96,16 @@ The phases of the product plan, one milestone each (`BACKLOG.md`, chain `etch`):
 
 ## ET0: canvas prototype
 
-Built (ETCH-2 and ETCH-3; colours and sizes follow in ET0):
+Built (ETCH-2 to ETCH-4):
 
 - **Window.** `etch` opens a window with a blank white 1024×768 image, titled Untitled ("Untitled 2" beside it, and so on), with a menu bar (File: New Image…, Close, Quit; Edit: Undo, Redo; View: Zoom In, Zoom Out, Actual Size, Fit to Window), the canvas, and a status bar (pointer position in image pixels, zoom, image size). Each image has its own window.
 - **New Image.** Ctrl+N asks for a width and height (1 to 16384 pixels each; the last ones used, 1024×768 at first) and opens the white image in a new window.
 - **Canvas.** The image sits centred on the window's backdrop with a one-pixel boundary, at 100%, or fitted with a margin when larger than the window. Ctrl+wheel zooms a step a notch around the pointer (a touchpad smoothly), Ctrl++ and Ctrl+- around the window's centre, through 10%, 12.5%, 16.7%, 25%, 33.3%, 50%, 66.7%, 100%, 150%, 200%, 300%, 400%, 600%, 800%, 1200%, 1600%, 2400%, 3200%; a zoom between steps (after Fit) goes to the next one. The wheel pans 48 screen pixels a notch (Shift+wheel sideways), and dragging with the middle button or with Space held moves the image with the pointer. The image can't be panned out of sight (16 pixels of it stay in); smaller than the window, it stays centred. Resizing the window keeps the point at its centre.
 - **Drawing stays immediate.** The canvas redraws only the 256-pixel tiles a stroke changed. `etch --bench-stroke FRAMES` draws a stroke a segment a frame on a 7680×4320 image at 100% and prints its frame times: on a Ryzen 9 5900 under Hyprland, 1.2 ms p99 a frame (target 8 ms).
 - **Tools.** A column at the window's left holds a button a tool, each with its icon and its name and key as the tooltip; one is on at a time, Pencil at first. A tool's key picks it too: P the pencil, E the eraser.
-- **Pencil.** Dragging draws one-pixel black lines through every pixel the pointer crossed (a click draws one pixel); each drag is one undo step.
-- **Eraser.** Dragging erases a 9-pixel-wide line to transparency, whatever the image was; the canvas's checkerboard shows through. Each drag is one undo step.
+- **Colours and sizes.** Below the canvas, left of the status: the foreground colour's square over the background's (their hex values in its tooltip), the palette of Paint's 20 colours (a click makes one the foreground, a right-click the background; X swaps the two), and the current tool's Size, 1 to 100 pixels. Each tool keeps its own size: the pencil starts at 1, the eraser at 9. A tip a few screen pixels across or more shows as a ring around the pointer, where a drag would draw.
+- **Pencil.** Dragging draws a line of the foreground colour at the pencil's size through every pixel the pointer crossed (a click draws one dot); each drag is one undo step.
+- **Eraser.** Dragging erases a line at the eraser's size to transparency, whatever the image was; the canvas's checkerboard shows through. Each drag is one undo step.
 - **Undo.** Ctrl+Z undoes the last stroke, Ctrl+Shift+Z and Ctrl+Y redo it; a new stroke after undoing drops what was undone.
 
 ## Non-goals for V0.1
