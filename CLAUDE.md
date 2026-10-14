@@ -77,6 +77,12 @@ Frame's crates, in `apps/frame/crates/`:
 | `deck-edit` | edits as undoable commands on the presentation model (ADR 0006): text edits (typing, delete, Enter, line breaks), slide edits (new on a layout, duplicate, delete, move), shape box edits (move, resize) and snapping with smart guides, formatting (text and paragraph looks, fill, outline, background), layout changes, inserting (text boxes, shapes, pictures into placeholders or centred, tables) and deleting shapes, shrink to fit, the outline (projection and its edits), the canvas's keyboard flow (Ctrl+Enter's next placeholder, Tab and Shift+Tab levels), undo history with amended steps; toolkit-free |
 | `frame` (`apps/frame`) | windows, slide list and slide commands, canvas and its slide renderer (GTK 4 snapshot, Pango), text editing on the canvas with PowerPoint's keyboard flow (caret in new slides' titles, Ctrl+Enter, Tab), selecting, dragging, resizing, and nudging shapes, the inspector sidebar, the Insert menu, picture drop and paste, shrinking text to fit, the outline view, save and save as, dialogs |
 
+Etch's crates, in `apps/etch/crates/`:
+
+| Crate | Owns |
+| --- | --- |
+| `image-model` | Etch's image model (ADR 0010): the RGBA8 `Image` (straight alpha, at most 16384 px a side), `Color`, pixel `Rect`s, the pencil (Bresenham lines stamped with a disc), and `Document`: operations applied to the image, each returning the rect it changed, with undo (the 64-px tiles an operation replaced) and redo (replaying the operation); no dependencies |
+
 ## Commands
 
 ```sh

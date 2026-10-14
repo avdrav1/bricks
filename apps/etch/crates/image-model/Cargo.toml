@@ -1,0 +1,16 @@
+[package]
+name = "image-model"
+description = "Etch's image model: an RGBA8 raster, the operations that change it, and their undo history"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true
+
+[lib]
+bench = false
