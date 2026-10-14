@@ -19,7 +19,9 @@ const isMicrosoft = (voice) => /^[a-z]{2}-[A-Z]{2}-\w+Neural$/.test(voice);
 // About 165 words a minute, a relaxed pace; both speak at about 185 at 1.
 export const defaultSpeed = (voice) => (isMicrosoft(voice) ? 0.9 : 0.85);
 
-// lines: [{ key, text }] from V.voiceLines(). Returns the manifest and whether it changed.
+// lines: [{ key, text, voice, speed }] from V.voiceLines(); a line with no voice
+// of its own (a cut in another language has one) is spoken by `voice`, at `speed`.
+// Returns the manifest and whether it changed.
 export async function makeVoice({ lines, dir, voice = DEFAULT_VOICE, speed = defaultSpeed(voice) }) {
   await mkdir(dir, { recursive: true });
   const file = join(dir, "manifest.json");
@@ -36,21 +38,26 @@ export async function makeVoice({ lines, dir, voice = DEFAULT_VOICE, speed = def
     delete manifest.clips[k];
   }
   if (missing.length) {
-    console.log(`Voiceover: speaking ${missing.length} of ${lines.length} sentences (${voice})`);
-    const speaker = isMicrosoft(voice) ? await microsoft(voice, speed) : await kokoro(voice, speed);
+    console.log(`Voiceover: speaking ${missing.length} of ${lines.length} sentences`);
+    const speakers = new Map();
+    const speakerFor = async (name, pace) => {
+      const id = `${name}@${pace}`;
+      if (!speakers.has(id)) speakers.set(id, isMicrosoft(name) ? await microsoft(name, pace) : await kokoro(name, pace));
+      return speakers.get(id);
+    };
     try {
       for (const [i, line] of missing.entries()) {
-        const { samples, rate } = await speaker.say(line.text);
+        const { samples, rate } = await (await (line.voice ? speakerFor(line.voice, line.speed ?? defaultSpeed(line.voice)) : speakerFor(voice, speed))).say(line.text);
         const clip = trim(samples, rate);
         const name = `${line.key}.wav`;
         await writeFile(join(dir, name), wav(clip, rate));
-        manifest.clips[line.key] = { file: name, dur: +(clip.length / rate).toFixed(3), text: line.text };
+        manifest.clips[line.key] = { file: name, dur: +(clip.length / rate).toFixed(3), text: line.text, voice: line.voice ?? voice };
         // Save as we go: a dropped connection loses only the sentence in hand.
         await writeFile(file, JSON.stringify(manifest, null, 1));
         process.stdout.write(`\r  ${i + 1}/${missing.length}`);
       }
     } finally {
-      speaker.close();
+      for (const speaker of speakers.values()) speaker.close();
     }
     process.stdout.write("\n");
   }

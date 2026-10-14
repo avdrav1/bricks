@@ -10,7 +10,7 @@ V.scene({
     root.innerHTML = `
       <div class="title-card">
         <h1 class="wordmark">Cronkite</h1>
-        <p class="tagline">A fast, native office suite for Linux.</p>
+        <p class="tagline">${V.tr("tagline", "A fast, native office suite for Linux.")}</p>
       </div>`;
     const [mark, tag] = root.querySelectorAll(".wordmark, .tagline");
     return (t) => {

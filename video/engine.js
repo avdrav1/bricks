@@ -112,7 +112,8 @@ const V = (() => {
     [/Ctrl\+N/g, "Control N"],
   ];
   const spoken = (text) => SAY.reduce((s, [re, to]) => s.replace(re, to), text);
-  const sentences = (line) => line.split(/(?<=[.?!])\s+/);
+  // Sentences end at . ? ! or Hindi's danda (।), followed by a space.
+  const sentences = (line) => line.split(/(?<=[.?!।])\s+/);
   const clipKey = (text) => {
     let h = 2166136261 >>> 0;
     for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619) >>> 0;
@@ -138,8 +139,14 @@ const V = (() => {
   // from `from` to `to` (seconds in its own time) under its own narration
   // `say`, which starts `lead` seconds in; it lasts the window, or longer if
   // the line needs it, holding the last frame.
-  const cuts = {};
-  const cut = (name, clips) => (cuts[name] = clips);
+  // opts: { lang, voice, speed, strings }: a cut in another language has its
+  // own narrator (a voice name and pace for voice.mjs) and its own words for the scenes'
+  // on-screen text (tr()); the apps' interfaces stay as they are.
+  const cuts = {}, cutOpts = {};
+  const cut = (name, clips, opts = {}) => ((cuts[name] = clips), (cutOpts[name] = opts));
+  let strings = {};
+  // On-screen text a cut can translate: tr("tagline", "A fast, native…").
+  const tr = (id, text) => strings[id] ?? text;
   // What plays: the scenes in the edit's order, or a cut's clips. Each shot:
   // { id, root, xfade, b, dur, start, end, update(localTime) }.
   let shots = [];
@@ -149,14 +156,15 @@ const V = (() => {
   const defer = (promise) => (pending.push(promise), promise);
   const settled = () => Promise.all(pending);
 
-  function layoutBeats(beats) {
+  // speaker: the cut's own narrator { voice, speed }, or null for the default one.
+  function layoutBeats(beats, speaker = null) {
     let local = 0;
     const b = beats.map((beat) => {
       // Each sentence: its text, where it starts in the line, its clip, its timing in the beat.
       let at = beat.lead ?? LEAD, from = 0;
       const lines = (beat.say ? sentences(beat.say) : []).map((text) => {
-        const key = clipKey(spoken(text));
-        const line = { text, key, off: beat.say.indexOf(text, from), dur: voice?.clips[key]?.dur ?? speech(text), start: at };
+        const key = clipKey((speaker ? `${speaker.voice}@${speaker.speed ?? ""}|` : "") + spoken(text));
+        const line = { text, key, voice: speaker?.voice, speed: speaker?.speed, off: beat.say.indexOf(text, from), dur: voice?.clips[key]?.dur ?? speech(text), start: at };
         from = line.off + text.length;
         at += line.dur + GAP;
         return line;
@@ -179,9 +187,11 @@ const V = (() => {
     for (const [name, clips] of Object.entries(cuts))
       for (const c of clips) {
         if (!byId.has(c.scene)) console.error(`Cut ${name} uses a scene that isn't written: ${c.scene}`);
-        Object.assign(c, layoutBeats([{ say: c.say, lead: c.lead, min: c.to - c.from }]));
+        Object.assign(c, layoutBeats([{ say: c.say, lead: c.lead, min: c.to - c.from }], cutOpts[name].voice ? cutOpts[name] : null));
       }
     if (cutName && !cuts[cutName]) console.error(`No cut called ${cutName}`);
+    strings = cutOpts[cutName]?.strings ?? {};
+    document.documentElement.lang = cutOpts[cutName]?.lang ?? "en";
     shots = cuts[cutName]
       ? cuts[cutName].map((c) => {
           const s = byId.get(c.scene);
@@ -216,7 +226,7 @@ const V = (() => {
   // The voiceover's clips: what to say (for voice.mjs: every scene's and every
   // cut's lines, so one voiceover serves them all) and when (for the mix).
   const voiceLines = () =>
-    [...new Map([...scenes, ...Object.values(cuts).flat()].flatMap((s) => s.b.flatMap((b) => b.lines)).map((l) => [l.key, { key: l.key, text: spoken(l.text) }])).values()];
+    [...new Map([...scenes, ...Object.values(cuts).flat()].flatMap((s) => s.b.flatMap((b) => b.lines)).map((l) => [l.key, { key: l.key, text: spoken(l.text), voice: l.voice, speed: l.speed }])).values()];
   const voiceTrack = () =>
     voice ? shots.flatMap((s) => s.b.flatMap((b) => b.lines.map((l) => ({ file: voice.clips[l.key]?.file, start: s.start + b.start + l.start })))).filter((c) => c.file) : [];
 
@@ -253,7 +263,6 @@ const V = (() => {
       if (clauses.length > 1 && clauses.every((c) => c.length <= MAX)) return pack(clauses);
       return balance(s);
     };
-    // Sentences end at . ? or ! followed by a space ("cronkite.cc" stays whole).
     const pieces = pack(sentences(b.say).flatMap(fit));
     let from = 0;
     const out = pieces.map((text) => {
@@ -379,5 +388,5 @@ const V = (() => {
 
   const list = () => shots.map((s) => ({ id: s.id, start: s.start, end: s.end }));
 
-  return { W, H, FPS, clamp, lerp, ease, p, tw, track, typed, typedEnd, hash, blink, fmt, html, css, text, markup, cls, show, scene, order, cut, defer, settled, setVoice, voiceLines, voiceTrack, init, seek, keys, pointer, vtt, list, get duration() { return total; } };
+  return { W, H, FPS, clamp, lerp, ease, p, tw, track, typed, typedEnd, hash, blink, fmt, html, css, text, markup, cls, show, scene, order, cut, tr, defer, settled, setVoice, voiceLines, voiceTrack, init, seek, keys, pointer, vtt, list, get duration() { return total; } };
 })();
