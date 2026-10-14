@@ -67,16 +67,21 @@
     return buf;
   }
 
-  async function soundtrack() {
+  // music: the techno; voice: the voiceover clips from .voice/ (V.voiceTrack()).
+  async function soundtrack({ music = true, voice = true } = {}) {
     const scenes = V.list();
     const duration = V.duration;
     const ctx = new OfflineAudioContext(2, Math.ceil(duration * RATE), RATE);
 
     // ---- the mix --------------------------------------------------------
+    // music -> compressor -> duck (down while the narrator talks) -> limiter; voice -> limiter.
     const master = ctx.createGain();
     const comp = ctx.createDynamicsCompressor();
     comp.threshold.value = -14; comp.knee.value = 8; comp.ratio.value = 4; comp.attack.value = 0.005; comp.release.value = 0.18;
-    master.connect(comp).connect(ctx.destination);
+    const duck = ctx.createGain();
+    const limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = -2; limiter.knee.value = 0; limiter.ratio.value = 20; limiter.attack.value = 0.002; limiter.release.value = 0.12;
+    master.connect(comp).connect(duck).connect(limiter).connect(ctx.destination);
     master.gain.value = 0.62;
 
     const verb = ctx.createConvolver();
@@ -313,26 +318,60 @@
         }
       }
     }
-    crash(A, 1.2);
-    sub(A, hz(33), 3.5, 1);
-    const BLOCK = 4;
-    for (let b = 0; b * BLOCK < bars; b++) {
-      const block = () => {
-        for (let i = b * BLOCK; i < Math.min(bars, (b + 1) * BLOCK); i++) scheduleBar(i);
-      };
-      if (b === 0) block();
-      else {
-        // A render quantum (128 frames) before the block's first bar, at least.
-        const at = Math.floor(((A + b * BLOCK * BAR - 0.05) * RATE) / 128) * 128 / RATE;
-        ctx.suspend(at).then(() => {
-          block();
-          ctx.resume();
-        });
+    if (music) {
+      crash(A, 1.2);
+      sub(A, hz(33), 3.5, 1);
+      const BLOCK = 4;
+      for (let b = 0; b * BLOCK < bars; b++) {
+        const block = () => {
+          for (let i = b * BLOCK; i < Math.min(bars, (b + 1) * BLOCK); i++) scheduleBar(i);
+        };
+        if (b === 0) block();
+        else {
+          // A render quantum (128 frames) before the block's first bar, at least.
+          const at = Math.floor(((A + b * BLOCK * BAR - 0.05) * RATE) / 128) * 128 / RATE;
+          ctx.suspend(at).then(() => {
+            block();
+            ctx.resume();
+          });
+        }
+      }
+      // Fade with the picture's fade to black.
+      master.gain.setValueAtTime(0.62, Math.max(0, duration - 2.5));
+      master.gain.linearRampToValueAtTime(0, duration);
+    }
+
+    // ---- the voiceover ---------------------------------------------------------
+    // Each sentence's clip at its time; the music dips about 10 dB under each
+    // stretch of talk, staying down through pauses under 3 s so it doesn't pump
+    // between lines, and coming back up slowly in the longer ones.
+    const clips = voice ? V.voiceTrack() : [];
+    if (clips.length) {
+      const VOICE = 1.15, DIP = 0.32;
+      const vo = ctx.createGain();
+      vo.gain.value = VOICE;
+      vo.connect(limiter);
+      const files = [...new Set(clips.map((c) => c.file))];
+      const buffers = new Map(
+        await Promise.all(files.map(async (f) => [f, await ctx.decodeAudioData(await (await fetch(`.voice/${f}`)).arrayBuffer())])),
+      );
+      const talk = [];
+      for (const c of clips) {
+        const buffer = buffers.get(c.file);
+        const src = ctx.createBufferSource();
+        src.buffer = buffer;
+        src.connect(vo);
+        src.start(c.start);
+        const end = c.start + buffer.duration;
+        const last = talk[talk.length - 1];
+        if (last && c.start - last.end < 3) last.end = Math.max(last.end, end);
+        else talk.push({ start: c.start, end });
+      }
+      for (const { start, end } of talk) {
+        duck.gain.setTargetAtTime(DIP, Math.max(0, start - 0.3), 0.08);
+        duck.gain.setTargetAtTime(1, end + 0.3, 0.6);
       }
     }
-    // Fade with the picture's fade to black.
-    master.gain.setValueAtTime(0.62, Math.max(0, duration - 2.5));
-    master.gain.linearRampToValueAtTime(0, duration);
 
     return ctx.startRendering();
   }

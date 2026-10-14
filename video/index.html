@@ -33,7 +33,11 @@
   // ?render: the renderer drives seek() itself. Otherwise this is a preview
   // player: space plays and pauses, arrows step, ?t=SECONDS starts there.
   const params = new URLSearchParams(location.search);
-  window.ready = Promise.all([...document.fonts].map((f) => f.load())).then(() => {
+  // The voiceover's clip lengths time the narration, so its manifest loads
+  // first too (voice.mjs writes it; without it, the narration is estimated).
+  const manifest = params.has("novoice") ? null : fetch(".voice/manifest.json").then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  window.ready = Promise.all([manifest, ...[...document.fonts].map((f) => f.load())]).then(([voice]) => {
+    if (voice) V.setVoice(voice);
     window.video = V.init();
     if (params.has("render")) document.body.classList.add("render");
     else preview();

@@ -6,16 +6,16 @@ before recording.
 
 **Tone:** calm, plain, a little dry. Show the apps working rather than describing them.
 
-**Not shipped yet:** shots marked ◆ show Slate features still being built: find and replace (SLATE-16), crash recovery (SLATE-17), and fonts, styles, and the format bar (SLATE-19 to SLATE-22). See the production notes before recording them.
+**Not released yet:** the shot marked ◆ shows Slate's Word layouts (SL4, SLATE-23 to SLATE-28): done, and in Slate v0.3.0, which isn't out yet. See the production notes before recording it.
 
 ---
 
-## 0:00 – Cold open (10 s)
+## 0:00 – Title and cold open (15 s)
 
 | Picture | Voiceover |
 | --- | --- |
-| A terminal. The cursor blinks next to `brick big.csv` (1 GB). Enter. The grid is full of rows almost at once. Hard cut to black. | *(none; the keyboard click and then silence)* |
-| Title card: **Cronkite**. Beneath it: *A fast, native office suite for Linux.* | "That was a one-gigabyte spreadsheet, open in about a third of a second." |
+| Title card: **Cronkite**. Beneath it: *A fast, native office suite for Linux.* The music starts on it. | *(none)* |
+| A terminal. The cursor blinks next to `brick big.csv` (1 GB). Enter. The grid is full of rows almost at once; then *1 GB CSV open in 314 ms*. | "That was a one-gigabyte spreadsheet, open in about a third of a second." |
 
 [BENCHMARKS.md: 1 GB CSV open to first rows visible, 314 ms]
 
@@ -44,17 +44,18 @@ before recording.
 
 | Picture | Voiceover |
 | --- | --- |
-| Double-click `report.docx` in Files; Slate opens. Headings, a bulleted list, a table, a picture: one long column with no page edges. ◆ The body is in Cambria and the headings in Calibri, as in Word. | "Slate is the word processor. You'll notice there are no pages. Slate gives you one endless page, so you write instead of fighting margins. And Word documents look like themselves, in their own fonts and styles." |
-| View → Text Width: Narrow, then Wide, then Full. The text reflows smoothly each time. | "Choose how wide you want the column. That's a setting for you; it doesn't change the document." |
+| Double-click `report.docx` in Files; Slate opens. Headings, a bulleted list, a table, a picture: one long column with no page edges. The body is in Cambria and the headings in Calibri, as in Word. | "Slate is the word processor. You'll notice there are no pages. Slate gives you one endless page, so you write instead of fighting margins. And Word documents look like themselves, in their own fonts and styles." |
+| ◆ A Word letter or invoice: an embedded font in its heading, a shaded heading with a border under it, tab stops with dot leaders and a right-aligned date, a paragraph with its own indents, Word's ● bullets. The column is the document's own page width. | "Word layouts come through too: the page's own width, tab stops with leaders, borders and shading, embedded fonts, and Word's own list markers." |
+| View → Text Width, which starts at Page (the document's page width): Narrow, then Wide, then Full. The text reflows smoothly each time. | "Choose how wide you want the column. That's a setting for you; it doesn't change the document." |
 | Type a sentence, press Ctrl+B and Ctrl+1, then undo and redo. | "Typing, headings, lists, tables, and copy and paste all work as you'd expect, with full undo." |
-| ◆ Select a paragraph. The format bar over the page: open the style picker (each style drawn in its own look) and pick Quote; choose a font, a size, and a colour; Ctrl+E centres it. | "When you want more, a slim format bar holds the document's own styles, fonts, sizes, and colours. No ribbon." |
-| ◆ Ctrl+F, type `budget`: matches highlight through the page and inside the table, with a count. Ctrl+H, type `forecast`, Replace All. Ctrl+Z puts every one back. | "Find and replace reaches into tables, and Replace All undoes in one step." |
+| Select a paragraph. The format bar over the page: open the style picker (each style drawn in its own look) and pick Quote; choose a font, a size, and a colour; Ctrl+E centres it. | "When you want more, a slim format bar holds the document's own styles, fonts, sizes, and colours. No ribbon." |
+| Ctrl+F, type `budget`: matches highlight through the page and inside the table, with a count. Ctrl+H, type `forecast`, Replace All. Ctrl+Z puts every one back. | "Find and replace reaches into tables, and Replace All undoes in one step." |
 | Ctrl+N: an Untitled window. Type a heading and a line; Ctrl+S suggests `Untitled.docx` in Documents. | "Ctrl+N starts a new Word document." |
-| ◆ Unsaved edits in a window. A terminal: `kill -9` Slate. Launch it again: it offers the edits back, and the title shows •. | "And if Slate ever crashes, your unsaved edits are waiting when you come back. Brick does the same." |
+| Unsaved edits in a window. A terminal: `kill -9` Slate. Launch it again: it offers the edits back, and the title shows •. | "And if Slate ever crashes, your unsaved edits are waiting when you come back. Brick does the same." |
 | Ctrl+S. Then open the same file in LibreOffice Writer: the edit is there, and so are the header, the footer, and the page layout Slate never showed. | "Here's the part we care most about. When Slate saves a Word document, it changes only what you edited. Everything else in the file, the parts Slate doesn't even show you, stays exactly as it was." |
 | Open `notes.md`: it shows formatted, not as source. Edit one paragraph and save. A terminal `git diff` shows one changed line. | "Markdown and plain text too. Edit one paragraph of a Markdown file, and only that paragraph changes on disk. Your version control will thank you." |
 
-[docs/specs/slate.md: pageless column, text widths; SL3 fonts, styles, format bar (SLATE-19 to SLATE-22, ADR 0008); SLATE-16 find and replace; SLATE-18 new document (Slate v0.1.1); SLATE-17 crash recovery; Brick's recovery is APP-7; SLATE-8: LibreOffice reopens an edited .docx with the edits and everything else unchanged; SLATE-7: an edited .md changes only the edited blocks]
+[docs/specs/slate.md: pageless column, text widths; SL3 fonts, styles, format bar (SLATE-19 to SLATE-22, ADR 0008); SL4 Word layouts: page width, tab stops, embedded fonts, a paragraph's own spacing and indents, borders and shading, list markers (SLATE-23 to SLATE-28, ADR 0009); SLATE-16 find and replace; SLATE-18 new document (Slate v0.1.1); SLATE-17 crash recovery; Brick's recovery is APP-7; SLATE-8: LibreOffice reopens an edited .docx with the edits and everything else unchanged; SLATE-7: an edited .md changes only the edited blocks]
 
 ## 2:50 – Frame (50 s)
 
@@ -73,7 +74,7 @@ before recording.
 | Picture | Voiceover |
 | --- | --- |
 | The browser at cronkite.cc: three install commands, one per app. Click Copy next to the Slate command. | "Getting started takes one command per app." |
-| A terminal: paste `curl -fsSL https://slate.cronkite.cc/install.sh \| sh`. It prints *Installed Slate 0.1.1*. | "It installs for your user only. No sudo, no package manager, and the download is checked before anything is installed." |
+| A terminal: paste `curl -fsSL https://slate.cronkite.cc/install.sh \| sh`. It prints *Installed Slate* and the current version. | "It installs for your user only. No sudo, no package manager, and the download is checked before anything is installed." |
 | Double-click a `.docx` in Files; Slate opens it. Then a `.pptx`; Frame opens it. | "After that, your files just open in the right app." |
 
 [sites/cronkite/index.html; SLATE-9 and FRAME-9 acceptance]
@@ -93,16 +94,12 @@ before recording.
   - `big.csv` (`python3 scripts/gen_corpus.py`, the 1 GB file);
   - a three-row `.csv` for the empty cells past the data;
   - a styled `.xlsx` with a chart and comments;
+  - a `.docx` letter or invoice with an embedded font, a shaded and bordered heading, tab stops with leaders, and Word bullets;
   - a `.docx` with a header and footer, a table, and a picture, its body in Cambria and its headings in Calibri, with the word `budget` in a paragraph and in the table (start from the Slate fixture, `apps/slate/crates/docx/tests/data/fixture.docx`);
   - a short `notes.md` inside a git repository;
   - a `.pptx` with a few slides, one of them with an empty picture placeholder, and a photo to drop on it.
-- **Versions:** Brick v0.3.0, Slate v0.1.1, Frame v0.1.0 are released. Make the installer shot print the version that's current on the day.
-- **Shots marked ◆:** these Slate features are being built and aren't in a release yet:
-  - fonts and styles drawn as in Word, and the format bar (SL3: SLATE-19 to SLATE-22);
-  - find and replace (SLATE-16);
-  - crash recovery (SLATE-17).
-
-  Record each one from the release that ships it. If the video is cut first, drop that row's shot and its line. Without SL3, change the first Slate line to end at "fighting margins."
+- **Versions:** Brick v0.3.0, Slate v0.2.0, Frame v0.1.0 are released. Make the installer shot print the version that's current on the day.
+- **The shot marked ◆:** Slate's Word layouts (SL4: SLATE-23 to SLATE-28) are done but ship in Slate v0.3.0. Record it from that release; if the video is cut first, drop the row and its line.
 - **Fonts:** the Word-like look needs the metric-compatible fonts installed (Carlito for Calibri, Caladea for Cambria; `docs/specs/slate.md` lists the packages). Install them on the recording machine.
 - **Claims to keep accurate:**
   - "about a third of a second" means 314 ms on the reference box;
@@ -110,3 +107,4 @@ before recording.
   - "a quarter fewer" means 15 vs 21 actions;
   - "only what you edited" is the patched save. Inside an edited paragraph, bookmarks, comments, and fields don't survive, so don't demo the edit on a paragraph that has them.
 - **Captions:** burn them in. Many viewers watch muted.
+- **The web-made video** (`video/`, `node render.mjs`) follows this script with the apps recreated in HTML, a synthesised soundtrack, and a voiceover spoken by Kokoro TTS. Its narration is these lines, verbatim.

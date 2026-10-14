@@ -8,7 +8,11 @@
 //   node render.mjs --from 30 --to 60     a stretch, in seconds
 //   node render.mjs --still 31.5 [--still 40 ...]   PNG frames, for checking a look
 //   node render.mjs --draft ...           render even though the page logs errors
-//   node render.mjs --audio vo.wav        add a voiceover recorded against the captions; the music ducks under it
+//   node render.mjs --voice bm_george     the narrator's voice (default af_heart; see voice.mjs)
+//   node render.mjs --speed 0.9           the narrator's pace (default 0.85, about 165 words a minute)
+//   node render.mjs --voice-only          just make the voiceover in .voice/ (for the preview)
+//   node render.mjs --no-voice            no voiceover: captions only, timed by word count
+//   node render.mjs --audio vo.wav        a voiceover recorded elsewhere instead, against the captions; the music ducks under it
 //   node render.mjs --no-music            leave out the soundtrack (soundtrack.js)
 //   node render.mjs --serve               the preview player at http://127.0.0.1:8123
 //
@@ -21,6 +25,7 @@ import { cpus } from "node:os";
 import { join, extname, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import { makeVoice } from "./voice.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -30,6 +35,8 @@ const opt = (name, fallback) => {
 };
 // --still 31.5 (seconds into the video) or --still brick-sort@1.5 (into a scene)
 const stills = args.flatMap((a, i) => (a === "--still" ? [args[i + 1]] : []));
+// The spoken voiceover (voice.mjs), unless there's none or one comes from --audio.
+const speak = !args.includes("--no-voice") && !opt("audio");
 
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg" };
 function serve(port) {
@@ -38,6 +45,8 @@ function serve(port) {
     const url = decodeURIComponent(new URL(req.url, "http://x").pathname).replace(/\/$/, "/index.html");
     const root = url.startsWith("/sites/") ? resolve(here, "..") : here;
     const path = join(root, url);
+    // No voiceover made yet: the page times the narration by word count.
+    if (url === "/.voice/manifest.json" && !existsSync(join(here, url))) return res.writeHead(200, { "content-type": "application/json" }).end("null");
     if (!path.startsWith(root) || !existsSync(path)) return res.writeHead(404).end();
     res.writeHead(200, { "content-type": TYPES[extname(path)] || "application/octet-stream", "cache-control": "no-store" });
     res.end(await readFile(path));
@@ -80,11 +89,22 @@ function launch() {
 
 async function render() {
   const server = await serve(0);
-  const url = `http://127.0.0.1:${server.address().port}/?render`;
+  const url = `http://127.0.0.1:${server.address().port}/?render${speak ? "" : "&novoice"}`;
   const browser = await launch();
   const browsers = [browser];
   try {
-    const first = await openPage(browser, url);
+    let first = await openPage(browser, url);
+    // The voiceover first: its clips' lengths set the timeline. Stills use
+    // whatever voiceover is already there.
+    if (speak && !stills.length) {
+      const lines = await first.page.evaluate(() => V.voiceLines());
+      const { changed } = await makeVoice({ lines, dir: join(here, ".voice"), voice: opt("voice", "af_heart"), speed: Number(opt("speed", 0.85)) });
+      if (args.includes("--voice-only")) return;
+      if (changed) {
+        await first.page.close();
+        first = await openPage(browser, url);
+      }
+    }
     const { duration, fps } = first.info;
     const outFile = resolve(opt("out", join(here, "..", "dist", "video", stills.length ? "still.png" : "cronkite-explainer.mp4")));
     await mkdir(dirname(outFile), { recursive: true });
@@ -122,11 +142,12 @@ async function render() {
 
     // The soundtrack renders in its own page while the frames do, and comes
     // back as a WAV in base64 slices (one string of it would be ~80 MB).
-    const soundtrack = args.includes("--no-music")
+    const music = !args.includes("--no-music");
+    const soundtrack = !music && !speak
       ? Promise.resolve(null)
       : (async () => {
           const { page } = await openPage(browser, url);
-          const size = await page.evaluate(async () => (window.__wav = V.wav(await V.soundtrack())).length);
+          const size = await page.evaluate(async (opts) => (window.__wav = V.wav(await V.soundtrack(opts))).length, { music, voice: speak });
           const chunks = [];
           for (let at = 0; at < size; at += 8 << 20)
             chunks.push(Buffer.from(await page.evaluate(([a, b]) => {
@@ -182,16 +203,17 @@ async function render() {
 
     const list = join(tmp, "parts.txt");
     await writeFile(list, parts.filter(Boolean).map((p) => `file '${p}'`).join("\n"));
+    // The soundtrack (music and spoken voiceover), and a voiceover from --audio.
     const voice = opt("audio") && resolve(opt("audio"));
-    const music = await soundtrack;
+    const mixed = await soundtrack;
     const inputs = ["-f", "concat", "-safe", "0", "-i", list];
-    for (const file of [music, voice].filter(Boolean)) inputs.push("-ss", String(f0 / fps), "-i", file);
+    for (const file of [mixed, voice].filter(Boolean)) inputs.push("-ss", String(f0 / fps), "-i", file);
     // The music sits under the voice: a compressor keyed by the voice ducks it.
     const mix =
-      music && voice ? ["-filter_complex", "[2:a]apad,asplit=2[vo][key];[1:a][key]sidechaincompress=threshold=0.03:ratio=6:attack=15:release=350[bed];[bed][vo]amix=inputs=2:normalize=0:duration=first[a]", "-map", "0:v", "-map", "[a]"]
-      : music || voice ? ["-map", "0:v", "-map", "1:a", "-af", "apad"]
+      mixed && voice ? ["-filter_complex", "[2:a]apad,asplit=2[vo][key];[1:a][key]sidechaincompress=threshold=0.03:ratio=6:attack=15:release=350[bed];[bed][vo]amix=inputs=2:normalize=0:duration=first[a]", "-map", "0:v", "-map", "[a]"]
+      : mixed || voice ? ["-map", "0:v", "-map", "1:a", "-af", "apad"]
       : [];
-    await run([...inputs, ...mix, ...(music || voice ? ["-c:a", "aac", "-b:a", "192k", "-shortest"] : []), "-c:v", "copy", "-movflags", "+faststart", outFile]);
+    await run([...inputs, ...mix, ...(mixed || voice ? ["-c:a", "aac", "-b:a", "192k", "-shortest"] : []), "-c:v", "copy", "-movflags", "+faststart", outFile]);
     await rm(tmp, { recursive: true });
     if (f0 === 0 && f1 === Math.round(duration * fps)) await writeFile(outFile.replace(/\.mp4$/, ".vtt"), await first.page.evaluate(() => V.vtt()));
     console.log(`${outFile}  (${((Date.now() - started) / 1000).toFixed(0)} s)`);

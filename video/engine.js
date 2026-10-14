@@ -96,9 +96,30 @@ const V = (() => {
   }
   const show = (el, on) => css(el, { display: on ? "" : "none" });
 
-  // ---- scenes --------------------------------------------------------------
+  // ---- narration -------------------------------------------------------------
+  // Each beat's line is spoken a sentence at a time. With the voiceover made
+  // (voice.mjs fills .voice/ and index.html hands its manifest to setVoice),
+  // a sentence lasts as long as its clip; without it, as long as it takes at
+  // WORDS_PER_SEC. Pictures sync to words through s.at(), either way.
+  const LEAD = 0.15, GAP = 0.18;
   const words = (s) => s.replace(/[*_`]/g, "").split(/\s+/).filter(Boolean).length;
   const speech = (s) => words(s) / WORDS_PER_SEC;
+  // How the narrator says what the captions write.
+  const SAY = [
+    [/`/g, ""],
+    [/\b00123\b/g, "zero zero one two three"],
+    [/cronkite\.cc/g, "cronkite dot C C"],
+    [/Ctrl\+N/g, "Control N"],
+  ];
+  const spoken = (text) => SAY.reduce((s, [re, to]) => s.replace(re, to), text);
+  const sentences = (line) => line.split(/(?<=[.?!])\s+/);
+  const clipKey = (text) => {
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619) >>> 0;
+    return h.toString(16).padStart(8, "0");
+  };
+  let voice = null; // { voice, clips: { key: { file, dur } } }
+  const setVoice = (manifest) => (voice = manifest);
 
   // scene({ id, beats: [{ say, min, dur }], xfade, build(root, ctx) -> update(t, ctx) })
   // A beat lasts its narration plus a breath, or `min` if the picture needs
@@ -124,8 +145,18 @@ const V = (() => {
       s.start = t;
       let local = 0;
       s.b = s.beats.map((beat) => {
-        const d = beat.dur ?? Math.max(beat.min ?? 0, beat.say ? speech(beat.say) + BREATH : 0);
-        const out = { start: local, end: local + d, say: beat.say };
+        // Each sentence: its text, where it starts in the line, its clip, its timing in the beat.
+        let at = LEAD, from = 0;
+        const lines = (beat.say ? sentences(beat.say) : []).map((text) => {
+          const key = clipKey(spoken(text));
+          const line = { text, key, off: beat.say.indexOf(text, from), dur: voice?.clips[key]?.dur ?? speech(text), start: at };
+          from = line.off + text.length;
+          at += line.dur + GAP;
+          return line;
+        });
+        const talk = lines.length ? at - GAP : 0;
+        const d = beat.dur ?? Math.max(beat.min ?? 0, beat.say ? talk + BREATH : 0);
+        const out = { start: local, end: local + d, say: beat.say, lines };
         local += d;
         return out;
       });
@@ -133,9 +164,16 @@ const V = (() => {
       s.at = (i, needle) => wordTime(s, i, needle);
       s.end = t + local;
       t = s.end;
-      for (const b of s.b) if (b.say) captions.push(...chunk(b.say, s.start + b.start + 0.15));
+      for (const b of s.b) if (b.say) captions.push(...chunk(b, s.start));
     }
     total = t;
+  }
+
+  // When the narrator reaches character `at` of a beat's line, in scene time:
+  // through its sentence's clip, in proportion to the characters.
+  function charTime(b, at) {
+    const line = b.lines.findLast((l) => l.off <= at) ?? b.lines[0];
+    return b.start + line.start + line.dur * clamp((at - line.off) / line.text.length);
   }
 
   // When the narrator reaches `needle` (a word or phrase) in beat i, in the
@@ -144,11 +182,17 @@ const V = (() => {
     const b = s.b[i];
     const at = b.say.indexOf(needle);
     if (at < 0) throw new Error(`"${needle}" isn't in ${s.id}'s beat ${i}`);
-    return b.start + 0.15 + speech(b.say.slice(0, at));
+    return charTime(b, at);
   }
 
-  // Split a line into caption cards of at most two short lines, timed by length.
-  function chunk(line, start) {
+  // The voiceover's clips: what to say (for voice.mjs) and when (for the mix).
+  const voiceLines = () => [...new Map(scenes.flatMap((s) => s.b.flatMap((b) => b.lines)).map((l) => [l.key, { key: l.key, text: spoken(l.text) }])).values()];
+  const voiceTrack = () =>
+    voice ? scenes.flatMap((s) => s.b.flatMap((b) => b.lines.map((l) => ({ file: voice.clips[l.key]?.file, start: s.start + b.start + l.start })))).filter((c) => c.file) : [];
+
+  // Split a beat's line into caption cards of at most two short lines, each
+  // shown while the narrator says it. `start`: the scene's start.
+  function chunk(b, start) {
     const MAX = 84;
     // Pack units into cards of at most MAX characters, in order.
     const pack = (units, sep = " ") => {
@@ -180,16 +224,15 @@ const V = (() => {
       return balance(s);
     };
     // Sentences end at . ? or ! followed by a space ("cronkite.cc" stays whole).
-    const pieces = pack(line.split(/(?<=[.?!])\s+/).flatMap(fit));
-    const out = [];
-    let t = start;
-    for (const piece of pieces) {
-      const d = speech(piece);
-      out.push({ start: t, end: t + d, text: piece });
-      t += d;
-    }
-    // The last card lingers a moment into the breath; the others hand over.
-    out[out.length - 1].end += 0.25;
+    const pieces = pack(sentences(b.say).flatMap(fit));
+    let from = 0;
+    const out = pieces.map((text) => {
+      const at = b.say.indexOf(text, from);
+      from = at + text.length;
+      return { start: start + charTime(b, at), end: start + charTime(b, from), text };
+    });
+    // Each card stays up until the next; the last lingers a moment into the breath.
+    out.forEach((c, i) => (c.end = out[i + 1]?.start ?? c.end + 0.25));
     return out;
   }
 
@@ -301,5 +344,5 @@ const V = (() => {
 
   const list = () => scenes.map((s) => ({ id: s.id, start: s.start, end: s.end }));
 
-  return { W, H, FPS, clamp, lerp, ease, p, tw, track, typed, typedEnd, hash, blink, fmt, html, css, text, markup, cls, show, scene, order, defer, settled, init, seek, keys, pointer, vtt, list, get duration() { return total; } };
+  return { W, H, FPS, clamp, lerp, ease, p, tw, track, typed, typedEnd, hash, blink, fmt, html, css, text, markup, cls, show, scene, order, defer, settled, setVoice, voiceLines, voiceTrack, init, seek, keys, pointer, vtt, list, get duration() { return total; } };
 })();

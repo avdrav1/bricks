@@ -28,3 +28,6 @@ Thumbs.db
 
 # Python
 __pycache__/
+
+# The voiceover, made by voice.mjs
+/video/.voice
