@@ -19,7 +19,7 @@ BACKLOG = ROOT / "BACKLOG.md"
 # app has its gate checked.
 CHAINS = {
     "brick": ["S0", "M0", "M1", "M2", "M3", "M4", "M5"],
-    "slate": ["SL0", "SL1", "SL3", "SL2"],
+    "slate": ["SL0", "SL1", "SL3", "SL2", "SL4"],
     "frame": ["FR0", "FR1"],
 }
 MILESTONES = [ms for chain in CHAINS.values() for ms in chain]
