@@ -17,8 +17,10 @@
 //! their licences, in a `fonts` folder found from the executable ([`folder_for`]),
 //! fetched by `scripts/fetch_fonts.py`. They're added as fontconfig application fonts of
 //! this process, never installed for the user. GTK names the Mac's system font
-//! `.AppleSystemUIFont`, which only CoreText knows; fontconfig is told it's the system
-//! font's file (SF), so the app's own text keeps the Mac's look.
+//! `.AppleSystemUIFont`, which only CoreText knows; without an alias fontconfig draws the
+//! apps' own text in Verdana. It gets Helvetica Neue, the Mac's system font before SF:
+//! SF itself (`System Font`, `SFNS.ttf`) draws every `i` without its dot through
+//! FreeType (MAC-6's runner screenshots).
 
 #[cfg(any(target_os = "macos", test))]
 use std::path::{Path, PathBuf};
@@ -50,19 +52,13 @@ mod mac {
     use std::path::Path;
     use std::time::Instant;
 
-    /// `.AppleSystemUIFont` (GTK's `gtk-font-name` on macOS) as the system font's file.
-    /// SF's family name differs between macOS releases, so the alias lists them in order.
+    /// `.AppleSystemUIFont` (GTK's `gtk-font-name` on macOS) as Helvetica Neue.
     const SYSTEM_FONT: &str = r#"<?xml version="1.0"?>
 <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
 <fontconfig>
   <alias binding="same">
     <family>.AppleSystemUIFont</family>
-    <prefer>
-      <family>System Font</family>
-      <family>.SF NS</family>
-      <family>SF Pro</family>
-      <family>Helvetica Neue</family>
-    </prefer>
+    <prefer><family>Helvetica Neue</family></prefer>
   </alias>
 </fontconfig>
 "#;
@@ -176,7 +172,7 @@ mod mac {
         // One test: fontconfig's configuration is the process's, and changing it from two
         // test threads at once isn't safe.
         #[test]
-        fn the_bundled_fonts_stand_in_for_office_fonts_and_the_system_font_is_the_macs() {
+        fn the_bundled_fonts_stand_in_for_office_fonts_and_the_system_font_is_helvetica_neue() {
             // `scripts/fetch_fonts.py` puts them in target/fonts (the macOS CI job does).
             let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/fonts");
             assert!(
@@ -205,11 +201,7 @@ mod mac {
             ] {
                 assert_eq!(matched(asked), drawn, "{asked}");
             }
-            let system = matched(".AppleSystemUIFont");
-            assert!(
-                ["System Font", ".SF NS", "SF Pro", "Helvetica Neue"].contains(&system.as_str()),
-                "{system}"
-            );
+            assert_eq!(matched(".AppleSystemUIFont"), "Helvetica Neue");
         }
     }
 }
