@@ -6,6 +6,7 @@
 //! the caret's paragraph), as one undo step, and gives the page the keyboard back.
 //! Plain text has no bar. It follows Brick's format bar (STYLE-6).
 
+use crate::keys::{self, Does};
 use crate::view::{Command, Page};
 use document_edit::{LookPatch, Looks, SizeChange, MAX_SIZE, MIN_SIZE};
 use document_model::{Align, Rgb, Style};
@@ -163,7 +164,12 @@ impl FormatBar {
         };
         let style = gtk::DropDown::new(Some(gtk::StringList::new(&names)), Some(string()));
         style.set_size_request(150, -1);
-        named(&style, "Style", "Paragraph style (Ctrl+0 to Ctrl+6)");
+        let style_keys = format!(
+            "Paragraph style ({} to {})",
+            keys::label(Does::Command(Command::Style(0))),
+            keys::label(Does::Command(Command::Style(6)))
+        );
+        named(&style, "Style", &style_keys);
         // A drop-down's accessible name is the item it shows: its description says what
         // it is.
         style.update_property(&[gtk::accessible::Property::Description("Style")]);
@@ -195,14 +201,28 @@ impl FormatBar {
         size.set_digits(1);
         size.set_width_chars(4);
         size.set_update_policy(gtk::SpinButtonUpdatePolicy::IfValid);
-        named(&size, "Size", "Font size (Ctrl+] and Ctrl+[)");
+        let size_keys = format!(
+            "Font size ({} and {})",
+            keys::label(Does::Command(Command::Size(true))),
+            keys::label(Does::Command(Command::Size(false)))
+        );
+        named(&size, "Size", &size_keys);
 
-        let bold = toggle("format-text-bold-symbolic", "Bold", "Bold (Ctrl+B)");
-        let italic = toggle("format-text-italic-symbolic", "Italic", "Italic (Ctrl+I)");
+        let tip = |text: &str, command: Command| keys::tip(text, Does::Command(command));
+        let bold = toggle(
+            "format-text-bold-symbolic",
+            "Bold",
+            &tip("Bold", Command::Bold),
+        );
+        let italic = toggle(
+            "format-text-italic-symbolic",
+            "Italic",
+            &tip("Italic", Command::Italic),
+        );
         let underline = toggle(
             "format-text-underline-symbolic",
             "Underline",
-            "Underline (Ctrl+U)",
+            &tip("Underline", Command::Underline),
         );
         let strike = toggle(
             "format-text-strikethrough-symbolic",
@@ -216,22 +236,22 @@ impl FormatBar {
         let left = toggle(
             "format-justify-left-symbolic",
             "Align Left",
-            "Align left (Ctrl+L)",
+            &tip("Align left", Command::Align(Align::Start)),
         );
         let center = toggle(
             "format-justify-center-symbolic",
             "Centre",
-            "Centre (Ctrl+E)",
+            &tip("Centre", Command::Align(Align::Center)),
         );
         let right = toggle(
             "format-justify-right-symbolic",
             "Align Right",
-            "Align right (Ctrl+R)",
+            &tip("Align right", Command::Align(Align::End)),
         );
         let justify = toggle(
             "format-justify-fill-symbolic",
             "Justify",
-            "Justify (Ctrl+J)",
+            &tip("Justify", Command::Align(Align::Justify)),
         );
         for b in [&center, &right, &justify] {
             b.set_group(Some(&left));

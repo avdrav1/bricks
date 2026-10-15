@@ -7,7 +7,7 @@
 use crate::canvas::Canvas;
 use crate::colours;
 use crate::image_menu;
-use crate::keys::{self, Command, Focus, Mods};
+use crate::keys::{self, Command, Focus};
 use crate::recent;
 use crate::recovery::{self, Crashed, Recovered};
 use crate::saving::{Opened, Saver};
@@ -21,6 +21,7 @@ use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
 use std::time::Instant;
+use suite_ui::keys::Primary;
 
 /// `etch`'s first image (always white: the remembered size and background are New
 /// Image's).
@@ -77,7 +78,7 @@ pub fn install_app_actions(app: &gtk::Application) {
         })
         .build();
     app.add_action_entries([new, open, open_recent, quit]);
-    for (action, accels) in keys::accels() {
+    for (action, accels) in keys::accels(Primary::HERE) {
         let accels: Vec<&str> = accels.iter().map(String::as_str).collect();
         app.set_accels_for_action(action, &accels);
     }
@@ -1098,10 +1099,10 @@ fn show(
     });
 
     // The window's keys from the key table (keys::BINDINGS): the tool keys, X, Space,
-    // Escape, Delete, the arrows, Ctrl+X, C, V, and A, and the Ctrl+Shift ones (shifted, a
-    // letter may arrive upper case, which an accelerator misses). None of them while a
-    // field has the keys, and only the Ctrl+Shift ones while text is typed on the canvas:
-    // its keys are its letters (keys::takes).
+    // Escape, Delete, the arrows, Ctrl+X, C, V, and A (⌘ on macOS), and the Ctrl+Shift
+    // (⇧⌘) ones (shifted, a letter may arrive upper case, which an accelerator misses).
+    // None of them while a field has the keys, and only the Ctrl+Shift (⇧⌘) ones while
+    // text is typed on the canvas: its keys are its letters (keys::takes).
     let handler = gtk::EventControllerKey::new();
     handler.set_propagation_phase(gtk::PropagationPhase::Capture);
     handler.connect_key_pressed({
@@ -1118,9 +1119,7 @@ fn show(
             if canvas.busy() {
                 return glib::Propagation::Stop;
             }
-            let binding = Mods::of(state)
-                .zip(key.to_lower().name())
-                .and_then(|(mods, name)| keys::window_binding(&name, mods, focus));
+            let binding = keys::window_key(Primary::HERE, key, state, focus);
             match binding.is_some_and(|b| run(&window, &canvas, &controls, b.command)) {
                 true => glib::Propagation::Stop,
                 false => glib::Propagation::Proceed,

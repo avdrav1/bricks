@@ -1,9 +1,11 @@
 //! The sheet tabs under the grid (XLSX-1, SHEET-1): one toggle button per sheet, the
 //! active one pressed, then an Add Sheet button. Clicking a tab shows its sheet; Ctrl+Page
-//! Down / Up step through them. Right-clicking a tab offers Rename…, Move Left, Move
-//! Right, and Delete; double-clicking it, or F2 on it, renames it in place.
+//! Down / Up step through them (⌃Page Down / Up on macOS too; `keys.rs`). Right-clicking a
+//! tab offers Rename…, Move Left, Move Right, and Delete; double-clicking it, or F2 on it,
+//! renames it in place.
 
 use crate::grid_view::GridView;
+use crate::keys::{self, Command};
 use data_model::SheetId;
 use gtk::{gdk, gio, glib, prelude::*};
 use std::cell::{Cell, RefCell};
@@ -131,7 +133,10 @@ impl SheetTabs {
         }
         let add = gtk::Button::from_icon_name("list-add-symbolic");
         add.add_css_class("flat");
-        add.set_tooltip_text(Some("Add Sheet (Shift+F11)"));
+        add.set_tooltip_text(Some(&format!(
+            "Add Sheet ({})",
+            keys::label(Command::NewSheet)
+        )));
         add.set_focus_on_click(false);
         add.connect_clicked({
             let tabs = Rc::downgrade(self);

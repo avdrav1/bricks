@@ -167,11 +167,12 @@ impl TextBox {
         self.changed();
     }
 
-    /// A key pressed while typing, with its modifiers.
+    /// A key pressed while typing, with its modifiers. The primary modifier (Ctrl, ⌘ on
+    /// macOS) with Home and End goes to the text's ends.
     pub fn key(&mut self, key: gdk::Key, mods: gdk::ModifierType) -> KeyOutcome {
         use gdk::Key as K;
         let shift = mods.contains(gdk::ModifierType::SHIFT_MASK);
-        let ctrl = mods.contains(gdk::ModifierType::CONTROL_MASK);
+        let primary = suite_ui::keys::is_primary(mods);
         if mods.contains(gdk::ModifierType::ALT_MASK) {
             return KeyOutcome::Ignored;
         }
@@ -207,8 +208,8 @@ impl TextBox {
             K::Right | K::KP_Right => self.step(1),
             K::Up | K::KP_Up => self.line_step(-1),
             K::Down | K::KP_Down => self.line_step(1),
-            K::Home | K::KP_Home => self.line_end(false, ctrl),
-            K::End | K::KP_End => self.line_end(true, ctrl),
+            K::Home | K::KP_Home => self.line_end(false, primary),
+            K::End | K::KP_End => self.line_end(true, primary),
             // Tab would take the keys off the canvas.
             K::Tab | K::KP_Tab | K::ISO_Left_Tab => KeyOutcome::Moved,
             _ => KeyOutcome::Ignored,

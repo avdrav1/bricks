@@ -19,6 +19,7 @@ mod bench;
 mod find_bar;
 mod fonts;
 mod format_bar;
+mod keys;
 mod open;
 mod recovery;
 mod saving;
@@ -27,11 +28,14 @@ mod view;
 
 use gtk::prelude::*;
 use gtk::{gdk, gio, glib};
+use keys::Does;
 use settings::{Saver, Settings, TextWidth};
 use std::cell::RefCell;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use suite_core::AppKind;
+use suite_ui::keys::Primary;
+use view::Command;
 
 const APP: AppKind = AppKind::Slate;
 const APP_ID: &str = APP.app_id();
@@ -154,10 +158,12 @@ fn main() -> glib::ExitCode {
             })
             .build();
         app.add_action_entries([new, open, close, quit, text_width]);
-        app.set_accels_for_action("app.new", &["<Control>n"]);
-        app.set_accels_for_action("app.open", &["<Control>o"]);
-        app.set_accels_for_action("app.close", &["<Control>w"]);
-        app.set_accels_for_action("app.quit", &["<Control>q"]);
+        for (action, accels) in keys::accels(Primary::HERE) {
+            app.set_accels_for_action(
+                action,
+                &accels.iter().map(String::as_str).collect::<Vec<_>>(),
+            );
+        }
         watch_settings(app);
         // Package copies of Word documents left by killed Slate processes.
         std::thread::spawn(saving::Original::sweep);
@@ -207,15 +213,19 @@ fn moved(window: &gtk::ApplicationWindow, path: &Path) {
 fn header(title: &str) -> gtk::HeaderBar {
     let header = gtk::HeaderBar::new();
     let open = gtk::Button::from_icon_name("document-open-symbolic");
-    open.set_tooltip_text(Some("Open… (Ctrl+O)"));
+    open.set_tooltip_text(Some(&keys::tip("Open…", Does::Action("app.open"))));
     open.set_action_name(Some("app.open"));
     open.update_property(&[gtk::accessible::Property::Label("Open")]);
     header.pack_start(&open);
     let file = gio::Menu::new();
-    file.append_item(&item("New", "app.new", "<Control>n"));
+    file.append_item(&item("New", "app.new", Does::Action("app.new")));
     file.append(Some("Open…"), Some("app.open"));
-    file.append_item(&item("Save", "win.save", "<Control>s"));
-    file.append_item(&item("Save As…", "win.save-as", "<Control><Shift>s"));
+    file.append_item(&item("Save", "win.save", Does::Action("win.save")));
+    file.append_item(&item(
+        "Save As…",
+        "win.save-as",
+        Does::Action("win.save-as"),
+    ));
     file.append(Some("Close Window"), Some("app.close"));
     // View → Text Width: a radio item per width, checked by `app.text-width`'s state.
     let widths = gio::Menu::new();
@@ -249,39 +259,68 @@ fn header(title: &str) -> gtk::HeaderBar {
     header
 }
 
-/// A menu item for `action` with `accel` shown beside it (the page handles the keys).
-fn item(label: &str, action: &str, accel: &str) -> gio::MenuItem {
+/// A menu item for `action` with the key that does `does` shown beside it (the page
+/// handles most keys: `keys`).
+fn item(label: &str, action: &str, does: Does) -> gio::MenuItem {
     let item = gio::MenuItem::new(Some(label), Some(action));
-    item.set_attribute_value("accel", Some(&accel.to_variant()));
+    if let Some(accel) = keys::accel(does) {
+        item.set_attribute_value("accel", Some(&accel.to_variant()));
+    }
     item
+}
+
+/// A menu item for `action`, the page's `command`, with its key shown beside it.
+fn command(label: &str, action: &str, command: Command) -> gio::MenuItem {
+    item(label, action, Does::Command(command))
 }
 
 fn edit_menu() -> gio::Menu {
     let menu = gio::Menu::new();
-    menu.append_item(&item("Undo", "win.undo", "<Control>z"));
-    menu.append_item(&item("Redo", "win.redo", "<Control><Shift>z"));
-    menu.append_item(&item("Cut", "win.cut", "<Control>x"));
-    menu.append_item(&item("Copy", "win.copy", "<Control>c"));
-    menu.append_item(&item("Paste", "win.paste", "<Control>v"));
-    menu.append_item(&item("Select All", "win.select-all", "<Control>a"));
-    menu.append_item(&item("Find…", "win.find", "<Control>f"));
-    menu.append_item(&item("Replace…", "win.replace", "<Control>h"));
+    menu.append_item(&command("Undo", "win.undo", Command::Undo));
+    menu.append_item(&command("Redo", "win.redo", Command::Redo));
+    menu.append_item(&command("Cut", "win.cut", Command::Cut));
+    menu.append_item(&command("Copy", "win.copy", Command::Copy));
+    menu.append_item(&command("Paste", "win.paste", Command::Paste));
+    menu.append_item(&command("Select All", "win.select-all", Command::SelectAll));
+    menu.append_item(&item("Find…", "win.find", Does::Action("win.find")));
+    menu.append_item(&item(
+        "Replace…",
+        "win.replace",
+        Does::Action("win.replace"),
+    ));
     menu
 }
 
 /// Format: bold, italic, underline, strikethrough, alignment, the paragraph's style, and
 /// lists; the window's page does them.
 fn format_menu() -> gio::Menu {
+    use document_model::Align;
     let menu = gio::Menu::new();
-    menu.append_item(&item("Bold", "win.bold", "<Control>b"));
-    menu.append_item(&item("Italic", "win.italic", "<Control>i"));
-    menu.append_item(&item("Underline", "win.underline", "<Control>u"));
+    menu.append_item(&command("Bold", "win.bold", Command::Bold));
+    menu.append_item(&command("Italic", "win.italic", Command::Italic));
+    menu.append_item(&command("Underline", "win.underline", Command::Underline));
     menu.append(Some("Strikethrough"), Some("win.strike"));
     let aligns = gio::Menu::new();
-    aligns.append_item(&item("Align Left", "win.align-left", "<Control>l"));
-    aligns.append_item(&item("Centre", "win.align-center", "<Control>e"));
-    aligns.append_item(&item("Align Right", "win.align-right", "<Control>r"));
-    aligns.append_item(&item("Justify", "win.justify", "<Control>j"));
+    aligns.append_item(&command(
+        "Align Left",
+        "win.align-left",
+        Command::Align(Align::Start),
+    ));
+    aligns.append_item(&command(
+        "Centre",
+        "win.align-center",
+        Command::Align(Align::Center),
+    ));
+    aligns.append_item(&command(
+        "Align Right",
+        "win.align-right",
+        Command::Align(Align::End),
+    ));
+    aligns.append_item(&command(
+        "Justify",
+        "win.justify",
+        Command::Align(Align::Justify),
+    ));
     menu.append_submenu(Some("Alignment"), &aligns);
     let styles = gio::Menu::new();
     for level in 0..=6u8 {
@@ -290,20 +329,19 @@ fn format_menu() -> gio::Menu {
         } else {
             format!("Heading {level}")
         };
-        let item = item(&label, "win.style", &format!("<Control>{level}"));
+        let item = command(&label, "win.style", Command::Style(level));
         item.set_action_and_target_value(Some("win.style"), Some(&level.to_variant()));
         styles.append_item(&item);
     }
     menu.append_submenu(Some("Paragraph Style"), &styles);
-    menu.append_item(&item("Bulleted List", "win.bullets", "<Control><Shift>8"));
-    menu.append_item(&item("Numbered List", "win.numbers", "<Control><Shift>7"));
+    menu.append_item(&command("Bulleted List", "win.bullets", Command::Bullets));
+    menu.append_item(&command("Numbered List", "win.numbers", Command::Numbers));
     menu
 }
 
 /// The window's Edit and Format actions, done by `page`.
 fn add_page_actions(window: &gtk::ApplicationWindow, page: &view::Page) {
     use document_model::Align;
-    use view::Command;
     let simple = |name: &str, command: Command| {
         let page = page.downgrade();
         gio::ActionEntry::builder(name)

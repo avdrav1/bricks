@@ -25,6 +25,7 @@ mod editor;
 mod format_bar;
 mod formula_bar;
 mod grid_view;
+mod keys;
 mod looks;
 mod malformed;
 mod recovery;
@@ -38,7 +39,7 @@ use data_model::{
     CsvTable, DelimiterChoice, Origin, RereadError, SaveProgress, SaveStats, Step, StylePatch,
     Workbook,
 };
-use grid_view::{FontToggle, GridView, ROW_H};
+use grid_view::{GridView, ROW_H};
 use gtk::{glib, prelude::*};
 use status::FindNote;
 use std::cell::{Cell, RefCell};
@@ -49,6 +50,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use suite_core::AppKind;
 use suite_file::recent;
+use suite_ui::keys::Primary;
 use xlsx::{ImportError, Imported};
 
 const APP_ID: &str = APP.app_id();
@@ -207,8 +209,11 @@ fn main() -> glib::ExitCode {
             })
             .build();
         app.add_action_entries([open, new, open_recent, clear_recent]);
-        app.set_accels_for_action("app.open", &["<Control>o"]);
-        app.set_accels_for_action("app.new", &["<Control>n"]);
+        // Open and New, and Replace (each window's action): from `keys::WINDOW` (MAC-3).
+        for (action, accels) in keys::accels(Primary::HERE) {
+            let accels: Vec<&str> = accels.iter().map(String::as_str).collect();
+            app.set_accels_for_action(action, &accels);
+        }
     });
     let (opened, failed, bench) = (RefCell::new(opened), RefCell::new(failed), args.bench);
     app.connect_activate(move |app| match opened.take() {
@@ -374,9 +379,11 @@ fn start_window(app: &gtk::Application) -> gtk::ApplicationWindow {
     new.add_css_class("pill");
     new.set_halign(gtk::Align::Center);
     new.set_action_name(Some("app.new"));
-    let hint = gtk::Label::new(Some(
-        "Ctrl+O, Ctrl+N, drop a file here, or run: brick FILE.csv",
-    ));
+    let hint = gtk::Label::new(Some(&format!(
+        "{}, {}, drop a file here, or run: brick FILE.csv",
+        keys::label(keys::Command::Open),
+        keys::label(keys::Command::New),
+    )));
     hint.add_css_class("dim-label");
     let page = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
@@ -936,14 +943,20 @@ fn build_window(
     );
     let delimiter = delimiter_dropdown(session, &grid);
     let open = gtk::Button::from_icon_name("document-open-symbolic");
-    open.set_tooltip_text(Some("Open… (Ctrl+O)"));
+    open.set_tooltip_text(Some(&format!(
+        "Open… ({})",
+        keys::label(keys::Command::Open)
+    )));
     open.set_action_name(Some("app.open"));
     let new = gtk::Button::from_icon_name("document-new-symbolic");
-    new.set_tooltip_text(Some("New (Ctrl+N)"));
+    new.set_tooltip_text(Some(&format!("New ({})", keys::label(keys::Command::New))));
     new.set_action_name(Some("app.new"));
     let save = Rc::new(RefCell::new(SaveState::Idle));
     let save_as_button = gtk::Button::from_icon_name("document-save-as-symbolic");
-    save_as_button.set_tooltip_text(Some("Save As… (Ctrl+Shift+S)"));
+    save_as_button.set_tooltip_text(Some(&format!(
+        "Save As… ({})",
+        keys::label(keys::Command::SaveAs)
+    )));
     save_as_button.connect_clicked({
         let (window, grid, session, save) = (
             window.downgrade(),
@@ -994,10 +1007,11 @@ fn build_window(
         }
     });
 
-    // Ctrl+S saves (asking where, for an untitled table) and Ctrl+Shift+S saves as;
-    // Ctrl+Z undoes, Ctrl+Shift+Z and Ctrl+Y redo (CMD-1); Esc cancels a running save
-    // (SAVE-3). Navigation keys belong to the grid (GRID-3); the cell editor's entry keeps
-    // its own text undo, and the grid lets Esc through when no editor is open.
+    // The window's keys (`keys::WINDOW`, MAC-3): Primary+S saves (asking where, for an
+    // untitled table) and Primary+Shift+S saves as; Primary+Z undoes, Primary+Shift+Z (and
+    // Ctrl+Y on Linux) redo (CMD-1); Esc cancels a running save (SAVE-3). Navigation keys
+    // belong to the grid (GRID-3); the cell editor's entry keeps its own text undo, and the
+    // grid lets Esc through when no editor is open.
     let keys = gtk::EventControllerKey::new();
     keys.connect_key_pressed({
         let (window, grid, save, session, find, tabs, formula_bar, format_bar) = (
@@ -1011,11 +1025,11 @@ fn build_window(
             format_bar.clone(),
         );
         move |_, key, _, mods| {
-            use gtk::gdk::{Key, ModifierType};
+            use keys::Command as C;
             let (Some(window), Some(grid)) = (window.upgrade(), grid.upgrade()) else {
                 return glib::Propagation::Proceed;
             };
-            if key == Key::Escape {
+            if key == gtk::gdk::Key::Escape {
                 if let Some(job) = session.importing.borrow().as_ref() {
                     job.cancel();
                     return glib::Propagation::Stop;
@@ -1028,80 +1042,70 @@ fn build_window(
                     return glib::Propagation::Stop;
                 }
             }
-            let shift = mods.contains(ModifierType::SHIFT_MASK);
-            // Ctrl+G or F5: the name box (FML-9).
-            let ctrl = mods.contains(ModifierType::CONTROL_MASK);
-            if (key == Key::F5 && !ctrl && !shift)
-                || (ctrl && !shift && matches!(key, Key::g | Key::G))
-            {
-                grid.finish_editing();
-                formula_bar.focus_name();
-                return glib::Propagation::Stop;
-            }
-            // Shift+F11: a new sheet, as in Excel (SHEET-1).
-            if key == Key::F11 && shift && !mods.contains(ModifierType::CONTROL_MASK) {
-                grid.add_sheet();
-                tabs.refresh();
-                return glib::Propagation::Stop;
-            }
-            if !mods.contains(ModifierType::CONTROL_MASK) {
+            let Some(command) = keys::window_command(Primary::HERE, key, mods) else {
                 return glib::Propagation::Proceed;
-            }
-            // Formatting (STYLE-6), as in Excel. Shifted digits arrive as their symbols.
-            let format = |code: &str| {
-                grid.format_selection(&StylePatch {
+            };
+            match command {
+                // The name box (FML-9).
+                C::GoTo => {
+                    grid.finish_editing();
+                    formula_bar.focus_name();
+                }
+                // A new sheet, as in Excel (SHEET-1).
+                C::NewSheet => {
+                    grid.add_sheet();
+                    tabs.refresh();
+                }
+                // Formatting (STYLE-6), as in Excel.
+                C::Font(toggle) => grid.toggle_font(toggle),
+                C::CustomFormat => format_bar.open_custom(),
+                C::Format(code) => grid.format_selection(&StylePatch {
                     num_fmt: Some(code.into()),
                     ..StylePatch::default()
-                })
-            };
-            match key {
-                Key::b | Key::B if !shift => grid.toggle_font(FontToggle::Bold),
-                Key::i | Key::I if !shift => grid.toggle_font(FontToggle::Italic),
-                Key::u | Key::U if !shift => grid.toggle_font(FontToggle::Underline),
-                Key::_5 if !shift => grid.toggle_font(FontToggle::Strike),
-                Key::_1 if !shift => format_bar.open_custom(),
-                Key::exclam | Key::_1 => format("#,##0.00"),
-                Key::numbersign | Key::_3 if shift => format("yyyy-mm-dd"),
-                Key::dollar | Key::_4 if shift => format("[$$-409]#,##0.00"),
-                Key::percent | Key::_5 => format("0.00%"),
-                Key::asciitilde | Key::grave | Key::dead_tilde | Key::dead_grave if shift => {
-                    format("General")
-                }
+                }),
                 // The next or previous sheet (XLSX-1).
-                Key::Page_Down | Key::KP_Page_Down => {
-                    grid.switch_to_neighbor(1);
+                C::Sheet(step) => {
+                    grid.switch_to_neighbor(step);
                 }
-                Key::Page_Up | Key::KP_Page_Up => {
-                    grid.switch_to_neighbor(-1);
-                }
-                Key::f | Key::F if !shift => {
+                C::Find => {
                     grid.finish_editing();
                     find.open(false);
                 }
-                Key::h | Key::H if !shift => {
-                    grid.finish_editing();
-                    find.open(true);
-                }
-                Key::s | Key::S => {
+                C::Save | C::SaveAs => {
                     grid.finish_editing(); // save what was typed, as Calc does
-                    if shift || session.needs_save_as(&grid) {
+                    if command == C::SaveAs || session.needs_save_as(&grid) {
                         save_as(&window, &grid, &session, &save, false);
                     } else {
                         start_save(&grid, &session, &save, None, false);
                     }
                 }
-                Key::z if !shift => {
+                C::Undo => {
                     grid.undo();
                 }
-                Key::Z | Key::z | Key::y | Key::Y => {
+                C::Redo => {
                     grid.redo();
                 }
-                _ => return glib::Propagation::Proceed,
+                // Accelerators, not the handler's.
+                C::Open | C::New | C::Replace => return glib::Propagation::Proceed,
             }
             glib::Propagation::Stop
         }
     });
     window.add_controller(keys);
+    // Replace (Ctrl+H, ⌥⌘F on macOS) is the accelerator `win.replace`: GTK matches it by
+    // keycode too, which Option+letter needs.
+    let replace = gtk::gio::ActionEntry::builder("replace")
+        .activate({
+            let (grid, find) = (grid.downgrade(), find.clone());
+            move |_: &gtk::ApplicationWindow, _, _| {
+                if let Some(grid) = grid.upgrade() {
+                    grid.finish_editing();
+                    find.open(true);
+                }
+            }
+        })
+        .build();
+    window.add_action_entries([replace]);
 
     // Closing with unsaved edits asks first (APP-9): Save, Don't Save, or Cancel. Closing
     // while a save runs waits for it and closes once it succeeds; a failed or cancelled
@@ -2038,7 +2042,7 @@ impl FindBar {
         let close = button("window-close-symbolic", "Close (Esc)");
         let replacing = gtk::ToggleButton::builder()
             .icon_name("edit-find-replace-symbolic")
-            .tooltip_text("Replace (Ctrl+H)")
+            .tooltip_text(format!("Replace ({})", keys::label(keys::Command::Replace)))
             .css_classes(["flat"])
             .build();
         let bar_row = || {

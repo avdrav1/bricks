@@ -1,7 +1,8 @@
 //! The slide list and slide commands (FRAME-7). The sidebar's numbered thumbnails are
-//! rebuilt whenever slides come and go. New Slide (Ctrl+M, the header bar's button)
-//! adds a slide after the current one on its layout, or on Title and Content after a
-//! title slide; the button's menu shows the deck's layouts as thumbnails to pick from.
+//! rebuilt whenever slides come and go. New Slide (Ctrl+M, ⇧⌘N on macOS; the header
+//! bar's button) adds a slide after the current one on its layout, or on Title and
+//! Content after a title slide; the button's menu shows the deck's layouts as thumbnails
+//! to pick from.
 //! A slide New Slide adds starts with the caret in its title (FRAME-15). Ctrl+D
 //! duplicates the slide, Delete in the list deletes it, and Ctrl+Up and Ctrl+Down or
 //! dragging a thumbnail move it; the list's context menu has New, Duplicate, and Delete.
@@ -9,6 +10,7 @@
 
 use crate::deck::Deck;
 use crate::editing;
+use crate::keys::{self, Action};
 use crate::slide_view::SlideView;
 use crate::window::DeckWindow;
 use deck_edit::SlideEdit;
@@ -245,7 +247,8 @@ pub fn attach(
     // The header bar: New Slide, and beside it the menu of layouts.
     let add = gtk::Button::with_label("New Slide");
     add.set_action_name(Some("win.new-slide"));
-    add.set_tooltip_text(Some("New Slide (Ctrl+M)"));
+    let tip = format!("New Slide ({})", keys::label(Action::NewSlide));
+    add.set_tooltip_text(Some(&tip));
     let layouts = gtk::MenuButton::new();
     layouts.set_tooltip_text(Some("New Slide with a layout"));
     layouts.update_property(&[gtk::accessible::Property::Label("Layouts")]);

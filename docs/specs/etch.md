@@ -86,6 +86,8 @@ Every change undoes and redoes: strokes, erasing, fills, shapes, text, crop, res
 
 Tool keys and X work only while no text is being typed (the size field included). No key is bound twice.
 
+On macOS, Command replaces Ctrl in every shortcut, Ctrl+wheel and Ctrl+Home and Ctrl+End in text included (⌘S, ⇧⌘S, ⌘+, ⌘-wheel), and the menus show them so (MAC-3). Redo is ⇧⌘Z (Ctrl+Y is Linux's alone), and Rotate 90° Right is ⌘] (Pixelmator's), as ⌘H hides the app; nothing stays on Control.
+
 ## Status bar
 
 Pointer position in image pixels, the selection's size, zoom, and the image size: `x: 342  y: 191      Selection: 320×180      100%      1920×1080`.

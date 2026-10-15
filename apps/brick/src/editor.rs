@@ -1,9 +1,12 @@
 //! In-cell editing keys (EDIT-2), as in LibreOffice Calc: which keys start an edit, and
 //! what keys do while one is open. Plain functions of the key, so the behavior is tested
-//! without a display; `grid_view.rs` wires them to the entry drawn over the cell.
+//! without a display; `grid_view.rs` wires them to the entry drawn over the cell. The
+//! primary modifier (Ctrl, or ⌘ on macOS) is a parameter, so tests run both (MAC-3); the
+//! keys are listed in `keys.rs`'s `GRID`.
 
 use grid::{Key, Mods};
 use gtk::gdk::{self, Key as K, ModifierType};
+use suite_ui::keys::Primary;
 
 /// How the edit started; decides what the arrow keys do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,12 +38,15 @@ pub enum Action {
 }
 
 /// Whether `key` starts an edit when the grid has the focus. Navigation keys are checked
-/// first by the caller; Ctrl, Alt and Super combinations never start one.
-pub fn start(key: gdk::Key, state: ModifierType) -> Option<Start> {
+/// first by the caller; Ctrl, Alt, Super and primary-modifier combinations never start one.
+pub fn start(primary: Primary, key: gdk::Key, state: ModifierType) -> Option<Start> {
     if key == K::F2 {
         return Some(Start::Keep);
     }
-    let held = ModifierType::CONTROL_MASK | ModifierType::ALT_MASK | ModifierType::SUPER_MASK;
+    let held = ModifierType::CONTROL_MASK
+        | ModifierType::ALT_MASK
+        | ModifierType::SUPER_MASK
+        | primary.mask();
     if state.intersects(held) {
         return None;
     }
@@ -83,14 +89,14 @@ pub fn while_editing(key: gdk::Key, state: ModifierType, mode: Mode) -> Action {
 /// whole selected columns get columns, anything else rows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShapeCommand {
-    /// Ctrl++: as many empty rows (columns) as the selection spans, above (left of) it.
+    /// Primary++: as many empty rows (columns) as the selection spans, above (left of) it.
     Insert,
-    /// Ctrl+-: the rows (columns) the selection spans.
+    /// Primary+-: the rows (columns) the selection spans.
     Delete,
 }
 
-pub fn shape_command(key: gdk::Key, state: ModifierType) -> Option<ShapeCommand> {
-    if !state.contains(ModifierType::CONTROL_MASK) {
+pub fn shape_command(primary: Primary, key: gdk::Key, state: ModifierType) -> Option<ShapeCommand> {
+    if !primary.held(state) {
         return None;
     }
     match key {
@@ -102,16 +108,17 @@ pub fn shape_command(key: gdk::Key, state: ModifierType) -> Option<ShapeCommand>
 
 /// Delete (EDIT-5) empties the selected cells. Only on its own: Shift+Delete is cut and
 /// Ctrl+Delete deletes a word in GTK, so modified presses aren't ours.
-pub fn clears(key: gdk::Key, state: ModifierType) -> bool {
+pub fn clears(primary: Primary, key: gdk::Key, state: ModifierType) -> bool {
     let held = ModifierType::SHIFT_MASK
         | ModifierType::CONTROL_MASK
         | ModifierType::ALT_MASK
-        | ModifierType::SUPER_MASK;
+        | ModifierType::SUPER_MASK
+        | primary.mask();
     matches!(key, K::Delete | K::KP_Delete) && !state.intersects(held)
 }
 
-/// Clipboard keys (CLIP-1, CLIP-2): Ctrl+C, Ctrl+X, Ctrl+V, and the older Ctrl+Insert,
-/// Shift+Delete, Shift+Insert.
+/// Clipboard keys (CLIP-1, CLIP-2): Primary+C, Primary+X, Primary+V, and the older
+/// Primary+Insert, Shift+Delete, Shift+Insert. On macOS Control isn't one of them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClipCommand {
     Copy,
@@ -120,10 +127,13 @@ pub enum ClipCommand {
     Paste,
 }
 
-pub fn clip_command(key: gdk::Key, state: ModifierType) -> Option<ClipCommand> {
-    let ctrl = state.contains(ModifierType::CONTROL_MASK);
+pub fn clip_command(primary: Primary, key: gdk::Key, state: ModifierType) -> Option<ClipCommand> {
+    let ctrl = primary.held(state);
     let shift = state.contains(ModifierType::SHIFT_MASK);
-    if state.intersects(ModifierType::ALT_MASK | ModifierType::SUPER_MASK) {
+    let other = ModifierType::ALT_MASK
+        | ModifierType::SUPER_MASK
+        | ModifierType::CONTROL_MASK.difference(primary.mask());
+    if state.intersects(other) {
         return None;
     }
     match (key, ctrl, shift) {
@@ -144,6 +154,23 @@ mod tests {
 
     const NONE: ModifierType = ModifierType::empty();
     const SHIFT: ModifierType = ModifierType::SHIFT_MASK;
+
+    // These tests are Linux's keys, Ctrl; `keys.rs` checks both platforms' tables.
+    fn start(key: gdk::Key, state: ModifierType) -> Option<Start> {
+        super::start(Primary::Control, key, state)
+    }
+
+    fn shape_command(key: gdk::Key, state: ModifierType) -> Option<ShapeCommand> {
+        super::shape_command(Primary::Control, key, state)
+    }
+
+    fn clears(key: gdk::Key, state: ModifierType) -> bool {
+        super::clears(Primary::Control, key, state)
+    }
+
+    fn clip_command(key: gdk::Key, state: ModifierType) -> Option<ClipCommand> {
+        super::clip_command(Primary::Control, key, state)
+    }
 
     #[test]
     fn enter_commits_and_moves_down_esc_cancels() {

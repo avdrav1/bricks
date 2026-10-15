@@ -1,12 +1,16 @@
-//! User-interface conventions shared by every app in the suite.
+//! User-interface conventions shared by every app in the suite, in GTK 4
+//! (docs/adr/0002-gtk4-for-the-suite.md): [`keys`], the primary modifier every shortcut
+//! uses (Control on Linux, Command on macOS), and [`im`], input methods for the apps' own
+//! text widgets.
 //!
 //! [`fonts`] chooses how text finds its fonts and adds the bundled ones on macOS;
 //! [`appearance`] switches the theme between light and dark. Menus, the command palette,
-//! toolbars, dialogs, window chrome, and shortcut handling may move here once two apps
-//! need the same one. The suite's toolkit is GTK 4 (docs/adr/0002-gtk4-for-the-suite.md).
+//! toolbars, dialogs, and window chrome may move here once two apps need the same one.
 
 pub mod appearance;
 pub mod fonts;
+pub mod im;
+pub mod keys;
 
 use suite_core::AppKind;
 

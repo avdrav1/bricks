@@ -9,8 +9,8 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
-suite-core.workspace = true
 gtk.workspace = true
+suite-core.workspace = true
 tracing.workspace = true
 
 [lints]
