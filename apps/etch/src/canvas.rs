@@ -12,10 +12,13 @@
 //! previews the shape over the image, which it doesn't touch until the release draws it,
 //! Shift constraining it and Escape cancelling it; with text, a click starts typing there
 //! and the text shows over the image until Enter or a click elsewhere puts it on, Escape
-//! dropping it), a middle-button drag or a drag with Space held pans, the wheel pans
-//! (Shift+wheel sideways), and Ctrl+wheel zooms around the pointer. The widget emits
-//! `changed` whenever what the status bar or the Edit menu shows may have changed: the
-//! view, the history, or the pixel under the pointer.
+//! dropping it; with the selection, a drag selects a rectangle, outlined in dashes, and a
+//! drag inside it lifts its pixels, which float over the image, leaving transparency where
+//! they were, until they land as one undo step), a middle-button drag or a drag with
+//! Space held pans, the wheel pans (Shift+wheel sideways), and Ctrl+wheel zooms around
+//! the pointer. The widget emits `changed` whenever what the status bar or the Edit menu
+//! shows may have changed: the view, the history, the selection, or the pixel under the
+//! pointer.
 
 use crate::colours;
 use crate::text::{KeyOutcome, TextBox, TextLook};
@@ -24,7 +27,7 @@ use crate::view::View;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{gdk, glib, graphene, gsk};
-use image_model::{Color, Document, Image, Rect, Shape, Tip};
+use image_model::{spanning, Color, Document, Floating, Image, Rect, Shape, Tip};
 use std::time::Instant;
 
 /// The side of a tile texture, in image pixels.
@@ -46,6 +49,9 @@ const CARET_LIGHT: gdk::RGBA = gdk::RGBA::new(1.0, 1.0, 1.0, 0.7);
 const FRAME_DARK: gdk::RGBA = gdk::RGBA::new(0.0, 0.0, 0.0, 0.5);
 /// How far the text's frame stands off the text, in widget pixels.
 const TEXT_PAD: f64 = 4.0;
+/// The selection's outline: dark dashes on a light line, seen on any colour.
+const SELECTION_LIGHT: gdk::RGBA = gdk::RGBA::new(1.0, 1.0, 1.0, 1.0);
+const SELECTION_DARK: gdk::RGBA = gdk::RGBA::new(0.0, 0.0, 0.0, 1.0);
 const CHANGED: &str = "changed";
 
 /// What a drag in progress does.
@@ -62,6 +68,16 @@ enum Drag {
     /// Panning; the drag's offset when the image last moved.
     Pan {
         last: (f64, f64),
+    },
+    /// Selecting a rectangle from where the drag began, in image coordinates.
+    Select {
+        from: (f64, f64),
+    },
+    /// Moving the floating pixels: the drag began at `from`, in image coordinates, with
+    /// their top-left pixel at `at`.
+    Move {
+        from: (f64, f64),
+        at: (i64, i64),
     },
 }
 
@@ -99,6 +115,12 @@ mod imp {
         pub preview: RefCell<Vec<(Rect, Color)>>,
         /// The text being typed, not yet on the image.
         pub text: RefCell<Option<TextBox>>,
+        /// The selection, on the image, while its pixels aren't lifted.
+        pub selection: Cell<Option<Rect>>,
+        /// The selection's pixels, lifted and floating over the image until they land,
+        /// and their texture.
+        pub floating: RefCell<Option<Floating>>,
+        pub floating_texture: RefCell<Option<gdk::Texture>>,
         /// The input method text is typed through, and the key controller it filters
         /// keys for while text is typed.
         pub im: OnceCell<gtk::IMMulticontext>,
@@ -178,10 +200,20 @@ mod imp {
             let visible = graphene::Rect::new(0.0, 0.0, w, h)
                 .intersection(&graphene::Rect::new(ox, oy, sw, sh));
             if let Some(visible) = visible {
-                self.checkerboard(snapshot, &visible, (ox, oy));
+                // The checkerboard's squares start on a device pixel, so their edges cover
+                // whole pixels: drawn in the hole floating pixels leave, none of what's
+                // under it shows through between squares.
+                let scale = obj.surface_scale();
+                let check = (
+                    device_edge(view.origin.0, scale),
+                    device_edge(view.origin.1, scale),
+                );
+                self.checkerboard(snapshot, &visible, check);
                 self.draw_tiles(snapshot, &view, &visible);
+                self.draw_floating(snapshot, &view, &visible, check);
                 self.draw_preview(snapshot, &view);
             }
+            self.draw_selection(snapshot, &view);
             self.draw_text(snapshot, &view);
             self.draw_tip_outline(snapshot, &view);
             snapshot.pop();
@@ -195,8 +227,87 @@ mod imp {
         pub(super) fn tip(&self) -> Option<Tip> {
             match self.action.get()? {
                 Action::Draw(tip) => Some(tip),
-                Action::Fill { .. } | Action::Pick | Action::Shape(_) | Action::Text(_) => None,
+                Action::Fill { .. }
+                | Action::Pick
+                | Action::Shape(_)
+                | Action::Text(_)
+                | Action::Select => None,
             }
+        }
+
+        /// The widget rectangle the `w` × `h` image pixels from `(x, y)` show in, edges
+        /// rounded to device pixels as the tiles' are.
+        fn widget_rect(
+            &self,
+            view: &View,
+            (x, y): (i64, i64),
+            (w, h): (u32, u32),
+        ) -> graphene::Rect {
+            let scale = self.obj().surface_scale();
+            let edge = |origin: f64, px: i64| device_edge(origin + px as f64 * view.zoom, scale);
+            let (x0, x1) = (edge(view.origin.0, x), edge(view.origin.0, x + w as i64));
+            let (y0, y1) = (edge(view.origin.1, y), edge(view.origin.1, y + h as i64));
+            graphene::Rect::new(x0, y0, x1 - x0, y1 - y0)
+        }
+
+        /// The floating pixels, over the image as they'll land: the place they were lifted
+        /// from transparent (the checkerboard), and where they are, on the image, their
+        /// pixels over the checkerboard, as they'll replace what's there.
+        fn draw_floating(
+            &self,
+            snapshot: &gtk::Snapshot,
+            view: &View,
+            visible: &graphene::Rect,
+            origin: (f32, f32),
+        ) {
+            let floating = self.floating.borrow();
+            let texture = self.floating_texture.borrow();
+            let (Some(f), Some(texture)) = (floating.as_ref(), texture.as_ref()) else {
+                return;
+            };
+            if let Some(r) = f.source() {
+                let at = (r.x as i64, r.y as i64);
+                snapshot.push_clip(&self.widget_rect(view, at, (r.width, r.height)));
+                self.checkerboard(snapshot, visible, origin);
+                snapshot.pop();
+            }
+            let (w, h) = self.obj().image_size();
+            if let Some(d) = f.bounds(Rect::new(0, 0, w, h)) {
+                let at = (d.x as i64, d.y as i64);
+                snapshot.push_clip(&self.widget_rect(view, at, (d.width, d.height)));
+                self.checkerboard(snapshot, visible, origin);
+                let filter = match view.zoom >= 1.0 {
+                    true => gsk::ScalingFilter::Nearest,
+                    false => gsk::ScalingFilter::Trilinear,
+                };
+                let shown = self.widget_rect(view, f.at(), f.size());
+                snapshot.append_scaled_texture(texture, filter, &shown);
+                snapshot.pop();
+            }
+        }
+
+        /// The selection's outline, just outside its pixels: dark dashes on a light line,
+        /// seen on any colour.
+        fn draw_selection(&self, snapshot: &gtk::Snapshot, view: &View) {
+            let Some((at, size)) = self.obj().selection_box() else {
+                return;
+            };
+            let r = self.widget_rect(view, at, size);
+            let builder = gsk::PathBuilder::new();
+            builder.add_rect(&graphene::Rect::new(
+                r.x() - 0.5,
+                r.y() - 0.5,
+                r.width() + 1.0,
+                r.height() + 1.0,
+            ));
+            let outline = builder.to_path();
+            let dashed = gsk::Stroke::new(1.0);
+            dashed.set_dash(&[4.0, 4.0]);
+            // The outline's corners sit on pixel centres: half a pixel in, the dashes end on
+            // pixel edges, whole pixels black or white.
+            dashed.set_dash_offset(0.5);
+            snapshot.append_stroke(&outline, &gsk::Stroke::new(1.0), &SELECTION_LIGHT);
+            snapshot.append_stroke(&outline, &dashed, &SELECTION_DARK);
         }
 
         /// The text being typed, over the image as it will land (its pixels, scaled as the
@@ -386,7 +497,11 @@ mod imp {
 
 /// The pixels of tile `(col, row)` as a texture.
 fn tile_texture(image: &Image, col: u32, row: u32) -> gdk::Texture {
-    let rect = tile_rect(image, col, row);
+    texture(image, tile_rect(image, col, row))
+}
+
+/// The pixels of `rect` (inside `image`) as a texture.
+fn texture(image: &Image, rect: Rect) -> gdk::Texture {
     let bytes = glib::Bytes::from_owned(image.copy_rect(rect));
     gdk::MemoryTexture::new(
         rect.width as i32,
@@ -465,9 +580,11 @@ impl Canvas {
         (x >= 0.0 && y >= 0.0 && x < w as f64 && y < h as f64).then_some((x as u32, y as u32))
     }
 
-    /// Whether there's anything to undo: a step, or text being typed (undo drops it).
+    /// Whether there's anything to undo: a step, text being typed, or floating pixels
+    /// (undo drops them).
     pub fn can_undo(&self) -> bool {
         self.typing()
+            || self.floating()
             || self
                 .imp()
                 .doc
@@ -476,9 +593,10 @@ impl Canvas {
                 .is_some_and(Document::can_undo)
     }
 
-    /// Whether there's a step to redo; not while text is typed.
+    /// Whether there's a step to redo; not while text is typed or pixels float.
     pub fn can_redo(&self) -> bool {
         !self.typing()
+            && !self.floating()
             && self
                 .imp()
                 .doc
@@ -504,9 +622,10 @@ impl Canvas {
         (doc.image().clone(), doc.position())
     }
 
-    /// Takes back the last step; while text is typed, drops the text instead.
+    /// Takes back the last step; while text is typed, drops the text instead, and while
+    /// pixels float, drops the move (they were never on the image).
     pub fn undo(&self) {
-        if self.cancel_text() {
+        if self.cancel_text() || self.drop_floating() {
             return;
         }
         self.set_drag(Drag::None);
@@ -514,9 +633,9 @@ impl Canvas {
         self.invalidate(changed);
     }
 
-    /// Does the last step undone again; nothing while text is typed.
+    /// Does the last step undone again; nothing while text is typed or pixels float.
     pub fn redo(&self) {
-        if self.typing() {
+        if self.typing() || self.floating() {
             return;
         }
         self.set_drag(Drag::None);
@@ -541,14 +660,22 @@ impl Canvas {
     }
 
     /// What the pointer's buttons do. Text being typed takes a new look from the text
-    /// tool, and goes on the image when another tool is chosen.
+    /// tool, and goes on the image when another tool is chosen; the selection goes when
+    /// another tool is chosen, its floating pixels landing first.
     pub fn set_action(&self, action: Action) {
         let imp = self.imp();
         imp.action.set(Some(action));
         match action {
-            Action::Text(look) => self.edit_text(|t| t.set_look(look)),
+            Action::Text(look) => {
+                self.deselect();
+                self.edit_text(|t| t.set_look(look));
+            }
+            Action::Select => {
+                self.commit_text();
+            }
             _ => {
                 self.commit_text();
+                self.deselect();
             }
         }
         if imp.drag.get() == Drag::None && !imp.space.get() {
@@ -557,11 +684,12 @@ impl Canvas {
         self.queue_draw();
     }
 
-    /// The pointer's cursor while nothing is dragged: an I-beam for text, else a
-    /// crosshair.
+    /// The pointer's cursor while nothing is dragged: an I-beam for text, a move cursor
+    /// over the selection, else a crosshair.
     fn idle_cursor(&self) -> &'static str {
         match self.imp().action.get() {
             Some(Action::Text(_)) => "text",
+            Some(Action::Select) if self.over_selection() => "move",
             _ => "crosshair",
         }
     }
@@ -691,6 +819,249 @@ impl Canvas {
             self.set_drag(Drag::None);
         }
         dragging
+    }
+
+    /// The selection's size, while there's one (its floating pixels' while they float).
+    pub fn selection_size(&self) -> Option<(u32, u32)> {
+        self.selection_box().map(|(_, size)| size)
+    }
+
+    /// Where the selection is, in image pixels: its top-left pixel and its size (floating
+    /// pixels may be partly off the image).
+    fn selection_box(&self) -> Option<((i64, i64), (u32, u32))> {
+        let imp = self.imp();
+        if let Some(f) = imp.floating.borrow().as_ref() {
+            return Some((f.at(), f.size()));
+        }
+        imp.selection
+            .get()
+            .map(|r| ((r.x as i64, r.y as i64), (r.width, r.height)))
+    }
+
+    /// Whether the selection's pixels float: lifted, not yet on the image.
+    pub fn floating(&self) -> bool {
+        self.imp().floating.borrow().is_some()
+    }
+
+    /// Whether image pixel `(x, y)` is in the selection.
+    fn in_selection(&self, (x, y): (i64, i64)) -> bool {
+        self.selection_box().is_some_and(|((sx, sy), (w, h))| {
+            x >= sx && y >= sy && x - sx < w as i64 && y - sy < h as i64
+        })
+    }
+
+    /// Whether the pointer is over the selection.
+    fn over_selection(&self) -> bool {
+        let (Some(view), Some(p)) = (self.view(), self.imp().pointer.get()) else {
+            return false;
+        };
+        let (x, y) = self.to_shown(&view, p);
+        self.in_selection((x.floor() as i64, y.floor() as i64))
+    }
+
+    /// After the selection changed: redraws, sets the cursor, and tells the status bar.
+    fn selection_shown(&self) {
+        let imp = self.imp();
+        if imp.drag.get() == Drag::None && !imp.space.get() {
+            self.set_cursor_from_name(Some(self.idle_cursor()));
+        }
+        self.queue_draw();
+        self.emit_changed();
+    }
+
+    /// Edit → Select All: the whole image, floating pixels landing first.
+    pub fn select_all(&self) {
+        self.deselect();
+        let (w, h) = self.image_size();
+        self.imp().selection.set(Some(Rect::new(0, 0, w, h)));
+        self.selection_shown();
+    }
+
+    /// Edit → Deselect: the selection goes, its floating pixels landing first. Whether
+    /// there was one.
+    pub fn deselect(&self) -> bool {
+        let imp = self.imp();
+        if matches!(imp.drag.get(), Drag::Select { .. }) {
+            imp.drag.set(Drag::None);
+        }
+        let landed = self.land();
+        let had = imp.selection.take().is_some() || landed;
+        if had {
+            self.selection_shown();
+        }
+        had
+    }
+
+    /// Lands the floating pixels, one undo step (none when they're back where they were
+    /// lifted from); the selection stays where they landed. Whether pixels floated.
+    fn land(&self) -> bool {
+        let imp = self.imp();
+        let Some(f) = self.take_floating() else {
+            return false;
+        };
+        let (w, h) = self.image_size();
+        imp.selection.set(f.bounds(Rect::new(0, 0, w, h)));
+        let changed = self.with_doc(|d| d.land(f));
+        self.queue_draw();
+        self.invalidate(changed);
+        true
+    }
+
+    /// Takes the floating pixels off the canvas, ending a drag moving them.
+    fn take_floating(&self) -> Option<Floating> {
+        let imp = self.imp();
+        let f = imp.floating.take()?;
+        imp.floating_texture.take();
+        if matches!(imp.drag.get(), Drag::Move { .. }) {
+            imp.drag.set(Drag::None);
+        }
+        Some(f)
+    }
+
+    /// Lifts the selection's pixels to float over the image, unless they float already.
+    /// Whether pixels float.
+    fn lift(&self) -> bool {
+        let imp = self.imp();
+        if self.floating() {
+            return true;
+        }
+        let Some(r) = imp.selection.get() else {
+            return false;
+        };
+        let Some(f) = self.with_doc(|d| d.lift(r)) else {
+            return false;
+        };
+        let pixels = f.pixels();
+        imp.floating_texture
+            .replace(Some(texture(pixels, pixels.bounds())));
+        imp.floating.replace(Some(f));
+        imp.selection.set(None);
+        self.queue_draw();
+        true
+    }
+
+    /// Undo while pixels float: drops the move, the image as it was, the selection back
+    /// where they were lifted from. Whether pixels floated.
+    fn drop_floating(&self) -> bool {
+        let Some(f) = self.take_floating() else {
+            return false;
+        };
+        self.imp().selection.set(f.source());
+        self.selection_shown();
+        true
+    }
+
+    /// Edit → Delete: clears the selection's pixels to transparency, one undo step. Pixels
+    /// floating are dropped and the place they were lifted from cleared. The selection
+    /// stays (where they floated). Whether there was one.
+    pub fn delete_selection(&self) -> bool {
+        let imp = self.imp();
+        let (w, h) = self.image_size();
+        let cleared = match self.take_floating() {
+            Some(f) => {
+                imp.selection.set(f.bounds(Rect::new(0, 0, w, h)));
+                f.source()
+            }
+            None => match imp.selection.get() {
+                Some(r) => Some(r),
+                None => return false,
+            },
+        };
+        let changed = cleared.and_then(|r| self.with_doc(|d| d.clear(r)));
+        self.invalidate(changed);
+        self.selection_shown();
+        true
+    }
+
+    /// The arrow keys: moves the selection's pixels `dx` right and `dy` down, lifting them
+    /// first. Whether there's a selection.
+    pub fn nudge(&self, dx: i64, dy: i64) -> bool {
+        if !self.lift() {
+            return false;
+        }
+        if let Some(f) = self.imp().floating.borrow_mut().as_mut() {
+            f.move_by(dx, dy);
+        }
+        self.selection_shown();
+        true
+    }
+
+    /// Puts what's pending on the image (before saving or closing): text being typed and
+    /// floating pixels, each one undo step.
+    pub fn commit(&self) {
+        self.commit_text();
+        self.land();
+    }
+
+    /// A primary-button press at widget point `at` with the selection: inside the
+    /// selection it starts moving its pixels, lifting them; elsewhere floating pixels land
+    /// and a new selection starts there.
+    pub fn select_begin(&self, at: (f64, f64)) {
+        let Some(view) = self.view() else { return };
+        let p = self.to_shown(&view, at);
+        let imp = self.imp();
+        if self.in_selection((p.0.floor() as i64, p.1.floor() as i64)) && self.lift() {
+            let at = imp.floating.borrow().as_ref().map(Floating::at);
+            if let Some(at) = at {
+                imp.drag.set(Drag::Move { from: p, at });
+                self.set_cursor_from_name(Some("move"));
+            }
+        } else {
+            self.deselect();
+            imp.drag.set(Drag::Select { from: p });
+        }
+        self.selection_shown();
+    }
+
+    /// Takes the selection drag to widget point `to`: the rectangle from where it began
+    /// to there, or the floating pixels as far as the pointer moved.
+    pub fn select_to(&self, to: (f64, f64)) {
+        let Some(view) = self.view() else { return };
+        let p = self.to_shown(&view, to);
+        let imp = self.imp();
+        match imp.drag.get() {
+            Drag::Select { from } => {
+                let (w, h) = self.image_size();
+                let r = spanning(from, p, Rect::new(0, 0, w, h));
+                if imp.selection.replace(r) != r {
+                    self.selection_shown();
+                }
+            }
+            Drag::Move { from, at } => {
+                let to = (
+                    at.0 + (p.0 - from.0).round() as i64,
+                    at.1 + (p.1 - from.1).round() as i64,
+                );
+                let moved = imp.floating.borrow_mut().as_mut().is_some_and(|f| {
+                    let moved = f.at() != to;
+                    f.move_to(to);
+                    moved
+                });
+                if moved {
+                    self.queue_draw();
+                }
+            }
+            Drag::None | Drag::Draw | Drag::Shape { .. } | Drag::Pan { .. } => {}
+        }
+    }
+
+    /// Widget point `at` in image coordinates as the image shows on screen: from its
+    /// origin rounded to device pixels, as the tiles are drawn, so a pointer on a pixel's
+    /// edge on screen is on its edge in the image, and a drag across 200 screen pixels at
+    /// 100% selects 200.
+    fn to_shown(&self, view: &View, (x, y): (f64, f64)) -> (f64, f64) {
+        let scale = self.surface_scale();
+        let origin = |o: f64| device_edge(o, scale) as f64;
+        (
+            (x - origin(view.origin.0)) / view.zoom,
+            (y - origin(view.origin.1)) / view.zoom,
+        )
+    }
+
+    /// Ends the selection drag: a click leaves no selection; moved pixels stay floating.
+    pub fn select_end(&self) {
+        self.imp().drag.set(Drag::None);
+        self.selection_shown();
     }
 
     /// Whether text is being typed (not yet on the image).
@@ -906,7 +1277,11 @@ impl Canvas {
         imp.drag.set(drag);
         let rects = match drag {
             Drag::Shape { shape, .. } => shape.rects(self.with_doc(|d| d.image().bounds())),
-            Drag::None | Drag::Draw | Drag::Pan { .. } => Vec::new(),
+            Drag::None
+            | Drag::Draw
+            | Drag::Pan { .. }
+            | Drag::Select { .. }
+            | Drag::Move { .. } => Vec::new(),
         };
         if !(rects.is_empty() && imp.preview.borrow().is_empty()) {
             imp.preview.replace(rects);
@@ -994,6 +1369,7 @@ impl Canvas {
                     (1 | 3, Some(Action::Pick)) if !space => canvas.pick((x, y), secondary),
                     (1, Some(Action::Shape(_))) if !space => canvas.shape_begin((x, y)),
                     (1, Some(Action::Text(look))) if !space => canvas.text_click((x, y), look),
+                    (1, Some(Action::Select)) if !space => canvas.select_begin((x, y)),
                     (1, _) if !space => canvas.draw_begin((x, y)),
                     (1 | 2, _) => {
                         imp.drag.set(Drag::Pan { last: (0.0, 0.0) });
@@ -1029,6 +1405,11 @@ impl Canvas {
                         imp.drag.set(Drag::Pan { last: (dx, dy) });
                         canvas.change_view(|v| v.pan(dx - last.0, dy - last.1));
                     }
+                    Drag::Select { .. } | Drag::Move { .. } => {
+                        if let Some((x, y)) = g.start_point() {
+                            canvas.select_to((x + dx, y + dy));
+                        }
+                    }
                     Drag::None => {}
                 }
             }
@@ -1048,6 +1429,7 @@ impl Canvas {
                         let idle = canvas.idle_cursor();
                         canvas.set_cursor_from_name(Some(if held { "grab" } else { idle }));
                     }
+                    Drag::Select { .. } | Drag::Move { .. } => canvas.select_end(),
                     Drag::None => {}
                 }
             }
@@ -1086,6 +1468,7 @@ impl Canvas {
                 if let Some(canvas) = canvas.upgrade() {
                     canvas.imp().pointer.set(Some((x, y)));
                     canvas.redraw_outline();
+                    canvas.follow_selection();
                     canvas.emit_changed();
                 }
             }
@@ -1103,6 +1486,22 @@ impl Canvas {
             }
         });
         self.add_controller(motion);
+    }
+
+    /// With the selection the tool, the cursor shows whether a drag would move the
+    /// selection (over it) or select anew.
+    fn follow_selection(&self) {
+        let imp = self.imp();
+        if imp.action.get() != Some(Action::Select)
+            || imp.drag.get() != Drag::None
+            || imp.space.get()
+        {
+            return;
+        }
+        let want = self.idle_cursor();
+        if self.cursor().and_then(|c| c.name()).as_deref() != Some(want) {
+            self.set_cursor_from_name(Some(want));
+        }
     }
 
     /// Redraws when the pointer moved and the tip's outline follows it.

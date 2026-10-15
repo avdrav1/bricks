@@ -26,6 +26,7 @@ pub enum Tool {
     Line,
     Rectangle,
     Ellipse,
+    Selection,
 }
 
 /// What the canvas does with the pointer's buttons under the current tool.
@@ -49,10 +50,13 @@ pub enum Action {
     /// A click starts typing text there in this look; while it's typed, a click elsewhere
     /// puts it on the image.
     Text(TextLook),
+    /// A primary-button drag selects a rectangle; one inside the selection moves its
+    /// pixels.
+    Select,
 }
 
 impl Tool {
-    pub const ALL: [Tool; 9] = [
+    pub const ALL: [Tool; 10] = [
         Tool::Pencil,
         Tool::Brush,
         Tool::Eraser,
@@ -62,6 +66,7 @@ impl Tool {
         Tool::Line,
         Tool::Rectangle,
         Tool::Ellipse,
+        Tool::Selection,
     ];
 
     /// The `tool` action's target for it.
@@ -76,6 +81,7 @@ impl Tool {
             Tool::Line => "line",
             Tool::Rectangle => "rectangle",
             Tool::Ellipse => "ellipse",
+            Tool::Selection => "selection",
         }
     }
 
@@ -94,6 +100,7 @@ impl Tool {
             Tool::Line => "Line",
             Tool::Rectangle => "Rectangle",
             Tool::Ellipse => "Ellipse",
+            Tool::Selection => "Selection",
         }
     }
 
@@ -109,6 +116,7 @@ impl Tool {
             Tool::Line => 'L',
             Tool::Rectangle => 'R',
             Tool::Ellipse => 'O',
+            Tool::Selection => 'S',
         }
     }
 
@@ -142,6 +150,10 @@ impl Tool {
             // An ellipse, wider than tall.
             Tool::Ellipse => {
                 "M 1.5 8 C 1.5 5.5 4.4 3.5 8 3.5 C 11.6 3.5 14.5 5.5 14.5 8 C 14.5 10.5 11.6 12.5 8 12.5 C 4.4 12.5 1.5 10.5 1.5 8 Z"
+            }
+            // A dashed rectangle: its corners, and a dash in each side's middle.
+            Tool::Selection => {
+                "M 2 5.5 L 2 3.5 L 4 3.5 M 7 3.5 L 9 3.5 M 12 3.5 L 14 3.5 L 14 5.5 M 14 7 L 14 9 M 14 10.5 L 14 12.5 L 12 12.5 M 9 12.5 L 7 12.5 M 4 12.5 L 2 12.5 L 2 10.5 M 2 9 L 2 7"
             }
         }
     }
@@ -221,7 +233,8 @@ impl Settings {
         self.before_picker
     }
 
-    /// The current tool's size (text's is its font's); the fill and the picker have none.
+    /// The current tool's size (text's is its font's); the fill, the picker, and the
+    /// selection have none.
     pub fn width(&self) -> Option<u32> {
         match self.tool {
             Tool::Pencil => Some(self.pencil_width),
@@ -231,7 +244,7 @@ impl Settings {
             Tool::Line => Some(self.line_width),
             Tool::Rectangle => Some(self.rectangle_width),
             Tool::Ellipse => Some(self.ellipse_width),
-            Tool::Fill | Tool::Picker => None,
+            Tool::Fill | Tool::Picker | Tool::Selection => None,
         }
     }
 
@@ -256,7 +269,7 @@ impl Settings {
             Tool::Line => self.line_width = w,
             Tool::Rectangle => self.rectangle_width = w,
             Tool::Ellipse => self.ellipse_width = w,
-            Tool::Fill | Tool::Picker => {}
+            Tool::Fill | Tool::Picker | Tool::Selection => {}
         }
     }
 
@@ -275,7 +288,7 @@ impl Settings {
     /// picker picks; text is typed in the foreground at its size in the font chosen; the
     /// shapes draw at their size, outlined in the foreground and filled with the
     /// background, or, filled without an outline, with the foreground (as Paint and
-    /// Paint.NET do).
+    /// Paint.NET do); the selection selects.
     pub fn action(&self) -> Action {
         let shape = |kind, width| {
             let fill = match self.style {
@@ -316,6 +329,7 @@ impl Settings {
             Tool::Line => shape(Kind::Line, self.line_width),
             Tool::Rectangle => shape(Kind::Rectangle(self.style), self.rectangle_width),
             Tool::Ellipse => shape(Kind::Ellipse(self.style), self.ellipse_width),
+            Tool::Selection => Action::Select,
         }
     }
 }
@@ -575,5 +589,20 @@ mod tests {
             panic!("text's action")
         };
         assert_eq!((t.family, t.size), ("DejaVu Serif", 4));
+    }
+
+    #[test]
+    fn the_selection_selects_and_has_no_size() {
+        let mut s = Settings::default();
+        s.set_tool(Tool::Selection);
+        assert_eq!(
+            (s.action(), s.width(), s.has_style()),
+            (Action::Select, None, false)
+        );
+        s.set_width(30);
+        s.set_tool(Tool::Pencil);
+        assert_eq!(s.width(), Some(1));
+        assert_eq!(Tool::from_id("selection"), Some(Tool::Selection));
+        assert_eq!(Tool::Selection.key(), 'S');
     }
 }

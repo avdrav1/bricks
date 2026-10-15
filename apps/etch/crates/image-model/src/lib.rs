@@ -15,6 +15,7 @@ mod fill;
 mod geom;
 mod image;
 mod pencil;
+mod select;
 mod shape;
 
 pub use blend::Blend;
@@ -25,6 +26,7 @@ pub use fill::Fill;
 pub use geom::Rect;
 pub use image::{Image, SizeError, MAX_SIDE};
 pub use pencil::Pencil;
+pub use select::{spanning, Floating};
 pub use shape::{Kind, Shape, ShapeTool, Style};
 
 /// The side of the square tiles history saves pixels in.

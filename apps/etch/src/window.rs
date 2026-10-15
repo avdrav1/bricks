@@ -102,6 +102,19 @@ pub fn install_app_actions(app: &gtk::Application) {
     let edit = gio::Menu::new();
     edit.append(Some("_Undo"), Some("win.undo"));
     edit.append(Some("_Redo"), Some("win.redo"));
+    let selection = gio::Menu::new();
+    for (label, action, accel) in [
+        ("Select _All", "win.select-all", "<Control>a"),
+        ("_Deselect", "win.deselect", "Escape"),
+        ("De_lete", "win.delete", "Delete"),
+    ] {
+        // The keys show beside the command; the window's key handler takes them, so a
+        // field or the text being typed keeps its own Ctrl+A, Escape, and Delete.
+        let item = gio::MenuItem::new(Some(label), Some(action));
+        item.set_attribute_value("accel", Some(&accel.to_variant()));
+        selection.append_item(&item);
+    }
+    edit.append_section(None, &selection);
     menu.append_submenu(Some("_Edit"), &edit);
     let view = gio::Menu::new();
     view.append(Some("Zoom _In"), Some("win.zoom-in"));
@@ -324,9 +337,10 @@ fn untitled(app: &gtk::Application) -> String {
         .unwrap_or_default()
 }
 
-/// The status bar's labels: pointer position, zoom, image size.
+/// The status bar's labels: pointer position, the selection's size, zoom, image size.
 struct Status {
     position: gtk::Label,
+    selection: gtk::Label,
     zoom: gtk::Label,
     size: gtk::Label,
 }
@@ -347,6 +361,7 @@ impl Status {
         };
         let status = Status {
             position: label(true),
+            selection: label(false),
             zoom: label(false),
             size: label(false),
         };
@@ -358,6 +373,12 @@ impl Status {
             &canvas
                 .pointer_pixel()
                 .map(|(x, y)| format!("x: {x}  y: {y}"))
+                .unwrap_or_default(),
+        );
+        self.selection.set_text(
+            &canvas
+                .selection_size()
+                .map(|(w, h)| format!("Selection: {w}×{h}"))
                 .unwrap_or_default(),
         );
         if let Some(v) = canvas.view() {
@@ -742,7 +763,19 @@ fn show(
         action("zoom-out", |c| c.zoom_step(-1, None)),
         action("actual-size", Canvas::actual_size),
         action("fit", Canvas::fit),
+        action("deselect", |c| {
+            c.deselect();
+        }),
+        action("delete", |c| {
+            c.delete_selection();
+        }),
     ]);
+    window.add_action_entries([gio::ActionEntry::builder("select-all")
+        .activate({
+            let canvas = canvas.clone();
+            move |window: &gtk::ApplicationWindow, _, _| select_all(window, &canvas)
+        })
+        .build()]);
     // The tool: the tool column's buttons and the tool keys set it.
     let tool = gio::ActionEntry::builder("tool")
         .parameter_type(Some(glib::VariantTy::STRING))
@@ -777,11 +810,13 @@ fn show(
         }
     });
 
-    // Space held: dragging pans. Escape drops a shape being dragged. Ctrl+Shift+Z redoes,
-    // Ctrl+Shift+S is Save As, and Ctrl+Shift+E Export (shifted, a letter may arrive upper
-    // case, which an accelerator misses). Unmodified, a tool's key picks it and X swaps
-    // the colours. None of them while a text field (the size) has the keys, and only the
-    // Ctrl+Shift ones while text is typed on the canvas: its keys are its letters.
+    // Space held: dragging pans. Escape drops a shape being dragged, or deselects.
+    // Ctrl+Shift+Z redoes, Ctrl+Shift+S is Save As, and Ctrl+Shift+E Export (shifted, a
+    // letter may arrive upper case, which an accelerator misses). Ctrl+A selects all,
+    // Delete deletes the selection, and the arrows move it a pixel (Shift: ten).
+    // Unmodified, a tool's key picks it and X swaps the colours. None of them while a
+    // text field (the size) has the keys, and only the Ctrl+Shift ones while text is
+    // typed on the canvas: its keys are its letters.
     let keys = gtk::EventControllerKey::new();
     keys.set_propagation_phase(gtk::PropagationPhase::Capture);
     keys.connect_key_pressed({
@@ -818,8 +853,34 @@ fn show(
                 ActionGroupExt::activate_action(&window, action, None);
                 return glib::Propagation::Stop;
             }
-            if !mods.is_empty() || text {
+            if text {
                 return glib::Propagation::Proceed;
+            }
+            if mods == gdk::ModifierType::CONTROL_MASK && matches!(key, gdk::Key::a | gdk::Key::A) {
+                select_all(&window, &canvas);
+                return glib::Propagation::Stop;
+            }
+            if mods.is_empty() || mods == gdk::ModifierType::SHIFT_MASK {
+                let step = if mods.is_empty() { 1 } else { 10 };
+                let by = match key {
+                    gdk::Key::Left | gdk::Key::KP_Left => Some((-step, 0)),
+                    gdk::Key::Right | gdk::Key::KP_Right => Some((step, 0)),
+                    gdk::Key::Up | gdk::Key::KP_Up => Some((0, -step)),
+                    gdk::Key::Down | gdk::Key::KP_Down => Some((0, step)),
+                    _ => None,
+                };
+                if by.is_some_and(|(dx, dy)| canvas.nudge(dx, dy)) {
+                    return glib::Propagation::Stop;
+                }
+            }
+            if !mods.is_empty() {
+                return glib::Propagation::Proceed;
+            }
+            if key == gdk::Key::Escape && canvas.deselect() {
+                return glib::Propagation::Stop;
+            }
+            if matches!(key, gdk::Key::Delete | gdk::Key::KP_Delete) && canvas.delete_selection() {
+                return glib::Propagation::Stop;
             }
             if matches!(key, gdk::Key::x | gdk::Key::X) {
                 controls.update(Settings::swap);
@@ -854,7 +915,13 @@ fn show(
                 return;
             };
             status.show(canvas);
-            for (name, on) in [("undo", canvas.can_undo()), ("redo", canvas.can_redo())] {
+            let selected = canvas.selection_size().is_some();
+            for (name, on) in [
+                ("undo", canvas.can_undo()),
+                ("redo", canvas.can_redo()),
+                ("deselect", selected),
+                ("delete", selected),
+            ] {
                 if let Some(a) = window
                     .lookup_action(name)
                     .and_downcast::<gio::SimpleAction>()
@@ -872,6 +939,14 @@ fn show(
         Some(Bench::Open { start, read_ms }) => bench_open(app, window, &canvas, start, read_ms),
         None => {}
     }
+}
+
+/// Edit → Select All: the selection becomes the tool (as in Paint, so the selection can be
+/// moved at once) and selects the whole image.
+fn select_all(window: &gtk::ApplicationWindow, canvas: &Canvas) {
+    let selection = Tool::Selection.id().to_variant();
+    ActionGroupExt::activate_action(window, "tool", Some(&selection));
+    canvas.select_all();
 }
 
 /// New Image's size and background: the last used, from the settings file the first time.

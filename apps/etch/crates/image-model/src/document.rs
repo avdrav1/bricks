@@ -2,7 +2,7 @@
 
 use crate::brush::Coverage;
 use crate::geom::{join, pixel};
-use crate::{Blend, Brush, Color, Fill, Image, Pencil, Rect, Shape, TILE};
+use crate::{Blend, Brush, Color, Fill, Floating, Image, Pencil, Rect, Shape, TILE};
 use std::collections::BTreeMap;
 
 /// What a stroke draws with.
@@ -98,6 +98,10 @@ pub enum Operation {
     Fill(Fill),
     Shape(Shape),
     Blend(Blend),
+    /// Floating pixels landed ([`Document::land`]).
+    Land(Floating),
+    /// A rectangle (inside the image) cleared to transparency ([`Document::clear`]).
+    Clear(Rect),
 }
 
 impl Operation {
@@ -109,6 +113,11 @@ impl Operation {
             Operation::Fill(f) => f.apply(image, |_, _, _, _| {}),
             Operation::Shape(s) => s.apply(image, |_, _| {}),
             Operation::Blend(b) => b.apply(image),
+            Operation::Land(f) => f.apply(image),
+            Operation::Clear(r) => {
+                image.fill_rect(*r, Color::TRANSPARENT);
+                Some(*r)
+            }
         }
     }
 }
@@ -343,6 +352,62 @@ impl Document {
         before.cover(&self.image, blend.bounds(&self.image)?);
         let changed = blend.apply(&mut self.image);
         self.record(Operation::Blend(blend), before);
+        changed
+    }
+
+    /// Copies the pixels of `rect` (clipped to the image) to float over it, to move them
+    /// ([`Floating`]); the image isn't changed until they land. `None` off the image.
+    pub fn lift(&self, rect: Rect) -> Option<Floating> {
+        let r = rect.intersect(self.image.bounds())?;
+        let pixels = Image::from_rgba(r.width, r.height, self.image.copy_rect(r))
+            .expect("a rectangle of the image is a valid image");
+        Some(Floating::lifted(r, pixels))
+    }
+
+    /// Lands floating pixels: the place they were lifted from becomes transparent and
+    /// they replace the pixels where they are now (transparent ones too), clipped to the
+    /// image. One undo step for the whole move, keeping the tiles it covers and the
+    /// pixels, so redo lands the same bytes. Pixels landed where they were lifted from, or
+    /// pasted wholly off the image, leave no step. Ends any stroke under way.
+    pub fn land(&mut self, floating: Floating) -> Option<Rect> {
+        self.end_stroke();
+        if floating.unmoved() {
+            return None;
+        }
+        let bounds = self.image.bounds();
+        let source = floating.source().and_then(|r| r.intersect(bounds));
+        let landed = floating.bounds(bounds);
+        if source.is_none() && landed.is_none() {
+            return None;
+        }
+        let mut before = Saved::default();
+        for r in [source, landed].into_iter().flatten() {
+            before.cover(&self.image, r);
+        }
+        let changed = floating.apply(&mut self.image);
+        self.record(Operation::Land(floating), before);
+        changed
+    }
+
+    /// Clears the pixels of `rect` (clipped to the image) to transparency (the selection's
+    /// Delete), one undo step keeping the tiles it covers. Nothing off the image or where
+    /// every pixel is transparent already (all bytes 0). Ends any stroke under way.
+    pub fn clear(&mut self, rect: Rect) -> Option<Rect> {
+        self.end_stroke();
+        let r = rect.intersect(self.image.bounds())?;
+        let (data, stride, row) = (self.image.data(), self.image.stride(), r.width as usize * 4);
+        let cleared = (r.y..r.bottom()).all(|y| {
+            let i = y as usize * stride + r.x as usize * 4;
+            data[i..i + row].iter().all(|&b| b == 0)
+        });
+        if cleared {
+            return None;
+        }
+        let mut before = Saved::default();
+        before.cover(&self.image, r);
+        let op = Operation::Clear(r);
+        let changed = op.apply(&mut self.image);
+        self.record(op, before);
         changed
     }
 

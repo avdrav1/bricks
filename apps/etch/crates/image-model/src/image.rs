@@ -147,6 +147,23 @@ impl Image {
         }
     }
 
+    /// Sets every pixel of `rect` (inside the image) to `color`.
+    pub(crate) fn fill_rect(&mut self, rect: Rect, color: Color) {
+        for y in rect.y..rect.bottom() {
+            self.fill_span(y, rect.x, rect.right(), color);
+        }
+    }
+
+    /// Copies the pixels of `src` whose top-left is at `(sx, sy)` into `rect` (inside the
+    /// image; the pixels it takes inside `src`).
+    pub(crate) fn copy_from(&mut self, rect: Rect, src: &Image, (sx, sy): (u32, u32)) {
+        let row = rect.width as usize * 4;
+        for k in 0..rect.height {
+            let (i, j) = (self.offset(rect.x, rect.y + k), src.offset(sx, sy + k));
+            self.data[i..i + row].copy_from_slice(&src.data[j..j + row]);
+        }
+    }
+
     /// Sets the pixel at `(x, y)` (inside the image) to `color`.
     pub(crate) fn set_pixel(&mut self, x: u32, y: u32, color: Color) {
         let i = self.offset(x, y);

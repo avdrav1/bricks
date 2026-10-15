@@ -125,6 +125,22 @@
 #      at first. Red the foreground, a click on the left half at 0 fills it and leaves the
 #      right half; Ctrl+Z, then at 5 (Alt+T, typed) the same; Ctrl+Z, then at 6 both halves
 #      fill red. Switching to the pencil and back keeps 6.
+# ETCH-15 acceptance: the rectangular selection.
+#  20. `etch t.png` (section 11's image): S picks the selection (the tool column shows it
+#      on), which has no size. A drag over the red half selects 100x80: the status says
+#      "Selection: 100×80" and the outline shows along its top and left edges, black
+#      dashes on white; the title stays unmarked. A drag inside it moves its pixels 200 px
+#      right, into the transparent quarter: on screen the place they left shows the
+#      checkerboard and the new place is red, outlined, while the title stays unmarked
+#      (they float). Escape lands them and deselects (no selection in the status, the
+#      title marked, the screen the same); one Ctrl+Z gives back the red and the
+#      transparency and clears the mark, and Ctrl+Y moves them again. Shift+Right moves a
+#      new selection's pixels 10 px (the strip they left transparent, the strip they
+#      reached red), and choosing the pencil (P) lands them and deselects. Ctrl+A with
+#      the pencil the tool picks the selection and selects the whole image (400×300);
+#      Escape deselects. Delete clears a selection to transparency (the checkerboard),
+#      marking the title, and Ctrl+Z gives the red back. While text is typed, Delete
+#      deletes a character and Ctrl+A selects nothing.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -345,6 +361,36 @@ elif cmd == "checked":
             on.append(n.get_name())
         stack.extend(n.get_child_at_index(i) for i in range(n.get_child_count()))
     print(", ".join(on) or "none")
+elif cmd == "dashes":
+    # The selection outline along the screen segment X0 Y0 X1 Y1 (a row or a column), on
+    # the line within 2 px across it with the most black: black dashes on white, about
+    # half each.
+    at = pixels(sys.argv[2])
+    x0, y0, x1, y1 = map(int, sys.argv[3:7])
+    best = None
+    for k in range(-2, 3):
+        if y0 == y1:
+            line = [at(x, y0 + k) for x in range(x0, x1)]
+        else:
+            line = [at(x0 + k, y) for y in range(y0, y1)]
+        black = sum(1 for p in line if max(p) < 60)
+        white = sum(1 for p in line if min(p) > 230)
+        if best is None or black > best[0]:
+            best = (black, white, len(line))
+    black, white, n = best
+    half = lambda c: 0.3 * n <= c <= 0.7 * n
+    print("dashed" if half(black) and half(white) else f"not dashed: black {black} white {white} of {n}")
+elif cmd == "checkered":
+    # In the screen rectangle X0 Y0 X1 Y1: the checkerboard (neutral greys from its grey
+    # to white) everywhere, with both its light and grey squares.
+    at = pixels(sys.argv[2])
+    x0, y0, x1, y1 = map(int, sys.argv[3:7])
+    box = [at(x, y) for y in range(y0, y1) for x in range(x0, x1)]
+    checker = sum(1 for p in box if min(p) >= 195 and max(p) - min(p) <= 3)
+    light = sum(1 for p in box if min(p) >= 245)
+    grey = sum(1 for p in box if all(195 <= c <= 213 for c in p))
+    every = "all" if checker == len(box) else f"{checker}/{len(box)}"
+    print(f"checker {every} light {min(light, 1)} grey {min(grey, 1)}")
 PY
 # The images sections 11, 12, and 19 open.
 cat > /tmp/mk.py <<"PY"
@@ -797,6 +843,51 @@ session() {
   done
   keys p; keys f; echo "kept: $(tolerance)"
   pkill -x etch; sleep 1
+
+  echo "== 20 selection"
+  etch /tmp/t.png >>/tmp/app.log 2>&1 & sleep 3
+  read cx cy cw ch <<<"$(px canvas)"
+  l=$((cx + (cw - 400) / 2)); t=$((cy + (ch - 300) / 2))
+  title() { python3 /tmp/a11y.py text | grep -E "^(• )?t\.png$" | head -1; }
+  sel() { s=$(python3 /tmp/a11y.py text | grep -E "^Selection: " | head -1); echo "${s:-no selection}"; }
+  # Image pixels X0 Y0 X1 Y1 on screen, 4 px in from each edge (clear of the outline).
+  inset() { echo $((l + $1 + 4)) $((t + $2 + 4)) $((l + $3 - 4)) $((t + $4 - 4)); }
+  red() { px count /tmp/shot.png $(inset "$@") FF0000; }
+  hole() { px checkered /tmp/shot.png $(inset "$@"); }
+  keys s; echo "key s: selection $(tool Selection) pencil $(tool Pencil)"
+  echo "sizes shown: $(python3 /tmp/a11y.py text | grep -c "^Size$")"
+  # Image pixels 50 to 150 across and 50 to 130 down, in the red half.
+  python3 /scripts/dnd_helpers.py drag $((l + 50)) $((t + 50)) $((l + 150)) $((t + 130)); sleep 0.5
+  shot selected; echo "selected: $(sel) $(title)"
+  echo "outline: top $(px dashes /tmp/shot.png $((l + 60)) $((t + 50)) $((l + 140)) $((t + 50))) left $(px dashes /tmp/shot.png $((l + 50)) $((t + 60)) $((l + 50)) $((t + 120)))"
+  # A drag inside it: its pixels move 200 px right, into the transparent quarter.
+  python3 /scripts/dnd_helpers.py drag $((l + 100)) $((t + 90)) $((l + 300)) $((t + 90)); sleep 0.5
+  shot moved; echo "moved: $(sel) $(title)"
+  echo "moved: left $(hole 50 50 150 130) reached red $(red 250 50 350 130)"
+  echo "moved outline: $(px dashes /tmp/shot.png $((l + 260)) $((t + 50)) $((l + 340)) $((t + 50)))"
+  keys -k Escape; shot landed; echo "landed: $(sel) $(title)"
+  echo "landed: left $(hole 50 50 150 130) reached red $(red 250 50 350 130)"
+  keys -M ctrl z -m ctrl; shot move-undone
+  echo "move undone: $(title) red $(red 50 50 150 130) clear $(hole 250 50 350 130)"
+  keys -M ctrl y -m ctrl; shot move-redone
+  echo "move redone: $(title) left $(hole 50 50 150 130) reached red $(red 250 50 350 130)"
+  keys -M ctrl z -m ctrl
+  # Image pixels 120 to 200 across, 160 to 240 down: Shift+Right moves them 10 px right.
+  python3 /scripts/dnd_helpers.py drag $((l + 120)) $((t + 160)) $((l + 200)) $((t + 240)); sleep 0.5
+  keys -M shift -k Right -m shift; shot nudged
+  echo "nudged: $(sel) left $(px checkered /tmp/shot.png $((l + 122)) $((t + 164)) $((l + 128)) $((t + 236))) reached $(px count /tmp/shot.png $((l + 202)) $((t + 164)) $((l + 208)) $((t + 236)) FF0000)"
+  keys p; shot nudge-landed; echo "nudge landed: $(sel) $(title) pencil $(tool Pencil)"
+  keys -M ctrl z -m ctrl
+  keys -M ctrl a -m ctrl; echo "select all: $(sel) selection $(tool Selection) pencil $(tool Pencil)"
+  keys -k Escape; echo "deselected: $(sel) $(title)"
+  python3 /scripts/dnd_helpers.py drag $((l + 50)) $((t + 50)) $((l + 150)) $((t + 130)); sleep 0.5
+  keys -k Delete; shot deleted; echo "deleted: $(sel) $(title) $(hole 50 50 150 130)"
+  keys -M ctrl z -m ctrl; shot delete-undone; echo "delete undone: $(title) red $(red 50 50 150 130)"
+  keys t; click $((l + 50)) $((t + 200)); keys ab; keys -k Left; keys -k Delete
+  keys -M ctrl a -m ctrl
+  echo "typing: $(desc) $(sel) text $(tool Text) selection $(tool Selection)"
+  keys -k Escape
+  pkill -x etch; sleep 1
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -1010,6 +1101,24 @@ check "19: at 0 a fill takes the white half and not the half six levels off" "19
 check "19: ... nor at 5" "19 tolerance" "^at 5: left all right 0/"
 check "19: at 6 it takes both" "19 tolerance" "^at 6: left all right all$"
 check "19: the fill keeps its tolerance across tools" "19 tolerance" "^kept: 6$"
+check "20: S picks the selection" "20 selection" "^key s: selection on pencil off$"
+check "20: ... which has no size" "20 selection" "^sizes shown: 0$"
+check "20: a drag selects 100×80, the status saying so" "20 selection" "^selected: Selection: 100×80 t\.png$"
+check "20: ... outlined in dashes along its edges" "20 selection" "^outline: top dashed left dashed$"
+check "20: a drag inside moves it, still selected, the image untouched until it lands" "20 selection" "^moved: Selection: 100×80 t\.png$"
+check "20: ... its old place transparent, its new place red" "20 selection" "^moved: left checker all light 1 grey 1 reached red all$"
+check "20: ... outlined there" "20 selection" "^moved outline: dashed$"
+check "20: Escape lands it and deselects, marking the title" "20 selection" "^landed: no selection • t\.png$"
+check "20: ... as it showed" "20 selection" "^landed: left checker all light 1 grey 1 reached red all$"
+check "20: one Ctrl+Z restores the move entirely" "20 selection" "^move undone: t\.png red all clear checker all light 1 grey 1$"
+check "20: Ctrl+Y moves it again" "20 selection" "^move redone: • t\.png left checker all light 1 grey 1 reached red all$"
+check "20: Shift+Right moves the selection 10 px" "20 selection" "^nudged: Selection: 80×80 left checker all light 1 grey 1 reached all$"
+check "20: choosing another tool lands it and deselects" "20 selection" "^nudge landed: no selection • t\.png pencil on$"
+check "20: Ctrl+A picks the selection and selects the whole image" "20 selection" "^select all: Selection: 400×300 selection on pencil off$"
+check "20: Escape deselects" "20 selection" "^deselected: no selection t\.png$"
+check "20: Delete clears the selection to transparency" "20 selection" "^deleted: Selection: 100×80 • t\.png checker all light 1 grey 1$"
+check "20: ... and Ctrl+Z gives it back" "20 selection" "^delete undone: t\.png red all$"
+check "20: while text is typed Delete deletes a character and Ctrl+A selects nothing" "20 selection" "^typing: 400×300 image, typing “a” no selection text on selection off$"
 absent "the app logs no errors or panics" "app log" "^etch:|panicked|CRITICAL"
 bench=$(section "8 bench" | sed -n "s/^bench: //p")
 if [ -z "$bench" ]; then echo "FAIL 8: --bench-stroke printed nothing"; fail=1; else
