@@ -33,6 +33,7 @@ fail() { note "FAIL $*"; failed=1; }
 # The windows on screen of process $1, one per line: layer, title, bounds.
 cat >"$out/windows.swift" <<'EOF'
 import CoreGraphics
+import Foundation
 let pid = Int(CommandLine.arguments[1]) ?? 0
 let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
 for w in list where (w[kCGWindowOwnerPID as String] as? Int) == pid {
