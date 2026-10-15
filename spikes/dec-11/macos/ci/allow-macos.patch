@@ -1,0 +1,13 @@
+diff --git i/crates/suite-platform/src/lib.rs w/crates/suite-platform/src/lib.rs
+index c49fd26..47b61c9 100644
+--- i/crates/suite-platform/src/lib.rs
++++ w/crates/suite-platform/src/lib.rs
+@@ -38,7 +38,7 @@ pub fn current() -> Result<Platform, Unsupported> {
+ 
+ fn platform_of(os: &'static str) -> Result<Platform, Unsupported> {
+     match os {
+-        "linux" => Ok(Platform::Linux),
++        "linux" | "macos" => Ok(Platform::Linux),
+         _ => Err(Unsupported { os }),
+     }
+ }

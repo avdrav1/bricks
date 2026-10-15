@@ -1,0 +1,57 @@
+# DEC-11 spike (throwaway): what breaks building and running the suite on macOS.
+# Every phase records its result in out/logs/summary.txt and never fails the job; the
+# logs and screenshots are the artifact. Script: spikes/dec-11/macos/ci/run.sh.
+name: spike-macos
+on:
+  push: { branches: [spike/dec-11-macos] }
+  workflow_dispatch:
+jobs:
+  arm64:
+    runs-on: macos-latest
+    timeout-minutes: 120
+    defaults: { run: { shell: bash } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { components: "rustfmt, clippy" }
+      - uses: Swatinem/rust-cache@v2
+      - name: brew
+        run: |
+          t0=$SECONDS
+          brew install gtk4 pkgconf adwaita-icon-theme hicolor-icon-theme 2>&1 | tail -20
+          mkdir -p out/logs && echo "brew install: $((SECONDS - t0)) s" >> out/logs/summary.txt
+      - run: spikes/dec-11/macos/ci/run.sh env
+      - run: spikes/dec-11/macos/ci/run.sh check
+      - run: spikes/dec-11/macos/ci/run.sh test
+      - run: spikes/dec-11/macos/ci/run.sh build
+      - run: spikes/dec-11/macos/ci/run.sh run
+      - run: spikes/dec-11/macos/ci/run.sh patched
+      - run: spikes/dec-11/macos/ci/run.sh input
+      - run: spikes/dec-11/macos/ci/run.sh dark
+      - run: spikes/dec-11/macos/ci/run.sh bundle
+      - if: always()
+        run: cat out/logs/summary.txt
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: macos-arm64, path: out, if-no-files-found: warn }
+  x86_64:
+    runs-on: macos-15-intel
+    timeout-minutes: 120
+    defaults: { run: { shell: bash } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: brew install gtk4 pkgconf adwaita-icon-theme 2>&1 | tail -20
+      - run: spikes/dec-11/macos/ci/run.sh env
+      - run: spikes/dec-11/macos/ci/run.sh check
+      - name: build and start brick
+        run: |
+          cargo build --release -p brick > out/logs/build-brick.log 2>&1; echo "build-brick: exit $?" >> out/logs/summary.txt
+          target/release/brick --version >> out/logs/summary.txt 2>&1
+          spikes/dec-11/macos/ci/run.sh run || true
+      - if: always()
+        run: cat out/logs/summary.txt
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: macos-x86_64, path: out, if-no-files-found: warn }
