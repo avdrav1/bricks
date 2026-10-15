@@ -1,0 +1,63 @@
+/* Etch: the GTK 4 window (apps/etch/src) and the scenes' extras.
+   Sizes inside .win are GTK pixels; the window's zoom makes them 125%. Etch is plain
+   GTK 4 on Adwaita: the window's background everywhere, bordered buttons and fields. */
+
+.etch-win .win-body { background: #f6f5f4; overflow: hidden; }
+
+/* the menu bar (app.set_menubar: File, Edit, View, Image) */
+.etch-menubar { flex: none; height: 26px; display: flex; align-items: stretch; padding: 0 0 0 0; border-bottom: 1px solid #dcdad5; }
+.etch-menubar span { padding: 0 8px; line-height: 24px; border-bottom: 2px solid transparent; }
+.etch-menubar span.on { color: var(--blue-dark); border-bottom-color: var(--blue); }
+
+/* the tool column (tools.rs: margins 6, spacing 4, flat toggle buttons, 20 px icons) and the canvas */
+.etch-main { flex: none; display: flex; position: relative; }
+.etch-tools { flex: none; width: 53px; padding: 6px 6px 0; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid #dcdad5; }
+.etch-tool { width: 40px; height: 34px; border-radius: 6px; display: grid; place-items: center; color: #2e3436; }
+.etch-tool.on { background: rgba(0, 0, 6, 0.12); }
+.etch-tool svg { display: block; }
+.etch-canvas { flex: none; position: relative; overflow: hidden; background: #f6f5f4; }
+.etch-img { position: absolute; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35); }
+.etch-img .etch-art, .etch-img .etch-photo { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block; }
+.etch-ov { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.etch-opening { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 12px; }
+.etch-spinner { color: #2e3436; }
+
+/* the colour row and the status (window.rs: spacing 12; Hex and Custom… spacing 6) */
+.etch-row { flex: none; height: 51px; border-top: 1px solid #dcdad5; display: flex; align-items: center; gap: 12px; padding: 0 12px; white-space: nowrap; }
+.etch-ind { position: relative; flex: none; width: 30px; height: 30px; }
+.etch-ind i { position: absolute; width: 20px; height: 20px; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45); }
+.etch-ind .fg { left: 0; top: 0; }
+.etch-ind .bg { left: 10px; top: 10px; }
+.etch-pair { display: flex; align-items: center; gap: 6px; }
+.etch-sizing, .etch-tolerating { gap: 12px; }
+.etch-entry { height: 34px; padding: 0 8px; line-height: 32px; border: 1px solid #cdc7c2; border-radius: 6px; background: #fff; }
+.etch-hex { width: 98px; }
+.etch-button { height: 34px; padding: 0 16px; line-height: 32px; border: 1px solid #cdc7c2; border-radius: 6px; background: #f6f5f4; box-shadow: inset 0 -1px rgba(0, 0, 0, 0.04); }
+.etch-button.on { background: #d6d1cd; }
+.etch-b, .etch-i { width: 48px; padding: 0; text-align: center; }
+.etch-b b { font-weight: 800; }
+.etch-i i { font-family: Caladea, serif; font-weight: 400; }
+.etch-pal { flex: none; display: grid; grid-template-columns: repeat(10, 16px); gap: 6px; }
+.etch-pal i { width: 16px; height: 16px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35); }
+.etch-spin { display: flex; height: 34px; border: 1px solid #cdc7c2; border-radius: 6px; background: #fff; overflow: hidden; }
+.etch-spin span { width: 40px; padding: 0 8px; line-height: 32px; font-variant-numeric: tabular-nums; }
+.etch-spin b { width: 34px; text-align: center; line-height: 31px; font-weight: 400; font-size: 18px; border-left: 1px solid #e6e2de; }
+.etch-dd { display: flex; align-items: center; justify-content: space-between; width: 150px; height: 34px; padding: 0 8px 0 10px; border: 1px solid #cdc7c2; border-radius: 6px; background: #f6f5f4; }
+.etch-seg { display: flex; }
+.etch-seg span { height: 34px; padding: 0 16px; line-height: 32px; border: 1px solid #cdc7c2; margin-left: -1px; background: #f6f5f4; }
+.etch-seg span:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+.etch-seg span:last-child { border-radius: 0 6px 6px 0; }
+.etch-seg span.on { background: #d6d1cd; }
+.etch-status { flex: 1; min-width: 0; display: flex; align-items: center; gap: 24px; padding-left: 12px; font-variant-numeric: tabular-nums; white-space: pre; }
+.etch-status .grow { flex: 1; }
+.etch-status span:empty:not(.grow) { display: none; }
+
+/* the Image menu, under its menu bar item */
+.etch-pop { position: absolute; left: 0; top: 0; z-index: 10; }
+.etch-menu { left: 0; top: 0; min-width: 250px; }
+.etch-menu .mi { gap: 24px; }
+.etch-menu .mi.off { opacity: 0.45; }
+
+/* the 8K timing card */
+.etch-stat { position: absolute; left: 50%; top: 440px; z-index: 40; opacity: 0; padding: 22px 44px 24px; border-radius: 22px; background: rgba(13, 20, 17, 0.9); color: #9d95e8; font: 500 52px var(--brand); white-space: nowrap; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35); }
+.etch-stat b { font-weight: 800; color: #e6ede9; }

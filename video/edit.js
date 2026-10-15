@@ -14,6 +14,8 @@ V.order([
   "slate-docx-save", "slate-markdown",
   // Frame
   "frame-edit", "frame-picture", "frame-shapes", "frame-outline", "frame-count",
+  // Etch
+  "etch-paint", "etch-shapes", "etch-select", "etch-big",
   // Install
   "install-site", "install-terminal", "install-open",
   // Close

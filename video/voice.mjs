@@ -4,17 +4,21 @@
 // Clips are cached by their text: only new or changed sentences are spoken.
 //
 // Two speakers, chosen by the voice's name:
-// - Microsoft's neural voices, "en-IE-ConnorNeural" (the default, Irish) and
-//   the like, through the read-aloud service built into Edge (msedge-tts). It
-//   needs no key but isn't licensed for this use, and it needs the network.
-// - Kokoro voices, "af_heart" and the like: an 82M-parameter model run locally
-//   with ONNX in JavaScript (kokoro-js). American and British voices only.
+// - Kokoro voices, "af_heart" (the default) and the like: Kokoro-82M, an
+//   Apache-2.0 model run locally with ONNX in JavaScript (kokoro-js), so its
+//   speech can be published. American and British voices only; af_heart is
+//   the voice its authors grade highest. The model downloads once from
+//   Hugging Face, then works offline.
+// - Microsoft's neural voices, "en-IE-ConnorNeural" and the like, through the
+//   read-aloud service built into Edge (msedge-tts). It needs no key but isn't
+//   licensed for publishing, and it needs the network: for drafts, and for the
+//   Hindi cut's narrator until it has a licensed one.
 import { mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 
-export const DEFAULT_VOICE = "en-IE-ConnorNeural";
+export const DEFAULT_VOICE = "af_heart";
 const isMicrosoft = (voice) => /^[a-z]{2}-[A-Z]{2}-\w+Neural$/.test(voice);
 // About 165 words a minute, a relaxed pace; both speak at about 185 at 1.
 export const defaultSpeed = (voice) => (isMicrosoft(voice) ? 0.9 : 0.85);

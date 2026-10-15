@@ -17,7 +17,9 @@ V.scene({
     })}`;
     const frame = root.querySelector("iframe");
     // The page as published, minus its web-font links: the video's own
-    // copy of League Spartan stands in, so rendering needs no network.
+    // copy of League Spartan stands in, so rendering needs no network. Its
+    // screenshots' URLs are made absolute: Chromium's preload scanner fetches
+    // them before it reads the <base>, against this page's own address.
     V.defer(
       fetch("/sites/cronkite/index.html")
         .then((r) => r.text())
@@ -27,6 +29,7 @@ V.scene({
               frame.onload = () => frame.contentDocument.fonts.ready.then(ok);
               frame.srcdoc = page
                 .replace(/<link[^>]+fonts\.(googleapis|gstatic)\.com[^>]*>\s*/g, "")
+                .replace(/(["\s])shots\//g, "$1/sites/cronkite/shots/")
                 .replace("<head>", '<head><base href="/sites/cronkite/"><link rel="stylesheet" href="/fonts.css"><style>html{scrollbar-width:none}</style>');
             }),
         ),
@@ -69,8 +72,8 @@ V.scene({
     const paste = 0.7, enter = 1.5, downloaded = 1.9, installed = 3.1;
     return (t) => {
       const lines = [V.ui.prompt(t >= paste ? cmd : "")];
-      if (t >= downloaded) lines.push("Downloading Slate 0.1.2");
-      if (t >= installed) lines.push("Installed Slate 0.1.2", "  /home/you/.local/bin/slate; Word documents (.docx) and Markdown (.md) open with it");
+      if (t >= downloaded) lines.push("Downloading Slate 0.3.0");
+      if (t >= installed) lines.push("Installed Slate 0.3.0", "  /home/you/.local/bin/slate; Word documents (.docx) and Markdown (.md) open with it");
       if (t >= installed + 0.1) lines.push(V.ui.prompt());
       V.ui.term(term, lines, t, t < enter || t >= installed + 0.1);
       V.keys(t, [[paste - 0.25, "Ctrl+Shift+V"], [enter, "Enter"]]);
@@ -82,55 +85,66 @@ V.scene({
   },
 });
 
-// Double-click a .docx: Slate opens it. Then a .pptx: Frame does.
+// Double-click a .docx: Slate opens it. Then a .pptx: Frame does. Then a .png: Etch does.
 V.scene({
   id: "install-open",
-  beats: [{ say: "After that, your files just open in the right app.", min: 7.5 }],
+  beats: [{ say: "After that, your files just open in the right app.", min: 10.5 }],
   build(root) {
     const items = [
       { name: "report.docx", ext: "docx" }, { name: "deck.pptx", ext: "pptx" }, { name: "notes.md", ext: "md" },
-      { name: "budget.xlsx", ext: "xlsx" }, { name: "big.csv", ext: "csv" }, { name: "photo.jpg", ext: "jpg" },
+      { name: "budget.xlsx", ext: "xlsx" }, { name: "big.csv", ext: "csv" }, { name: "drawing.png", ext: "png" },
     ];
     root.innerHTML = `${V.ui.desktop()}${V.ui.files({ id: "files", x: 120, y: 110, w: 1000, h: 640, path: "Documents", items })}`;
-    // Slate's and Frame's windows come from their scene files.
-    if (!V.slate || !V.frame) return console.error("install-open needs V.slate.window and V.frame.window");
-    root.insertAdjacentHTML("beforeend", `${V.slate.window({ id: "slate", x: 560, y: 90, w: 1180, h: 840 })}${V.frame.window({ id: "frame", x: 330, y: 150, w: 1460, h: 820 })}`);
+    // Slate's, Frame's, and Etch's windows come from their scene files.
+    if (!V.slate || !V.frame || !V.etch) return console.error("install-open needs V.slate.window, V.frame.window, and V.etch.window");
+    const etchRect = { x: 470, y: 120, w: 1360, h: 800 };
+    root.insertAdjacentHTML(
+      "beforeend",
+      `${V.slate.window({ id: "slate", x: 560, y: 90, w: 1180, h: 840 })}${V.frame.window({ id: "frame", x: 330, y: 150, w: 1460, h: 820 })}${V.etch.window({ id: "etch", ...etchRect })}`,
+    );
     const files = root.querySelector("#files");
     const slate = root.querySelector("#slate");
     const frame = root.querySelector("#frame");
+    const etch = root.querySelector("#etch");
+    V.etch.bind(etch, etchRect);
     const docx = files.querySelector('[data-name="report.docx"]');
     const pptx = files.querySelector('[data-name="deck.pptx"]');
-    const open1 = 1.3, back = 3.6, open2 = 4.6;
+    const png = files.querySelector('[data-name="drawing.png"]');
+    const open1 = 1.3, back = 3.6, open2 = 4.6, back2 = 6.6, open3 = 7.6;
     return (t) => {
       const [dx, dy] = V.ui.pos(docx, 0.5, 0.4);
       const [px, py] = V.ui.pos(pptx, 0.5, 0.4);
-      V.ui.selectFile(files, t >= open2 - 0.2 ? "deck.pptx" : t >= open1 - 0.2 ? "report.docx" : "");
-      // Back to Files for the second file: Slate stays open behind it.
-      V.css(files, { zIndex: t >= back ? 3 : 1 });
+      const [gx, gy] = V.ui.pos(png, 0.5, 0.4);
+      V.ui.selectFile(files, t >= open3 - 0.2 ? "drawing.png" : t >= open2 - 0.2 ? "deck.pptx" : t >= open1 - 0.2 ? "report.docx" : "");
+      // Back to Files for each next file: the apps opened stay open behind it.
+      V.css(files, { zIndex: t >= back2 ? 5 : t >= back ? 3 : 1 });
       V.css(slate, { zIndex: 2 });
       V.css(frame, { zIndex: 4 });
+      V.css(etch, { zIndex: 6 });
       V.ui.appear(slate, t, open1 + 0.35);
       V.ui.appear(frame, t, open2 + 0.35);
+      V.ui.appear(etch, t, open3 + 0.35);
       V.pointer(t, [
         [0, 900, 650], [open1 - 0.5, dx, dy], [open1 - 0.15, dx, dy, { click: true }], [open1, dx, dy, { click: true }],
         [back - 0.4, dx + 60, dy + 380], [back, 300, 700, { click: true }], [open2 - 0.5, px, py], [open2 - 0.15, px, py, { click: true }], [open2, px, py, { click: true }],
-        [open2 + 2, px + 500, py + 330],
+        [back2 - 0.4, 260, 620], [back2, 230, 640, { click: true }], [open3 - 0.5, gx, gy], [open3 - 0.15, gx, gy, { click: true }], [open3, gx, gy, { click: true }],
+        [open3 + 2, gx + 420, gy + 260],
       ]);
     };
   },
 });
 
-// The three icons, then the URL.
+// The four icons, then the URL.
 V.scene({
   id: "close",
   xfade: 0.6,
-  beats: [{ say: "Cronkite. Fast, native, and open source. Brick, Slate, and Frame are all available today, at cronkite.cc." }, { dur: 2.5 }],
+  beats: [{ say: "Cronkite. Fast, native, and open source. Brick, Slate, Frame, and Etch are all available today, at cronkite.cc." }, { dur: 2.5 }],
   build(root, s) {
     root.innerHTML = `
       <div class="paper close">
-        <div class="close-icons">${["brick", "slate", "frame"].map((a) => V.ui.appIcon(a, 168)).join("")}</div>
+        <div class="close-icons">${["brick", "slate", "frame", "etch"].map((a) => V.ui.appIcon(a, 168)).join("")}</div>
         <h1 class="close-url">cronkite.cc</h1>
-        <p class="close-line">${V.tr("close-line", "Brick, Slate, and Frame · Available now · Open source")}</p>
+        <p class="close-line">${V.tr("close-line", "Brick, Slate, Frame, and Etch · Available now · Open source")}</p>
         <div class="close-black"></div>
       </div>`;
     const icons = [...root.querySelectorAll(".close-icons svg")];

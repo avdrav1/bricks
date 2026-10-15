@@ -110,6 +110,7 @@ const V = (() => {
     [/\b00123\b/g, "zero zero one two three"],
     [/cronkite\.cc/g, "cronkite dot C C"],
     [/Ctrl\+N/g, "Control N"],
+    [/\b8K\b/g, "eight K"],
   ];
   const spoken = (text) => SAY.reduce((s, [re, to]) => s.replace(re, to), text);
   // Sentences end at . ? ! or Hindi's danda (।), followed by a space.

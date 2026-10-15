@@ -22,20 +22,21 @@ V.scene({
   },
 });
 
-// Three app icons slide in side by side, each named as the narrator says it.
+// Four app icons slide in side by side, each named as the narrator says it.
 V.scene({
   id: "suite-icons",
-  beats: [{ say: "Cronkite is an office suite for Linux, built from scratch in Rust. It has three apps: Brick for spreadsheets, Slate for documents, and Frame for presentations." }],
+  beats: [{ say: "Cronkite is an office suite for Linux, built from scratch in Rust. It has four apps: Brick for spreadsheets, Slate for documents, Frame for presentations, and Etch for images." }],
   build(root, s) {
     const apps = [
       ["brick", "Brick", "Spreadsheets", "Brick for"],
       ["slate", "Slate", "Documents", "Slate for"],
       ["frame", "Frame", "Presentations", "Frame for"],
+      ["etch", "Etch", "Images", "Etch for"],
     ];
     root.innerHTML = `
       <div class="paper">
         <p class="kicker">An office suite for Linux · built from scratch in Rust</p>
-        <div class="trio">${apps.map(([id, name, kind]) => `<div class="app-card" data-app="${id}">${V.ui.appIcon(id, 220)}<h2>${name}</h2><span>${kind}</span></div>`).join("")}</div>
+        <div class="suite-apps">${apps.map(([id, name, kind]) => `<div class="app-card" data-app="${id}">${V.ui.appIcon(id, 220)}<h2>${name}</h2><span>${kind}</span></div>`).join("")}</div>
       </div>`;
     const kicker = root.querySelector(".kicker");
     const cards = [...root.querySelectorAll(".app-card")];
@@ -60,9 +61,9 @@ V.scene({
   build(root, s) {
     const grid = [
       ["files", "Files"], ["settings", "Settings"], ["terminal", "Console"], ["browser", "Web"], ["text", "Text Editor"], ["calendar", "Calendar"],
-      ["software", "Software"], ["calculator", "Calculator"], ["photos", "Image Viewer"], ["brick", "Brick"], ["slate", "Slate"], ["frame", "Frame"],
+      ["software", "Software"], ["photos", "Image Viewer"], ["brick", "Brick"], ["slate", "Slate"], ["frame", "Frame"], ["etch", "Etch"],
     ];
-    const ours = new Set(["brick", "slate", "frame"]);
+    const ours = new Set(["brick", "slate", "frame", "etch"]);
     root.innerHTML = `
       ${V.ui.desktop({ dim: true })}
       <div class="appgrid-search">${V.ui.icon("edit-find", 18)}<span>Type to search</span></div>
@@ -79,9 +80,9 @@ V.scene({
         const k = V.p(t, 0.1 + i * 0.04, 0.6 + i * 0.04, V.ease.out);
         V.css(el, { opacity: k, transform: `scale(${0.85 + 0.15 * k})` });
       });
-      // While the narrator says each one installs on its own, the three
+      // While the narrator says each one installs on its own, the four
       // lift out one by one.
-      items.slice(9).forEach((el, i) => {
+      items.filter((el) => ours.has(el.dataset.app)).forEach((el, i) => {
         const lift = V.p(t, own + i * 0.35, own + 0.4 + i * 0.35, V.ease.out);
         V.css(el.querySelector("svg"), { transform: `translateY(${-10 * lift}px)` });
         V.cls(el, "lit", lift > 0.5);

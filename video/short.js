@@ -2,6 +2,7 @@
 // and Hindi (?cut=short-hi); render with `node render.mjs --cut short` or
 // `--cut short-hi`. Each clip is a window of a scene, in that scene's own
 // seconds, under a line of its own. The apps' interfaces stay in English.
+// A clip with a line in only one of the languages plays only in that cut.
 "use strict";
 
 (() => {
@@ -34,8 +35,11 @@
     },
     {
       scene: "frame-outline", from: 1.0, to: 6.6,
-      en: "Or just type an outline.",
       hi: "या बस एक आउटलाइन टाइप कीजिए।",
+    },
+    {
+      scene: "etch-paint", from: 0.6, to: 7.0,
+      en: "Etch edits images, closer to Paint than to Photoshop.",
     },
     {
       scene: "install-terminal", from: 0.3, to: 5.0,
@@ -44,11 +48,12 @@
     },
     {
       scene: "close", from: 1.0, to: 12.16,
-      en: "Cronkite. Fast, native, and open source. Get it at cronkite.cc.",
+      en: "Cronkite: four apps, fast, native, and open source. Get them at cronkite.cc.",
       hi: "Cronkite. तेज़, नेटिव और ओपन सोर्स। cronkite.cc पर पाइए।",
     },
   ];
-  const inLanguage = (lang) => clips.map(({ en, hi, ...clip }) => ({ ...clip, say: { en, hi }[lang] }));
+  const inLanguage = (lang) =>
+    clips.filter((c) => (!c.en && !c.hi) || c[lang]).map(({ en, hi, ...clip }) => ({ ...clip, say: { en, hi }[lang] }));
 
   V.cut("short", inLanguage("en"));
   V.cut("short-hi", inLanguage("hi"), {
@@ -59,7 +64,7 @@
       tagline: "Linux के लिए एक तेज़, नेटिव ऑफ़िस सुइट।",
       "open-stat": "<b>1 GB</b> CSV <b>314 ms</b> में खुली",
       "install-notes": ["सिर्फ़ आपके लिए: ~/.local", "sudo की ज़रूरत नहीं", "पैकेज मैनेजर नहीं", "sha256 से जाँच"],
-      "close-line": "Brick, Slate और Frame · अभी उपलब्ध · ओपन सोर्स",
+      "close-line": "Brick, Slate, Frame और Etch · अभी उपलब्ध · ओपन सोर्स",
     },
   });
 })();

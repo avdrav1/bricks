@@ -1,12 +1,10 @@
 # Cronkite: demo and explainer video script
 
-About 4 minutes at a relaxed pace, about 540 words of voiceover. Screen recordings on a
+About 4½ minutes at a relaxed pace, about 650 words of voiceover. Screen recordings on a
 GNOME desktop at 1920×1080. Each claim below has its source in brackets. Cut those notes
 before recording.
 
 **Tone:** calm, plain, a little dry. Show the apps working rather than describing them.
-
-**Not released yet:** the shot marked ◆ shows Slate's Word layouts (SL4, SLATE-23 to SLATE-28): done, and in Slate v0.3.0, which isn't out yet. See the production notes before recording it.
 
 ---
 
@@ -23,7 +21,7 @@ before recording.
 
 | Picture | Voiceover |
 | --- | --- |
-| Three app icons slide in side by side: Brick, Slate, Frame. | "Cronkite is an office suite for Linux, built from scratch in Rust. It has three apps: Brick for spreadsheets, Slate for documents, and Frame for presentations." |
+| Four app icons slide in side by side: Brick, Slate, Frame, Etch. | "Cronkite is an office suite for Linux, built from scratch in Rust. It has four apps: Brick for spreadsheets, Slate for documents, Frame for presentations, and Etch for images." |
 | The icons sit in the GNOME app grid next to Files and Settings. | "They're native apps. No browser tab, no subscription, no account. Each one installs and runs on its own, so you take only what you need." |
 
 ## 0:30 – Brick (60 s)
@@ -45,7 +43,7 @@ before recording.
 | Picture | Voiceover |
 | --- | --- |
 | Double-click `report.docx` in Files; Slate opens. Headings, a bulleted list, a table, a picture: one long column with no page edges. The body is in Cambria and the headings in Calibri, as in Word. | "Slate is the word processor. You'll notice there are no pages. Slate gives you one endless page, so you write instead of fighting margins. And Word documents look like themselves, in their own fonts and styles." |
-| ◆ A Word letter or invoice: an embedded font in its heading, a shaded heading with a border under it, tab stops with dot leaders and a right-aligned date, a paragraph with its own indents, Word's ● bullets. The column is the document's own page width. | "Word layouts come through too: the page's own width, tab stops with leaders, borders and shading, embedded fonts, and Word's own list markers." |
+| A Word letter or invoice: an embedded font in its heading, a shaded heading with a border under it, tab stops with dot leaders and a right-aligned date, a paragraph with its own indents, Word's ● bullets. The column is the document's own page width. | "Word layouts come through too: the page's own width, tab stops with leaders, borders and shading, embedded fonts, and Word's own list markers." |
 | View → Text Width, which starts at Page (the document's page width): Narrow, then Wide, then Full. The text reflows smoothly each time. | "Choose how wide you want the column. That's a setting for you; it doesn't change the document." |
 | Type a sentence, press Ctrl+B and Ctrl+1, then undo and redo. | "Typing, headings, lists, tables, and copy and paste all work as you'd expect, with full undo." |
 | Select a paragraph. The format bar over the page: open the style picker (each style drawn in its own look) and pick Quote; choose a font, a size, and a colour; Ctrl+E centres it. | "When you want more, a slim format bar holds the document's own styles, fonts, sizes, and colours. No ribbon." |
@@ -55,7 +53,7 @@ before recording.
 | Ctrl+S. Then open the same file in LibreOffice Writer: the edit is there, and so are the header, the footer, and the page layout Slate never showed. | "Here's the part we care most about. When Slate saves a Word document, it changes only what you edited. Everything else in the file, the parts Slate doesn't even show you, stays exactly as it was." |
 | Open `notes.md`: it shows formatted, not as source. Edit one paragraph and save. A terminal `git diff` shows one changed line. | "Markdown and plain text too. Edit one paragraph of a Markdown file, and only that paragraph changes on disk. Your version control will thank you." |
 
-[docs/specs/slate.md: pageless column, text widths; SL3 fonts, styles, format bar (SLATE-19 to SLATE-22, ADR 0008); SL4 Word layouts: page width, tab stops, embedded fonts, a paragraph's own spacing and indents, borders and shading, list markers (SLATE-23 to SLATE-28, ADR 0009); SLATE-16 find and replace; SLATE-18 new document (Slate v0.1.1); SLATE-17 crash recovery; Brick's recovery is APP-7; SLATE-8: LibreOffice reopens an edited .docx with the edits and everything else unchanged; SLATE-7: an edited .md changes only the edited blocks]
+[docs/specs/slate.md: pageless column, text widths; SL3 fonts, styles, format bar (SLATE-19 to SLATE-22, ADR 0008); SL4 Word layouts: page width, tab stops, embedded fonts, a paragraph's own spacing and indents, borders and shading, list markers (SLATE-23 to SLATE-28, ADR 0009, Slate v0.3.0); SLATE-16 find and replace; SLATE-18 new document (Slate v0.1.1); SLATE-17 crash recovery; Brick's recovery is APP-7; SLATE-8: LibreOffice reopens an edited .docx with the edits and everything else unchanged; SLATE-7: an edited .md changes only the edited blocks]
 
 ## 2:50 – Frame (50 s)
 
@@ -69,27 +67,38 @@ before recording.
 
 [docs/specs/frame.md; FRAME-14 new deck; FRAME-12 pictures into placeholders and shrink to fit; FRAME-15 notes: 15 actions on the canvas, 19 in the outline, PowerPoint's 21; FRAME-8 patched save]
 
-## 3:40 – Install (20 s)
+## 3:40 – Etch (40 s)
 
 | Picture | Voiceover |
 | --- | --- |
-| The browser at cronkite.cc: three install commands, one per app. Click Copy next to the Slate command. | "Getting started takes one command per app." |
-| A terminal: paste `curl -fsSL https://slate.cronkite.cc/install.sh \| sh`. It prints *Installed Slate* and the current version. | "It installs for your user only. No sudo, no package manager, and the download is checked before anything is installed." |
-| Double-click a `.docx` in Files; Slate opens it. Then a `.pptx`; Frame opens it. | "After that, your files just open in the right app." |
+| Etch with `drawing.png` (1024×768): the menu bar (File, Edit, View, Image), the tool column, the canvas, and the colour row with the palette. Press F, click Light Turquoise in the palette, click the white sky: it fills up to the sun, the house, and the tree. Press B, click White, drag a soft cloud across the sky. Press I and click the roof: the colour is dark red, and the brush is back. | "Etch is for images. It's closer to Paint than to Photoshop: a fill, a brush, a colour picker, and Paint's own keys." |
+| Press T, click on the grass, and type *Welcome home!*: it shows in its dashed frame in Caladea, bold, as it will land. Enter. Press R, choose Filled, click Brown, and drag a chimney onto the roof: the rectangle follows the pointer until the button comes up. | "Type text in any font you have. Shapes show exactly where they'll land while you drag them." |
+| Press S and drag a box around the tree: *Selection: 178×328*. Ctrl+C, Ctrl+V: the copy floats at the image's top-left; drag it left of the house and click away. Image → Rotate 90° Right: the picture turns, 768×1024. Ctrl+Z turns it back. | "Select part of a picture to move it, or copy and paste it. Crop, resize, rotate, and flip are in the Image menu, and every step can be undone." |
+| Double-click `mountain.png` (7680×4320) in Files: Etch says *Opening…*, then shows it fitted. On-screen: *8K PNG open in 659 ms*. Ctrl+scroll over a ridge, notch by notch to 3200%: the pixels are sharp squares. | "And it stays quick with big pictures: an 8K photo opens in under a second. Zoom all the way in, and every pixel is a crisp square." |
 
-[sites/cronkite/index.html; SLATE-9 and FRAME-9 acceptance]
+[docs/specs/etch.md (Principles, Tools, Shortcuts); ETCH-8 brush, ETCH-9 and ETCH-14 fill with tolerance, ETCH-10 colour picker (goes back to the tool before it), ETCH-11 shapes previewed while dragged (outline, filled, or both), ETCH-12 text in every installed font through the input method, Enter puts it on the image; ETCH-15 selection, ETCH-16 cut, copy, and paste (paste floats at the visible image's top-left); ETCH-17 to ETCH-20 crop, resize image and canvas, rotate, flip, each one undo step; ETCH-24 Paint's keys; ETCH-6: an 8K photo-like PNG (7680×4320) shows in 659 ms, median of 3, on a Ryzen 9 5900 (target 1 s); ET0: zoom 10% to 3200%, pixels square from 100%]
 
-## 4:00 – Close (10 s)
+## 4:20 – Install (20 s)
 
 | Picture | Voiceover |
 | --- | --- |
-| The three icons, then the URL **cronkite.cc**. Beneath it: *Brick, Slate, and Frame · Available now · Open source*. | "Cronkite. Fast, native, and open source. Brick, Slate, and Frame are all available today, at cronkite.cc." |
+| The browser at cronkite.cc: four install commands, one per app. Click Copy next to the Slate command. | "Getting started takes one command per app." |
+| A terminal: paste `curl -fsSL https://slate.cronkite.cc/install.sh \| sh`. It prints *Installed Slate 0.3.0*. | "It installs for your user only. No sudo, no package manager, and the download is checked before anything is installed." |
+| Double-click a `.docx` in Files; Slate opens it. Then a `.pptx`; Frame opens it. Then a `.png`; Etch opens it. | "After that, your files just open in the right app." |
+
+[sites/cronkite/index.html; SLATE-9, FRAME-9, and ETCH-6 acceptance: installing makes each app the default for its files]
+
+## 4:40 – Close (10 s)
+
+| Picture | Voiceover |
+| --- | --- |
+| The four icons, then the URL **cronkite.cc**. Beneath it: *Brick, Slate, Frame, and Etch · Available now · Open source*. | "Cronkite. Fast, native, and open source. Brick, Slate, Frame, and Etch are all available today, at cronkite.cc." |
 
 ---
 
 ## Production notes
 
-- **Machine:** record the Brick timings on the reference box (8-core, NVMe; see `apps/brick/docs/BENCHMARKS.md`). Show them in real time; never speed them up.
+- **Machine:** record the Brick timings on the reference box (8-core, NVMe; see `apps/brick/docs/BENCHMARKS.md`), and Etch's 8K open on a machine like the Ryzen 9 5900 it was measured on. Show them in real time; never speed them up.
 - **Files you need:**
   - `big.csv` (`python3 scripts/gen_corpus.py`, the 1 GB file);
   - a three-row `.csv` for the empty cells past the data;
@@ -97,14 +106,16 @@ before recording.
   - a `.docx` letter or invoice with an embedded font, a shaded and bordered heading, tab stops with leaders, and Word bullets;
   - a `.docx` with a header and footer, a table, and a picture, its body in Cambria and its headings in Calibri, with the word `budget` in a paragraph and in the table (start from the Slate fixture, `apps/slate/crates/docx/tests/data/fixture.docx`);
   - a short `notes.md` inside a git repository;
-  - a `.pptx` with a few slides, one of them with an empty picture placeholder, and a photo to drop on it.
-- **Versions:** Brick v0.3.0, Slate v0.2.0, Frame v0.1.0 are released. Make the installer shot print the version that's current on the day.
-- **The shot marked ◆:** Slate's Word layouts (SL4: SLATE-23 to SLATE-28) are done but ship in Slate v0.3.0. Record it from that release; if the video is cut first, drop the row and its line.
+  - a `.pptx` with a few slides, one of them with an empty picture placeholder, and a photo to drop on it;
+  - `drawing.png`, 1024×768: a white sky, a sun, a house with a roof, a tree, birds, and a green field with a level horizon (so the pasted tree's corners match);
+  - `mountain.png`, a 7680×4320 photo.
+- **Versions:** Brick v0.3.0, Slate v0.3.0, Frame v0.1.0, and Etch v0.2.0 are released. Make the installer shot print the version that's current on the day.
 - **Fonts:** the Word-like look needs the metric-compatible fonts installed (Carlito for Calibri, Caladea for Cambria; `docs/specs/slate.md` lists the packages). Install them on the recording machine.
 - **Claims to keep accurate:**
   - "about a third of a second" means 314 ms on the reference box;
-  - "under a second" means 0.82 s for 19.1M rows;
+  - Brick's "under a second" means 0.82 s for 19.1M rows;
   - "a quarter fewer" means 15 vs 21 actions;
-  - "only what you edited" is the patched save. Inside an edited paragraph, bookmarks, comments, and fields don't survive, so don't demo the edit on a paragraph that has them.
+  - "only what you edited" is the patched save. Inside an edited paragraph, bookmarks, comments, and fields don't survive, so don't demo the edit on a paragraph that has them;
+  - Etch's "under a second" means an 8K PNG shown 659 ms after starting (ETCH-6, a Ryzen 9 5900; the spec's target is a second).
 - **Captions:** burn them in. Many viewers watch muted.
-- **The web-made video** (`video/`, `node render.mjs`) follows this script with the apps recreated in HTML, a synthesised soundtrack, and a voiceover in Microsoft's Irish neural voice, Connor (`en-IE-ConnorNeural`), through the read-aloud service built into Edge. That service isn't licensed for this use; for a published cut, use an Azure Speech key (the same voice, licensed) or a recorded narrator. Its narration is these lines, verbatim. Its short cut (`video/short.js`, `node render.mjs --cut short`) runs 55 s: windows of the same shots under nine shorter lines of its own. Its Hindi version (`--cut short-hi`, 60 s) has the same shots with the lines in Hindi, narrated by Microsoft's `hi-IN-MadhurNeural`, and Hindi captions and on-screen text; the apps' interfaces stay in English. Have a native speaker check the Hindi before it's published.
+- **The web-made video** (`video/`, `node render.mjs`) follows this script with the apps recreated in HTML, a synthesised soundtrack, and a voiceover by Kokoro's `af_heart` voice: Kokoro-82M, an Apache-2.0 model run locally (kokoro-js), so the narration can be published. `--voice` picks another: Kokoro's `bm_george` and the like, or, for drafts only, Microsoft's voices through the read-aloud service built into Edge, which isn't licensed for publishing. Its narration is these lines, verbatim; it runs 6:23. Its short cut (`video/short.js`, `node render.mjs --cut short`) runs 55 s: windows of the same shots under eight shorter lines of its own, Etch's among them. Its Hindi version (`--cut short-hi`, 60 s) has the same shots but Frame's outline in place of Etch's, with the lines in Hindi, narrated by Microsoft's `hi-IN-MadhurNeural` through Edge (before it's published, use an Azure Speech key for that voice or a recorded narrator), and Hindi captions and on-screen text; the apps' interfaces stay in English. Have a native speaker check the Hindi before it's published.

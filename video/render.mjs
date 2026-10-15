@@ -9,7 +9,7 @@
 //   node render.mjs --from 30 --to 60     a stretch, in seconds
 //   node render.mjs --still 31.5 [--still 40 ...]   PNG frames, for checking a look
 //   node render.mjs --draft ...           render even though the page logs errors
-//   node render.mjs --voice af_heart      the narrator's voice (default en-IE-ConnorNeural, Irish; see voice.mjs)
+//   node render.mjs --voice bm_george     the narrator's voice (default af_heart, Kokoro, run locally; see voice.mjs)
 //   node render.mjs --speed 0.9           the narrator's pace, relative to the voice's default
 //   node render.mjs --voice-only          just make the voiceover in .voice/ (for the preview)
 //   node render.mjs --no-voice            no voiceover: captions only, timed by word count

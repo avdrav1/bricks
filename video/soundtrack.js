@@ -18,6 +18,7 @@
     groove:  { kick: 1, clap: 1, hats: 1, ohat: 1, bass: 1, pad: 0.8 },
     calm:    { kick: 1, hats: 1, bass: 0.5, pad: 1, arp: 0.5 },
     drive:   { kick: 1, clap: 1, hats: 1, ohat: 1, bass: 1, pad: 0.7, arp: 1 },
+    paint:   { kick: 1, hats: 1, ohat: 1, bass: 0.8, pad: 0.9, arp: 0.6 },
     break:   { pad: 1, arp: 0.8, hats: 0.5 },
     finale:  { kick: 1, clap: 1, hats: 1, ohat: 1, bass: 1, pad: 1, arp: 1 },
   };
@@ -28,6 +29,7 @@
     : id.startsWith("brick-") ? "groove"
     : id.startsWith("slate-") ? "calm"
     : id.startsWith("frame-") ? "drive"
+    : id.startsWith("etch-") ? "paint"
     : id.startsWith("install-") ? "break"
     : id === "close" ? "finale"
     : null;

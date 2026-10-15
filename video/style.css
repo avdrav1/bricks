@@ -149,7 +149,7 @@ body.render #stage { transform: none !important; }
 
 .paper { position: absolute; inset: 0; background: var(--paper); color: var(--ink); font-family: var(--brand); }
 .kicker { position: absolute; top: 170px; width: 100%; text-align: center; margin: 0; font: 500 40px var(--brand); color: var(--muted); }
-.trio { position: absolute; left: 0; right: 0; top: 290px; display: flex; justify-content: center; gap: 140px; }
+.suite-apps { position: absolute; left: 0; right: 0; top: 290px; display: flex; justify-content: center; gap: 56px; }
 .app-card { display: flex; flex-direction: column; align-items: center; width: 340px; padding: 36px 0 30px; border-radius: 28px; }
 .app-card.lit { background: var(--accent-tint); }
 .app-card h2 { margin: 18px 0 0; font: 800 76px/1 var(--brand); letter-spacing: -0.02em; }
