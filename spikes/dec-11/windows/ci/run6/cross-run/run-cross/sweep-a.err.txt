@@ -1,0 +1,199 @@
+2026-10-15T18:59:26.742555Z  INFO slate: application starting
+Slate starting...
+Using renderer 'GskGLRenderer' for surface 'GdkWin32Toplevel'
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:27.004: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gtk-CRITICAL **: 18:59:28.917: gtk_native_get_surface: assertion 'GTK_IS_NATIVE (self)' failed
+
+(slate.exe:904): Gtk-CRITICAL **: 18:59:28.917: gtk_native_get_surface: assertion 'GTK_IS_NATIVE (self)' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:28.967: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:34.676: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:34.700: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:34.846: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:34.910: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:34.934: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:34.948: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:34.964: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:34.981: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:34.995: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.013: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.027: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.043: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.060: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.074: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.090: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.106: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.120: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.137: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.152: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.168: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.183: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.199: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.215: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.230: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.245: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.261: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.276: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.292: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.309: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.325: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.339: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.355: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.370: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.386: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.402: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.418: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.434: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.450: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.465: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.495: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.526: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:35.574: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:36.724: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:36.738: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:36.754: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:36.770: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:36.785: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:36.801: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:36.817: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:36.832: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:36.848: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:36.862: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:36.879: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:36.894: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:36.909: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:36.925: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:36.941: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:36.957: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:36.972: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:36.988: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.004: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.020: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.035: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.051: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.067: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.082: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.098: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.114: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.129: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.145: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.160: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.175: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.191: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.207: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.222: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.237: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.254: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.269: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.285: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.300: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.317: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.332: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.348: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.363: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.379: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.395: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.410: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.426: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.441: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.457: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.473: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.504: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.535: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:904): Gdk-CRITICAL **: 18:59:37.583: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
