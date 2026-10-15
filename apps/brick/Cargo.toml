@@ -15,6 +15,7 @@ bench = false
 [dependencies]
 suite-core.workspace = true
 suite-ui.workspace = true
+suite-platform.workspace = true
 suite-file.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

@@ -36,6 +36,28 @@ impl AppKind {
             AppKind::Etch => "Etch",
         }
     }
+
+    /// The command that starts it, which also names its per-user folders on Linux
+    /// (`~/.local/state/brick`).
+    pub const fn command(self) -> &'static str {
+        match self {
+            AppKind::Brick => "brick",
+            AppKind::Slate => "slate",
+            AppKind::Frame => "frame",
+            AppKind::Etch => "etch",
+        }
+    }
+
+    /// The application ID: GTK's, and the desktop entry's and icon's name, on Linux; the
+    /// bundle identifier, and the name of its per-user folders, on macOS (ADR 0011).
+    pub const fn app_id(self) -> &'static str {
+        match self {
+            AppKind::Brick => "dev.cronkite.Brick",
+            AppKind::Slate => "dev.cronkite.Slate",
+            AppKind::Frame => "dev.cronkite.Frame",
+            AppKind::Etch => "dev.cronkite.Etch",
+        }
+    }
 }
 
 impl fmt::Display for AppKind {
@@ -53,5 +75,8 @@ mod tests {
         let names: Vec<_> = AppKind::ALL.iter().map(|a| a.display_name()).collect();
         assert_eq!(names, ["Brick", "Slate", "Frame", "Etch"]);
         assert_eq!(AppKind::Etch.to_string(), "Etch");
+        let commands: Vec<_> = AppKind::ALL.iter().map(|a| a.command()).collect();
+        assert_eq!(commands, ["brick", "slate", "frame", "etch"]);
+        assert_eq!(AppKind::Slate.app_id(), "dev.cronkite.Slate");
     }
 }

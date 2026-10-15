@@ -51,7 +51,7 @@ use suite_core::AppKind;
 use suite_file::recent;
 use xlsx::{ImportError, Imported};
 
-const APP_ID: &str = "dev.cronkite.Brick";
+const APP_ID: &str = APP.app_id();
 const APP: AppKind = AppKind::Brick;
 
 #[derive(Clone)]

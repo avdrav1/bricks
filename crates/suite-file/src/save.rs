@@ -2,6 +2,10 @@
 //! it, then atomically rename it over the original and fsync the directory. A crash or
 //! `kill -9` at any point leaves either the old file or the new one, never a mix. The rename
 //! also keeps any open mapping of the old file valid. Every app in the suite saves this way.
+//!
+//! Both syncs are `File::sync_all`: `fsync` on Linux, and on macOS `fcntl(F_FULLFSYNC)`,
+//! which Rust's standard library uses there because a plain `fsync` leaves the data in the
+//! drive's cache (MAC-2; macOS CI traces the call). APFS takes it on the directory too.
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Seek, Write};

@@ -1,9 +1,9 @@
 //! File → Open Recent (ETCH-22): the last ten images opened or saved, newest first, across
-//! runs. The list is the suite's ([`suite_file::recent`], as Brick's), kept in
-//! `$XDG_STATE_HOME/etch/recent` (`~/.local/state/etch/recent`). The submenu shows each
-//! image by its name and its folder; it's read again whenever a window becomes active
-//! (another `etch` may have changed the list) and after every change. Reading and writing
-//! the list run off the UI thread.
+//! runs. The list is the suite's ([`suite_file::recent`], as Brick's), kept in `recent` in
+//! Etch's state folder ([`suite_platform::dirs`]: `~/.local/state/etch/recent` on Linux).
+//! The submenu shows each image by its name and its folder; it's read again whenever a
+//! window becomes active (another `etch` may have changed the list) and after every
+//! change. Reading and writing the list run off the UI thread.
 
 use gtk::prelude::*;
 use gtk::{gio, glib};
@@ -18,14 +18,9 @@ thread_local! {
     static SHOWN: RefCell<Option<Vec<PathBuf>>> = const { RefCell::new(None) };
 }
 
-/// `$XDG_STATE_HOME/etch/recent`: `~/.local/state/etch/recent` without it, as Brick's.
+/// `recent` in Etch's state folder, as Brick's.
 fn store() -> PathBuf {
-    std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .unwrap_or_else(|| glib::home_dir().join(".local/state"))
-        .join("etch")
-        .join("recent")
+    suite_platform::dirs::state_dir(crate::APP).join("recent")
 }
 
 /// The Open Recent submenu, filled once the list is read.

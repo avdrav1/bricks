@@ -1,24 +1,22 @@
 //! Crash recovery journals (Brick's APP-7, Slate's SLATE-17): one directory per app. Each
 //! open window with unsaved edits keeps one journal, `<pid>-<n>.journal`, written
-//! atomically (temporary file, fsync, rename). Each process holds `owner-<pid>.lock` locked
-//! while it runs, so a journal whose owner's lock can be taken belongs to a process that
-//! ended without closing its windows: that is a crash (or a kill), and its edits are
-//! offered back. Another running instance's journals are left alone. What a journal holds
-//! is the app's business.
+//! atomically (temporary file, fsync, rename). Each process holds its owner lock
+//! ([`crate::owner`]) in the directory while it runs, so a journal whose owner's lock can
+//! be taken belongs to a process that ended without closing its windows: that is a crash
+//! (or a kill), and its edits are offered back. Another running instance's journals are
+//! left alone. What a journal holds is the app's business.
 
+use crate::owner;
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
 
 /// An app's recovery directory.
 pub struct Store {
     dir: PathBuf,
 }
 
-/// This process's lock, taken with its first journal and held until it exits.
-static OWNER: Mutex<Option<File>> = Mutex::new(None);
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
 impl Store {
@@ -32,21 +30,6 @@ impl Store {
         self.dir.join(format!("{}-{n}.journal", std::process::id()))
     }
 
-    fn lock_path(&self, pid: u32) -> PathBuf {
-        self.dir.join(format!("owner-{pid}.lock"))
-    }
-
-    /// Take this process's owner lock, once: a process journals into one app's directory.
-    fn hold_owner_lock(&self) -> std::io::Result<()> {
-        let mut owner = OWNER.lock().unwrap_or_else(|e| e.into_inner());
-        if owner.is_none() {
-            let f = File::create(self.lock_path(std::process::id()))?;
-            f.lock()?;
-            *owner = Some(f);
-        }
-        Ok(())
-    }
-
     /// Write `journal` from `fill`: to a temporary file, synced, then renamed over it, so
     /// a crash mid-write leaves the previous journal whole.
     pub fn write(
@@ -55,7 +38,7 @@ impl Store {
         fill: impl FnOnce(&mut File) -> std::io::Result<()>,
     ) -> std::io::Result<()> {
         std::fs::create_dir_all(&self.dir)?;
-        self.hold_owner_lock()?;
+        owner::hold(&self.dir)?;
         let tmp = journal.with_extension("tmp");
         let mut f = File::create(&tmp)?;
         let written = fill(&mut f)
@@ -83,7 +66,9 @@ impl Store {
             let Some(pid) = journal_pid(&path) else {
                 continue;
             };
-            let alive = *live.entry(pid).or_insert_with(|| self.owner_alive(pid));
+            let alive = *live
+                .entry(pid)
+                .or_insert_with(|| owner::alive(&self.dir, pid));
             if !alive {
                 let written = e.metadata().and_then(|m| m.modified()).ok();
                 found.push((written, path));
@@ -91,17 +76,6 @@ impl Store {
         }
         found.sort_by(|a, b| b.cmp(a));
         found.into_iter().map(|(_, p)| p).collect()
-    }
-
-    /// Whether process `pid`'s owner lock is held: by this process, or another running one.
-    fn owner_alive(&self, pid: u32) -> bool {
-        if pid == std::process::id() {
-            return true;
-        }
-        match File::open(self.lock_path(pid)) {
-            Ok(f) => matches!(f.try_lock(), Err(std::fs::TryLockError::WouldBlock)),
-            Err(_) => false,
-        }
     }
 
     /// Delete a journal (saved, discarded, restored, or its window closed). Once a gone
@@ -115,8 +89,8 @@ impl Store {
                 .flatten()
                 .flatten()
                 .any(|e| e.file_name().to_string_lossy().starts_with(&prefix));
-            if !left && !self.owner_alive(pid) {
-                let _ = std::fs::remove_file(self.lock_path(pid));
+            if !left {
+                owner::release(&self.dir, pid);
             }
         }
     }
@@ -186,12 +160,12 @@ mod tests {
         // A process that crashed: its journal, and its lock file nobody holds.
         let gone = d.0.join("999999-0.journal");
         write(&store, &gone, "gone");
-        File::create(store.lock_path(999_999)).unwrap();
+        File::create(owner::lock_path(&d.0, 999_999)).unwrap();
         // A live other instance: its lock file is held (here, by this test).
         std::thread::sleep(std::time::Duration::from_millis(20));
         let live = d.0.join("888888-0.journal");
         write(&store, &live, "live");
-        let held = File::create(store.lock_path(888_888)).unwrap();
+        let held = File::create(owner::lock_path(&d.0, 888_888)).unwrap();
         held.lock().unwrap();
 
         assert_eq!(
@@ -209,7 +183,7 @@ mod tests {
 
         store.remove(&gone);
         assert!(
-            !store.lock_path(999_999).exists(),
+            !owner::lock_path(&d.0, 999_999).exists(),
             "its lock file goes with its last journal"
         );
         assert_eq!(store.crashed(), [live]);

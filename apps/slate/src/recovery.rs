@@ -1,9 +1,11 @@
 //! Crash recovery (SLATE-17). A window with unsaved edits keeps a journal of its document,
 //! written [`WRITE_AFTER`] after the first edit not yet in it (so at most that often while
-//! editing goes on), off the UI thread, in `$XDG_STATE_HOME/slate/recovery` (the suite's
-//! [`Store`]: one journal per window, an owner lock per process). The journal goes once
-//! nothing is unsaved (saved, or every edit undone) and when the window closes, so one still
-//! there after its process ended means a crash or a kill (`saving::Saver` keeps it).
+//! editing goes on), off the UI thread, in `recovery` in Slate's state folder
+//! ([`suite_platform::dirs`]: `$XDG_STATE_HOME/slate` on Linux, `~/Library/Application
+//! Support/dev.cronkite.Slate` on macOS), kept by the suite's [`Store`]: one journal per
+//! window, an owner lock per process. The journal goes once nothing is unsaved (saved, or
+//! every edit undone) and when the window closes, so one still there after its process
+//! ended means a crash or a kill (`saving::Saver` keeps it).
 //!
 //! A journal holds a line of [`Header`] (the file's path, its size and modification time
 //! when it was read or last saved, when the journal was written) and the document's blocks,
@@ -48,14 +50,10 @@ pub struct Crashed {
     pub header: Header,
 }
 
-/// The user's recovery directory: `$XDG_STATE_HOME/slate/recovery` (`~/.local/state/…`).
+/// The user's recovery directory: `recovery` in Slate's state folder
+/// (`~/.local/state/slate`).
 pub fn store() -> Store {
-    let state = std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))
-        .unwrap_or_else(std::env::temp_dir);
-    Store::at(state.join("slate").join("recovery"))
+    Store::at(suite_platform::dirs::state_dir(crate::APP).join("recovery"))
 }
 
 /// Write `blocks` and `header` as the journal `journal`, atomically.

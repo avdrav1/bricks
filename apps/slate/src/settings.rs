@@ -1,5 +1,7 @@
-//! The user's settings (ADR 0005): the text width, remembered in
-//! `$XDG_CONFIG_HOME/slate/settings`, a `key=value` file written atomically.
+//! The user's settings (ADR 0005): the text width, remembered in `settings` in Slate's
+//! config folder ([`suite_platform::dirs`]: `$XDG_CONFIG_HOME/slate` on Linux,
+//! `~/Library/Application Support/dev.cronkite.Slate` on macOS), a `key=value` file
+//! written atomically.
 //!
 //! A missing or unreadable file, or one without a value Slate knows, means the defaults.
 //! Writes run on a thread of their own, in order, so the UI thread never waits on the disk;
@@ -119,9 +121,9 @@ impl Settings {
     }
 }
 
-/// `$XDG_CONFIG_HOME/slate/settings`.
+/// `settings` in Slate's config folder (`$XDG_CONFIG_HOME/slate/settings`).
 pub fn path() -> PathBuf {
-    gtk::glib::user_config_dir().join("slate").join("settings")
+    suite_platform::dirs::config_dir(crate::APP).join("settings")
 }
 
 /// Write `settings` to `path`: a temporary file in the same directory, synced, then renamed

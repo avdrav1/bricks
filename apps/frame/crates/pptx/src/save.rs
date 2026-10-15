@@ -52,8 +52,9 @@ const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/rela
 const RELS_NS: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
 const XML_DECLARATION: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n";
 
-/// A private copy of the package a deck was read from, in the cache directory
-/// (`$XDG_CACHE_HOME/frame`), removed with it. Every save patches it, so the file may
+/// A private copy of the package a deck was read from, in Frame's cache folder
+/// (`$XDG_CACHE_HOME/frame`, on macOS `~/Library/Caches/dev.cronkite.Frame`;
+/// [`suite_platform::dirs`]), removed with it. Every save patches it, so the file may
 /// change, move, or be saved over meanwhile, and a deck saved more than once (with undo
 /// in between) still finds every part it was read with.
 #[derive(Debug)]
@@ -79,11 +80,7 @@ impl Original {
     /// A new path for a copy, in the cache directory.
     fn place() -> io::Result<PathBuf> {
         static N: AtomicU64 = AtomicU64::new(0);
-        let base = std::env::var_os("XDG_CACHE_HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
-            .unwrap_or_else(std::env::temp_dir);
-        let dir = base.join("frame");
+        let dir = suite_platform::dirs::cache_dir(suite_core::AppKind::Frame);
         std::fs::create_dir_all(&dir)?;
         Ok(dir.join(format!(
             "original-{}-{}.pptx",

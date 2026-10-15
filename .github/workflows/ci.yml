@@ -32,6 +32,19 @@ jobs:
       - run: brew install gtk4 pkgconf
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - run: cargo test --workspace
+      # Saving syncs with fcntl(F_FULLFSYNC) (MAC-2): trace suite-file's atomic-save tests
+      # with fs_usage and find the calls.
+      - name: Saves use F_FULLFSYNC
+        run: |
+          cargo test -p suite-file --test atomic --no-run
+          sudo fs_usage -w -f filesys > "$RUNNER_TEMP/fs_usage.log" 2>&1 &
+          sleep 3
+          cargo test -p suite-file --test atomic
+          sleep 2
+          sudo pkill -INT fs_usage || true
+          sleep 1
+          grep FULLFSYNC "$RUNNER_TEMP/fs_usage.log" | grep atomic | head -20
+          grep FULLFSYNC "$RUNNER_TEMP/fs_usage.log" | grep -q atomic
   bench:
     # Prints the apps/brick/docs/BENCHMARKS.md table. Runner numbers are informational: gates use the
     # reference box, and rows that open a window are skipped (no display).

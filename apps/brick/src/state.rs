@@ -1,25 +1,25 @@
-//! The app's state folder: `$XDG_STATE_HOME/brick` (default `~/.local/state/brick`),
-//! holding the recent-files list (APP-4) and crash recovery journals (APP-7).
+//! The app's state folder ([`suite_platform::dirs::state_dir`]): `$XDG_STATE_HOME/brick`
+//! (default `~/.local/state/brick`) on Linux, `~/Library/Application
+//! Support/dev.cronkite.Brick` on macOS, holding the recent-files list (APP-4) and crash
+//! recovery journals (APP-7).
 //!
-//! Earlier releases kept it under their own names: `…/bricks` (v0.1.1 to v0.2.1, PKG-4)
-//! and `…/spreadsheet` (v0.1.0). The first use moves the newest of those over, so recent
-//! files and unrestored edits carry across the upgrade (PKG-5).
+//! Earlier releases, all Linux-only, kept it under their own names: `…/bricks` (v0.1.1 to
+//! v0.2.1, PKG-4) and `…/spreadsheet` (v0.1.0). On Linux the first use moves the newest of
+//! those over, so recent files and unrestored edits carry across the upgrade (PKG-5).
 
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
+use suite_core::AppKind;
 
-const NAME: &str = "brick";
 /// The folders of earlier releases, newest first.
 const OLD_NAMES: [&str; 2] = ["bricks", "spreadsheet"];
 
 static DIR: LazyLock<PathBuf> = LazyLock::new(|| {
-    let base = std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .unwrap_or_else(|| {
-            PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/state")
-        });
-    resolve(&base)
+    let dir = suite_platform::dirs::state_dir(AppKind::Brick);
+    if cfg!(target_os = "linux") {
+        adopt_old(&dir);
+    }
+    dir
 });
 
 /// The state folder (it may not exist yet).
@@ -32,15 +32,13 @@ pub fn recent() -> suite_file::recent::Recent {
     suite_file::recent::Recent::load_from(dir().join("recent"))
 }
 
-/// `base/brick`, after moving the newest earlier release's folder there if it doesn't
-/// exist yet.
-fn resolve(base: &Path) -> PathBuf {
-    let dir = base.join(NAME);
-    if dir.exists() {
-        return dir;
-    }
+/// Unless `dir` exists, move the newest earlier release's folder beside it there.
+fn adopt_old(dir: &Path) {
+    let Some(base) = dir.parent().filter(|_| !dir.exists()) else {
+        return;
+    };
     if let Some(old) = OLD_NAMES.iter().map(|n| base.join(n)).find(|p| p.is_dir()) {
-        if let Err(e) = std::fs::rename(&old, &dir) {
+        if let Err(e) = std::fs::rename(&old, dir) {
             eprintln!(
                 "brick: cannot move {} to {}: {e}",
                 old.display(),
@@ -48,7 +46,6 @@ fn resolve(base: &Path) -> PathBuf {
             );
         }
     }
-    dir
 }
 
 #[cfg(test)]
@@ -60,6 +57,13 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    /// `base/brick`, as the state folder in `base` (Linux's) is found.
+    fn resolve(base: &Path) -> PathBuf {
+        let dir = base.join("brick");
+        adopt_old(&dir);
+        dir
     }
 
     #[test]

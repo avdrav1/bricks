@@ -117,16 +117,13 @@ pub fn open_text_as(path: &Path, encoding: Encoding) -> io::Result<Source> {
     result
 }
 
-/// A fresh path for a scratch copy in the cache directory (`$XDG_CACHE_HOME/brick`,
-/// created if missing): decoded copies of non-UTF-8 files, imported XLSX sheets. Callers
-/// map the copy and then remove it; the mapping stays valid after unlink.
+/// A fresh path for a scratch copy in Brick's cache folder (`$XDG_CACHE_HOME/brick`, on
+/// macOS `~/Library/Caches/dev.cronkite.Brick`; [`suite_platform::dirs`], created if
+/// missing): decoded copies of non-UTF-8 files, imported XLSX sheets. Callers map the copy
+/// and then remove it; the mapping stays valid after unlink.
 pub fn scratch_path() -> io::Result<PathBuf> {
     static N: AtomicU64 = AtomicU64::new(0);
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
-        .unwrap_or_else(std::env::temp_dir);
-    let dir = base.join("brick");
+    let dir = suite_platform::dirs::cache_dir(suite_core::AppKind::Brick);
     std::fs::create_dir_all(&dir)?;
     Ok(dir.join(format!(
         "copy-{}-{}",

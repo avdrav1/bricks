@@ -1,8 +1,10 @@
 //! A Word document's embedded fonts and family fallbacks (SLATE-25, ADR 0009).
 //!
 //! Opening a document (off the UI thread) writes each face its font table embeds once to
-//! a private directory, `$XDG_RUNTIME_DIR/slate/fonts` (else `$XDG_CACHE_HOME/slate/fonts`;
-//! mode 0700), named by its bytes' hash so the same face is one file. On the UI thread the
+//! a private directory, `fonts` in Slate's runtime folder (`$XDG_RUNTIME_DIR/slate/fonts`)
+//! or, without one, in its cache folder (`$XDG_CACHE_HOME/slate/fonts`; on macOS
+//! `~/Library/Caches/dev.cronkite.Slate/fonts`; [`suite_platform::dirs`]), mode 0700,
+//! named by its bytes' hash so the same face is one file. On the UI thread the
 //! page adds them to fontconfig as application fonts of the configuration Pango's font
 //! map uses (`FcConfigAppFontAddFile`, what Pango 1.56's `pango_font_map_add_font_file`
 //! does too), and tells the font map (`pango_fc_font_map_config_changed`): the fonts are
@@ -20,7 +22,6 @@
 //! Markdown and plain text have no font table and keep their families.
 
 use document_model::{FontTable, Format};
-use gtk::glib;
 use gtk::prelude::*;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -79,11 +80,9 @@ pub fn write(table: &FontTable) -> Vec<FontFile> {
 
 /// The private font directory, made (mode 0700) if need be.
 fn private_dir() -> std::io::Result<PathBuf> {
-    let base = std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute() && p.is_dir())
-        .unwrap_or_else(glib::user_cache_dir);
-    let dir = base.join("slate").join("fonts");
+    let dir = suite_platform::dirs::runtime_dir(crate::APP)
+        .unwrap_or_else(|| suite_platform::dirs::cache_dir(crate::APP))
+        .join("fonts");
     std::fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)

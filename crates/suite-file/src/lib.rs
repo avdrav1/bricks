@@ -1,11 +1,14 @@
 //! Format-independent file infrastructure shared by every app in the suite.
 //!
 //! Atomic saving lives here ([`save_atomic`]), crash recovery journals' directory
-//! ([`recovery`]: owner locks, atomic journal writes, finding a crashed process's journals),
-//! which Brick and Slate share, and the recent files list ([`recent`]), Brick's and Etch's.
-//! Save-as, file metadata, and temp files may move here once two apps need them. Format
-//! parsers (CSV, XLSX, DOCX, PPTX) stay in their app's crates.
+//! ([`recovery`]: atomic journal writes, finding a crashed process's journals), which
+//! Brick, Slate, and Etch share, owner locks telling which processes keeping files in a
+//! folder still run ([`owner`]: recovery's and Slate's package copies'), and the recent
+//! files list ([`recent`]), Brick's and Etch's. Save-as, file metadata, and temp files may
+//! move here once two apps need them. Format parsers (CSV, XLSX, DOCX, PPTX) stay in their
+//! app's crates.
 
+pub mod owner;
 pub mod recent;
 pub mod recovery;
 mod save;

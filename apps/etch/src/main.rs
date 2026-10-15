@@ -41,7 +41,7 @@ use suite_core::AppKind;
 const APP: AppKind = AppKind::Etch;
 /// The desktop entry and icon take this name (packaging/dev.cronkite.Etch.*), so docks
 /// match the window to its entry.
-const APP_ID: &str = "dev.cronkite.Etch";
+const APP_ID: &str = APP.app_id();
 const USAGE: &str = "usage: etch [FILE...] [--version] [--bench-stroke FRAMES] [--bench-open FILE]";
 
 #[derive(Default)]

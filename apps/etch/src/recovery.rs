@@ -1,9 +1,11 @@
 //! Crash recovery (ETCH-25). A window with unsaved changes keeps a journal of its image,
 //! written [`WRITE_AFTER`] after the first change not yet in it (so at most that often while
-//! drawing goes on), off the UI thread, in `$XDG_STATE_HOME/etch/recovery` (the suite's
-//! [`Store`]: one journal per window, an owner lock per process). The journal goes once
-//! nothing is unsaved (saved, or every change undone) and when the window closes, so one
-//! still there after its process ended means a crash or a kill (`saving::Saver` keeps it).
+//! drawing goes on), off the UI thread, in `recovery` in Etch's state folder
+//! ([`suite_platform::dirs`]: `$XDG_STATE_HOME/etch` on Linux, `~/Library/Application
+//! Support/dev.cronkite.Etch` on macOS), kept by the suite's [`Store`]: one journal per
+//! window, an owner lock per process. The journal goes once nothing is unsaved (saved, or
+//! every change undone) and when the window closes, so one still there after its process
+//! ended means a crash or a kill (`saving::Saver` keeps it).
 //!
 //! A journal is [`MAGIC`], a binary [`Header`] (when it was written, the image's size, the
 //! file's size and modification time when it was read or last saved, its path), then the
@@ -54,14 +56,9 @@ pub struct Crashed {
     pub header: Header,
 }
 
-/// The user's recovery directory: `$XDG_STATE_HOME/etch/recovery` (`~/.local/state/…`).
+/// The user's recovery directory: `recovery` in Etch's state folder (`~/.local/state/etch`).
 pub fn store() -> Store {
-    let state = std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))
-        .unwrap_or_else(std::env::temp_dir);
-    Store::at(state.join("etch").join("recovery"))
+    Store::at(suite_platform::dirs::state_dir(crate::APP).join("recovery"))
 }
 
 /// Write `image` and `header` as the journal `journal`, atomically; the journal's size in

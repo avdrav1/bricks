@@ -57,6 +57,7 @@ dependencies = [
  "libc",
  "suite-core",
  "suite-file",
+ "suite-platform",
  "suite-ui",
  "tracing",
  "tracing-subscriber",
@@ -218,6 +219,8 @@ dependencies = [
  "memchr",
  "memmap2",
  "parking_lot",
+ "suite-core",
+ "suite-platform",
 ]
 
 [[package]]
@@ -1019,7 +1022,9 @@ dependencies = [
  "deck-edit",
  "presentation-model",
  "quick-xml",
+ "suite-core",
  "suite-file",
+ "suite-platform",
  "zip",
 ]
 
@@ -1278,10 +1283,16 @@ version = "0.1.0"
 [[package]]
 name = "suite-file"
 version = "0.1.0"
+dependencies = [
+ "parking_lot",
+]
 
 [[package]]
 name = "suite-platform"
 version = "0.1.0"
+dependencies = [
+ "suite-core",
+]
 
 [[package]]
 name = "suite-ui"

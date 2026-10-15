@@ -9,7 +9,10 @@ publish = false
 
 [dependencies]
 presentation-model.workspace = true
+suite-core.workspace = true
 suite-file.workspace = true
+# The cache folder for package copies (MAC-2).
+suite-platform.workspace = true
 quick-xml = "0.41"
 zip = { version = "8", default-features = false, features = ["deflate"] }
 

@@ -34,7 +34,7 @@ use std::path::{Path, PathBuf};
 use suite_core::AppKind;
 
 const APP: AppKind = AppKind::Slate;
-const APP_ID: &str = "dev.cronkite.Slate";
+const APP_ID: &str = APP.app_id();
 const USAGE: &str =
     "usage: slate [FILE.txt|FILE.md|FILE.docx]... [--version] [--bench-flow|--bench-typing|--bench-find]";
 const START_WINDOW: &str = "start";

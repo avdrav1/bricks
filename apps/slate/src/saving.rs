@@ -44,9 +44,14 @@ pub struct Docx {
     pub original: Arc<Original>,
 }
 
-/// A private copy of the package a Word document was read from or last saved as, in the
-/// cache directory (`$XDG_CACHE_HOME/slate`), removed with it: the next save patches it,
-/// so the file may change, move, or be saved over meanwhile.
+/// A private copy of the package a Word document was read from or last saved as, in Slate's
+/// cache folder (`$XDG_CACHE_HOME/slate`, on macOS `~/Library/Caches/dev.cronkite.Slate`;
+/// [`suite_platform::dirs`]), removed with it: the next save patches it, so the file may
+/// change, move, or be saved over meanwhile. The process holds its owner lock there
+/// ([`suite_file::owner`]) before making its first copy, so another Slate's [`sweep`]
+/// leaves its copies alone while it runs.
+///
+/// [`sweep`]: Original::sweep
 #[derive(Debug)]
 pub struct Original {
     copy: PathBuf,
@@ -69,9 +74,14 @@ impl Original {
 
     /// A new copy's path, in a directory that exists.
     fn fresh() -> std::io::Result<PathBuf> {
+        Original::fresh_in(&Original::dir())
+    }
+
+    /// A new copy's path in `dir`, which is made, with this process's owner lock in it.
+    fn fresh_in(dir: &Path) -> std::io::Result<PathBuf> {
         static N: AtomicU64 = AtomicU64::new(0);
-        let dir = Original::dir();
-        std::fs::create_dir_all(&dir)?;
+        std::fs::create_dir_all(dir)?;
+        suite_file::owner::hold(dir)?;
         Ok(dir.join(format!(
             "original-{}-{}.docx",
             std::process::id(),
@@ -84,28 +94,41 @@ impl Original {
     }
 
     fn dir() -> PathBuf {
-        std::env::var_os("XDG_CACHE_HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
-            .unwrap_or_else(std::env::temp_dir)
-            .join("slate")
+        suite_platform::dirs::cache_dir(crate::APP)
     }
 
     /// Remove the copies left by Slate processes no longer running (killed before they
-    /// could remove their own).
+    /// could remove their own), and their owner locks.
     pub fn sweep() {
-        let Ok(entries) = std::fs::read_dir(Original::dir()) else {
+        Original::sweep_in(&Original::dir());
+    }
+
+    fn sweep_in(dir: &Path) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
             return;
         };
+        // Whether each copy's process still runs, asked once a process.
+        let mut owners = std::collections::HashMap::new();
         for entry in entries.flatten() {
             let name = entry.file_name();
-            let pid = name
+            let Some(pid) = name
                 .to_str()
                 .and_then(|n| n.strip_prefix("original-"))
                 .and_then(|n| n.split('-').next())
-                .and_then(|pid| pid.parse::<u32>().ok());
-            if pid.is_some_and(|pid| !Path::new(&format!("/proc/{pid}")).exists()) {
+                .and_then(|pid| pid.parse::<u32>().ok())
+            else {
+                continue;
+            };
+            let alive = *owners
+                .entry(pid)
+                .or_insert_with(|| suite_file::owner::alive(dir, pid));
+            if !alive {
                 let _ = std::fs::remove_file(entry.path());
+            }
+        }
+        for (pid, alive) in owners {
+            if !alive {
+                suite_file::owner::release(dir, pid);
             }
         }
     }
@@ -657,4 +680,65 @@ fn filter(name: &str, patterns: &[&str]) -> gtk::FileFilter {
         filter.add_pattern(p);
     }
     filter
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::BufRead;
+    use std::process::{Command, Stdio};
+    use suite_file::owner;
+
+    /// Run in a child process by the test below: a Slate holding a package copy in
+    /// `$SLATE_SWEEP_DIR` until its stdin closes.
+    #[test]
+    fn hold_a_copy_for_parent() {
+        let Some(dir) = std::env::var_os("SLATE_SWEEP_DIR") else {
+            return;
+        };
+        let copy = Original::fresh_in(Path::new(&dir)).unwrap();
+        std::fs::write(&copy, b"package").unwrap();
+        println!("copy\t{}", copy.display());
+        let _ = std::io::stdin().read_line(&mut String::new());
+    }
+
+    /// A second Slate's sweep keeps a running Slate's copy, whatever its pid, and removes a
+    /// gone one's: one that was killed, and one whose lock nobody holds.
+    #[test]
+    fn a_sweep_keeps_the_copies_of_running_slates() {
+        let dir = std::env::temp_dir().join(format!("slate-sweep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut other = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "saving::tests::hold_a_copy_for_parent",
+                "--nocapture",
+            ])
+            .env("SLATE_SWEEP_DIR", &dir)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let copy = std::io::BufReader::new(other.stdout.take().unwrap())
+            .lines()
+            .find_map(|l| l.ok()?.strip_prefix("copy\t").map(PathBuf::from))
+            .expect("the other Slate's copy");
+        // A copy left by a Slate that's gone: its lock file is there, but nobody holds it.
+        let stale = dir.join("original-999999-0.docx");
+        std::fs::write(&stale, b"old").unwrap();
+        std::fs::File::create(owner::lock_path(&dir, 999_999)).unwrap();
+
+        Original::sweep_in(&dir);
+        assert!(copy.exists(), "a running Slate's copy stays");
+        assert!(!stale.exists(), "a gone Slate's copy goes");
+        assert!(!owner::lock_path(&dir, 999_999).exists(), "with its lock");
+
+        other.kill().unwrap();
+        other.wait().unwrap();
+        assert!(copy.exists(), "a killed Slate leaves its copy behind");
+        Original::sweep_in(&dir);
+        assert!(!copy.exists(), "which the next sweep removes");
+        assert!(!owner::lock_path(&dir, other.id()).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

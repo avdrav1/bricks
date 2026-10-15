@@ -1,5 +1,5 @@
 //! Where crash recovery journals live (APP-7): `recovery` in the state folder
-//! (`~/.local/state/brick/recovery`, see [`crate::state`]), kept by the suite's
+//! (`~/.local/state/brick/recovery` on Linux, see [`crate::state`]), kept by the suite's
 //! [`suite_file::recovery::Store`]: one journal per window with unsaved edits, and an owner
 //! lock per process, so a journal whose process is gone is a crash's. What a journal holds
 //! is the workbook's ([`data_model`]'s journal format).

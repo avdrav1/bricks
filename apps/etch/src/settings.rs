@@ -1,5 +1,7 @@
-//! What Etch remembers across runs: New Image's last size and background, in
-//! `$XDG_CONFIG_HOME/etch/settings`, a `key=value` file written atomically (as Slate's).
+//! What Etch remembers across runs: New Image's last size and background, in `settings` in
+//! Etch's config folder ([`suite_platform::dirs`]: `$XDG_CONFIG_HOME/etch` on Linux,
+//! `~/Library/Application Support/dev.cronkite.Etch` on macOS), a `key=value` file
+//! written atomically (as Slate's).
 //!
 //! A missing or unreadable file, or values Etch doesn't know, mean the defaults.
 
@@ -110,9 +112,9 @@ impl Settings {
     }
 }
 
-/// `$XDG_CONFIG_HOME/etch/settings`.
+/// `settings` in Etch's config folder (`$XDG_CONFIG_HOME/etch/settings`).
 pub fn path() -> PathBuf {
-    gtk::glib::user_config_dir().join("etch").join("settings")
+    suite_platform::dirs::config_dir(crate::APP).join("settings")
 }
 
 /// Writes `settings` to `path` atomically (a synced temporary file renamed over the old
