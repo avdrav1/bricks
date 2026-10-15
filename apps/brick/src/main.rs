@@ -139,7 +139,8 @@ fn main() -> glib::ExitCode {
         .init();
     tracing::info!("application starting");
     eprintln!("{}", suite_ui::startup_message(APP));
-    // Before the file's indexing threads start: it may set the environment (macOS).
+    // Before the file's indexing threads start: they may set the environment (macOS).
+    suite_ui::renderer::init();
     suite_ui::fonts::init();
     // The save benchmark overwrites its file: only ever a scratch copy.
     if let (Some(Bench::Save { .. }), Some(file)) = (&args.bench, &args.file) {
@@ -155,7 +156,8 @@ fn main() -> glib::ExitCode {
     // A file named on the command line is mapped and indexing before the toolkit starts,
     // so its first rows show as early as possible (BENCH-1 times this path). One that
     // can't be opened is said so on the start window (a file manager's launch has no
-    // terminal to print to); benchmarks just fail.
+    // terminal to print to); benchmarks just fail. The file then reaches `open`, as the
+    // system's files do (`suite_ui::launch`).
     let mut failed = None;
     let opened = match &args.file {
         Some(path) => match open_session(path) {
@@ -180,7 +182,7 @@ fn main() -> glib::ExitCode {
 
     let app = gtk::Application::builder()
         .application_id(APP_ID)
-        .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
+        .flags(gtk::gio::ApplicationFlags::NON_UNIQUE | gtk::gio::ApplicationFlags::HANDLES_OPEN)
         .build();
     // GTK on macOS doesn't follow the Mac's light or dark appearance by itself.
     #[cfg(target_os = "macos")]
@@ -215,18 +217,27 @@ fn main() -> glib::ExitCode {
             app.set_accels_for_action(action, &accels);
         }
     });
-    let (opened, failed, bench) = (RefCell::new(opened), RefCell::new(failed), args.bench);
-    app.connect_activate(move |app| match opened.take() {
-        Some((session, book)) => build_window(app, &session, book, bench.clone()),
-        None if app.windows().is_empty() => {
+    let (opened, failed) = (RefCell::new(opened), RefCell::new(failed));
+    let bench = RefCell::new(args.bench);
+    app.connect_open(move |app, files, _| {
+        if let Some((session, book)) = opened.take() {
+            build_window(app, &session, book, bench.take());
+        } else if let Some((message, detail)) = failed.take() {
             let window = start_window(app);
-            if let Some((message, detail)) = failed.take() {
-                alert(Some(window.upcast_ref()), &message, &detail);
+            alert(Some(window.upcast_ref()), &message, &detail);
+        } else {
+            let parent = app.active_window();
+            for file in files {
+                open_file(app, file, parent.as_ref());
             }
         }
-        None => {}
     });
-    app.run_with_args::<&str>(&[])
+    app.connect_activate(|app| {
+        if app.windows().is_empty() {
+            start_window(app);
+        }
+    });
+    suite_ui::launch::run(&app, args.file.as_slice())
 }
 
 /// Map `path` and start indexing it; an .xlsx file starts importing (XLSX-1), and the
@@ -575,22 +586,27 @@ fn accept_file_drops(app: &gtk::Application, window: &gtk::ApplicationWindow) {
             glib::idle_add_local_once(move || {
                 let parent = window.upgrade().map(|w| w.upcast::<gtk::Window>());
                 for file in files {
-                    match file.path() {
-                        Some(path) => {
-                            open_window(&app, &path, parent.as_ref());
-                        }
-                        None => alert(
-                            parent.as_ref(),
-                            &format!("Cannot open {}", file.uri()),
-                            "Only local files can be opened.",
-                        ),
-                    }
+                    open_file(&app, &file, parent.as_ref());
                 }
             });
             true
         }
     });
     window.add_controller(target);
+}
+
+/// Open `file` as [`open_window`] does; one that isn't local (no path) alerts instead.
+fn open_file(app: &gtk::Application, file: &gtk::gio::File, parent: Option<&gtk::Window>) {
+    match file.path() {
+        Some(path) => {
+            open_window(app, &path, parent);
+        }
+        None => alert(
+            parent,
+            &format!("Cannot open {}", file.uri()),
+            "Only local files can be opened.",
+        ),
+    }
 }
 
 /// Show `path` in a window: its existing one, or a new one. The start window closes once

@@ -1,0 +1,55 @@
+name: mac5-probe
+# MAC-5 experiment (removed before merge): open events, launch order, and renderers on macOS.
+on:
+  push: { branches: [story/mac-5-finder-open] }
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: macos-14
+    timeout-minutes: 60
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: brew install gtk4 pkgconf
+      - run: python3 scripts/fetch_fonts.py target/fonts
+      - run: cargo build --release -p brick -p slate -p frame -p etch
+      - name: Open files through Launch Services
+        run: scripts/check_mac_open.sh target/release
+      - name: Probe launch order and renderers
+        if: always()
+        run: |
+          o=out/mac-open; l=$o/logs; s=$o/shots; f=$o/files
+          win() { "$o/windows" "$1"; }
+          # Terminal launch, no Launch Services, no file.
+          for a in frame etch slate brick; do
+            target/release/$a >"$l/probe-$a-terminal.err" 2>&1 & p=$!
+            sleep 8; win $p >"$l/probe-$a-terminal-windows.txt"; screencapture -x "$s/probe-$a-terminal.png"
+            kill $p; sleep 1; kill -9 $p 2>/dev/null || true
+          done
+          # Two files in one open.
+          open --stderr "$l/probe-frame-two.err" -a "$o/apps/Frame.app" "$f/deck.pptx" "$f/shapes.pptx"
+          sleep 10; p=$(pgrep -f "Frame.app/Contents/MacOS/frame" | head -1)
+          win $p >"$l/probe-frame-two-windows.txt"; screencapture -x "$s/probe-frame-two.png"; kill $p; sleep 2
+          # Etch with a file, LS, three times (race).
+          for i in 1 2 3; do
+            open --stderr "$l/probe-etch-race-$i.err" -a "$o/apps/Etch.app" "$f/wide.png"
+            sleep 8; p=$(pgrep -f "Etch.app/Contents/MacOS/etch" | head -1)
+            win $p >"$l/probe-etch-race-$i-windows.txt"; kill $p; sleep 2
+          done
+          # GL on this runner.
+          for a in slate:readme.md frame:deck.pptx; do
+            GSK_RENDERER=gl GSK_DEBUG=renderer target/release/${a%%:*} "$f/${a#*:}" >"$l/probe-gl-${a%%:*}.err" 2>&1 & p=$!
+            sleep 10; screencapture -x "$s/probe-gl-${a%%:*}.png"; kill $p; sleep 1; kill -9 $p 2>/dev/null || true
+          done
+          # Etch's 8K stroke benchmark: cairo (the default now) and GL.
+          target/release/etch --bench-stroke 240 >"$l/probe-etch-bench-cairo.json" 2>"$l/probe-etch-bench-cairo.err"
+          GSK_RENDERER=gl target/release/etch --bench-stroke 240 >"$l/probe-etch-bench-gl.json" 2>"$l/probe-etch-bench-gl.err"
+          cat "$l"/probe-etch-bench-*.json
+          sw_vers; system_profiler SPDisplaysDataType | head -30
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: mac5-probe, path: out/mac-open, if-no-files-found: warn }

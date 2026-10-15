@@ -4,13 +4,19 @@
 //! text widgets.
 //!
 //! [`fonts`] chooses how text finds its fonts and adds the bundled ones on macOS;
-//! [`appearance`] switches the theme between light and dark. Menus, the command palette,
-//! toolbars, dialogs, and window chrome may move here once two apps need the same one.
+//! [`appearance`] switches the theme between light and dark; [`launch`] hands the files an
+//! app is asked to open to GApplication's `open`; [`renderer`] picks how GTK draws.
+//! Menus, the command palette, toolbars, dialogs, and window chrome may move here once two
+//! apps need the same one.
 
 pub mod appearance;
 pub mod fonts;
 pub mod im;
 pub mod keys;
+pub mod launch;
+#[cfg(target_os = "macos")]
+pub mod probe;
+pub mod renderer;
 
 use suite_core::AppKind;
 

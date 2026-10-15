@@ -247,7 +247,7 @@ fn choose_and_open(app: &gtk::Application) {
 }
 
 /// Open `file` as [`open`] does; one that isn't local (no path) alerts instead.
-fn open_file(app: &gtk::Application, file: &gio::File) {
+pub fn open_file(app: &gtk::Application, file: &gio::File) {
     match file.path() {
         Some(path) => open(app, &path, None),
         None => {

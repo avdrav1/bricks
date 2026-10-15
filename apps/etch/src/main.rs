@@ -33,7 +33,6 @@ mod window;
 
 use gtk::prelude::*;
 use gtk::{gio, glib};
-use std::cell::RefCell;
 use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -108,31 +107,34 @@ fn main() -> glib::ExitCode {
         return glib::ExitCode::FAILURE;
     }
     eprintln!("{}", suite_ui::startup_message(APP));
+    suite_ui::renderer::init();
     suite_ui::fonts::init();
 
     let app = gtk::Application::builder()
         .application_id(APP_ID)
-        .flags(gio::ApplicationFlags::NON_UNIQUE)
+        .flags(gio::ApplicationFlags::NON_UNIQUE | gio::ApplicationFlags::HANDLES_OPEN)
         .build();
     // GTK on macOS doesn't follow the Mac's light or dark appearance by itself.
     #[cfg(target_os = "macos")]
     app.connect_startup(|_| suite_platform::appearance::follow(suite_ui::appearance::set_dark));
     app.connect_startup(window::install_app_actions);
-    let (files, stroke, open) = (RefCell::new(args.files), args.stroke, args.open);
+    // Files, from the command line or the system (Finder), each open in their own window
+    // (`suite_ui::launch`); a benchmark's window opens on `activate`.
+    app.connect_open(|app, files, _| {
+        for file in files {
+            window::open_file(app, file);
+        }
+    });
+    let (stroke, open) = (args.stroke, args.open);
     app.connect_activate(move |app| {
-        let files = files.take();
         if let Some(path) = &open {
             window::open(app, path, Some(start));
         } else if let Some(frames) = stroke {
             window::open_bench(app, frames);
-        } else if !files.is_empty() {
-            for path in &files {
-                window::open(app, path, None);
-            }
         } else if app.windows().is_empty() && !recovery::reopen(app) {
             // A crash's images open instead of the blank one.
             window::open_blank(app, window::DEFAULT_SIZE);
         }
     });
-    app.run_with_args::<&str>(&[])
+    suite_ui::launch::run(&app, &args.files)
 }

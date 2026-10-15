@@ -104,11 +104,12 @@ fn main() -> glib::ExitCode {
         return glib::ExitCode::FAILURE;
     }
     eprintln!("{}", suite_ui::startup_message(APP));
+    suite_ui::renderer::init();
     suite_ui::fonts::init();
 
     let app = gtk::Application::builder()
         .application_id(APP_ID)
-        .flags(gio::ApplicationFlags::NON_UNIQUE)
+        .flags(gio::ApplicationFlags::NON_UNIQUE | gio::ApplicationFlags::HANDLES_OPEN)
         .build();
     // GTK on macOS doesn't follow the Mac's light or dark appearance by itself.
     #[cfg(target_os = "macos")]
@@ -170,17 +171,24 @@ fn main() -> glib::ExitCode {
     });
     // Changes still being written finish before Slate exits.
     app.connect_shutdown(|_| SAVER.with_borrow_mut(Saver::finish));
-    let files = RefCell::new(Some(files));
-    app.connect_activate(move |app| match files.take() {
-        Some(files) if !files.is_empty() => {
-            for f in files {
-                open_window(app, Some(&f), bench, None);
+    // Files, from the command line or the system (Finder), each open in their own window;
+    // a benchmark runs on the first (`suite_ui::launch`).
+    let bench = std::cell::Cell::new(bench);
+    app.connect_open(move |app, files, _| {
+        let parent = app.active_window();
+        for file in files {
+            match (bench.take(), file.path()) {
+                (Some(bench), Some(path)) => open_window(app, Some(&path), Some(bench), None),
+                _ => open_file(app, file, parent.as_ref()),
             }
         }
-        _ if app.windows().is_empty() => start_window(app),
-        _ => {}
     });
-    app.run_with_args::<&str>(&[])
+    app.connect_activate(|app| {
+        if app.windows().is_empty() {
+            start_window(app);
+        }
+    });
+    suite_ui::launch::run(&app, &files)
 }
 
 fn canonical(path: &Path) -> PathBuf {
