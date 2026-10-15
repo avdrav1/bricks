@@ -150,6 +150,12 @@ Built (ETCH-15 to ETCH-20):
 - **Resize Canvas…** (Ctrl+Shift+R) asks for the canvas's new Width and Height (1 to 16384, the image's own at first), the anchor, where the image stays on it: nine toggle buttons in a 3×3 grid (↖ ↑ ↗ ← ● → ↙ ↓ ↘, named Top left to Bottom right for screen readers, the centre on at first), and what fills the new area: Transparent (at first) or Background colour (the window's, its hex value in the tooltip). The image's pixels aren't scaled: a larger canvas adds the new area around them as the anchor says, and a smaller one crops them as it says. Centred, a pixel left over goes to the right and bottom: 5 more pixels across adds 2 on the left and 3 on the right, 3 fewer takes 1 off the left and 2 off the right. 8K to 8000×5000 takes 32 ms off the UI thread.
 - **Rotate 90° Right** (Ctrl+H), **Rotate 90° Left** (Ctrl+G), and **Rotate 180°** (Ctrl+J) turn the image, a quarter turn swapping its width and height; **Flip Horizontal** and **Flip Vertical** mirror it left to right and top to bottom. Every pixel moves whole, nothing resampled: four quarter turns, two half turns, or two flips give back the image byte for byte. A quarter turn of an 8K image takes 24 ms off the UI thread, a half turn or a flip 19.
 
+## ET3: desktop polish
+
+Built so far (ETCH-21):
+
+- **Drag and drop.** Image files dropped on any Etch window (from a file manager) open as Open opens them, each in a window of its own: several files open several windows, a file already open brings its window forward instead, and a file that isn't an image Etch can open alerts with its name and the reason, as opening it would.
+
 ## Non-goals for V0.1
 
 Layers, masks, vector illustration, advanced brushes, PSD, CMYK, RAW, colour management, adjustment layers, advanced filters, animation, professional typography, plugins, AI generation, collaboration. Later candidates, once the basics are strong: layers, editable text and shapes, blur, sharpen, greyscale, brightness and contrast, hue and saturation, selection shapes, magic wand, arbitrary rotation, guides, rulers, a pixel grid, SVG import as raster, and `.etch`.

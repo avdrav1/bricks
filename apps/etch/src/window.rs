@@ -212,21 +212,29 @@ fn choose_and_open(app: &gtk::Application) {
     let (app, parent) = (app.clone(), app.active_window());
     glib::spawn_future_local(async move {
         match dialog.open_future(parent.as_ref()).await {
-            Ok(file) => match file.path() {
-                Some(path) => open(&app, &path, None),
-                None => {
-                    alert(
-                        &app,
-                        &format!("Cannot open {}", file.uri()),
-                        "Only local files can be opened.",
-                    )
-                    .await
-                }
-            },
+            Ok(file) => open_file(&app, &file),
             Err(e) if e.matches(gtk::DialogError::Dismissed) => {}
             Err(e) => alert(&app, "Cannot show the file dialog", &e.to_string()).await,
         }
     });
+}
+
+/// Open `file` as [`open`] does; one that isn't local (no path) alerts instead.
+fn open_file(app: &gtk::Application, file: &gio::File) {
+    match file.path() {
+        Some(path) => open(app, &path, None),
+        None => {
+            let (app, uri) = (app.clone(), file.uri());
+            glib::spawn_future_local(async move {
+                alert(
+                    &app,
+                    &format!("Cannot open {uri}"),
+                    "Only local files can be opened.",
+                )
+                .await
+            });
+        }
+    }
 }
 
 /// Open the image file at `path` in its own window: its existing one, or a new one titled
@@ -314,15 +322,44 @@ pub fn moved(window: &gtk::ApplicationWindow, path: &Path) {
     });
 }
 
-/// An empty window titled `title`, with the menu bar.
+/// An empty window titled `title`, with the menu bar, taking dropped files.
 fn new_window(app: &gtk::Application, title: &str) -> gtk::ApplicationWindow {
-    gtk::ApplicationWindow::builder()
+    let window = gtk::ApplicationWindow::builder()
         .application(app)
         .title(title)
         .default_width(1100)
         .default_height(800)
         .show_menubar(true)
-        .build()
+        .build();
+    accept_drops(app, &window);
+    window
+}
+
+/// Files dropped on `window` (from a file manager) open as Open does, each in its own
+/// window: an image already open brings its window forward, and a file that isn't one
+/// alerts with the reason. They open once the drop is done, so the drag's source isn't
+/// kept waiting on the alerts.
+fn accept_drops(app: &gtk::Application, window: &gtk::ApplicationWindow) {
+    let target = gtk::DropTarget::new(gdk::FileList::static_type(), gdk::DragAction::COPY);
+    target.connect_drop({
+        let app = app.downgrade();
+        move |_, value, _, _| {
+            let (Some(app), Ok(files)) = (app.upgrade(), value.get::<gdk::FileList>()) else {
+                return false;
+            };
+            let files = files.files();
+            if files.is_empty() {
+                return false;
+            }
+            glib::idle_add_local_once(move || {
+                for file in &files {
+                    open_file(&app, file);
+                }
+            });
+            true
+        }
+    });
+    window.add_controller(target);
 }
 
 async fn alert(app: &gtk::Application, message: &str, detail: &str) {

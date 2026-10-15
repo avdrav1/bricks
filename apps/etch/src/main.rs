@@ -4,7 +4,8 @@
 //!
 //! Each image has its own window (docs/specs/etch.md, ADR 0010) with a menu bar, the
 //! canvas, and a status bar. `etch` opens a blank white 1024×768 image; `etch FILE...`
-//! opens each PNG, JPEG, or BMP file in a window of its own, read off the UI thread.
+//! opens each PNG, JPEG, or BMP file in a window of its own, read off the UI thread, as do
+//! files dropped on a window.
 //! File → New Image (Ctrl+N) asks for a size and a background (white, transparent, or the
 //! background colour), remembered across runs; File → Open (Ctrl+O) picks a file, and Save
 //! (Ctrl+S), Save As (Ctrl+Shift+S), and Export (Ctrl+Shift+E) write PNG, JPEG, or BMP;

@@ -1,7 +1,7 @@
 """Helpers for scripts/check_drop.sh (APP-5): a drag source and a Wayland pointer.
 
-  dnd_helpers.py source FILE           a GTK 4 window, titled "dragsrc", whose whole area
-                                       drags FILE as text/uri-list, as file managers do
+  dnd_helpers.py source FILE...        a GTK 4 window, titled "dragsrc", whose whole area
+                                       drags the FILEs as text/uri-list, as file managers do
   dnd_helpers.py drag X1 Y1 X2 Y2 [HOLD] [BUTTON]
                                        under a wlroots compositor: press BUTTON (left, or
                                        middle) at (X1, Y1), move
@@ -30,25 +30,25 @@ import time
 BUTTONS = {"left": 0x110, "right": 0x111, "middle": 0x112}
 
 
-def source(path):
+def source(*paths):
     import gi
 
     gi.require_version("Gtk", "4.0")
     gi.require_version("Gdk", "4.0")
     from gi.repository import Gdk, Gio, GLib, Gtk
 
-    uri = Gio.File.new_for_path(path).get_uri()
+    uris = "".join(Gio.File.new_for_path(p).get_uri() + "\r\n" for p in paths)
 
     def activate(app):
         win = Gtk.ApplicationWindow(application=app, title="dragsrc")
         win.set_default_size(600, 600)
         area = Gtk.Box(hexpand=True, vexpand=True)
-        area.append(Gtk.Label(label="drag " + path, hexpand=True))
+        area.append(Gtk.Label(label="drag " + " ".join(paths), hexpand=True))
         drag = Gtk.DragSource(actions=Gdk.DragAction.COPY)
         drag.connect(
             "prepare",
             lambda *_: Gdk.ContentProvider.new_for_bytes(
-                "text/uri-list", GLib.Bytes.new((uri + "\r\n").encode())
+                "text/uri-list", GLib.Bytes.new(uris.encode())
             ),
         )
         area.add_controller(drag)
@@ -160,7 +160,7 @@ def hold(x, y, seconds):
 
 if __name__ == "__main__":
     if sys.argv[1] == "source":
-        source(sys.argv[2])
+        source(*sys.argv[2:])
     elif sys.argv[1] == "drag":
         drag(*map(float, sys.argv[2:7]), *sys.argv[7:8])
     elif sys.argv[1] == "click":

@@ -208,6 +208,14 @@
 #      each undone by one Ctrl+Z (400×300). Four Ctrl+H give back 400×300, and saved, the
 #      file's pixels are t.png's exactly; one Ctrl+Z after them leaves three turns
 #      (300×400).
+# ETCH-21 acceptance: drag and drop to open.
+#  26. `etch t.png`; a drag source (dnd_helpers.py source, floating in a corner, as a file
+#      manager offers files) drags one.png and two.jpg onto its window: each opens in a
+#      window of its own (sway's tree shows one.png, t.png, and two.jpg). After a click in
+#      the rightmost window, dropping t.png on it opens no second window and asks for
+#      t.png's to come forward (sway marks it urgent); dropping notes.png (text) alerts
+#      "Cannot open “notes.png”" with the reason, and closing the alert leaves the three
+#      windows.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -228,8 +236,9 @@ python -m pywayland.scanner -i /usr/share/wayland/wayland.xml \
 python -m pywayland.scanner -i /usr/share/wayland/wayland.xml \
   /scripts/protocols/input-method-unstable-v2.xml -o /tmp/proto/im_proto >/dev/null 2>&1
 export PYTHONPATH=/tmp/proto XDG_RUNTIME_DIR=/tmp/rt GDK_DEBUG=no-portals GDK_BACKEND=wayland
-# The other app of section 21 floats in a corner, clear of the image.
-printf "output HEADLESS-1 resolution 1280x720 position 0 0\ndefault_border none\nfor_window [app_id=dev.cronkite.ClipCheck] floating enable, resize set 160 80, move position 1100 600\n" > /tmp/sway.conf
+# The other app of section 21 and the drag source of section 26 float in a corner, clear
+# of the image.
+printf "output HEADLESS-1 resolution 1280x720 position 0 0\ndefault_border none\nfor_window [app_id=dev.cronkite.ClipCheck] floating enable, resize set 160 80, move position 1100 600\nfor_window [app_id=dev.brick.DragSource] floating enable, resize set 200 120, move position 1060 580\n" > /tmp/sway.conf
 sed "s/^APP = .*/APP = \"etch\"/" /scripts/a11y_helpers.py > /tmp/a11y.py
 cat > /tmp/px.py <<"PY"
 import sys
@@ -563,6 +572,24 @@ make("/tmp/t.png", 400, 300, t, "png", True)
 make("/tmp/s.png", 400, 300, lambda x, y: (255, 255, 255, 255), "png", True)
 make("/tmp/c.jpg", 320, 200, lambda x, y: (x * 255 // 319, y * 255 // 199, 128), "jpeg", False, ["quality"], ["90"])
 make("/tmp/n.png", 400, 300, lambda x, y: (255,) * 3 if x < 200 else (249,) * 3, "png", False)
+PY
+# Section 26: the titles of the etch windows (sorted), which has the focus, and which
+# asked to come forward (xdg-activation: sway marks such a window urgent).
+cat > /tmp/tree.py <<"PY"
+import json
+import subprocess
+
+tree = json.loads(subprocess.run(["swaymsg", "-t", "get_tree"], capture_output=True, text=True).stdout)
+
+def walk(n):
+    yield n
+    for c in n.get("nodes", []) + n.get("floating_nodes", []):
+        yield from walk(c)
+
+wins = [n for n in walk(tree) if n.get("app_id") == "dev.cronkite.Etch" and n.get("name")]
+print("windows: " + ", ".join(sorted(n["name"] for n in wins)))
+print("focused: " + next((n["name"] for n in wins if n.get("focused")), "none"))
+print("urgent: " + ", ".join(sorted(n["name"] for n in wins if n.get("urgent"))))
 PY
 session() {
   WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 sway --unsupported-gpu -c /tmp/sway.conf >/tmp/sway.log 2>&1 &
@@ -1233,6 +1260,34 @@ session() {
   echo "four turns: $(size) $(titled rot.png) $(px same /tmp/rot.png /tmp/t.png)"
   keys -M ctrl z -m ctrl; sleep 1; echo "three turns: $(size) $(titled rot.png)"
   pkill -x etch; sleep 1
+
+  echo "== 26 drop"
+  cp /tmp/t.png /tmp/one.png; cp /tmp/c.jpg /tmp/two.jpg
+  printf "shopping: eggs, milk\n" > /tmp/notes.png
+  # Its own log: the text file failing is logged (the app log must stay clean).
+  etch /tmp/t.png >>/tmp/drop.log 2>&1 & sleep 3
+  # Drags FILE... from the source in the corner onto the screen at X Y.
+  drop() {
+    local x=$1 y=$2; shift 2
+    python3 /scripts/dnd_helpers.py source "$@" >>/tmp/dnd.log 2>&1 & src=$!; sleep 3
+    python3 /scripts/dnd_helpers.py drag 1160 640 $x $y; sleep 4
+    kill $src; sleep 1
+  }
+  python3 /tmp/tree.py | sed "s/^/before: /"
+  drop 300 360 /tmp/one.png /tmp/two.jpg; shot dropped
+  python3 /tmp/tree.py | sed "s/^/dropped: /"
+  # Onto the window at the right, so t.png has to come forward. A click in that window
+  # first (on its status bar, changing nothing), as someone working in Etch makes: the
+  # compositor takes a request to come forward only from an app that had input lately.
+  python3 /scripts/dnd_helpers.py click 1000 708; sleep 0.5
+  drop 1000 300 /tmp/t.png
+  python3 /tmp/tree.py | sed "s/^/again: /"
+  drop 600 300 /tmp/notes.png
+  shown alert | grep -E "^alert: (Cannot open|It isn)"
+  keys -k Return; sleep 1
+  python3 /tmp/tree.py | sed "s/^/after alert: /"
+  pkill -x etch; sleep 1
+  grep -E "^etch: |panicked|CRITICAL" /tmp/drop.log | sed "s/^/log: /"
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -1553,6 +1608,16 @@ check "25: ... transparent" "25 rotate" "^horizontal undone: checker all light 1
 check "25: ... and blue" "25 rotate" "^horizontal undone: blended all$"
 check "25: four quarter turns give back t.png exactly" "25 rotate" "^four turns: 400×300 rot\.png same$"
 check "25: one Ctrl+Z after them leaves three turns" "25 rotate" "^three turns: 300×400 • rot\.png$"
+check "26: etch t.png opens one window" "26 drop" "^before: windows: t\.png$"
+check "26: two files dropped open in windows of their own" "26 drop" "^dropped: windows: one\.png, t\.png, two\.jpg$"
+check "26: ... none of them asking to come forward yet" "26 drop" "^dropped: urgent: $"
+check "26: dropping an open file opens no other window" "26 drop" "^again: windows: one\.png, t\.png, two\.jpg$"
+check "26: ... and asks for its own to come forward" "26 drop" "^again: urgent: t\.png$"
+check "26: a dropped text file alerts naming it" "26 drop" "^alert: Cannot open “notes\.png”$"
+check "26: ... and why" "26 drop" "^alert: It isn't an image Etch can open: PNG, JPEG, or BMP\.$"
+check "26: closing the alert leaves the three windows" "26 drop" "^after alert: windows: one\.png, t\.png, two\.jpg$"
+check "26: ... and the failure is logged with the reason" "26 drop" "^log: etch: cannot open /tmp/notes\.png: It isn't an image"
+absent "26: ... and nothing else goes wrong" "26 drop" "^log: .*(panicked|CRITICAL)"
 absent "the app logs no errors or panics" "app log" "^etch:|panicked|CRITICAL"
 bench=$(section "8 bench" | sed -n "s/^bench: //p")
 if [ -z "$bench" ]; then echo "FAIL 8: --bench-stroke printed nothing"; fail=1; else
