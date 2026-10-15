@@ -220,6 +220,9 @@ start slate-live 20 "$bin/slate" "$work/office-fonts.docx"
 shot slate-live-1-light; check "slate starts light" light "$TOP"
 appearance dark
 until_shot dark slate-live-2-dark "slate turns dark with the Mac"
+# Diagnostic: does a resize (a new frame for sure) show the dark look?
+osascript -e "tell application \"System Events\" to tell (first process whose unix id is $pid) to set size of window 1 to {880, 840}" >>"$logs/osascript.log" 2>&1
+shot slate-live-2b-resized
 appearance light
 until_shot light slate-live-3-light "slate turns light again"
 stop

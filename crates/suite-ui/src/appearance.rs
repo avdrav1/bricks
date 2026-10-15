@@ -8,7 +8,12 @@ use gtk::prelude::*;
 /// Ask GTK for the dark (`true`) or light variant of the theme. Safe from any thread: GTK
 /// is told on the main context, at once when the caller already runs there.
 pub fn set_dark(dark: bool) {
-    tracing::info!("appearance: {}", if dark { "dark" } else { "light" });
+    tracing::info!(
+        "appearance: {} (thread {:?}, main context owner {})",
+        if dark { "dark" } else { "light" },
+        std::thread::current().name(),
+        glib::MainContext::default().is_owner()
+    );
     glib::MainContext::default().invoke(move || apply(dark));
 }
 
@@ -29,4 +34,14 @@ fn apply(dark: bool) {
         }
         None => {}
     }
+    if new_exists() {
+        tracing::info!(
+            "appearance applied: {:?}",
+            settings.property_value("gtk-interface-color-scheme")
+        );
+    }
+}
+
+fn new_exists() -> bool {
+    glib::Type::from_name("GtkInterfaceColorScheme").is_some()
 }
