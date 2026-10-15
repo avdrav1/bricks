@@ -7,38 +7,10 @@ set -u
 out=${1:-spikes/dec-11/windows/wine}
 shift || true
 mkdir -p "$out"
-sysroot=/usr/x86_64-w64-mingw32/sys-root/mingw
 rel=/build/target/x86_64-pc-windows-gnu/release
 b=/build/xbundle/cronkite
 here=spikes/dec-11/windows
-
-# The bundle: exes, every DLL they (and the pixbuf loaders, gdbus) import from the sysroot.
-rm -rf "$b" && mkdir -p "$b/bin" "$b/lib" "$b/share/glib-2.0/schemas" "$b/share/icons"
-cp "$rel"/{brick,slate,frame,etch}.exe "$b/bin/" 2>/dev/null
-cp "$sysroot/bin/gdbus.exe" "$b/bin/"
-cp -r "$sysroot/lib/gdk-pixbuf-2.0" "$b/lib/"
-queue=("$b"/bin/*.exe "$sysroot"/lib/gdk-pixbuf-2.0/2.10.0/loaders/*.dll)
-declare -A seen
-while [ ${#queue[@]} -gt 0 ]; do
-    f=${queue[0]}; queue=("${queue[@]:1}")
-    for dll in $(x86_64-w64-mingw32-objdump -p "$f" | awk '/DLL Name:/ {print $3}'); do
-        [ -n "${seen[$dll]:-}" ] && continue
-        seen[$dll]=1
-        if [ -f "$sysroot/bin/$dll" ]; then
-            cp "$sysroot/bin/$dll" "$b/bin/"
-            queue+=("$sysroot/bin/$dll")
-        fi
-    done
-done
-glib-compile-schemas --targetdir="$b/share/glib-2.0/schemas" "$sysroot/share/glib-2.0/schemas" 2>/dev/null ||
-    cp "$sysroot/share/glib-2.0/schemas/gschemas.compiled" "$b/share/glib-2.0/schemas/" 2>/dev/null
-cp -r "$sysroot/share/icons/Adwaita" "$sysroot/share/icons/hicolor" "$b/share/icons/" 2>/dev/null
-{
-    echo "dlls: $(ls "$b"/bin/*.dll | wc -l)"
-    echo "total: $(du -sm "$b" | cut -f1) MB (bin $(du -sm "$b/bin" | cut -f1) MB, icons $(du -sm "$b/share/icons" | cut -f1) MB)"
-    du -k "$b"/bin/*.exe
-    (cd /build/xbundle && rm -f c.zip && zip -qr9 c.zip cronkite && echo "zip -9: $(du -m c.zip | cut -f1) MB")
-} >"$out/size.txt" 2>&1
+"$here/cross_bundle.sh" "$rel" /build/xbundle "$out/size.txt" >/dev/null
 
 export DISPLAY=:99 WINEPREFIX=/build/wineprefix WINEDEBUG=-all
 Xvfb :99 -screen 0 1280x800x24 >/dev/null 2>&1 &

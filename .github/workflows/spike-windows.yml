@@ -114,3 +114,64 @@ jobs:
             logs
             run-msvc
             probe
+
+  # Linux → Windows: Fedora's MinGW GTK 4, the release build and its bundle made on Linux,
+  # then run on a Windows runner.
+  cross-fedora:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    container: fedora:latest
+    env:
+      CARGO_BUILD_TARGET: x86_64-pc-windows-gnu
+      CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: x86_64-w64-mingw32-gcc
+      PKG_CONFIG_ALLOW_CROSS: "1"
+      PKG_CONFIG: x86_64-w64-mingw32-pkg-config
+    steps:
+      - name: MinGW GTK 4
+        run: |
+          dnf -y install --setopt=install_weak_deps=False mingw64-gtk4 mingw64-gcc mingw64-pkg-config \
+            mingw64-adwaita-icon-theme mingw64-gdk-pixbuf gcc git zip glib2 findutils
+          x86_64-w64-mingw32-pkg-config --modversion gtk4
+      - uses: actions/checkout@v4
+      - name: Rust
+        run: |
+          curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --target x86_64-pc-windows-gnu
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Release build
+        run: |
+          rustup target add x86_64-pc-windows-gnu
+          SECONDS=0
+          cargo build --release -p brick -p slate -p frame -p etch
+          echo "cross release build: ${SECONDS}s"
+      - name: Bundle
+        run: |
+          mkdir -p xbundle
+          spikes/dec-11/windows/cross_bundle.sh target/x86_64-pc-windows-gnu/release xbundle xbundle/size.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cross-bundle
+          path: |
+            xbundle/cronkite
+            xbundle/size.txt
+          retention-days: 5
+
+  cross-run:
+    needs: cross-fedora
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: cross-bundle, path: xbundle }
+      - name: Run apps (cross-built bundle, clean PATH)
+        continue-on-error: true
+        shell: pwsh
+        run: spikes/dec-11/windows/run_apps.ps1 -Bin xbundle\cronkite\bin -Out run-cross -Clean
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cross-run
+          path: |
+            run-cross
+            xbundle/size.txt
