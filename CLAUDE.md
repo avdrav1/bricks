@@ -40,7 +40,7 @@ Everything below about stories, invariants, crates, benchmarks, and ADRs is Bric
 | Crate | Owns |
 | --- | --- |
 | `suite-core` | `AppKind` (display name, command, app ID) and other app-independent primitives |
-| `suite-ui` | UI conventions shared by the apps (GTK 4): the primary modifier every shortcut uses (`keys`: Control on Linux, Command on macOS; accelerators, labels, key-handler matching, and the clash check the apps' shortcut-table tests run) |
+| `suite-ui` | UI conventions shared by the apps (GTK 4): the primary modifier every shortcut uses (`keys`: Control on Linux, Command on macOS; accelerators, labels, key-handler matching, and the clash check the apps' shortcut-table tests run); input methods for the apps' own text widgets (`im`: the client widget set while realized, which GTK's macOS input method needs) |
 | `suite-platform` | OS integration (Linux, macOS): the platform check, each app's per-user folders (`dirs`: XDG on Linux, `~/Library/Application Support` and `~/Library/Caches` on macOS); toolkit-free, so engine crates use it too |
 | `suite-file` | format-independent file infrastructure (document names, atomic save, owner locks telling which processes keeping files in a folder still run, crash recovery journals' directory: atomic journal writes, crashed sessions; the recent files list, Brick's and Etch's) |
 
