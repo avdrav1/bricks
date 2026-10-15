@@ -1,9 +1,12 @@
 //! User-interface conventions shared by every app in the suite.
 //!
-//! Menus, the command palette, toolbars, dialogs, themes, window chrome, and shortcut
-//! handling may move here once two apps need the same one. The suite's toolkit is GTK 4
-//! (docs/adr/0002-gtk4-for-the-suite.md); this crate adds the `gtk` dependency when it first
-//! holds a widget.
+//! [`fonts`] chooses how text finds its fonts and adds the bundled ones on macOS;
+//! [`appearance`] switches the theme between light and dark. Menus, the command palette,
+//! toolbars, dialogs, window chrome, and shortcut handling may move here once two apps
+//! need the same one. The suite's toolkit is GTK 4 (docs/adr/0002-gtk4-for-the-suite.md).
+
+pub mod appearance;
+pub mod fonts;
 
 use suite_core::AppKind;
 

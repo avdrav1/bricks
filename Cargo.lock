@@ -1298,7 +1298,9 @@ dependencies = [
 name = "suite-ui"
 version = "0.1.0"
 dependencies = [
+ "gtk4",
  "suite-core",
+ "tracing",
 ]
 
 [[package]]

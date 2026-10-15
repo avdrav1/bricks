@@ -1,11 +1,14 @@
 //! Operating-system integration shared by every app in the suite: Linux and macOS
 //! (ADR 0011). [`current`] checks the build's platform; [`dirs`] has each app's per-user
-//! folders (XDG on Linux, `~/Library` on macOS). Nothing here depends on the UI toolkit,
-//! so engine crates may use it too.
+//! folders (XDG on Linux, `~/Library` on macOS); `appearance` (macOS only) reads the
+//! Mac's light or dark appearance and follows its changes. Nothing here depends on the UI
+//! toolkit, so engine crates may use it too.
 //!
 //! File dialogs, clipboard, desktop integration, drag and drop, Wayland/X11 differences,
-//! system theme, and recent files may move here once two apps need them.
+//! and recent files may move here once two apps need them.
 
+#[cfg(target_os = "macos")]
+pub mod appearance;
 pub mod dirs;
 
 use std::fmt;

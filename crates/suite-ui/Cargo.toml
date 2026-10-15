@@ -10,6 +10,8 @@ publish = false
 
 [dependencies]
 suite-core.workspace = true
+gtk.workspace = true
+tracing.workspace = true
 
 [lints]
 workspace = true

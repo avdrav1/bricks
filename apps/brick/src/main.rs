@@ -137,6 +137,8 @@ fn main() -> glib::ExitCode {
         .init();
     tracing::info!("application starting");
     eprintln!("{}", suite_ui::startup_message(APP));
+    // Before the file's indexing threads start: it may set the environment (macOS).
+    suite_ui::fonts::init();
     // The save benchmark overwrites its file: only ever a scratch copy.
     if let (Some(Bench::Save { .. }), Some(file)) = (&args.bench, &args.file) {
         let canonical = |p: &Path| p.canonicalize().ok();
@@ -178,6 +180,9 @@ fn main() -> glib::ExitCode {
         .application_id(APP_ID)
         .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
         .build();
+    // GTK on macOS doesn't follow the Mac's light or dark appearance by itself.
+    #[cfg(target_os = "macos")]
+    app.connect_startup(|_| suite_platform::appearance::follow(suite_ui::appearance::set_dark));
     app.connect_startup(|app| {
         theme::follow_color_scheme();
         let open = gtk::gio::ActionEntry::builder("open")

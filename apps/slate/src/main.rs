@@ -100,11 +100,15 @@ fn main() -> glib::ExitCode {
         return glib::ExitCode::FAILURE;
     }
     eprintln!("{}", suite_ui::startup_message(APP));
+    suite_ui::fonts::init();
 
     let app = gtk::Application::builder()
         .application_id(APP_ID)
         .flags(gio::ApplicationFlags::NON_UNIQUE)
         .build();
+    // GTK on macOS doesn't follow the Mac's light or dark appearance by itself.
+    #[cfg(target_os = "macos")]
+    app.connect_startup(|_| suite_platform::appearance::follow(suite_ui::appearance::set_dark));
     app.connect_startup(|app| {
         let css = gtk::CssProvider::new();
         css.load_from_string(CSS);

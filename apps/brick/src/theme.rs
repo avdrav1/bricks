@@ -3,8 +3,9 @@
 //! KDE, and wlroots desktops through xdg-desktop-portal-gtk), not always as a dark theme
 //! name, and GTK before 4.20 reads only the theme name. So the app reads the setting at
 //! startup, follows its changes while running, and asks GTK for the dark or light variant
-//! of the theme. Everything else follows: the grid takes its colors from the theme's
-//! foreground color. Without a portal nothing changes.
+//! of the theme (`suite_ui::appearance`). Everything else follows: the grid takes its
+//! colors from the theme's foreground color. Without a portal nothing changes. On macOS the
+//! Mac's appearance drives it (`suite_platform::appearance`, MAC-6).
 
 use gtk::gio;
 use gtk::glib;
@@ -27,21 +28,8 @@ pub fn prefers_dark(value: &glib::Variant) -> Option<bool> {
 }
 
 fn apply(value: &glib::Variant) {
-    let (Some(dark), Some(settings)) = (prefers_dark(value), gtk::Settings::default()) else {
-        return;
-    };
-    // GTK 4.20 replaced the dark-variant switch with `gtk-interface-color-scheme` (and
-    // warns when the old one is set). The app builds against GTK 4.14's API, so the new
-    // setting is found by name at run time.
-    let new = glib::Type::from_name("GtkInterfaceColorScheme")
-        .and_then(glib::EnumClass::with_type)
-        .and_then(|e| e.to_value_by_nick(if dark { "dark" } else { "light" }));
-    match new {
-        Some(v) => settings.set_property_from_value("gtk-interface-color-scheme", &v),
-        None if settings.is_gtk_application_prefer_dark_theme() != dark => {
-            settings.set_gtk_application_prefer_dark_theme(dark)
-        }
-        None => {}
+    if let Some(dark) = prefers_dark(value) {
+        suite_ui::appearance::set_dark(dark);
     }
 }
 
