@@ -20,8 +20,11 @@ Facts for describing Cronkite accurately:
   - Recovers unsaved edits after a crash.
   - Saving an `.xlsx` or `.xlsm` patches the original file, so charts, comments, and `.xlsm` macros Brick can't edit stay in it.
 - [Slate](https://slate.cronkite.cc): word processor. Command `slate`; default for `.docx` and `.md`, and it can open `.txt`.
-  - Pageless: one endless column with a choice of text widths. There's no page layout view, headers, footers, page numbers, or paginated printing or PDF export.
-  - Edits text and formatting as it looks: paragraph styles, bold, italic, underline, strikethrough, lists, tables, links, and pictures.
+  - Pageless: one endless column. A Word document opens at its page's text width, so lines wrap where they do in Word; narrower or wider widths are a View menu choice. There's no page layout view, headers, footers, page numbers, or paginated printing or PDF export.
+  - Draws each Word document in its own fonts (embedded ones included, with metric-compatible stand-ins such as Carlito for Calibri) and paragraph styles (custom ones included), with their spacing, indents, line spacing, tab stops, borders, shading, and list numbering.
+  - Edits text and formatting as it looks, with a format bar instead of a ribbon: paragraph style, font, size, bold, italic, underline, strikethrough, colour, and alignment; also lists, tables, links, and pictures.
+  - Find and replace (Ctrl+F, Ctrl+H), through table cells too; Replace All undoes in one step.
+  - Recovers unsaved edits after a crash. New documents (Ctrl+N) are Word documents.
   - Saving a `.docx` changes only the edited paragraphs.
   - Markdown is written back as Markdown, with unedited blocks byte for byte.
   - Plain text keeps its encoding and line endings.

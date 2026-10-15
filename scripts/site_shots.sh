@@ -4,9 +4,10 @@
 #
 # Usage: scripts/site_shots.sh [OUTDIR]   (sites/cronkite/shots by default)
 #
-# Downloads Brick, Slate, and Frame from dl.cronkite.cc (checking each sha256), builds the
-# demo files (scripts/site_demo.py), and runs the apps in an Arch container under headless
-# sway at 1440x900, scale 2, with GNOME's fonts and icons. Each shot is the whole screen:
+# Downloads Brick, Slate, Frame, and Etch from dl.cronkite.cc (checking each sha256), builds
+# the demo files (scripts/site_demo.py), and runs the apps in an Arch container under
+# headless sway at 1440x900, scale 2, with GNOME's fonts and icons. Each shot is the whole
+# screen:
 #   brick-rows       the 1 GB CSV (corpus/rows_1024mb.csv), Ctrl+End at row 19 million
 #   brick-find       the same file with Ctrl+F portland, matches counted
 #   brick-workbook   budget.xlsx with the grand total's =SUM in the formula bar
@@ -14,6 +15,9 @@
 #   slate-find       notes.md with Ctrl+F tune-up highlighting its matches
 #   frame-deck       review.pptx on the chart slide, slide list and inspector beside it
 #   frame-outline    the same deck in the outline view (Ctrl+Shift+O)
+#   etch-paint       a scene painted on Etch's blank image with the pencil, in the
+#                    palette's colours and several sizes (scripts/etch_scene.py, through a
+#                    virtual pointer)
 # and each becomes NAME.webp (2880 px wide), NAME-1920.webp, and NAME-960.webp.
 # Needs docker, curl, LibreOffice with Python UNO, ImageMagick, and the corpus
 # (python3 scripts/gen_corpus.py; CORPUS=DIR points at another worktree's corpus/).
@@ -41,15 +45,21 @@ fetch() {
 fetch brick https://dl.cronkite.cc
 fetch slate https://dl.cronkite.cc/slate
 fetch frame https://dl.cronkite.cc/frame
+fetch etch https://dl.cronkite.cc/etch
 python3 scripts/site_demo.py "$tmp/files" >/dev/null
 
 # Arch's sway binary carries cap_sys_nice: exec fails without it in the container's set.
 log=$(docker run --rm --cap-add SYS_NICE -v "$tmp/bin:/opt/bin:ro" -v "$tmp/files:/data:ro" \
-  -v "$csv:/big/rows.csv:ro" -v "$tmp/raw:/shots" archlinux:latest bash -c '
+  -v "$csv:/big/rows.csv:ro" -v "$PWD/scripts:/scripts:ro" -v "$tmp/raw:/shots" archlinux:latest bash -c '
 set -uo pipefail
 pacman -Syu --noconfirm --needed sway wtype grim gtk4 dbus adwaita-fonts adwaita-icon-theme \
-  noto-fonts ttf-liberation ttf-carlito ttf-caladea shared-mime-info >/dev/null 2>&1
-mkdir -p /tmp/rt /tmp/home /tmp/f && chmod 700 /tmp/rt && cp /data/* /tmp/f/
+  noto-fonts ttf-liberation ttf-carlito ttf-caladea shared-mime-info python-gobject \
+  python-pywayland wlr-protocols wayland pkgconf >/dev/null 2>&1
+mkdir -p /tmp/rt /tmp/home /tmp/f /tmp/proto && chmod 700 /tmp/rt && cp /data/* /tmp/f/
+touch /tmp/proto/__init__.py
+python -m pywayland.scanner -i /usr/share/wayland/wayland.xml \
+  /usr/share/wlr-protocols/unstable/wlr-virtual-pointer-unstable-v1.xml -o /tmp/proto/wlr_proto >/dev/null
+export PYTHONPATH=/tmp/proto
 export PATH=/opt/bin:$PATH XDG_RUNTIME_DIR=/tmp/rt HOME=/tmp/home GDK_DEBUG=no-portals GDK_BACKEND=wayland
 printf "output HEADLESS-1 resolution 2880x1800 scale 2 position 0 0\ndefault_border none\n" > /tmp/sway.conf
 WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 sway --unsupported-gpu -c /tmp/sway.conf >/tmp/sway.log 2>&1 &
@@ -94,6 +104,13 @@ shot frame-deck
 key -M ctrl -M shift -k o -m shift -m ctrl
 shot frame-outline
 quit frame
+
+etch >>/tmp/app.log 2>&1 & sleep 4
+key -M ctrl 0 -m ctrl
+sleep 1; grim /tmp/blank.png
+python3 /scripts/etch_scene.py /tmp/blank.png 1440 900 2 >>/tmp/app.log 2>&1 || echo "etch scene failed"
+shot etch-paint
+quit etch
 swaymsg exit >/dev/null 2>&1 || true
 echo "== app log"; cat /tmp/app.log
 ' 2>&1) || { echo "$log"; exit 1; }
