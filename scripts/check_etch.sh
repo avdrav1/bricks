@@ -63,6 +63,13 @@
 #      writes it with the line white (less black). Save As now offers the JPEG image
 #      filter first. Ctrl+S on an Untitled image asks where: Save As, offering
 #      Untitled.png.
+# ETCH-8 acceptance: the brush.
+#  13. B picks the brush (the tool column shows it on), whose Hard and Soft buttons show
+#      beside the size only while it's the tool, Soft on, size 8 at first; at size 15 a
+#      sideways drag draws a soft black line: down the canvas column through it, a black
+#      core and grey pixels fading to white on each side; Hard and another drag draw a
+#      line 15 px black with no grey; Ctrl+Z takes back the hard line and leaves the soft
+#      one, another Ctrl+Z the soft one, and Ctrl+Y gives it back the same.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -218,6 +225,15 @@ elif cmd == "file":
     at = pixels(sys.argv[2])
     black = sum(1 for y in range(h) for x in range(w) if max(at(x, y)) < 60)
     print(f"{fmt.get_name()} {w}x{h} black {black}")
+elif cmd == "profile":
+    # Down the screen column X from Y0 to Y1: black pixels, and greys between black and
+    # white (a soft edge).
+    at = pixels(sys.argv[2])
+    x, y0, y1 = map(int, sys.argv[3:6])
+    col = [at(x, y) for y in range(y0, y1)]
+    black = sum(1 for p in col if max(p) < 60)
+    grey = sum(1 for p in col if max(p) >= 60 and min(p) < 245 and max(p) - min(p) <= 3)
+    print(f"black {black} soft {grey}")
 PY
 # The images sections 11 and 12 open.
 cat > /tmp/mk.py <<"PY"
@@ -455,6 +471,34 @@ session() {
   shown untitled | grep -E "^untitled: (Save As|Untitled\.png)$"
   pkill -x etch; sleep 1
   grep -E "saved|cannot save|panicked|CRITICAL" /tmp/save.log | sed "s/^/log: /"
+
+  echo "== 13 brush"
+  etch >>/tmp/app.log 2>&1 & sleep 3
+  keys -M ctrl 0 -m ctrl
+  tool() { python3 /tmp/a11y.py state $1 2>&1 | sed "s/^no toggle button.*/hidden/"; }
+  size() { python3 /tmp/a11y.py text | grep -A1 "^Size$" | tail -1; }
+  echo "start: edge $(tool Hard) $(tool Soft)"
+  keys b; echo "key b: brush $(tool Brush) pencil $(tool Pencil)"
+  echo "edge: hard $(tool Hard) soft $(tool Soft)"
+  echo "brush size: $(size)"
+  keys -M alt s -m alt; keys -M ctrl a -m ctrl; keys 15; keys -k Return
+  echo "size: $(size)"
+  read mx my <<<"$(px centre)"
+  python3 /scripts/dnd_helpers.py drag $((mx - 150)) $((my - 60)) $((mx + 150)) $((my - 60)); sleep 0.5
+  shot soft; soft=$(px profile /tmp/shot.png $mx $((my - 80)) $((my - 40))); echo "soft: $soft"
+  python3 /tmp/a11y.py press Hard; sleep 0.5
+  echo "pressed: hard $(tool Hard) soft $(tool Soft)"
+  python3 /scripts/dnd_helpers.py drag $((mx - 150)) $((my + 60)) $((mx + 150)) $((my + 60)); sleep 0.5
+  shot hard; echo "hard: $(px profile /tmp/shot.png $mx $((my + 40)) $((my + 80)))"
+  keys -M ctrl z -m ctrl; shot hard-undone
+  echo "undone hard: $(px profile /tmp/shot.png $mx $((my + 40)) $((my + 80)))"
+  echo "soft kept: $(same "$soft" "$(px profile /tmp/shot.png $mx $((my - 80)) $((my - 40)))")"
+  keys -M ctrl z -m ctrl; shot soft-undone
+  echo "undone soft: $(px profile /tmp/shot.png $mx $((my - 80)) $((my - 40)))"
+  keys -M ctrl y -m ctrl; shot soft-redone
+  echo "redone soft: $(same "$soft" "$(px profile /tmp/shot.png $mx $((my - 80)) $((my - 40)))")"
+  keys p; echo "key p: edge $(tool Hard) $(tool Soft)"
+  pkill -x etch; sleep 1
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -571,6 +615,20 @@ check "12: Ctrl+S on an Untitled image asks where" "12 save" "^untitled: Save As
 check "12: ... offering Untitled.png" "12 save" "^untitled: Untitled\.png$"
 check "12: saves are logged" "12 save" "^log: .*saved /tmp/s\.png as PNG: copied in"
 absent "12: saving logs no failures or panics" "12 save" "^log: .*(cannot save|panicked|CRITICAL)"
+# ETCH-8: the brush.
+check "13: the brush's edge is hidden while the pencil is the tool" "13 brush" "^start: edge hidden hidden$"
+check "13: B picks the brush" "13 brush" "^key b: brush on pencil off$"
+check "13: ... showing its edge, Soft on" "13 brush" "^edge: hard off soft on$"
+check "13: ... at size 8" "13 brush" "^brush size: 8$"
+check "13: the size takes 15" "13 brush" "^size: 15$"
+check "13: a soft line has a black core fading through grey" "13 brush" "^soft: black [3-7] soft ([6-9]|1[0-2])$"
+check "13: Hard turns the hard edge on" "13 brush" "^pressed: hard on soft off$"
+check "13: a hard line is 15 px black with no grey" "13 brush" "^hard: black 15 soft 0$"
+check "13: Ctrl+Z takes back the hard line" "13 brush" "^undone hard: black 0 soft 0$"
+check "13: ... leaving the soft one" "13 brush" "^soft kept: yes$"
+check "13: another Ctrl+Z takes back the soft line" "13 brush" "^undone soft: black 0 soft 0$"
+check "13: Ctrl+Y gives it back the same" "13 brush" "^redone soft: yes$"
+check "13: the edge hides again with the pencil" "13 brush" "^key p: edge hidden hidden$"
 absent "the app logs no errors or panics" "app log" "^etch:|panicked|CRITICAL"
 bench=$(section "8 bench" | sed -n "s/^bench: //p")
 if [ -z "$bench" ]; then echo "FAIL 8: --bench-stroke printed nothing"; fail=1; else

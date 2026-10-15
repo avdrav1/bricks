@@ -147,6 +147,12 @@ impl Image {
         }
     }
 
+    /// Sets the pixel at `(x, y)` (inside the image) to `color`.
+    pub(crate) fn set_pixel(&mut self, x: u32, y: u32, color: Color) {
+        let i = self.offset(x, y);
+        self.data[i..i + 4].copy_from_slice(&color.to_bytes());
+    }
+
     fn offset(&self, x: u32, y: u32) -> usize {
         (y as usize * self.width as usize + x as usize) * 4
     }

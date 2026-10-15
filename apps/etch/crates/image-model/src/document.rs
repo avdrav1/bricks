@@ -1,18 +1,69 @@
 //! [`Document`]: the image, the operations that change it, and their undo history.
 
+use crate::brush::Coverage;
 use crate::geom::join;
-use crate::{Image, Pencil, Rect, TILE};
+use crate::{Brush, Image, Pencil, Rect, TILE};
 use std::collections::BTreeMap;
 
 /// Pointer positions beyond this many pixels off the image clamp to it, so far-off points
 /// can't overflow the line arithmetic.
 const FAR: f64 = 1_000_000.0;
 
-/// A pencil stroke: its tip and the pixels the pointer went through, in order. Lines join
-/// each to the next.
+/// What a stroke draws with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Tip {
+    /// Hard-edged pixels that replace what's there (the eraser too).
+    Pencil(Pencil),
+    /// A disc composited over what's there, hard or soft.
+    Brush(Brush),
+}
+
+impl From<Pencil> for Tip {
+    fn from(p: Pencil) -> Tip {
+        Tip::Pencil(p)
+    }
+}
+
+impl From<Brush> for Tip {
+    fn from(b: Brush) -> Tip {
+        Tip::Brush(b)
+    }
+}
+
+impl Tip {
+    /// The tip's width in pixels.
+    pub fn width(&self) -> u32 {
+        match self {
+            Tip::Pencil(p) => p.width,
+            Tip::Brush(b) => b.width,
+        }
+    }
+
+    /// Draws the stroke's part from pixel `a` to pixel `b`, saving the tiles it changes
+    /// in `before` first; `cover` is the stroke's coverage so far (the brush's).
+    fn segment(
+        &self,
+        image: &mut Image,
+        before: &mut Saved,
+        cover: &mut Coverage,
+        a: (i64, i64),
+        b: (i64, i64),
+    ) -> Option<Rect> {
+        match self {
+            Tip::Pencil(p) => {
+                before.cover(image, p.bounds(image, a, b)?);
+                p.line(image, a, b)
+            }
+            Tip::Brush(brush) => brush.segment(image, before, cover, a, b),
+        }
+    }
+}
+
+/// A stroke: its tip and the pixels the pointer went through, in order. Lines join each
+/// to the next.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Stroke {
-    pub pencil: Pencil,
+    pub tip: Tip,
     pub points: Vec<(i64, i64)>,
 }
 
@@ -20,9 +71,25 @@ impl Stroke {
     fn apply(&self, image: &mut Image) -> Option<Rect> {
         let mut changed = None;
         let mut prev = *self.points.first()?;
-        for &p in &self.points {
-            changed = join(changed, self.pencil.line(image, prev, p));
-            prev = p;
+        match self.tip {
+            Tip::Pencil(pencil) => {
+                for &p in &self.points {
+                    changed = join(changed, pencil.line(image, prev, p));
+                    prev = p;
+                }
+            }
+            // The brush blends over the pixels from before the stroke, so it keeps them
+            // while it replays, as it did while drawn.
+            Tip::Brush(brush) => {
+                let (mut before, mut cover) = (Saved::default(), Coverage::default());
+                for &p in &self.points {
+                    changed = join(
+                        changed,
+                        brush.segment(image, &mut before, &mut cover, prev, p),
+                    );
+                    prev = p;
+                }
+            }
         }
         changed
     }
@@ -46,13 +113,13 @@ impl Operation {
 
 /// The image's tiles from before an operation touched them, keyed by tile column and row.
 #[derive(Default)]
-struct Saved {
+pub(crate) struct Saved {
     tiles: BTreeMap<(u32, u32), Vec<u8>>,
 }
 
 impl Saved {
     /// The pixels of tile `(col, row)`, clipped to the image.
-    fn tile_rect(image: &Image, (col, row): (u32, u32)) -> Rect {
+    pub(crate) fn tile_rect(image: &Image, (col, row): (u32, u32)) -> Rect {
         let (x, y) = (col * TILE, row * TILE);
         Rect::new(
             x,
@@ -64,7 +131,7 @@ impl Saved {
 
     /// Saves every tile of `image` that `rect` overlaps and isn't saved yet; call it before
     /// changing pixels in `rect`.
-    fn cover(&mut self, image: &Image, rect: Rect) {
+    pub(crate) fn cover(&mut self, image: &Image, rect: Rect) {
         for row in rect.y / TILE..rect.bottom().div_ceil(TILE) {
             for col in rect.x / TILE..rect.right().div_ceil(TILE) {
                 self.tiles
@@ -72,6 +139,11 @@ impl Saved {
                     .or_insert_with(|| image.copy_rect(Saved::tile_rect(image, (col, row))));
             }
         }
+    }
+
+    /// The saved pixels of tile `(col, row)`, packed as [`Image::copy_rect`] gives them.
+    pub(crate) fn tile(&self, tile: (u32, u32)) -> Option<&[u8]> {
+        self.tiles.get(&tile).map(Vec::as_slice)
     }
 
     /// Writes the saved tiles back; returns the pixels they cover.
@@ -106,6 +178,8 @@ pub struct Document {
     undone: Vec<Step>,
     /// The stroke being drawn: already on the image, not yet in `done`.
     live: Option<Step>,
+    /// The live stroke's coverage (the brush's).
+    cover: Coverage,
     /// The number the next step gets: steps are numbered from 1 in the order they're made.
     next_id: u64,
 }
@@ -117,6 +191,7 @@ impl Document {
             done: Vec::new(),
             undone: Vec::new(),
             live: None,
+            cover: Coverage::default(),
             next_id: 1,
         }
     }
@@ -139,23 +214,20 @@ impl Document {
 
     /// Starts a stroke at `at`, in image pixels (fractions floor to the pixel they're in;
     /// points off the image are fine, the stroke clips). Ends any stroke under way.
-    pub fn begin_stroke(&mut self, pencil: Pencil, at: (f64, f64)) -> Option<Rect> {
+    pub fn begin_stroke(&mut self, tip: impl Into<Tip>, at: (f64, f64)) -> Option<Rect> {
         self.end_stroke();
+        let tip = tip.into();
         let p = pixel(at);
         let mut step = Step {
             op: Operation::Stroke(Stroke {
-                pencil,
+                tip,
                 points: vec![p],
             }),
             before: Saved::default(),
             id: self.next_id,
         };
         self.next_id += 1;
-        let changed = pencil.bounds(&self.image, p, p);
-        if let Some(rect) = changed {
-            step.before.cover(&self.image, rect);
-            pencil.line(&mut self.image, p, p);
-        }
+        let changed = tip.segment(&mut self.image, &mut step.before, &mut self.cover, p, p);
         self.live = Some(step);
         changed
     }
@@ -170,14 +242,14 @@ impl Document {
             return None;
         }
         stroke.points.push(p);
-        let rect = stroke.pencil.bounds(&self.image, last, p)?;
-        step.before.cover(&self.image, rect);
-        stroke.pencil.line(&mut self.image, last, p)
+        let tip = stroke.tip;
+        tip.segment(&mut self.image, &mut step.before, &mut self.cover, last, p)
     }
 
     /// Finishes the stroke under way as one undo step. A stroke that touched no pixel (all
     /// of it off the image) leaves no step.
     pub fn end_stroke(&mut self) {
+        self.cover = Coverage::default();
         if let Some(step) = self.live.take() {
             if !step.before.tiles.is_empty() {
                 self.done.push(step);

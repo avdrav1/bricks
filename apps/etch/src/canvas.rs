@@ -15,7 +15,7 @@ use crate::view::View;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{gdk, glib, graphene, gsk};
-use image_model::{Document, Image, Pencil, Rect};
+use image_model::{Document, Image, Rect, Tip};
 use std::time::Instant;
 
 /// The side of a tile texture, in image pixels.
@@ -69,7 +69,7 @@ mod imp {
         /// Whether the next allocation should show the image at 100% rather than fitted.
         pub actual_size: Cell<bool>,
         /// What a primary-button drag draws with.
-        pub tip: Cell<Option<Pencil>>,
+        pub tip: Cell<Option<Tip>>,
     }
 
     #[glib::object_subclass]
@@ -162,7 +162,7 @@ mod imp {
             let (Some(tip), Some(p)) = (self.tip.get(), self.pointer.get()) else {
                 return;
             };
-            let w = tip.width.max(1) as f64;
+            let w = tip.width().max(1) as f64;
             let panning = self.space.get() || matches!(self.drag.get(), Drag::Pan { .. });
             if w * view.zoom < OUTLINE_MIN_PX || panning {
                 return;
@@ -170,7 +170,7 @@ mod imp {
             // The disc's centre: the pixel's centre for odd widths, its corner for even ones
             // (they lean right and down).
             let (x, y) = view.to_image(p);
-            let shift = if tip.width % 2 == 0 { 1.0 } else { 0.5 };
+            let shift = if tip.width() % 2 == 0 { 1.0 } else { 0.5 };
             let centre = view.to_widget((x.floor() + shift, y.floor() + shift));
             let builder = gsk::PathBuilder::new();
             builder.add_circle(
@@ -385,7 +385,7 @@ impl Canvas {
     }
 
     /// What a primary-button drag draws with.
-    pub fn set_tip(&self, tip: Pencil) {
+    pub fn set_tip(&self, tip: Tip) {
         self.imp().tip.set(Some(tip));
         self.queue_draw();
     }
@@ -599,7 +599,7 @@ impl Canvas {
     fn redraw_outline(&self) {
         let (tip, view) = (self.imp().tip.get(), self.view());
         if let (Some(tip), Some(view)) = (tip, view) {
-            if tip.width as f64 * view.zoom >= OUTLINE_MIN_PX {
+            if tip.width() as f64 * view.zoom >= OUTLINE_MIN_PX {
                 self.queue_draw();
             }
         }

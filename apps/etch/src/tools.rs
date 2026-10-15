@@ -5,7 +5,7 @@
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{glib, graphene, gsk};
-use image_model::{Color, Pencil};
+use image_model::{Brush, Color, Pencil, Tip};
 
 /// The widths a tool's size can take, in image pixels.
 pub const SIZES: std::ops::RangeInclusive<u32> = 1..=100;
@@ -14,16 +14,18 @@ pub const SIZES: std::ops::RangeInclusive<u32> = 1..=100;
 pub enum Tool {
     #[default]
     Pencil,
+    Brush,
     Eraser,
 }
 
 impl Tool {
-    pub const ALL: [Tool; 2] = [Tool::Pencil, Tool::Eraser];
+    pub const ALL: [Tool; 3] = [Tool::Pencil, Tool::Brush, Tool::Eraser];
 
     /// The `tool` action's target for it.
     pub fn id(self) -> &'static str {
         match self {
             Tool::Pencil => "pencil",
+            Tool::Brush => "brush",
             Tool::Eraser => "eraser",
         }
     }
@@ -35,6 +37,7 @@ impl Tool {
     pub fn label(self) -> &'static str {
         match self {
             Tool::Pencil => "Pencil",
+            Tool::Brush => "Brush",
             Tool::Eraser => "Eraser",
         }
     }
@@ -43,6 +46,7 @@ impl Tool {
     pub fn key(self) -> char {
         match self {
             Tool::Pencil => 'P',
+            Tool::Brush => 'B',
             Tool::Eraser => 'E',
         }
     }
@@ -52,6 +56,10 @@ impl Tool {
         match self {
             // A pencil leaning right: body, the tip's cut, the lead.
             Tool::Pencil => "M 2.5 13.5 L 3 10.5 L 11 2.5 L 13.5 5 L 5.5 13 Z M 9.5 4 L 12 6.5",
+            // A brush leaning right: its handle, the ferrule, and the bristles' rounded tip.
+            Tool::Brush => {
+                "M 14 2 L 9 7 M 7 6.5 L 9.5 9 M 8 8 C 5.5 7 3.5 9 3.5 11.5 C 3.5 12.8 3 13.5 2 14 C 5.5 14.5 9 12 8 8 Z"
+            }
             // A tilted block, its band, and the line it rubs along.
             Tool::Eraser => {
                 "M 2 9.5 L 8 3.5 L 13 8.5 L 8 13.5 L 6 13.5 Z M 5 6.5 L 10 11.5 M 8 13.5 L 14.5 13.5"
@@ -60,14 +68,17 @@ impl Tool {
     }
 }
 
-/// What drawing uses: the tool, the foreground and background colours, and each tool's
-/// own size (switching tools keeps each one's).
+/// What drawing uses: the tool, the foreground and background colours, each tool's own
+/// size (switching tools keeps each one's), and the brush's edge.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Settings {
     pub tool: Tool,
     pub foreground: Color,
     pub background: Color,
+    /// The brush's edge: soft (falling off to transparent) or hard.
+    pub soft: bool,
     pencil_width: u32,
+    brush_width: u32,
     eraser_width: u32,
 }
 
@@ -77,7 +88,9 @@ impl Default for Settings {
             tool: Tool::Pencil,
             foreground: Color::BLACK,
             background: Color::WHITE,
+            soft: true,
             pencil_width: 1,
+            brush_width: 8,
             eraser_width: 9,
         }
     }
@@ -88,6 +101,7 @@ impl Settings {
     pub fn width(&self) -> u32 {
         match self.tool {
             Tool::Pencil => self.pencil_width,
+            Tool::Brush => self.brush_width,
             Tool::Eraser => self.eraser_width,
         }
     }
@@ -97,6 +111,7 @@ impl Settings {
         let w = width.clamp(*SIZES.start(), *SIZES.end());
         match self.tool {
             Tool::Pencil => self.pencil_width = w,
+            Tool::Brush => self.brush_width = w,
             Tool::Eraser => self.eraser_width = w,
         }
     }
@@ -106,15 +121,20 @@ impl Settings {
         std::mem::swap(&mut self.foreground, &mut self.background);
     }
 
-    /// What a drag with the current tool draws with: the pencil in the foreground, the
-    /// eraser to transparency, each at its size.
-    pub fn tip(&self) -> Pencil {
+    /// What a drag with the current tool draws with: the pencil and the brush in the
+    /// foreground, the eraser to transparency, each at its size.
+    pub fn tip(&self) -> Tip {
         match self.tool {
-            Tool::Pencil => Pencil {
+            Tool::Pencil => Tip::Pencil(Pencil {
                 color: self.foreground,
                 width: self.pencil_width,
-            },
-            Tool::Eraser => Pencil::eraser(self.eraser_width),
+            }),
+            Tool::Brush => Tip::Brush(Brush {
+                color: self.foreground,
+                width: self.brush_width,
+                soft: self.soft,
+            }),
+            Tool::Eraser => Tip::Pencil(Pencil::eraser(self.eraser_width)),
         }
     }
 }
@@ -225,22 +245,36 @@ mod tests {
         assert_eq!(s.width(), 100);
         s.set_width(0);
         assert_eq!(s.width(), 1);
+        s.tool = Tool::Brush;
+        assert_eq!(s.width(), 8);
         s.tool = Tool::Pencil;
-        assert_eq!(s.tip().width, 7);
+        assert_eq!(s.tip().width(), 7);
     }
 
     #[test]
-    fn the_pencil_draws_in_the_foreground_and_the_eraser_ignores_both() {
+    fn the_pencil_and_brush_draw_in_the_foreground_and_the_eraser_ignores_both() {
         let red = Color::rgb(237, 28, 36);
         let mut s = Settings {
             foreground: red,
             ..Settings::default()
         };
-        assert_eq!(s.tip().color, red);
+        let pencil = |c| Tip::Pencil(Pencil { color: c, width: 1 });
+        assert_eq!(s.tip(), pencil(red));
         s.swap();
         assert_eq!((s.foreground, s.background), (Color::WHITE, red));
-        assert_eq!(s.tip().color, Color::WHITE);
+        assert_eq!(s.tip(), pencil(Color::WHITE));
+        s.tool = Tool::Brush;
+        let brush = |soft| {
+            Tip::Brush(Brush {
+                color: Color::WHITE,
+                width: 8,
+                soft,
+            })
+        };
+        assert_eq!(s.tip(), brush(true));
+        s.soft = false;
+        assert_eq!(s.tip(), brush(false));
         s.tool = Tool::Eraser;
-        assert_eq!(s.tip().color, Color::TRANSPARENT);
+        assert_eq!(s.tip(), Tip::Pencil(Pencil::eraser(9)));
     }
 }

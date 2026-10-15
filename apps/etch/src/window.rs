@@ -368,6 +368,10 @@ struct Controls {
     canvas: Canvas,
     indicator: colours::Indicator,
     size: gtk::SpinButton,
+    /// The brush's Hard and Soft buttons, shown while the brush is the tool.
+    edge: gtk::Box,
+    hard: gtk::ToggleButton,
+    soft: gtk::ToggleButton,
 }
 
 impl Controls {
@@ -385,11 +389,34 @@ impl Controls {
         if self.size.value() as u32 != s.width() {
             self.size.set_value(s.width() as f64);
         }
+        self.edge.set_visible(s.tool == Tool::Brush);
+        let edge = if s.soft { &self.soft } else { &self.hard };
+        if !edge.is_active() {
+            edge.set_active(true);
+        }
     }
 }
 
-/// The colour row and the size, left of the status: the colours, the palette, and the
-/// current tool's size.
+/// The brush's edge, Hard or Soft: two linked buttons, one on.
+fn edge_buttons() -> (gtk::Box, gtk::ToggleButton, gtk::ToggleButton) {
+    let edge = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    edge.add_css_class("linked");
+    edge.set_valign(gtk::Align::Center);
+    let hard = gtk::ToggleButton::with_label("Hard");
+    let soft = gtk::ToggleButton::with_label("Soft");
+    soft.set_group(Some(&hard));
+    hard.set_tooltip_text(Some("Hard edge: solid to the rim"));
+    soft.set_tooltip_text(Some("Soft edge: fades to transparent at the rim"));
+    for b in [&hard, &soft] {
+        b.set_focusable(false);
+        edge.append(b);
+    }
+    edge.update_property(&[gtk::accessible::Property::Label("Edge")]);
+    (edge, hard, soft)
+}
+
+/// The colour row and the size, left of the status: the colours, the palette, the
+/// current tool's size, and the brush's edge.
 fn colour_row(controls: &Rc<Controls>) -> gtk::Box {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     row.append(&controls.indicator);
@@ -424,6 +451,17 @@ fn colour_row(controls: &Rc<Controls>) -> gtk::Box {
     });
     row.append(&controls.size);
     row.append(&gtk::Label::new(Some("px")));
+    controls.soft.connect_toggled({
+        let controls = Rc::downgrade(controls);
+        move |soft| {
+            if let Some(c) = controls.upgrade() {
+                if c.settings.get().soft != soft.is_active() {
+                    c.update(|s| s.soft = soft.is_active());
+                }
+            }
+        }
+    });
+    row.append(&controls.edge);
     row
 }
 
@@ -438,6 +476,7 @@ fn show(
     bench: Option<Bench>,
 ) {
     let canvas = Canvas::new(image, matches!(bench, Some(Bench::Stroke(_))));
+    let (edge, hard, soft) = edge_buttons();
     let controls = Rc::new(Controls {
         settings: Cell::new(Settings::default()),
         canvas: canvas.clone(),
@@ -447,6 +486,9 @@ fn show(
             *tools::SIZES.end() as f64,
             1.0,
         ),
+        edge,
+        hard,
+        soft,
     });
     controls.show();
     let (bar, status) = Status::new();

@@ -7,14 +7,16 @@
 //! that. History keeps each step's operation and the image's [`TILE`]-pixel tiles from
 //! before it touched them: undo writes the tiles back, redo replays the operation.
 
+mod brush;
 mod color;
 mod document;
 mod geom;
 mod image;
 mod pencil;
 
+pub use brush::Brush;
 pub use color::Color;
-pub use document::{Document, Operation, Stroke};
+pub use document::{Document, Operation, Stroke, Tip};
 pub use geom::Rect;
 pub use image::{Image, SizeError, MAX_SIDE};
 pub use pencil::Pencil;
