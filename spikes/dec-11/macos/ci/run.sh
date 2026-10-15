@@ -59,16 +59,23 @@ both() {
 
 # osascript that can't hang the job on a permission prompt.
 osa() {
-    osascript -e "$1" >>"$logs/osascript.log" 2>&1 &
+    osascript -e "$1" >"$out/osa.out" 2>&1 &
     local p=$! i
-    for i in $(seq 20); do kill -0 "$p" 2>/dev/null || break; sleep 0.5; done
+    for i in $(seq 40); do kill -0 "$p" 2>/dev/null || break; sleep 0.5; done
     if kill -0 "$p" 2>/dev/null; then
         kill "$p"
         note "osascript timed out: $1"
     else
         wait "$p"
-        note "osascript exit $?: $1"
+        note "osascript exit $?: $1${2:+ -> $(tr '\n' ' ' <"$out/osa.out")}"
     fi
+    cat "$out/osa.out" >>"$logs/osascript.log"
+}
+
+# Bring process $1 to the front.
+front() {
+    osa "tell application \"System Events\" to set frontmost of (first process whose unix id is $1) to true"
+    sleep 1
 }
 
 # usage: timed NAME SECONDS CMD... (a benchmark mode: must exit on its own)
@@ -326,7 +333,107 @@ app)
     step dmg hdiutil create -volname Brick -srcfolder "$bapp" -format UDZO -ov "$out/app/Brick.dmg"
     note "Brick.dmg: $(stat -f %z "$out/app/Brick.dmg" 2>/dev/null) bytes"
     step spctl spctl --assess --type execute -vv "$bapp"
+    ;;
+relocate)
+    # Is Brick.app self-contained? Hide Homebrew and start it, logging what it loads.
+    bapp=$out/app/Brick.app
+    s=$out/samples
+    sudo mv /opt/homebrew /opt/homebrew-away && note "Homebrew hidden"
+    shoot reloc-brick 10 env DYLD_PRINT_LIBRARIES=1 GSK_RENDERER=cairo "$bapp/Contents/MacOS/brick" "$s/people.csv"
+    note "reloc: libraries loaded from the bundle: $(grep -c 'Contents/Frameworks' "$logs/run-reloc-brick.log"), from /opt/homebrew: $(grep -c '/opt/homebrew' "$logs/run-reloc-brick.log")"
+    grep -v 'dyld\[' "$logs/run-reloc-brick.log" | head -20 >>"$logs/summary.txt"
+    sudo mv /opt/homebrew-away /opt/homebrew && note "Homebrew back"
     rm -rf "$out/app"
+    ;;
+fonts)
+    # Pango's CoreText font map (the default on macOS) against fontconfig's.
+    s=$out/samples
+    p=$(brew --prefix)
+    du -shL "$p/share/icons/Adwaita" "$p/share/icons/hicolor" "$p/share/glib-2.0/schemas" "$p/lib/gdk-pixbuf-2.0" >"$logs/bundle-data-L.txt" 2>&1
+    note "bundle data: $(tr '\n' ' ' <"$logs/bundle-data-L.txt")"
+    for a in slate frame etch; do note "$a patched binary: $(stat -f %z "$rel/$a") bytes"; done
+    shoot f-brick-fc 10 env GSK_RENDERER=cairo PANGOCAIRO_BACKEND=fc "$rel/brick" "$s/people.csv"
+    shoot f-slate-docx-fc 10 env GSK_RENDERER=cairo PANGOCAIRO_BACKEND=fc "$rel/slate" "$s/fixture.docx"
+    shoot f-frame-scale2 10 env GSK_RENDERER=cairo GDK_SCALE=2 "$rel/frame" "$s/fixture.pptx"
+    shoot f-brick-gldebug 10 env GDK_DEBUG=opengl GSK_DEBUG=renderer "$rel/brick" "$s/people.csv"
+    shoot f-help 4 env GSK_RENDERER=help "$rel/brick"
+    ;;
+ui)
+    # Menus, typing, clipboard, saving, and dark mode, driven through System Events.
+    s=$out/samples
+    printf 'Typed on macOS: ' >"$s/fast.txt"
+    printf 'Typed on macOS: ' >"$s/slow.txt"
+    printf 'Clipboard on macOS\n' >"$s/clip.txt"
+    printf 'TextEdit: ' >"$s/control.txt"
+    # Control: the same fast keystrokes into TextEdit.
+    open -a TextEdit "$s/control.txt"; sleep 5
+    osa 'tell application "TextEdit" to activate'
+    osa 'tell application "System Events" to keystroke "hello world"'
+    sleep 2; screencapture -x "$shots/u-textedit.png"
+    osa 'tell application "TextEdit" to quit saving no'
+    # Slate: fast, then one key every 0.3 s.
+    KEEP=1 shoot u-slate-fast-0 8 "$rel/slate" "$s/fast.txt"
+    pid=$(cat "$out/pid"); front "$pid"
+    osa 'tell application "System Events" to keystroke "hello world"'
+    sleep 2; screencapture -x "$shots/u-slate-fast-1.png"
+    kill "$pid"; sleep 1; kill -9 "$pid" 2>/dev/null
+    KEEP=1 shoot u-slate-slow-0 8 "$rel/slate" "$s/slow.txt"
+    pid=$(cat "$out/pid"); front "$pid"
+    osa 'tell application "System Events"
+repeat with c in characters of "hello world"
+keystroke c
+delay 0.3
+end repeat
+end tell'
+    sleep 1; screencapture -x "$shots/u-slate-slow-1.png"
+    # Save with Ctrl+S (Slate binds <Control>s), then read the file.
+    osa 'tell application "System Events" to keystroke "s" using control down'
+    sleep 3; note "slow.txt after Ctrl+S: $(cat "$s/slow.txt")"
+    osa 'tell application "System Events" to keystroke "s" using command down'
+    # Menus: Slate's global menu bar, its items.
+    osa "tell application \"System Events\" to tell (first process whose unix id is $pid) to get name of every menu bar item of menu bar 1" out
+    osa "tell application \"System Events\" to tell (first process whose unix id is $pid) to get name of every menu item of menu 1 of menu bar item 2 of menu bar 1" out
+    osa "tell application \"System Events\" to tell (first process whose unix id is $pid) to click menu bar item 2 of menu bar 1"
+    sleep 1; screencapture -x "$shots/u-slate-menu.png"
+    osa 'tell application "System Events" to key code 53'
+    kill "$pid"; sleep 1; kill -9 "$pid" 2>/dev/null
+    # Clipboard both ways.
+    KEEP=1 shoot u-clip-0 8 "$rel/slate" "$s/clip.txt"
+    pid=$(cat "$out/pid"); front "$pid"
+    printf 'stale' | pbcopy
+    osa 'tell application "System Events" to keystroke "a" using control down'
+    osa 'tell application "System Events" to keystroke "c" using control down'
+    sleep 1; note "pbpaste after Slate Ctrl+A Ctrl+C: $(pbpaste)"
+    printf 'From the macOS pasteboard' | pbcopy
+    osa 'tell application "System Events" to keystroke "v" using control down'
+    sleep 2; screencapture -x "$shots/u-clip-1-pasted.png"
+    kill "$pid"; sleep 1; kill -9 "$pid" 2>/dev/null
+    # Brick: type into a cell, copy a cell.
+    KEEP=1 shoot u-brick-0 10 "$rel/brick" "$s/people.csv"
+    pid=$(cat "$out/pid"); front "$pid"
+    osa 'tell application "System Events" to keystroke "hello world"'
+    osa 'tell application "System Events" to key code 36'
+    sleep 2; screencapture -x "$shots/u-brick-1-typed.png"
+    osa 'tell application "System Events" to key code 125'
+    osa 'tell application "System Events" to keystroke "c" using control down'
+    sleep 2; note "pbpaste after Brick Ctrl+C: $(pbpaste | head -3 | tr '\n' '|')"
+    kill "$pid"; sleep 1; kill -9 "$pid" 2>/dev/null
+    # Etch: its menu bar model is the global menu bar.
+    KEEP=1 shoot u-etch-0 8 "$rel/etch" "$s/picture.png"
+    pid=$(cat "$out/pid"); front "$pid"
+    osa "tell application \"System Events\" to tell (first process whose unix id is $pid) to get name of every menu bar item of menu bar 1" out
+    osa "tell application \"System Events\" to tell (first process whose unix id is $pid) to get name of every menu item of menu 1 of menu bar item 2 of menu bar 1" out
+    osa "tell application \"System Events\" to tell (first process whose unix id is $pid) to click menu bar item 2 of menu bar 1"
+    sleep 1; screencapture -x "$shots/u-etch-menu.png"
+    osa 'tell application "System Events" to key code 53'
+    kill "$pid"; sleep 1; kill -9 "$pid" 2>/dev/null
+    # Dark mode, set the way System Settings does.
+    osa 'tell application "System Events" to tell appearance preferences to set dark mode to true'
+    sleep 2
+    shoot u-dark-brick 10 "$rel/brick" "$s/people.csv"
+    shoot u-dark-slate 10 "$rel/slate" "$s/readme.md"
+    shoot u-dark-etch 10 "$rel/etch" "$s/picture.png"
+    osa 'tell application "System Events" to tell appearance preferences to set dark mode to false'
     ;;
 *) echo "unknown phase $phase"; exit 2 ;;
 esac

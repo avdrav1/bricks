@@ -3,13 +3,17 @@
 # logs and screenshots are the artifact. Script: spikes/dec-11/macos/ci/run.sh.
 name: spike-macos
 on:
-  push: { branches: [spike/dec-11-macos] }
+  push:
+    branches: [spike/dec-11-macos]
+    paths: [".github/workflows/spike-macos.yml", "spikes/dec-11/macos/ci/**"]
   workflow_dispatch:
 jobs:
   arm64:
     runs-on: macos-latest
     timeout-minutes: 120
     defaults: { run: { shell: bash } }
+    # FULL=1: every phase (run 2, 38783201936); 0: only those added since (run 3 on).
+    env: { FULL: "0" }
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -21,30 +25,44 @@ jobs:
           brew install gtk4 pkgconf adwaita-icon-theme hicolor-icon-theme 2>&1 | tail -20
           mkdir -p out/logs && echo "brew install: $((SECONDS - t0)) s" >> out/logs/summary.txt
       - run: spikes/dec-11/macos/ci/run.sh env
-      - run: spikes/dec-11/macos/ci/run.sh check
-      - run: spikes/dec-11/macos/ci/run.sh test
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh check
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh test
       - run: spikes/dec-11/macos/ci/run.sh build
       - run: spikes/dec-11/macos/ci/run.sh run
       - run: spikes/dec-11/macos/ci/run.sh patched
       # Interaction phases draw with cairo: run 1 showed Brick's window all black with the
       # default renderer on the Intel runner VM.
-      - run: spikes/dec-11/macos/ci/run.sh input
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh input
         env: { GSK_RENDERER: cairo }
-      - run: spikes/dec-11/macos/ci/run.sh dark
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh dark
         env: { GSK_RENDERER: cairo }
-      - run: spikes/dec-11/macos/ci/run.sh sweep
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh sweep
         env: { GSK_RENDERER: cairo }
-      - run: spikes/dec-11/macos/ci/run.sh sigbus
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh sigbus
       - run: spikes/dec-11/macos/ci/run.sh app
         env: { GSK_RENDERER: cairo }
-      - run: spikes/dec-11/macos/ci/run.sh minos
-      - run: spikes/dec-11/macos/ci/run.sh bundle
+      - run: spikes/dec-11/macos/ci/run.sh relocate
+      - run: spikes/dec-11/macos/ci/run.sh fonts
+      - run: spikes/dec-11/macos/ci/run.sh ui
+        env: { GSK_RENDERER: cairo }
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh minos
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh bundle
       - if: always()
         run: cat out/logs/summary.txt
       - if: always()
         uses: actions/upload-artifact@v4
         with: { name: macos-arm64, path: out, if-no-files-found: warn }
   x86_64:
+    # Runs 1 and 2 covered Intel (38781402667, 38783201936); now only on demand.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-15-intel
     timeout-minutes: 120
     defaults: { run: { shell: bash } }
