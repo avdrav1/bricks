@@ -1418,7 +1418,7 @@ impl Canvas {
     /// passes on, while text is typed.
     fn add_text_inputs(&self) {
         let im = gtk::IMMulticontext::new();
-        im.set_client_widget(Some(self));
+        suite_ui::im::attach(&im, self);
         im.connect_commit({
             let canvas = self.downgrade();
             move |_, s| {

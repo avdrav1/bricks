@@ -36,7 +36,7 @@ pub fn attach(view: &Rc<DeckWindow>) {
     canvas.set_editable(true);
     canvas.set_focusable(true);
     let im = &view.im;
-    im.set_client_widget(Some(canvas));
+    suite_ui::im::attach(im, canvas);
     im.connect_commit({
         let view = Rc::downgrade(view);
         move |_, text| {

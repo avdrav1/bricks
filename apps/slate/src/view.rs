@@ -307,7 +307,7 @@ mod imp {
                 gtk::accessible::Property::ReadOnly(false),
             ]);
             let im = gtk::IMMulticontext::new();
-            im.set_client_widget(Some(&*obj));
+            suite_ui::im::attach(&im, &*obj);
             im.connect_commit({
                 let page = obj.downgrade();
                 move |_, text| {
