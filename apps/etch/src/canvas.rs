@@ -8,17 +8,20 @@
 //!
 //! Input: a primary-button drag draws with the tool's tip (with the fill, a click fills
 //! with the foreground and a right-click with the background; with the colour picker, a
-//! click picks the foreground and a right-click the background), a middle-button drag or a
-//! drag with Space held pans, the wheel pans (Shift+wheel sideways), and Ctrl+wheel zooms
-//! around the pointer. The widget emits `changed` whenever what the status bar or the Edit
-//! menu shows may have changed: the view, the history, or the pixel under the pointer.
+//! click picks the foreground and a right-click the background; with a shape, the drag
+//! previews the shape over the image, which it doesn't touch until the release draws it,
+//! Shift constraining it and Escape cancelling it), a middle-button drag or a drag with
+//! Space held pans, the wheel pans (Shift+wheel sideways), and Ctrl+wheel zooms around the
+//! pointer. The widget emits `changed` whenever what the status bar or the Edit menu shows
+//! may have changed: the view, the history, or the pixel under the pointer.
 
+use crate::colours;
 use crate::tools::Action;
 use crate::view::View;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{gdk, glib, graphene, gsk};
-use image_model::{Color, Document, Image, Rect, Tip};
+use image_model::{Color, Document, Image, Rect, Shape, Tip};
 use std::time::Instant;
 
 /// The side of a tile texture, in image pixels.
@@ -41,6 +44,11 @@ enum Drag {
     #[default]
     None,
     Draw,
+    /// A shape from where the drag began, in image coordinates, as it is so far.
+    Shape {
+        from: (f64, f64),
+        shape: Shape,
+    },
     /// Panning; the drag's offset when the image last moved.
     Pan {
         last: (f64, f64),
@@ -76,6 +84,9 @@ mod imp {
         /// What a pick does with the colour picked.
         #[allow(clippy::type_complexity)]
         pub picked: RefCell<Option<std::rc::Rc<dyn Fn(Color, bool)>>>,
+        /// The shape being dragged, not yet on the image, as the rectangles of one colour
+        /// each that draw it over the image.
+        pub preview: RefCell<Vec<(Rect, Color)>>,
     }
 
     #[glib::object_subclass]
@@ -152,6 +163,7 @@ mod imp {
             if let Some(visible) = visible {
                 self.checkerboard(snapshot, &visible, (ox, oy));
                 self.draw_tiles(snapshot, &view, &visible);
+                self.draw_preview(snapshot, &view);
             }
             self.draw_tip_outline(snapshot, &view);
             snapshot.pop();
@@ -165,7 +177,33 @@ mod imp {
         pub(super) fn tip(&self) -> Option<Tip> {
             match self.action.get()? {
                 Action::Draw(tip) => Some(tip),
-                Action::Fill { .. } | Action::Pick => None,
+                Action::Fill { .. } | Action::Pick | Action::Shape(_) => None,
+            }
+        }
+
+        /// The shape being dragged, over the image: its rectangles where the image's pixels
+        /// they cover are on screen (edges rounded to device pixels from 100% up, as the
+        /// tiles' are).
+        fn draw_preview(&self, snapshot: &gtk::Snapshot, view: &View) {
+            let preview = self.preview.borrow();
+            if preview.is_empty() {
+                return;
+            }
+            let scale = self.obj().surface_scale();
+            let edge = |origin: f64, px: u32| {
+                let at = origin + px as f64 * view.zoom;
+                match view.zoom >= 1.0 {
+                    true => device_edge(at, scale),
+                    false => at as f32,
+                }
+            };
+            for (r, c) in preview.iter() {
+                let (x0, x1) = (edge(view.origin.0, r.x), edge(view.origin.0, r.right()));
+                let (y0, y1) = (edge(view.origin.1, r.y), edge(view.origin.1, r.bottom()));
+                snapshot.append_color(
+                    &colours::rgba(*c),
+                    &graphene::Rect::new(x0, y0, x1 - x0, y1 - y0),
+                );
             }
         }
 
@@ -235,13 +273,9 @@ mod imp {
             // Tile edges come from one formula, rounded to device pixels, so neighbours
             // meet exactly: no seam and no overlap, whatever the renderer. Rounding moves
             // a tile at most half a screen pixel from where the view puts it.
-            let scale = self
-                .obj()
-                .native()
-                .and_then(|n| n.surface())
-                .map_or(1.0, |s| s.scale());
+            let scale = self.obj().surface_scale();
             let edge = |origin: f64, px: u32, len: u32| {
-                (((origin + px.min(len) as f64 * view.zoom) * scale).round() / scale) as f32
+                device_edge(origin + px.min(len) as f64 * view.zoom, scale)
             };
             let filter = if view.zoom >= 1.0 {
                 gsk::ScalingFilter::Nearest
@@ -295,6 +329,11 @@ fn tile_rect(image: &Image, col: u32, row: u32) -> Rect {
         TILE_PX.min(image.width() - x),
         TILE_PX.min(image.height() - y),
     )
+}
+
+/// Screen coordinate `at` rounded to the device pixels of a surface at `scale`.
+fn device_edge(at: f64, scale: f64) -> f32 {
+    ((at * scale).round() / scale) as f32
 }
 
 glib::wrapper! {
@@ -371,13 +410,13 @@ impl Canvas {
     }
 
     pub fn undo(&self) {
-        self.imp().drag.set(Drag::None);
+        self.set_drag(Drag::None);
         let changed = self.with_doc(Document::undo);
         self.invalidate(changed);
     }
 
     pub fn redo(&self) {
-        self.imp().drag.set(Drag::None);
+        self.set_drag(Drag::None);
         let changed = self.with_doc(Document::redo);
         self.invalidate(changed);
     }
@@ -484,6 +523,73 @@ impl Canvas {
         self.emit_changed();
     }
 
+    /// Starts dragging a shape at widget point `at`, when the tool draws one. Until
+    /// [`Canvas::shape_end`] the shape shows over the image, which stays as it was.
+    pub fn shape_begin(&self, at: (f64, f64)) {
+        let (Some(view), Some(Action::Shape(tool))) = (self.view(), self.imp().action.get()) else {
+            return;
+        };
+        let from = view.to_image(at);
+        self.set_drag(Drag::Shape {
+            from,
+            shape: tool.at(from, from, false),
+        });
+    }
+
+    /// Takes the dragged shape's far corner (a line's end) to widget point `to`;
+    /// `constrain` (Shift held) keeps a line to 45° steps and a box square.
+    pub fn shape_to(&self, to: (f64, f64), constrain: bool) {
+        let Some(view) = self.view() else { return };
+        let Drag::Shape { from, shape } = self.imp().drag.get() else {
+            return;
+        };
+        let next = shape.tool.at(from, view.to_image(to), constrain);
+        if next != shape {
+            self.set_drag(Drag::Shape { from, shape: next });
+        }
+    }
+
+    /// Draws the dragged shape on the image, one undo step.
+    pub fn shape_end(&self) {
+        let Drag::Shape { shape, .. } = self.imp().drag.get() else {
+            return;
+        };
+        self.set_drag(Drag::None);
+        let changed = self.with_doc(|d| d.shape(shape));
+        self.invalidate(changed);
+    }
+
+    /// Escape: drops the shape being dragged, leaving the image as it was. Whether a shape
+    /// was being dragged.
+    pub fn cancel_shape(&self) -> bool {
+        let dragging = matches!(self.imp().drag.get(), Drag::Shape { .. });
+        if dragging {
+            self.set_drag(Drag::None);
+        }
+        dragging
+    }
+
+    /// What a drag does now; a shape's preview follows.
+    fn set_drag(&self, drag: Drag) {
+        let imp = self.imp();
+        imp.drag.set(drag);
+        let rects = match drag {
+            Drag::Shape { shape, .. } => shape.rects(self.with_doc(|d| d.image().bounds())),
+            Drag::None | Drag::Draw | Drag::Pan { .. } => Vec::new(),
+        };
+        if !(rects.is_empty() && imp.preview.borrow().is_empty()) {
+            imp.preview.replace(rects);
+            self.queue_draw();
+        }
+    }
+
+    /// The scale of the surface the canvas shows on: device pixels a widget pixel.
+    fn surface_scale(&self) -> f64 {
+        self.native()
+            .and_then(|n| n.surface())
+            .map_or(1.0, |s| s.scale())
+    }
+
     fn with_doc<T>(&self, f: impl FnOnce(&mut Document) -> T) -> T {
         let mut doc = self.imp().doc.borrow_mut();
         f(doc.as_mut().expect("a canvas has a document"))
@@ -548,6 +654,7 @@ impl Canvas {
                         canvas.fill((x, y), if secondary { background } else { foreground })
                     }
                     (1 | 3, Some(Action::Pick)) if !space => canvas.pick((x, y), secondary),
+                    (1, Some(Action::Shape(_))) if !space => canvas.shape_begin((x, y)),
                     (1, _) if !space => canvas.draw_begin((x, y)),
                     (1 | 2, _) => {
                         imp.drag.set(Drag::Pan { last: (0.0, 0.0) });
@@ -572,6 +679,13 @@ impl Canvas {
                             canvas.draw_to((x + dx, y + dy));
                         }
                     }
+                    Drag::Shape { .. } => {
+                        if let Some((x, y)) = g.start_point() {
+                            let state = g.current_event_state();
+                            let shift = state.contains(gdk::ModifierType::SHIFT_MASK);
+                            canvas.shape_to((x + dx, y + dy), shift);
+                        }
+                    }
                     Drag::Pan { last } => {
                         imp.drag.set(Drag::Pan { last: (dx, dy) });
                         canvas.change_view(|v| v.pan(dx - last.0, dy - last.1));
@@ -588,6 +702,7 @@ impl Canvas {
                 };
                 match canvas.imp().drag.get() {
                     Drag::Draw => canvas.draw_end(),
+                    Drag::Shape { .. } => canvas.shape_end(),
                     Drag::Pan { .. } => {
                         canvas.imp().drag.set(Drag::None);
                         let held = canvas.imp().space.get();

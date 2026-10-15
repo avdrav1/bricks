@@ -83,6 +83,19 @@
 #      brush; I and a click on the half-transparent blue make it #0000FF80, alpha
 #      included; I and a right-click on the transparent green make the background
 #      #00FF0000. Picking changes no pixel: the title stays unmarked.
+# ETCH-11 acceptance: line, rectangle, and ellipse with previews.
+#  16. the shapes' style hides while the pencil is the tool; R picks the rectangle (the tool
+#      column shows it on) with Outline, Filled, and Both beside the size, Outline on, size
+#      1. At size 5, a drag held still before its release shows the rectangle on the
+#      canvas (its top band 5 px black, the inside white) while the title stays
+#      "Untitled": the image is untouched. The release lands it pixel for pixel as
+#      previewed (as many black pixels around it) and marks the title; one Ctrl+Z
+#      removes it entirely (no ink) and clears the mark. O and Both, with Red the
+#      background: the held drag previews a black-outlined red ellipse, unmarked, which
+#      lands the same; one Ctrl+Z takes it all back. L hides the style; a held line drag
+#      previews the line along the pointer's path, Escape before the release drops it,
+#      and after the release there's no ink and no mark; a line drawn then lands, and
+#      Ctrl+Z takes it back.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -563,6 +576,52 @@ session() {
   colours clear; echo "after clear: picker $(picker) brush $(tool Brush)"
   echo "title: $(python3 /tmp/a11y.py text | grep -E "^(• )?t\.png$" | head -1)"
   pkill -x etch; sleep 1
+
+  echo "== 16 shapes"
+  etch >>/tmp/app.log 2>&1 & sleep 3
+  keys -M ctrl 0 -m ctrl
+  title() { python3 /tmp/a11y.py text | grep -E "^(• )?Untitled$" | head -1; }
+  # A drag from (X1, Y1) to (X2, Y2) held still 6 s before its release, in the background:
+  # the screen is read while the shape previews.
+  held() { python3 /scripts/dnd_helpers.py drag $1 $2 $3 $4 6 & d=$!; sleep 3.5; }
+  dark() { px count /tmp/shot.png $1 $2 $3 $4 000000; }
+  echo "start: style $(tool Outline)"
+  keys r; echo "key r: rectangle $(tool Rectangle) pencil $(tool Pencil)"
+  echo "style: outline $(tool Outline) filled $(tool Filled) both $(tool Both)"
+  echo "rectangle size: $(size)"
+  keys -M alt s -m alt; keys -M ctrl a -m ctrl; keys 5; keys -k Return
+  read mx my <<<"$(px centre)"
+  l=$((mx - 100)); t=$((my - 60)); r=$((mx + 100)); b=$((my + 60))
+  box() { dark $((l - 10)) $((t - 10)) $((r + 10)) $((b + 10)); }
+  held $l $t $r $b; shot rect-held
+  band=$(dark $((l + 6)) $((t + 1)) $((r - 5)) $((t + 4)))
+  inside=$(px count /tmp/shot.png $((l + 8)) $((t + 8)) $((r - 7)) $((b - 7)) FFFFFF)
+  echo "rect held: $(title) band $band inside $inside"; around=$(box)
+  wait $d; sleep 0.5; shot rect-drawn
+  echo "rect drawn: $(title) same $(same "$around" "$(box)")"
+  keys -M ctrl z -m ctrl; shot rect-undone; echo "rect undone: $(title) ink $(px ink /tmp/shot.png)"
+  read x y <<<"$(px where Red)"; python3 /scripts/dnd_helpers.py click $x $y 1 right; sleep 0.5
+  keys o; echo "key o: ellipse $(tool Ellipse) rectangle $(tool Rectangle)"
+  python3 /tmp/a11y.py press Both; sleep 0.5
+  echo "pressed: outline $(tool Outline) both $(tool Both)"
+  red() { px count /tmp/shot.png $((mx - 30)) $((my - 15)) $((mx + 30)) $((my + 15)) $1; }
+  held $l $t $r $b; shot ellipse-held
+  corner=$(px count /tmp/shot.png $((l + 1)) $((t + 1)) $((l + 12)) $((t + 8)) FFFFFF)
+  echo "ellipse held: $(title) inside $(red ED1C24) corner $corner"; around=$(box)
+  wait $d; sleep 0.5; shot ellipse-drawn
+  echo "ellipse drawn: $(title) inside $(red ED1C24) same $(same "$around" "$(box)")"
+  keys -M ctrl z -m ctrl; shot ellipse-undone
+  echo "ellipse undone: $(title) ink $(px ink /tmp/shot.png) inside $(red FFFFFF)"
+  keys l; echo "key l: line $(tool Line) style $(tool Outline)"
+  held $l $t $r $b; shot line-held
+  echo "line held: $(title) line $(px line /tmp/shot.png $l $t $r $b)"
+  keys -k Escape; shot line-escaped; echo "line escaped: ink $(px ink /tmp/shot.png)"
+  wait $d; sleep 0.5; shot line-released
+  echo "line released: $(title) ink $(px ink /tmp/shot.png)"
+  python3 /scripts/dnd_helpers.py drag $l $t $r $b; sleep 0.5; shot line-drawn
+  echo "line drawn: $(title) line $(px line /tmp/shot.png $l $t $r $b)"
+  keys -M ctrl z -m ctrl; shot line-undone; echo "line undone: $(title) ink $(px ink /tmp/shot.png)"
+  pkill -x etch; sleep 1
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -712,6 +771,25 @@ check "15: ... back to the brush again" "15 picker" "^after blue: picker off bru
 check "15: a right-click on transparent green makes it the background" "15 picker" "^clear: Foreground #0000FF80, background #00FF0000$"
 check "15: ... back to the brush" "15 picker" "^after clear: picker off brush on$"
 check "15: picking changes no pixel: the title stays unmarked" "15 picker" "^title: t\.png$"
+# ETCH-11: line, rectangle, and ellipse with previews.
+check "16: the shapes' style is hidden while the pencil is the tool" "16 shapes" "^start: style hidden$"
+check "16: R picks the rectangle" "16 shapes" "^key r: rectangle on pencil off$"
+check "16: ... showing its style, Outline on" "16 shapes" "^style: outline on filled off both off$"
+check "16: ... at size 1" "16 shapes" "^rectangle size: 1$"
+check "16: a held drag previews the rectangle (5 px band, white inside), the image untouched" "16 shapes" "^rect held: Untitled band all inside all$"
+check "16: the release lands it as previewed, marking the title" "16 shapes" "^rect drawn: • Untitled same yes$"
+check "16: one Ctrl+Z removes it entirely" "16 shapes" "^rect undone: Untitled ink 0$"
+check "16: O picks the ellipse" "16 shapes" "^key o: ellipse on rectangle off$"
+check "16: Both turns on" "16 shapes" "^pressed: outline off both on$"
+check "16: a held drag previews the ellipse filled red (its box's corner white), the image untouched" "16 shapes" "^ellipse held: Untitled inside all corner all$"
+check "16: the release lands it as previewed" "16 shapes" "^ellipse drawn: • Untitled inside all same yes$"
+check "16: one Ctrl+Z takes it all back" "16 shapes" "^ellipse undone: Untitled ink 0 inside all$"
+check "16: L picks the line, which has no style" "16 shapes" "^key l: line on style hidden$"
+check "16: a held drag previews the line along the pointer's path, the image untouched" "16 shapes" "^line held: Untitled line 41/41$"
+check "16: Escape drops it" "16 shapes" "^line escaped: ink 0$"
+check "16: ... and the release then draws nothing" "16 shapes" "^line released: Untitled ink 0$"
+check "16: a line dragged lands" "16 shapes" "^line drawn: • Untitled line 41/41$"
+check "16: ... and Ctrl+Z takes it back" "16 shapes" "^line undone: Untitled ink 0$"
 absent "the app logs no errors or panics" "app log" "^etch:|panicked|CRITICAL"
 bench=$(section "8 bench" | sed -n "s/^bench: //p")
 if [ -z "$bench" ]; then echo "FAIL 8: --bench-stroke printed nothing"; fail=1; else

@@ -1,13 +1,9 @@
 //! [`Document`]: the image, the operations that change it, and their undo history.
 
 use crate::brush::Coverage;
-use crate::geom::join;
-use crate::{Brush, Color, Fill, Image, Pencil, Rect, TILE};
+use crate::geom::{join, pixel};
+use crate::{Brush, Color, Fill, Image, Pencil, Rect, Shape, TILE};
 use std::collections::BTreeMap;
-
-/// Pointer positions beyond this many pixels off the image clamp to it, so far-off points
-/// can't overflow the line arithmetic.
-const FAR: f64 = 1_000_000.0;
 
 /// What a stroke draws with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -100,6 +96,7 @@ impl Stroke {
 pub enum Operation {
     Stroke(Stroke),
     Fill(Fill),
+    Shape(Shape),
 }
 
 impl Operation {
@@ -109,6 +106,7 @@ impl Operation {
         match self {
             Operation::Stroke(s) => s.apply(image),
             Operation::Fill(f) => f.apply(image, |_, _, _, _| {}),
+            Operation::Shape(s) => s.apply(image, |_, _| {}),
         }
     }
 }
@@ -161,6 +159,38 @@ impl Saved {
 
     fn bytes(&self) -> usize {
         self.tiles.values().map(Vec::len).sum()
+    }
+}
+
+/// [`Saved`] for operations that write many small pieces (a fill's row spans, a shape's
+/// rows): a flag a tile says whether it's saved without looking it up.
+struct Covering {
+    saved: Saved,
+    cols: u32,
+    flags: Vec<bool>,
+}
+
+impl Covering {
+    fn new(image: &Image) -> Covering {
+        let cols = image.width().div_ceil(TILE);
+        Covering {
+            saved: Saved::default(),
+            cols,
+            flags: vec![false; (cols * image.height().div_ceil(TILE)) as usize],
+        }
+    }
+
+    /// [`Saved::cover`].
+    fn cover(&mut self, image: &Image, rect: Rect) {
+        for row in rect.y / TILE..rect.bottom().div_ceil(TILE) {
+            for col in rect.x / TILE..rect.right().div_ceil(TILE) {
+                let k = (row * self.cols + col) as usize;
+                if !self.flags[k] {
+                    self.flags[k] = true;
+                    self.saved.cover(image, Saved::tile_rect(image, (col, row)));
+                }
+            }
+        }
     }
 }
 
@@ -280,28 +310,34 @@ impl Document {
             color,
             tolerance,
         };
-        let mut before = Saved::default();
-        // Which tiles are saved: the fill writes a row span at a time, many to a tile.
-        let cols = w.div_ceil(TILE);
-        let mut saved = vec![false; (cols * h.div_ceil(TILE)) as usize];
+        let mut covering = Covering::new(&self.image);
         let changed = fill.apply(&mut self.image, |image, y, x0, x1| {
-            let row = y / TILE;
-            for col in x0 / TILE..x1.div_ceil(TILE) {
-                let k = (row * cols + col) as usize;
-                if !saved[k] {
-                    saved[k] = true;
-                    before.cover(image, Saved::tile_rect(image, (col, row)));
-                }
-            }
+            covering.cover(image, Rect::new(x0, y, x1 - x0, 1));
         })?;
+        self.record(Operation::Fill(fill), covering.saved);
+        Some(changed)
+    }
+
+    /// Draws `shape` (a line, rectangle, or ellipse; see [`Shape`]), clipped to the image.
+    /// One undo step, keeping only the tiles the shape wrote to. A shape off the image
+    /// leaves no step. Ends any stroke under way.
+    pub fn shape(&mut self, shape: Shape) -> Option<Rect> {
+        self.end_stroke();
+        let mut covering = Covering::new(&self.image);
+        let changed = shape.apply(&mut self.image, |image, r| covering.cover(image, r))?;
+        self.record(Operation::Shape(shape), covering.saved);
+        Some(changed)
+    }
+
+    /// Makes `op`, done, the last step, with the pixels it replaced; drops the redo.
+    fn record(&mut self, op: Operation, before: Saved) {
         self.done.push(Step {
-            op: Operation::Fill(fill),
+            op,
             before,
             id: self.next_id,
         });
         self.next_id += 1;
         self.undone.clear();
-        Some(changed)
     }
 
     pub fn can_undo(&self) -> bool {
@@ -339,16 +375,4 @@ impl Document {
             .map(|s| s.before.bytes())
             .sum()
     }
-}
-
-/// The pixel a point in image coordinates falls in.
-fn pixel((x, y): (f64, f64)) -> (i64, i64) {
-    let clamp = |v: f64| {
-        if v.is_nan() {
-            0
-        } else {
-            v.clamp(-FAR, FAR).floor() as i64
-        }
-    };
-    (clamp(x), clamp(y))
 }

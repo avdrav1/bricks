@@ -46,7 +46,8 @@ pub fn hex(c: Color) -> String {
     }
 }
 
-fn rgba(c: Color) -> gdk::RGBA {
+/// The colour as GDK draws it.
+pub fn rgba(c: Color) -> gdk::RGBA {
     gdk::RGBA::new(
         c.r as f32 / 255.0,
         c.g as f32 / 255.0,

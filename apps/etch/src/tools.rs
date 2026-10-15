@@ -5,7 +5,7 @@
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{glib, graphene, gsk};
-use image_model::{Brush, Color, Pencil, Tip};
+use image_model::{Brush, Color, Kind, Pencil, ShapeTool, Style, Tip};
 
 /// The widths a tool's size can take, in image pixels.
 pub const SIZES: std::ops::RangeInclusive<u32> = 1..=100;
@@ -18,6 +18,9 @@ pub enum Tool {
     Eraser,
     Fill,
     Picker,
+    Line,
+    Rectangle,
+    Ellipse,
 }
 
 /// What the canvas does with the pointer's buttons under the current tool.
@@ -34,15 +37,21 @@ pub enum Action {
     /// A click makes the pixel under it the foreground colour, a right-click the
     /// background.
     Pick,
+    /// A primary-button drag previews the shape from the press to the pointer, and the
+    /// release draws it.
+    Shape(ShapeTool),
 }
 
 impl Tool {
-    pub const ALL: [Tool; 5] = [
+    pub const ALL: [Tool; 8] = [
         Tool::Pencil,
         Tool::Brush,
         Tool::Eraser,
         Tool::Fill,
         Tool::Picker,
+        Tool::Line,
+        Tool::Rectangle,
+        Tool::Ellipse,
     ];
 
     /// The `tool` action's target for it.
@@ -53,6 +62,9 @@ impl Tool {
             Tool::Eraser => "eraser",
             Tool::Fill => "fill",
             Tool::Picker => "picker",
+            Tool::Line => "line",
+            Tool::Rectangle => "rectangle",
+            Tool::Ellipse => "ellipse",
         }
     }
 
@@ -67,6 +79,9 @@ impl Tool {
             Tool::Eraser => "Eraser",
             Tool::Fill => "Fill",
             Tool::Picker => "Colour Picker",
+            Tool::Line => "Line",
+            Tool::Rectangle => "Rectangle",
+            Tool::Ellipse => "Ellipse",
         }
     }
 
@@ -78,6 +93,9 @@ impl Tool {
             Tool::Eraser => 'E',
             Tool::Fill => 'F',
             Tool::Picker => 'I',
+            Tool::Line => 'L',
+            Tool::Rectangle => 'R',
+            Tool::Ellipse => 'O',
         }
     }
 
@@ -102,12 +120,21 @@ impl Tool {
             Tool::Picker => {
                 "M 2 14 L 2.5 11.5 L 8.5 5.5 L 10.5 7.5 L 4.5 13.5 Z M 7.5 4.5 L 11.5 8.5 M 9.5 6.5 L 12 4 C 13 3 14.5 3 13.5 2.5 C 13 1.5 13 3 12 4"
             }
+            // A line rising right.
+            Tool::Line => "M 2.5 13.5 L 13.5 2.5",
+            // A rectangle, wider than tall.
+            Tool::Rectangle => "M 2 4 L 14 4 L 14 12 L 2 12 Z",
+            // An ellipse, wider than tall.
+            Tool::Ellipse => {
+                "M 1.5 8 C 1.5 5.5 4.4 3.5 8 3.5 C 11.6 3.5 14.5 5.5 14.5 8 C 14.5 10.5 11.6 12.5 8 12.5 C 4.4 12.5 1.5 10.5 1.5 8 Z"
+            }
         }
     }
 }
 
 /// What drawing uses: the tool, the foreground and background colours, each tool's own
-/// size (switching tools keeps each one's), and the brush's edge.
+/// size (switching tools keeps each one's), the brush's edge, and the rectangle's and
+/// ellipse's style.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Settings {
     pub tool: Tool,
@@ -115,11 +142,17 @@ pub struct Settings {
     pub background: Color,
     /// The brush's edge: soft (falling off to transparent) or hard.
     pub soft: bool,
+    /// Rectangles and ellipses outlined, filled, or both (one style for the two, as in
+    /// Paint).
+    pub style: Style,
     /// The tool before the colour picker, which a pick goes back to.
     before_picker: Tool,
     pencil_width: u32,
     brush_width: u32,
     eraser_width: u32,
+    line_width: u32,
+    rectangle_width: u32,
+    ellipse_width: u32,
 }
 
 impl Default for Settings {
@@ -129,10 +162,14 @@ impl Default for Settings {
             foreground: Color::BLACK,
             background: Color::WHITE,
             soft: true,
+            style: Style::Outline,
             before_picker: Tool::Pencil,
             pencil_width: 1,
             brush_width: 8,
             eraser_width: 9,
+            line_width: 1,
+            rectangle_width: 1,
+            ellipse_width: 1,
         }
     }
 }
@@ -162,6 +199,9 @@ impl Settings {
             Tool::Pencil => Some(self.pencil_width),
             Tool::Brush => Some(self.brush_width),
             Tool::Eraser => Some(self.eraser_width),
+            Tool::Line => Some(self.line_width),
+            Tool::Rectangle => Some(self.rectangle_width),
+            Tool::Ellipse => Some(self.ellipse_width),
             Tool::Fill | Tool::Picker => None,
         }
     }
@@ -173,8 +213,16 @@ impl Settings {
             Tool::Pencil => self.pencil_width = w,
             Tool::Brush => self.brush_width = w,
             Tool::Eraser => self.eraser_width = w,
+            Tool::Line => self.line_width = w,
+            Tool::Rectangle => self.rectangle_width = w,
+            Tool::Ellipse => self.ellipse_width = w,
             Tool::Fill | Tool::Picker => {}
         }
+    }
+
+    /// Whether the tool has a style: outlined, filled, or both.
+    pub fn has_style(&self) -> bool {
+        matches!(self.tool, Tool::Rectangle | Tool::Ellipse)
     }
 
     /// X: the foreground becomes the background and the background the foreground.
@@ -184,8 +232,22 @@ impl Settings {
 
     /// What the canvas does with the current tool: the pencil and the brush draw in the
     /// foreground, the eraser to transparency, each at its size; the fill fills; the
-    /// picker picks.
+    /// picker picks; the shapes draw at their size, outlined in the foreground and filled
+    /// with the background, or, filled without an outline, with the foreground (as Paint
+    /// and Paint.NET do).
     pub fn action(&self) -> Action {
+        let shape = |kind, width| {
+            let fill = match self.style {
+                Style::Filled => self.foreground,
+                Style::Outline | Style::Both => self.background,
+            };
+            Action::Shape(ShapeTool {
+                kind,
+                width,
+                outline: self.foreground,
+                fill,
+            })
+        };
         match self.tool {
             Tool::Pencil => Action::Draw(Tip::Pencil(Pencil {
                 color: self.foreground,
@@ -202,6 +264,9 @@ impl Settings {
                 background: self.background,
             },
             Tool::Picker => Action::Pick,
+            Tool::Line => shape(Kind::Line, self.line_width),
+            Tool::Rectangle => shape(Kind::Rectangle(self.style), self.rectangle_width),
+            Tool::Ellipse => shape(Kind::Ellipse(self.style), self.ellipse_width),
         }
     }
 }
@@ -354,6 +419,46 @@ mod tests {
                 background: red
             }
         );
+    }
+
+    #[test]
+    fn shapes_outline_in_the_foreground_and_fill_with_the_background() {
+        let red = Color::rgb(237, 28, 36);
+        let mut s = Settings {
+            foreground: red,
+            ..Settings::default()
+        };
+        let shape = |kind, width, fill| {
+            Action::Shape(ShapeTool {
+                kind,
+                width,
+                outline: red,
+                fill,
+            })
+        };
+        s.set_tool(Tool::Line);
+        assert!(!s.has_style());
+        assert_eq!(s.action(), shape(Kind::Line, 1, Color::WHITE));
+        s.set_width(5);
+        s.set_tool(Tool::Rectangle);
+        assert!(s.has_style());
+        assert_eq!(s.width(), Some(1));
+        let outline = Kind::Rectangle(Style::Outline);
+        assert_eq!(s.action(), shape(outline, 1, Color::WHITE));
+        s.style = Style::Both;
+        assert_eq!(
+            s.action(),
+            shape(Kind::Rectangle(Style::Both), 1, Color::WHITE)
+        );
+        // Filled without an outline: the foreground, as in Paint.
+        s.style = Style::Filled;
+        assert_eq!(s.action(), shape(Kind::Rectangle(Style::Filled), 1, red));
+        // The style is the ellipse's too; each keeps its own size.
+        s.set_tool(Tool::Ellipse);
+        s.set_width(3);
+        assert_eq!(s.action(), shape(Kind::Ellipse(Style::Filled), 3, red));
+        s.set_tool(Tool::Line);
+        assert_eq!(s.width(), Some(5));
     }
 
     #[test]

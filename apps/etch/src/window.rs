@@ -10,7 +10,7 @@ use crate::tools::{self, Settings, Tool};
 use gtk::prelude::*;
 use gtk::{gdk, gio, glib};
 use image_io::Format;
-use image_model::{Color, Image, MAX_SIDE};
+use image_model::{Color, Image, Style, MAX_SIDE};
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -374,7 +374,14 @@ struct Controls {
     edge: gtk::Box,
     hard: gtk::ToggleButton,
     soft: gtk::ToggleButton,
+    /// The rectangle's and ellipse's Outline, Filled, and Both buttons ([`STYLES`]), shown
+    /// while one of them is the tool.
+    style: gtk::Box,
+    styles: [gtk::ToggleButton; 3],
 }
+
+/// The styles of the style buttons, in order.
+const STYLES: [Style; 3] = [Style::Outline, Style::Filled, Style::Both];
 
 impl Controls {
     fn update(&self, f: impl FnOnce(&mut Settings)) {
@@ -397,29 +404,42 @@ impl Controls {
         if !edge.is_active() {
             edge.set_active(true);
         }
+        self.style.set_visible(s.has_style());
+        let style = STYLES
+            .iter()
+            .position(|&t| t == s.style)
+            .map(|i| &self.styles[i]);
+        if let Some(b) = style.filter(|b| !b.is_active()) {
+            b.set_active(true);
+        }
     }
 }
 
-/// The brush's edge, Hard or Soft: two linked buttons, one on.
-fn edge_buttons() -> (gtk::Box, gtk::ToggleButton, gtk::ToggleButton) {
-    let edge = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    edge.add_css_class("linked");
-    edge.set_valign(gtk::Align::Center);
-    let hard = gtk::ToggleButton::with_label("Hard");
-    let soft = gtk::ToggleButton::with_label("Soft");
-    soft.set_group(Some(&hard));
-    hard.set_tooltip_text(Some("Hard edge: solid to the rim"));
-    soft.set_tooltip_text(Some("Soft edge: fades to transparent at the rim"));
-    for b in [&hard, &soft] {
+/// A choice of a few, labelled `label`: linked toggle buttons, one on, each with its
+/// name and tooltip.
+fn choice<const N: usize>(
+    label: &str,
+    options: [(&str, &str); N],
+) -> (gtk::Box, [gtk::ToggleButton; N]) {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    row.add_css_class("linked");
+    row.set_valign(gtk::Align::Center);
+    let buttons = options.map(|(name, tip)| {
+        let b = gtk::ToggleButton::with_label(name);
+        b.set_tooltip_text(Some(tip));
         b.set_focusable(false);
-        edge.append(b);
+        row.append(&b);
+        b
+    });
+    for b in &buttons[1..] {
+        b.set_group(Some(&buttons[0]));
     }
-    edge.update_property(&[gtk::accessible::Property::Label("Edge")]);
-    (edge, hard, soft)
+    row.update_property(&[gtk::accessible::Property::Label(label)]);
+    (row, buttons)
 }
 
 /// The colour row and the size, left of the status: the colours, the palette, the
-/// current tool's size, and the brush's edge.
+/// current tool's size, the brush's edge, and the shapes' style.
 fn colour_row(controls: &Rc<Controls>) -> gtk::Box {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     row.append(&controls.indicator);
@@ -466,6 +486,19 @@ fn colour_row(controls: &Rc<Controls>) -> gtk::Box {
         }
     });
     row.append(&controls.edge);
+    for (button, style) in controls.styles.iter().zip(STYLES) {
+        button.connect_toggled({
+            let controls = Rc::downgrade(controls);
+            move |b| {
+                if let Some(c) = controls.upgrade() {
+                    if b.is_active() && c.settings.get().style != style {
+                        c.update(|s| s.style = style);
+                    }
+                }
+            }
+        });
+    }
+    row.append(&controls.style);
     row
 }
 
@@ -480,7 +513,27 @@ fn show(
     bench: Option<Bench>,
 ) {
     let canvas = Canvas::new(image, matches!(bench, Some(Bench::Stroke(_))));
-    let (edge, hard, soft) = edge_buttons();
+    let (edge, [hard, soft]) = choice(
+        "Edge",
+        [
+            ("Hard", "Hard edge: solid to the rim"),
+            ("Soft", "Soft edge: fades to transparent at the rim"),
+        ],
+    );
+    let (style, styles) = choice(
+        "Style",
+        [
+            (
+                "Outline",
+                "Outline: the shape's outline in the foreground colour",
+            ),
+            ("Filled", "Filled: the whole shape in the foreground colour"),
+            (
+                "Both",
+                "Both: the outline in the foreground colour, filled with the background colour",
+            ),
+        ],
+    );
     let controls = Rc::new(Controls {
         settings: Cell::new(Settings::default()),
         canvas: canvas.clone(),
@@ -494,6 +547,8 @@ fn show(
         edge,
         hard,
         soft,
+        style,
+        styles,
     });
     controls.show();
     let (bar, status) = Status::new();
@@ -556,10 +611,10 @@ fn show(
         }
     });
 
-    // Space held: dragging pans. Ctrl+Shift+Z redoes, Ctrl+Shift+S is Save As, and
-    // Ctrl+Shift+E Export (shifted, a letter may arrive upper case, which an accelerator
-    // misses). Unmodified, a tool's key picks it and X swaps the colours. None of them
-    // while a text field (the size) has the keys.
+    // Space held: dragging pans. Escape drops a shape being dragged. Ctrl+Shift+Z redoes,
+    // Ctrl+Shift+S is Save As, and Ctrl+Shift+E Export (shifted, a letter may arrive upper
+    // case, which an accelerator misses). Unmodified, a tool's key picks it and X swaps
+    // the colours. None of them while a text field (the size) has the keys.
     let keys = gtk::EventControllerKey::new();
     keys.set_propagation_phase(gtk::PropagationPhase::Capture);
     keys.connect_key_pressed({
@@ -577,6 +632,9 @@ fn show(
             let redo = gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK;
             if key == gdk::Key::space {
                 canvas.set_space(true);
+                return glib::Propagation::Stop;
+            }
+            if key == gdk::Key::Escape && canvas.cancel_shape() {
                 return glib::Propagation::Stop;
             }
             if mods == redo && matches!(key, gdk::Key::z | gdk::Key::Z) {

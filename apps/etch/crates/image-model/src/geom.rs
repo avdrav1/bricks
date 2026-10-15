@@ -81,6 +81,22 @@ impl Rect {
     }
 }
 
+/// Pointer positions beyond this many pixels off the image clamp to it, so far-off points
+/// can't overflow the line arithmetic.
+const FAR: f64 = 1_000_000.0;
+
+/// The pixel a point in image coordinates falls in: fractions floor, far-off points clamp.
+pub(crate) fn pixel((x, y): (f64, f64)) -> (i64, i64) {
+    let clamp = |v: f64| {
+        if v.is_nan() {
+            0
+        } else {
+            v.clamp(-FAR, FAR).floor() as i64
+        }
+    };
+    (clamp(x), clamp(y))
+}
+
 /// Merges an operation's changed rectangles.
 pub(crate) fn join(a: Option<Rect>, b: Option<Rect>) -> Option<Rect> {
     match (a, b) {

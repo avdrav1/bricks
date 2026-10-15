@@ -142,7 +142,7 @@ fn dist2(p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
 }
 
 /// `src` at `coverage` (0 to 255) composited over `dst`, straight alpha, source-over.
-fn over(dst: Color, src: Color, coverage: u8) -> Color {
+pub(crate) fn over(dst: Color, src: Color, coverage: u8) -> Color {
     if coverage == 255 && src.a == 255 {
         return src;
     }

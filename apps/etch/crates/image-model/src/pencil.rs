@@ -26,7 +26,7 @@ impl Pencil {
     /// the pixels `dx0..=dx1` of row `dy`. Pixel `(i, j)` of the tip's `width`-square is
     /// in when its distance from the square's centre is at most half the width; offsets
     /// run from `-(width - 1) / 2`, so even widths lean right and down.
-    fn rows(&self) -> Vec<(i64, i64, i64)> {
+    pub(crate) fn rows(&self) -> Vec<(i64, i64, i64)> {
         let w = self.width.max(1) as i64;
         let lo = -(w - 1) / 2;
         let c = (w - 1) as f64 / 2.0;
@@ -43,7 +43,7 @@ impl Pencil {
     }
 
     /// How far the tip reaches from the pixel it's stamped on: `(before, after)`.
-    fn reach(&self) -> (i64, i64) {
+    pub(crate) fn reach(&self) -> (i64, i64) {
         let w = self.width.max(1) as i64;
         ((w - 1) / 2, w / 2)
     }
@@ -66,7 +66,7 @@ impl Pencil {
         let changed = self.bounds(image, a, b)?;
         let rows = self.rows();
         let (w, h) = (image.width() as i64, image.height() as i64);
-        let mut stamp = |x: i64, y: i64| {
+        let stamp = |x: i64, y: i64| {
             for &(dy, dx0, dx1) in &rows {
                 let yy = y + dy;
                 let (x0, x1) = ((x + dx0).max(0), (x + dx1 + 1).min(w));
@@ -75,24 +75,29 @@ impl Pencil {
                 }
             }
         };
-        let (dx, sx) = ((b.0 - a.0).abs(), (b.0 - a.0).signum());
-        let (dy, sy) = (-(b.1 - a.1).abs(), (b.1 - a.1).signum());
-        let (mut x, mut y, mut err) = (a.0, a.1, dx + dy);
-        loop {
-            stamp(x, y);
-            if (x, y) == b {
-                break;
-            }
-            let e2 = 2 * err;
-            if e2 >= dy {
-                err += dy;
-                x += sx;
-            }
-            if e2 <= dx {
-                err += dx;
-                y += sy;
-            }
-        }
+        bresenham(a, b, stamp);
         Some(changed)
+    }
+}
+
+/// Calls `f` with each pixel of Bresenham's line from `a` to `b`, both included, in order.
+pub(crate) fn bresenham(a: (i64, i64), b: (i64, i64), mut f: impl FnMut(i64, i64)) {
+    let (dx, sx) = ((b.0 - a.0).abs(), (b.0 - a.0).signum());
+    let (dy, sy) = (-(b.1 - a.1).abs(), (b.1 - a.1).signum());
+    let (mut x, mut y, mut err) = (a.0, a.1, dx + dy);
+    loop {
+        f(x, y);
+        if (x, y) == b {
+            break;
+        }
+        let e2 = 2 * err;
+        if e2 >= dy {
+            err += dy;
+            x += sx;
+        }
+        if e2 <= dx {
+            err += dx;
+            y += sy;
+        }
     }
 }
