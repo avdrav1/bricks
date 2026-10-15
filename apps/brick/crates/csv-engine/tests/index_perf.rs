@@ -7,7 +7,6 @@
 
 use csv_engine::{Dialect, RowIndex, Source, SparseRowIndex};
 use std::io::Write;
-use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -31,13 +30,20 @@ fn corpus(name: &str) -> PathBuf {
 }
 
 /// Drop the file from the page cache so the measurement includes reading it from disk.
+/// Only Linux has `posix_fadvise`; elsewhere the run measures a warm cache.
 fn evict(path: &Path) {
-    let f = std::fs::File::open(path).unwrap();
-    // SAFETY: valid fd; advisory call with no memory effects.
-    #[allow(unsafe_code)]
-    unsafe {
-        libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::fd::AsRawFd;
+        let f = std::fs::File::open(path).unwrap();
+        // SAFETY: valid fd; advisory call with no memory effects.
+        #[allow(unsafe_code)]
+        unsafe {
+            libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+        }
     }
+    #[cfg(not(target_os = "linux"))]
+    let _ = path;
 }
 
 fn index_cold(path: &Path) -> (Arc<SparseRowIndex>, Duration) {

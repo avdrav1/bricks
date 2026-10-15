@@ -8,7 +8,6 @@
 //! `cargo test --release -p brick --test first_rows -- --ignored --nocapture`
 
 use std::io::{BufRead, BufReader};
-use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Instant;
@@ -16,14 +15,21 @@ use std::time::Instant;
 const TARGET_MS: f64 = 500.0;
 const RUNS: usize = 3;
 
-/// Drop `path` from the page cache so the open reads from disk.
+/// Drop `path` from the page cache so the open reads from disk. Only Linux has
+/// `posix_fadvise`; elsewhere the open runs against a warm cache.
 fn evict(path: &Path) {
-    let f = std::fs::File::open(path).unwrap();
-    // SAFETY: valid fd; advisory call with no memory effects.
-    #[allow(unsafe_code)]
-    unsafe {
-        libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::fd::AsRawFd;
+        let f = std::fs::File::open(path).unwrap();
+        // SAFETY: valid fd; advisory call with no memory effects.
+        #[allow(unsafe_code)]
+        unsafe {
+            libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+        }
     }
+    #[cfg(not(target_os = "linux"))]
+    let _ = path;
 }
 
 fn field(json: &str, key: &str) -> String {

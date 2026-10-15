@@ -20,7 +20,6 @@ use data_model::{
 use formula::Value;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
-use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64};
@@ -53,14 +52,21 @@ fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// Drop `path` from the page cache so the next read comes from disk.
+/// Drop `path` from the page cache so the next read comes from disk. Only Linux has
+/// `posix_fadvise`; elsewhere the read hits a warm cache.
 fn evict(path: &Path) {
-    let f = std::fs::File::open(path).unwrap();
-    // SAFETY: valid fd; advisory call with no memory effects.
-    #[allow(unsafe_code)]
-    unsafe {
-        libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::fd::AsRawFd;
+        let f = std::fs::File::open(path).unwrap();
+        // SAFETY: valid fd; advisory call with no memory effects.
+        #[allow(unsafe_code)]
+        unsafe {
+            libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+        }
     }
+    #[cfg(not(target_os = "linux"))]
+    let _ = path;
 }
 
 fn has_display() -> bool {

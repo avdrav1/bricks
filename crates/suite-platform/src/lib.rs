@@ -1,5 +1,5 @@
-//! Operating-system integration shared by every app in the suite. The first target is
-//! Linux.
+//! Operating-system integration shared by every app in the suite: Linux and macOS
+//! (ADR 0011).
 //!
 //! File dialogs, clipboard, desktop integration, drag and drop, Wayland/X11 differences,
 //! system theme, and recent files may move here once two apps need them.
@@ -10,6 +10,7 @@ use std::fmt;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Platform {
     Linux,
+    MacOs,
 }
 
 /// The suite was built for an operating system it doesn't support.
@@ -23,7 +24,7 @@ impl fmt::Display for Unsupported {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "unsupported operating system {:?}; only Linux is supported",
+            "unsupported operating system {:?}; only Linux and macOS are supported",
             self.os
         )
     }
@@ -39,6 +40,7 @@ pub fn current() -> Result<Platform, Unsupported> {
 fn platform_of(os: &'static str) -> Result<Platform, Unsupported> {
     match os {
         "linux" => Ok(Platform::Linux),
+        "macos" => Ok(Platform::MacOs),
         _ => Err(Unsupported { os }),
     }
 }
@@ -48,10 +50,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_linux_is_supported() {
+    fn linux_and_macos_are_supported() {
         assert_eq!(platform_of("linux"), Ok(Platform::Linux));
-        let err = platform_of("macos").unwrap_err();
-        assert_eq!(err, Unsupported { os: "macos" });
-        assert!(err.to_string().contains("\"macos\""));
+        assert_eq!(platform_of("macos"), Ok(Platform::MacOs));
+        let err = platform_of("windows").unwrap_err();
+        assert_eq!(err, Unsupported { os: "windows" });
+        assert!(err.to_string().contains("\"windows\""));
+    }
+
+    #[test]
+    fn this_build_is_supported() {
+        let expected = if cfg!(target_os = "macos") {
+            Platform::MacOs
+        } else {
+            Platform::Linux
+        };
+        assert_eq!(current(), Ok(expected));
     }
 }

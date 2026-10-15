@@ -111,11 +111,13 @@ mod tests {
         }
     }
 
+    /// A fresh folder for one test, by its canonical path: the list stores canonical paths,
+    /// and the temp dir may sit behind a symlink (macOS: `/var` → `/private/var`).
     fn dir(name: &str) -> Dir {
         let d = std::env::temp_dir().join(format!("app4-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
-        Dir(d)
+        Dir(std::fs::canonicalize(&d).unwrap())
     }
 
     /// APP-4 acceptance: the last 10 files survive a restart, newest first.

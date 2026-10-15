@@ -5,7 +5,6 @@
 
 use csv_engine::{Dialect, RowIndex, Source, SparseRowIndex};
 use std::hint::black_box;
-use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -22,20 +21,27 @@ fn splitmix(mut x: u64) -> u64 {
 }
 
 /// Drop the file from the page cache. Pages mapped into this process survive
-/// `POSIX_FADV_DONTNEED`, so first drop our page-table entries for the mapping.
+/// `POSIX_FADV_DONTNEED`, so first drop our page-table entries for the mapping. Only Linux
+/// has `posix_fadvise`; elsewhere the fetches run against a warm cache.
 fn evict(path: &Path, mapped: &[u8]) {
-    let f = std::fs::File::open(path).unwrap();
-    // SAFETY: MADV_DONTNEED on a read-only shared file mapping only drops page-table
-    // entries; the next access re-reads from the file. fadvise is advisory.
-    #[allow(unsafe_code)]
-    unsafe {
-        libc::madvise(
-            mapped.as_ptr() as *mut libc::c_void,
-            mapped.len(),
-            libc::MADV_DONTNEED,
-        );
-        libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::fd::AsRawFd;
+        let f = std::fs::File::open(path).unwrap();
+        // SAFETY: MADV_DONTNEED on a read-only shared file mapping only drops page-table
+        // entries; the next access re-reads from the file. fadvise is advisory.
+        #[allow(unsafe_code)]
+        unsafe {
+            libc::madvise(
+                mapped.as_ptr() as *mut libc::c_void,
+                mapped.len(),
+                libc::MADV_DONTNEED,
+            );
+            libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+        }
     }
+    #[cfg(not(target_os = "linux"))]
+    let _ = (path, mapped);
 }
 
 /// Fetch one window and touch every byte of it, as a renderer splitting cells would.

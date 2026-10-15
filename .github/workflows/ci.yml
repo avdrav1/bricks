@@ -17,6 +17,22 @@ jobs:
       - run: cargo test --workspace
       - run: python3 -m unittest discover -s scripts
       - run: python3 scripts/backlog.py status
+  macos:
+    # arm64, the oldest macOS the suite supports (ADR 0011). GUI checks stay on Linux.
+    runs-on: macos-14
+    timeout-minutes: 60
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+      HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { components: "clippy" }
+      - uses: Swatinem/rust-cache@v2
+      - run: brew install gtk4 pkgconf
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - run: cargo test --workspace
   bench:
     # Prints the apps/brick/docs/BENCHMARKS.md table. Runner numbers are informational: gates use the
     # reference box, and rows that open a window are skipped (no display).
