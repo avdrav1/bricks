@@ -157,6 +157,20 @@
 #      with it in place (opaque blue, blue at alpha 128, red beside). Ctrl+Z takes the
 #      paste back (red there, unmarked) and Ctrl+Y lands it again. While text is typed
 #      Ctrl+V pastes nothing.
+# ETCH-17 acceptance: crop to selection.
+#  22. `etch crop.png` (a copy of t.png): Ctrl+Shift+X without a selection does nothing
+#      (400×300, unmarked). A selection of image pixels 150 to 250 across and 100 to 200
+#      down (red, transparent, and half-transparent blue), then the Image menu by keyboard
+#      (Alt+I, then C for Crop to Selection; GTK names no popover menu item to AT-SPI):
+#      the status says 100×100 with no selection, the title is marked, and on screen the
+#      100x100 image shows its left half red, its top right the checkerboard, its bottom
+#      right blue blended over it.
+#      Ctrl+S writes a 100x100 PNG whose corners are the pixels exactly (ff0000ff,
+#      transparent, 0000ff80). One Ctrl+Z gives back 400×300 and every region of t.png on
+#      screen (the title marked: the file is the crop), and Ctrl+Y crops again. Pixels
+#      moved and still floating land first: a 100x80 red selection dragged 200 px right
+#      and cropped (Ctrl+Shift+X) leaves a 100×80 image all red; one Ctrl+Z gives back
+#      400×300 with the moved pixels landed.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -408,6 +422,15 @@ elif cmd == "checkered":
     grey = sum(1 for p in box if all(195 <= c <= 213 for c in p))
     every = "all" if checker == len(box) else f"{checker}/{len(box)}"
     print(f"checker {every} light {min(light, 1)} grey {min(grey, 1)}")
+elif cmd == "rgba":
+    # An image file: its size and its pixels at X,Y ... as straight-alpha RRGGBBAA.
+    p = GdkPixbuf.Pixbuf.new_from_file(sys.argv[2])
+    rs, nc, data = p.get_rowstride(), p.get_n_channels(), p.get_pixels()
+    out = [f"{p.get_width()}x{p.get_height()}"]
+    for xy in sys.argv[3:]:
+        x, y = map(int, xy.split(","))
+        out.append(bytes(data[y * rs + x * nc:y * rs + x * nc + nc]).hex())
+    print(*out)
 PY
 # Section 21: another GTK 4 app on the clipboard. "read X,Y ...": its window takes the
 # keyboard (Wayland offers the clipboard to the focused window), waits for an image there,
@@ -1014,6 +1037,45 @@ session() {
   keys -k Escape
   pkill -x etch; sleep 1
   echo "clip log: $(grep -c . /tmp/clip.log)"; sed "s/^/clip: /" /tmp/clip.log
+
+  # The image size in the status; the title of FILE; the W x H image centred at 100% in
+  # the last screenshot: pixels of colour HEX in its image pixels X0 Y0 X1 Y1, 4 px in.
+  size() { python3 /tmp/a11y.py text | grep -E "^[0-9]+×[0-9]+$" | head -1; }
+  titled() { python3 /tmp/a11y.py text | grep -E "^(• )?$1$" | head -1; }
+  centred() { # W H X0 Y0 X1 Y1 HEX
+    read cx cy cw ch <<<"$(px canvas)"
+    local l=$((cx + (cw - $1) / 2)) t=$((cy + (ch - $2) / 2))
+    px count /tmp/shot.png $((l + $3 + 4)) $((t + $4 + 4)) $((l + $5 - 4)) $((t + $6 - 4)) $7
+  }
+
+  echo "== 22 crop"
+  cp /tmp/t.png /tmp/crop.png
+  etch /tmp/crop.png >>/tmp/app.log 2>&1 & sleep 3
+  read cx cy cw ch <<<"$(px canvas)"
+  l=$((cx + (cw - 400) / 2)); t=$((cy + (ch - 300) / 2))
+  keys -M ctrl -M shift x -m shift -m ctrl; sleep 1
+  echo "unselected: $(size) $(titled crop.png)"
+  keys s
+  python3 /scripts/dnd_helpers.py drag $((l + 150)) $((t + 100)) $((l + 250)) $((t + 200)); sleep 0.5
+  echo "selected: $(sel)"
+  keys -M alt i -m alt; sleep 1; shot image-menu
+  keys c; sleep 1.5; shot cropped
+  echo "cropped: $(size) $(sel) $(titled crop.png)"
+  px opened /tmp/shot.png 100 100 | sed "s/^/cropped: /"
+  keys -M ctrl s -m ctrl; sleep 2
+  echo "saved: $(px rgba /tmp/crop.png 0,0 99,0 99,99)"
+  keys -M ctrl z -m ctrl; sleep 1; shot crop-undone
+  echo "crop undone: $(size) $(titled crop.png)"
+  px opened /tmp/shot.png 400 300 | sed "s/^/crop undone: /"
+  keys -M ctrl y -m ctrl; sleep 1; echo "crop redone: $(size) $(titled crop.png)"
+  keys -M ctrl z -m ctrl; sleep 1
+  python3 /scripts/dnd_helpers.py drag $((l + 50)) $((t + 50)) $((l + 150)) $((t + 130)); sleep 0.5
+  python3 /scripts/dnd_helpers.py drag $((l + 100)) $((t + 90)) $((l + 300)) $((t + 90)); sleep 0.5
+  keys -M ctrl -M shift x -m shift -m ctrl; sleep 1.5; shot float-cropped
+  echo "float cropped: $(size) $(sel) red $(centred 100 80 0 0 100 80 FF0000)"
+  keys -M ctrl z -m ctrl; sleep 1; shot float-crop-undone
+  echo "float crop undone: $(size) red $(centred 400 300 250 50 350 130 FF0000) left $(px checkered /tmp/shot.png $((l + 54)) $((t + 54)) $((l + 146)) $((t + 126)))"
+  pkill -x etch; sleep 1
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -1259,6 +1321,20 @@ check "21: ... exactly: opaque blue, blue at alpha 128, red beside" "21 clipboar
 check "21: one Ctrl+Z takes the paste back" "21 clipboard" "^paste undone: t\.png red all$"
 check "21: ... and Ctrl+Y lands it again" "21 clipboard" "^paste redone: • t\.png blue all$"
 check "21: while text is typed Ctrl+V pastes nothing" "21 clipboard" "^typing: 400×300 image, typing “ab” no selection$"
+check "22: Crop to Selection does nothing without a selection" "22 crop" "^unselected: 400×300 crop\.png$"
+check "22: a 100×100 selection" "22 crop" "^selected: Selection: 100×100$"
+check "22: its C crops to the selection: 100×100, no selection, marked" "22 crop" "^cropped: 100×100 no selection • crop\.png$"
+check "22: ... the selection's red half on the left" "22 crop" "^cropped: red all$"
+check "22: ... its transparent quarter top right" "22 crop" "^cropped: checker all light 1 grey 1 green 0$"
+check "22: ... its half-transparent blue bottom right" "22 crop" "^cropped: blended all$"
+check "22: the cropped image saves 100x100 with the pixels exact" "22 crop" "^saved: 100x100 ff0000ff [0-9a-f]{6}00 0000ff80$"
+check "22: one Ctrl+Z gives back 400×300" "22 crop" "^crop undone: 400×300 • crop\.png$"
+check "22: ... with every pixel as it was: red" "22 crop" "^crop undone: red all$"
+check "22: ... transparent" "22 crop" "^crop undone: checker all light 1 grey 1 green 0$"
+check "22: ... and half-transparent blue" "22 crop" "^crop undone: blended all$"
+check "22: Ctrl+Y crops again (the file's image: unmarked)" "22 crop" "^crop redone: 100×100 crop\.png$"
+check "22: floating pixels land, then the image is cropped to them" "22 crop" "^float cropped: 100×80 no selection red all$"
+check "22: ... and one Ctrl+Z gives back 400×300 with them landed" "22 crop" "^float crop undone: 400×300 red all left checker all light 1 grey 1$"
 absent "the app logs no errors or panics" "app log" "^etch:|panicked|CRITICAL"
 bench=$(section "8 bench" | sed -n "s/^bench: //p")
 if [ -z "$bench" ]; then echo "FAIL 8: --bench-stroke printed nothing"; fail=1; else

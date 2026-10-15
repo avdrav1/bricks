@@ -77,6 +77,7 @@ Every change undoes and redoes: strokes, erasing, fills, shapes, text, crop, res
 | Ctrl++, Ctrl+- | Zoom In, Zoom Out |
 | Ctrl+0 | Actual Size (100%) |
 | Ctrl+9 | Fit to Window |
+| Ctrl+Shift+X | Crop to Selection |
 | P, B, E, F, I, T, R, L, S | Pencil, Brush, Eraser, Fill, Colour picker, Text, Rectangle, Line, Selection (Ellipse: O) |
 | X | Swap the foreground and background colours |
 
@@ -133,13 +134,15 @@ Built so far (ETCH-6 to ETCH-14):
 
 ## ET2: image manipulation
 
-Built so far (ETCH-15 to ETCH-16):
+Built so far (ETCH-15 to ETCH-17):
 
 - **Selection.** The tool column's Selection (S) selects a rectangle by dragging: the pixels between the pixel edges nearest the press and the release (a drag across 200 pixels selects 200), clipped to the image. Its outline is dashed, black on white, so it shows on any colour, and the status bar says its size between the pointer position and the zoom: `Selection: 320×180`. A click outside it (or a drag selecting nothing) leaves no selection. Over the selection the pointer is a move cursor.
 - **Moving the selected pixels.** A drag inside the selection lifts its pixels and moves them with the pointer: they float over the image, which isn't touched until they land (the title stays unmarked), and the place they left shows transparency (the checkerboard), as the model is always RGBA, not the background colour. More drags move them further. They land, replacing the pixels under them (see-through and transparent ones too, as they were), clipped to the image, when the selection goes: Escape, a click or drag outside it, choosing another tool, Select All, or saving or closing (which land them and keep the selection where they landed). Lifting, every drag, and landing are one undo step; Ctrl+Z while they float drops the move and the selection goes back where they were. The arrow keys move the selection's pixels a pixel (Shift: ten), lifting them as a drag does.
 - **Edit menu.** Select All (Ctrl+A) picks the selection tool, as Paint does, and selects the whole image; Deselect (Escape) and Delete (Delete) work while there's a selection. Delete clears the selection's pixels to transparency, one undo step, and the selection stays; floating pixels are dropped instead, the place they were lifted from left transparent. While text is typed, or a field has the keys, Ctrl+A, Escape, Delete, and the arrows are theirs.
 - **Fast enough on the UI thread.** Lifting a whole 8K image takes 26 ms, lifting and landing it 125 ms at worst, and deleting it 34 ms (Ryzen 9 5900; target 200 ms, as the fill's).
 - **Clipboard.** Edit → Cut (Ctrl+X), Copy (Ctrl+C), and Paste (Ctrl+V). Copy puts the selection's pixels (the floating ones while they float) on the desktop's clipboard as an image, straight alpha, transparency included: other apps paste it as PNG or any other image type GTK writes. Cut copies, then deletes as Delete does, one undo step. Paste takes an image another app copied (a screenshot, a picture from a browser), converted off the UI thread, picks the selection tool, as Paint does, and floats the image over the canvas with its top-left pixel at the top-left of the visible part of the image (the image's own top-left when that shows): the status shows its size and the title stays unmarked. It moves, nudges, lands, and drops as moved pixels do, replacing the pixels under it when it lands, one undo step; Ctrl+Z while it floats drops it. An image larger than the canvas floats whole and lands clipped (Paint offers to enlarge the canvas; Etch doesn't yet); one over 16384 pixels a side keeps its top-left 16384. Nothing happens when the clipboard holds no image. While text is typed, or a field has the keys, Ctrl+X, Ctrl+C, and Ctrl+V are theirs: they never cut or paste pixels then. What Etch copies stays on the clipboard while Etch runs.
+- **Image menu.** After View, holding the commands that change the whole image, its size too. Each is one undo step whose undo gives back the image as it was, size and every pixel, and whose redo gives back the result, both at once whatever the image's size: history keeps the whole image on the step's other side (ADR 0010). The command runs off the UI thread on a copy of the image (16 ms for 8K on a Ryzen 9 5900), the canvas not taking input until it's done; then the image shows anew, as an opened one does (at 100% centred, or fitted when larger than the window), with no selection, and the status gives its new size. Text being typed and floating pixels go on the image first, each its own step.
+- **Crop to Selection** (Ctrl+Shift+X): the image becomes the selection's pixels, its top-left pixel the selection's. Floating pixels land first and the crop takes the selection where they landed (clipped to the image). Without a selection the command is greyed out. Cropping an 8K image takes 22 ms.
 
 ## Non-goals for V0.1
 

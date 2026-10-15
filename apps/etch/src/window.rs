@@ -5,6 +5,7 @@
 
 use crate::canvas::Canvas;
 use crate::colours;
+use crate::image_menu;
 use crate::saving::Saver;
 use crate::settings::{self, Background};
 use crate::text;
@@ -137,6 +138,7 @@ pub fn install_app_actions(app: &gtk::Application) {
     view.append(Some("_Actual Size"), Some("win.actual-size"));
     view.append(Some("_Fit to Window"), Some("win.fit"));
     menu.append_submenu(Some("_View"), &view);
+    menu.append_submenu(Some("_Image"), &image_menu::menu());
     app.set_menubar(Some(&menu));
 }
 
@@ -801,6 +803,7 @@ fn show(
         with_window("select-all", select_all),
         with_window("paste", paste),
     ]);
+    image_menu::add_actions(window, &canvas);
     // The tool: the tool column's buttons and the tool keys set it.
     let tool = gio::ActionEntry::builder("tool")
         .parameter_type(Some(glib::VariantTy::STRING))
@@ -836,10 +839,10 @@ fn show(
     });
 
     // Space held: dragging pans. Escape drops a shape being dragged, or deselects.
-    // Ctrl+Shift+Z redoes, Ctrl+Shift+S is Save As, and Ctrl+Shift+E Export (shifted, a
-    // letter may arrive upper case, which an accelerator misses). Ctrl+X, Ctrl+C, and
-    // Ctrl+V cut, copy, and paste, Ctrl+A selects all, Delete deletes the selection, and
-    // the arrows move it a pixel (Shift: ten).
+    // Ctrl+Shift+Z redoes, Ctrl+Shift+S is Save As, Ctrl+Shift+E Export, and Ctrl+Shift+X
+    // crops (shifted, a letter may arrive upper case, which an accelerator misses).
+    // Ctrl+X, Ctrl+C, and Ctrl+V cut, copy, and paste, Ctrl+A selects all, Delete deletes
+    // the selection, and the arrows move it a pixel (Shift: ten).
     // Unmodified, a tool's key picks it and X swaps the colours. None of them while a
     // text field (the size) has the keys, and only the Ctrl+Shift ones while text is
     // typed on the canvas: its keys are its letters.
@@ -855,6 +858,10 @@ fn show(
                 .is_some_and(|f| f.is::<gtk::Text>() || f.is::<gtk::TextView>());
             if field {
                 return glib::Propagation::Proceed;
+            }
+            // While an Image menu command runs, the image waits for it.
+            if canvas.busy() {
+                return glib::Propagation::Stop;
             }
             let text = canvas.typing();
             let mods = state & gtk::accelerator_get_default_mod_mask();
@@ -877,6 +884,9 @@ fn show(
             };
             if let (true, Some(action)) = (mods == redo, shifted) {
                 ActionGroupExt::activate_action(&window, action, None);
+                return glib::Propagation::Stop;
+            }
+            if mods == redo && image_menu::shifted_key(&window, key) {
                 return glib::Propagation::Stop;
             }
             if text {
@@ -967,6 +977,7 @@ fn show(
                     a.set_enabled(on);
                 }
             }
+            image_menu::update(&window, canvas);
         }
     });
     Saver::attach(window, &canvas, file);

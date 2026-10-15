@@ -2,7 +2,7 @@
 
 use crate::brush::Coverage;
 use crate::geom::{join, pixel};
-use crate::{Blend, Brush, Color, Fill, Floating, Image, Pencil, Rect, Shape, TILE};
+use crate::{Blend, Brush, Color, Fill, Floating, Image, Pencil, Rect, Shape, Transform, TILE};
 use std::collections::BTreeMap;
 
 /// What a stroke draws with.
@@ -102,6 +102,9 @@ pub enum Operation {
     Land(Floating),
     /// A rectangle (inside the image) cleared to transparency ([`Document::clear`]).
     Clear(Rect),
+    /// A transform of the whole image ([`Document::transform`]); its step keeps a whole
+    /// image rather than tiles.
+    Transform(Transform),
 }
 
 impl Operation {
@@ -117,6 +120,10 @@ impl Operation {
             Operation::Clear(r) => {
                 image.fill_rect(*r, Color::TRANSPARENT);
                 Some(*r)
+            }
+            Operation::Transform(t) => {
+                *image = t.apply(image).expect("a recorded transform has pixels");
+                Some(image.bounds())
             }
         }
     }
@@ -210,6 +217,10 @@ impl Covering {
 struct Step {
     op: Operation,
     before: Saved,
+    /// A transform's step: the image on the other side of it, the one before it while the
+    /// step is done and the one after it while it's undone. Undo and redo swap it with the
+    /// document's, so neither recomputes the transform.
+    other: Option<Image>,
     id: u64,
 }
 
@@ -267,6 +278,7 @@ impl Document {
                 points: vec![p],
             }),
             before: Saved::default(),
+            other: None,
             id: self.next_id,
         };
         self.next_id += 1;
@@ -411,11 +423,43 @@ impl Document {
         changed
     }
 
+    /// Transforms the whole image ([`Transform`]: crop), as one undo step keeping the
+    /// image from before it. Nothing when the transform would leave the image as it is or
+    /// have no pixels. Returns the new image's bounds. Ends any stroke under way.
+    pub fn transform(&mut self, transform: Transform) -> Option<Rect> {
+        if transform.unchanged(&self.image) {
+            return None;
+        }
+        let result = transform.apply(&self.image).ok()?;
+        self.install(transform, result)
+    }
+
+    /// [`Document::transform`] with its result computed elsewhere (off the UI thread):
+    /// `result` must be `transform.apply(self.image())`. Nothing when the transform would
+    /// leave the image as it is. Returns the new image's bounds. Ends any stroke under way.
+    pub fn install(&mut self, transform: Transform, result: Image) -> Option<Rect> {
+        self.end_stroke();
+        if transform.unchanged(&self.image) {
+            return None;
+        }
+        let before = std::mem::replace(&mut self.image, result);
+        self.done.push(Step {
+            op: Operation::Transform(transform),
+            before: Saved::default(),
+            other: Some(before),
+            id: self.next_id,
+        });
+        self.next_id += 1;
+        self.undone.clear();
+        Some(self.image.bounds())
+    }
+
     /// Makes `op`, done, the last step, with the pixels it replaced; drops the redo.
     fn record(&mut self, op: Operation, before: Saved) {
         self.done.push(Step {
             op,
             before,
+            other: None,
             id: self.next_id,
         });
         self.next_id += 1;
@@ -430,11 +474,18 @@ impl Document {
         !self.undone.is_empty()
     }
 
-    /// Takes back the last step (finishing a stroke under way first).
+    /// Takes back the last step (finishing a stroke under way first). A transform's undo
+    /// gives back the whole image from before it, its size too.
     pub fn undo(&mut self) -> Option<Rect> {
         self.end_stroke();
-        let step = self.done.pop()?;
-        let changed = step.before.restore(&mut self.image);
+        let mut step = self.done.pop()?;
+        let changed = match step.other.as_mut() {
+            Some(other) => {
+                std::mem::swap(&mut self.image, other);
+                Some(self.image.bounds())
+            }
+            None => step.before.restore(&mut self.image),
+        };
         self.undone.push(step);
         changed
     }
@@ -442,8 +493,14 @@ impl Document {
     /// Does the last undone step again.
     pub fn redo(&mut self) -> Option<Rect> {
         self.end_stroke();
-        let step = self.undone.pop()?;
-        let changed = step.op.apply(&mut self.image);
+        let mut step = self.undone.pop()?;
+        let changed = match step.other.as_mut() {
+            Some(other) => {
+                std::mem::swap(&mut self.image, other);
+                Some(self.image.bounds())
+            }
+            None => step.op.apply(&mut self.image),
+        };
         self.done.push(step);
         changed
     }
@@ -454,7 +511,7 @@ impl Document {
             .iter()
             .chain(&self.undone)
             .chain(&self.live)
-            .map(|s| s.before.bytes())
+            .map(|s| s.before.bytes() + s.other.as_ref().map_or(0, |i| i.data().len()))
             .sum()
     }
 }

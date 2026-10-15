@@ -27,8 +27,8 @@ use crate::tools::Action;
 use crate::view::View;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
-use gtk::{gdk, glib, graphene, gsk};
-use image_model::{spanning, Color, Document, Floating, Image, Rect, Shape, Tip};
+use gtk::{gdk, gio, glib, graphene, gsk};
+use image_model::{spanning, Color, Document, Floating, Image, Rect, Shape, Tip, Transform};
 use std::time::Instant;
 
 /// The side of a tile texture, in image pixels.
@@ -126,6 +126,9 @@ mod imp {
         /// keys for while text is typed.
         pub im: OnceCell<gtk::IMMulticontext>,
         pub text_keys: OnceCell<gtk::EventControllerKey>,
+        /// An Image menu command runs off the UI thread: the image mustn't change until
+        /// its result is in.
+        pub busy: Cell<bool>,
     }
 
     #[glib::object_subclass]
@@ -595,21 +598,24 @@ impl Canvas {
     }
 
     /// Whether there's anything to undo: a step, text being typed, or floating pixels
-    /// (undo drops them).
+    /// (undo drops them); nothing while an Image menu command runs.
     pub fn can_undo(&self) -> bool {
-        self.typing()
-            || self.floating()
-            || self
-                .imp()
-                .doc
-                .borrow()
-                .as_ref()
-                .is_some_and(Document::can_undo)
+        !self.busy()
+            && (self.typing()
+                || self.floating()
+                || self
+                    .imp()
+                    .doc
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(Document::can_undo))
     }
 
-    /// Whether there's a step to redo; not while text is typed or pixels float.
+    /// Whether there's a step to redo; not while text is typed, pixels float, or an Image
+    /// menu command runs.
     pub fn can_redo(&self) -> bool {
-        !self.typing()
+        !self.busy()
+            && !self.typing()
             && !self.floating()
             && self
                 .imp()
@@ -639,22 +645,112 @@ impl Canvas {
     /// Takes back the last step; while text is typed, drops the text instead, and while
     /// pixels float, drops the move (they were never on the image).
     pub fn undo(&self) {
-        if self.cancel_text() || self.drop_floating() {
+        if self.busy() || self.cancel_text() || self.drop_floating() {
             return;
         }
         self.set_drag(Drag::None);
-        let changed = self.with_doc(Document::undo);
-        self.invalidate(changed);
+        self.history(Document::undo);
     }
 
     /// Does the last step undone again; nothing while text is typed or pixels float.
     pub fn redo(&self) {
-        if self.typing() || self.floating() {
+        if self.busy() || self.typing() || self.floating() {
             return;
         }
         self.set_drag(Drag::None);
-        let changed = self.with_doc(Document::redo);
-        self.invalidate(changed);
+        self.history(Document::redo);
+    }
+
+    /// Undo or redo: shows the pixels it changed, or the image anew when its size changed
+    /// (a transform's step).
+    fn history(&self, step: fn(&mut Document) -> Option<Rect>) {
+        let size = self.image_size();
+        let changed = self.with_doc(step);
+        if self.image_size() != size {
+            self.reshaped();
+        } else {
+            self.invalidate(changed);
+        }
+    }
+
+    /// Whether an Image menu command is running ([`Canvas::transform`]): until it's done
+    /// nothing changes the image.
+    pub fn busy(&self) -> bool {
+        self.imp().busy.get()
+    }
+
+    /// Image → Crop to Selection: the image becomes the selection's pixels (floating ones
+    /// landing first, the selection where they landed), one undo step. Nothing without a
+    /// selection.
+    pub fn crop(&self) {
+        if self.busy() {
+            return;
+        }
+        self.commit();
+        if let Some(r) = self.imp().selection.get() {
+            self.transform(Transform::Crop(r));
+        }
+    }
+
+    /// An Image menu command: text being typed and floating pixels go on the image first,
+    /// then `transform` runs off the UI thread on a copy of the image, with the canvas
+    /// insensitive and the image unchanging meanwhile; its result becomes the image as
+    /// one undo step, shown anew ([`Canvas::reshaped`]), the selection gone.
+    pub fn transform(&self, transform: Transform) {
+        if self.busy() {
+            return;
+        }
+        self.commit();
+        let image = self.with_doc(|d| (!transform.unchanged(d.image())).then(|| d.image().clone()));
+        let Some(image) = image else {
+            return;
+        };
+        self.imp().busy.set(true);
+        self.set_sensitive(false);
+        self.emit_changed();
+        let canvas = self.downgrade();
+        glib::spawn_future_local(async move {
+            let t0 = Instant::now();
+            let result = gio::spawn_blocking(move || transform.apply(&image)).await;
+            let Some(canvas) = canvas.upgrade() else {
+                return;
+            };
+            let ms = t0.elapsed().as_secs_f64() * 1e3;
+            canvas.imp().busy.set(false);
+            canvas.set_sensitive(true);
+            match result {
+                Ok(Ok(image)) => {
+                    let size = (image.width(), image.height());
+                    tracing::info!("{transform:?} to {}×{} in {ms:.1} ms", size.0, size.1);
+                    canvas.with_doc(|d| d.install(transform, image));
+                    canvas.reshaped();
+                }
+                Ok(Err(e)) => {
+                    tracing::warn!("{transform:?}: {e}");
+                    canvas.emit_changed();
+                }
+                Err(_) => {
+                    tracing::warn!("{transform:?} failed unexpectedly");
+                    canvas.emit_changed();
+                }
+            }
+            canvas.grab_focus();
+        });
+    }
+
+    /// After the image's size changed (a transform, or undoing one): every tile texture
+    /// goes, the selection goes, and the image shows as an opened one does, at 100%
+    /// centred or fitted when larger than the canvas.
+    fn reshaped(&self) {
+        let imp = self.imp();
+        imp.tiles.borrow_mut().clear();
+        imp.selection.set(None);
+        if let Some(v) = imp.view.get() {
+            imp.view.set(Some(View::new(self.image_size(), v.size)));
+        }
+        self.describe();
+        self.queue_draw();
+        self.selection_shown();
     }
 
     /// Zoom In (`dir` > 0) or Out a step, around the pointer when given, else the centre.
@@ -967,8 +1063,12 @@ impl Canvas {
 
     /// Edit → Delete: clears the selection's pixels to transparency, one undo step. Pixels
     /// floating are dropped and the place they were lifted from cleared. The selection
-    /// stays (where they floated). Whether there was one.
+    /// stays (where they floated). Whether there was one; nothing while an Image menu
+    /// command runs.
     pub fn delete_selection(&self) -> bool {
+        if self.busy() {
+            return false;
+        }
         let imp = self.imp();
         let (w, h) = self.image_size();
         let cleared = match self.take_floating() {
@@ -1037,7 +1137,11 @@ impl Canvas {
     /// over the image with their top-left pixel at the top-left of the image's visible
     /// part (the image's own top-left when that shows), until they land as one undo step
     /// as moved pixels do. Pixels larger than the image float whole and land clipped.
+    /// Nothing while an Image menu command runs.
     pub fn paste(&self, pixels: Image, shown: gdk::Texture) {
+        if self.busy() {
+            return;
+        }
         self.commit_text();
         self.deselect();
         let (w, h) = self.image_size();
