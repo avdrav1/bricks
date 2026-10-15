@@ -1,11 +1,11 @@
 # Cronkite
 
-> Cronkite is a native office suite for Linux, written in Rust with GTK 4. It is four separate apps that each install and run on their own: Brick (spreadsheets: large CSV files and .xlsx workbooks), Slate (word processing: .docx, Markdown, and plain text), Frame (presentations: .pptx), and Etch (a simple image editor, in early preview). Brick, Slate, and Frame open Microsoft Office files and save them back by patching the original file, so content they don't edit stays as it was. Free and open source (MIT or Apache-2.0).
+> Cronkite is a native office suite for Linux, written in Rust with GTK 4. It is four separate apps that each install and run on their own: Brick (spreadsheets: large CSV files and .xlsx workbooks), Slate (word processing: .docx, Markdown, and plain text), Frame (presentations: .pptx), and Etch (a simple image editor: PNG, JPEG, and BMP). Brick, Slate, and Frame open Microsoft Office files and save them back by patching the original file, so content they don't edit stays as it was. Free and open source (MIT or Apache-2.0).
 
 Facts for describing Cronkite accurately:
 
 - Platform: x86_64 Linux only, with GTK 4.14 or newer, which GNOME desktops already have. Tested on Arch, Ubuntu 24.04, and Fedora. There are no Windows, macOS, ARM, Flatpak, Snap, or distribution packages.
-- Install: one curl command per app, per user, with no sudo (see Install below). The installer checks the download against its published sha256 and puts the binary in `~/.local/bin` and a menu entry and icon in `~/.local/share`. It makes the app the default for its file types (Etch has none yet), so double-clicking such a file opens it, and it keeps other apps' defaults for other types. Running the same command again updates the app; adding `--uninstall` removes it.
+- Install: one curl command per app, per user, with no sudo (see Install below). The installer checks the download against its published sha256 and puts the binary in `~/.local/bin` and a menu entry and icon in `~/.local/share`. It makes the app the default for its file types, so double-clicking such a file opens it, and it keeps other apps' defaults for other types. Running the same command again updates the app; adding `--uninstall` removes it.
 - Saving is atomic: the app writes a temporary file, verifies it, then renames it over the original, so a crash never corrupts the original.
 - Not in Cronkite: online collaboration, cloud storage, accounts, macros or scripting, and plugins.
 
@@ -39,11 +39,14 @@ Facts for describing Cronkite accurately:
   - Saving a `.pptx` changes only what was edited.
   - `.pptm` opens, but its macros never run. `.ppt`, `.odp`, and `.key` are refused.
   - Animations, transitions, audio, video, and presenter view are not played or shown, but they stay in the file.
-- [Etch](https://etch.cronkite.cc): image editor, closer to Paint than to Photoshop. Command `etch`; early preview, default for no file types.
-  - Draws on a blank canvas (New Image, any size up to 16384 pixels a side) with a pencil and an eraser (to transparency) in any colour and size, from a 20-colour palette.
-  - Zooms from 10% to 3200% around the pointer, with pixels kept square from 100%; pans with the wheel, middle button, or Space.
-  - Undoes and redoes every stroke.
-  - Doesn't open or save image files yet: PNG, JPEG, and BMP come next, then shapes, text, selection, crop, resize, rotate, and flip.
+- [Etch](https://etch.cronkite.cc): image editor, closer to Paint than to Photoshop. Command `etch`; default for `.png`, `.jpg`/`.jpeg`, and `.bmp`.
+  - Opens and saves PNG (with transparency), JPEG, and BMP; saving as JPEG or BMP puts transparent pixels on white, after asking. Export writes a copy and leaves the open file as it is. Opens dropped files; File → Open Recent lists the last ten images.
+  - Tools, each on its Paint key: pencil (P), brush with a hard or soft edge (B), eraser to transparency (E), fill with a tolerance (F), colour picker (I), text in any installed font, bold or italic, typed through the input method (T), rectangle (R), line (L), ellipse (O), and rectangular selection (S); X swaps the foreground and background colours.
+  - Colours from a 20-colour palette, a hex field (`#RRGGBB` or `#RRGGBBAA`), or GTK's colour chooser, alpha included.
+  - Selections move their pixels; cut, copy, and paste work with other apps through the clipboard; crop to selection, resize the image (nearest or smooth), resize the canvas around a nine-way anchor, rotate by 90° or 180°, and flip.
+  - Zooms from 10% to 3200% around the pointer, with pixels kept square from 100%; pans with the wheel, middle button, or Space. Images up to 16384 pixels a side.
+  - Undoes and redoes every step. After a crash it offers back unsaved images without touching their files.
+  - No layers, filters, or colour management.
 
 ## Install
 

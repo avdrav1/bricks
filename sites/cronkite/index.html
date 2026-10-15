@@ -45,7 +45,6 @@
   .app p { margin: 4px 0 0; font-size: 15px; }
   .badge { align-self: flex-start; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; }
   .badge.ready { color: var(--accent); background: var(--accent-tint); }
-  .badge.preview { color: var(--muted); background: var(--head); }
   .app .more { margin-top: auto; padding-top: 12px; font-size: 15px; }
 
   .cmd { display: flex; align-items: stretch; border: 1px solid var(--rule); background: var(--head); margin: 10px 0 6px; }
@@ -125,10 +124,10 @@
         <a class="more" href="#install-frame">Install Frame &darr;</a>
       </article>
       <article class="app">
-        <span class="badge preview">Early preview</span>
+        <span class="badge ready">Available now</span>
         <h3>Etch</h3>
         <span class="kind">Image editor</span>
-        <p>A simple paint program, closer to Paint than to Photoshop. Today it draws with a pencil and an eraser in Paint's 20 colours at any size, zooms to 3200%, and undoes every stroke; opening and saving PNG, JPEG, and BMP come next.</p>
+        <p>A simple paint program, closer to Paint than to Photoshop. Opens and saves PNG, JPEG, and BMP; draws with a pencil, brush, fill, lines, rectangles, ellipses, and text; selects, moves, crops, resizes, rotates, and flips, and copies and pastes with other apps. Every step undoes.</p>
         <a class="more" href="#install-etch">Install Etch &darr;</a>
       </article>
     </div>
@@ -167,8 +166,8 @@
         <figcaption><b>Frame</b>The outline view: type titles and bullets, and Frame makes the slides.</figcaption>
       </figure>
       <figure class="shot wide">
-        <a href="shots/etch-paint.webp"><img src="shots/etch-paint-1920.webp" srcset="shots/etch-paint-960.webp 960w, shots/etch-paint-1920.webp 1920w, shots/etch-paint.webp 2880w" sizes="(max-width: 980px) 100vw, 940px" width="1920" height="1200" loading="lazy" alt="Etch with a picture painted on its 1024 by 768 canvas: a red house with a dark red roof, a tree, a sun with rays, and two birds over a green hill, with the tool column on the left and the 20-colour palette and size field below."></a>
-        <figcaption><b>Etch</b>Early preview: a pencil and an eraser in Paint's 20 colours at any size, with every stroke undoable.</figcaption>
+        <a href="shots/etch-paint.webp"><img src="shots/etch-paint-1920.webp" srcset="shots/etch-paint-960.webp 960w, shots/etch-paint-1920.webp 1920w, shots/etch-paint.webp 2880w" sizes="(max-width: 980px) 100vw, 940px" width="1920" height="1200" loading="lazy" alt="Etch with a picture painted on its 1024 by 768 canvas: a red house with a dark red roof, a tree, a sun with rays, and two birds over a green hill. On the left the tool column: pencil, brush, eraser, fill, colour picker, text, line, rectangle, ellipse, and selection; below, the colours, a hex field, the 20-colour palette, and the size."></a>
+        <figcaption><b>Etch</b>Paint's tools and keys: pencil, brush, fill, shapes, and text in Paint's 20 colours or any other, every step undoable.</figcaption>
       </figure>
     </div>
   </section>
@@ -203,13 +202,13 @@
       <pre id="install-etch-cmd">curl -fsSL https://etch.cronkite.cc/install.sh | sh</pre>
       <button type="button" data-copy="install-etch-cmd">Copy</button>
     </div>
-    <p class="note">The command is <code>etch</code>. It opens no files yet, so it takes over no file types. Download page: <a href="https://etch.cronkite.cc">etch.cronkite.cc</a>.</p>
+    <p class="note">The command is <code>etch</code>. PNG, JPEG, and BMP images open with it. Download page: <a href="https://etch.cronkite.cc">etch.cronkite.cc</a>.</p>
 
     <h3>What an installer does</h3>
     <ol class="steps">
       <li>Downloads the app's latest release and checks it against its published sha256. If the checksum doesn't match, nothing is installed.</li>
       <li>Puts the app (<code>brick</code>, <code>slate</code>, <code>frame</code>, <code>etch</code>) in <code>~/.local/bin</code>, and its menu entry and icon in <code>~/.local/share</code>.</li>
-      <li>Makes it the default app for its files (above), so double-clicking one opens it. Other apps' defaults for other files are kept. (Etch, which opens no files yet, changes no defaults.)</li>
+      <li>Makes it the default app for its files (above), so double-clicking one opens it. Other apps' defaults for other files are kept.</li>
     </ol>
 
     <h3>Requirements</h3>
