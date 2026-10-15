@@ -66,6 +66,13 @@ Each file is one object: `version`, `date`, `url` (the x86_64 Linux `.tar.gz`), 
 - [Frame](https://dl.cronkite.cc/frame/latest.json)
 - [Etch](https://dl.cronkite.cc/etch/latest.json)
 
+## Video
+
+An explainer, narrated, with burned-in English captions. The apps in it are recreated in HTML from the real ones (`video/` in the repository), not screen recordings.
+
+- [Cronkite in a minute](https://dl.cronkite.cc/video/7830f993ade2/cronkite-explainer-short.mp4): 55 seconds, MP4.
+- [The full tour](https://dl.cronkite.cc/video/7830f993ade2/cronkite-explainer.mp4): about 6 minutes, MP4.
+
 ## Source
 
 - [Repository](https://github.com/avdrav1/cronkite): one Cargo workspace, with each app under `apps/` and the shared crates under `crates/`.

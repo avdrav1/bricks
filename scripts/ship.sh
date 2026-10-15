@@ -10,6 +10,8 @@
 #   scripts/ship.sh [APP] upload [--dry-run] tarball, checksum, latest.json -> Cloudflare R2
 #   scripts/ship.sh [APP] site   [--dry-run] the app's download page (sites/APP) -> Cloudflare Pages
 #   scripts/ship.sh suite-site [--dry-run]   suite install page (sites/cronkite) -> Cloudflare Pages
+#   scripts/ship.sh video [--dry-run]        the explainer's English cuts (dist/video/, from
+#                                            video/render.mjs) and a poster -> R2 video/ID/
 #   scripts/ship.sh [APP] tag                annotated git tag (local only): vX.Y.Z for Brick,
 #                                            APP-vX.Y.Z for the others (slate-v0.3.0)
 #
@@ -163,9 +165,26 @@ suite-site)
   pages_project "$CF_SUITE_PAGES_PROJECT"
   run wr pages deploy dist/cronkite-site --project-name "$CF_SUITE_PAGES_PROJECT" --branch main --commit-dirty=true
   ;;
+video)
+  # The explainer video (video/render.mjs and --cut short) and a poster from the short
+  # cut's title card, under video/ID/ where ID is the two cuts' hash: a new render gets new
+  # addresses, so a page linking the old ones never shows a mix. Captions are burned in.
+  need CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID R2_BUCKET DOWNLOAD_BASE_URL
+  full=dist/video/cronkite-explainer.mp4 short=dist/video/cronkite-explainer-short.mp4
+  for f in "$full" "$short"; do
+    [ -f "$f" ] || { echo "no $f (cd video && node render.mjs, and --cut short)"; exit 1; }
+  done
+  poster=dist/video/cronkite-explainer-short.jpg
+  ffmpeg -hide_banner -loglevel error -y -ss 1 -i "$short" -frames:v 1 -q:v 3 "$poster"
+  id=$(cat "$full" "$short" | sha256sum | cut -c1-12)
+  run wr r2 object put "$R2_BUCKET/video/$id/$(basename "$full")" --file "$full" --content-type video/mp4 --remote
+  run wr r2 object put "$R2_BUCKET/video/$id/$(basename "$short")" --file "$short" --content-type video/mp4 --remote
+  run wr r2 object put "$R2_BUCKET/video/$id/$(basename "$poster")" --file "$poster" --content-type image/jpeg --remote
+  echo "video base: $DOWNLOAD_BASE_URL/video/$id"
+  ;;
 tag)
   git tag -a "$TAG" -m "$TAG"
   echo "tagged $TAG locally; push with: git push origin main $TAG"
   ;;
-*) sed -n '2,14p' "$0"; exit 1 ;;
+*) sed -n '2,17p' "$0"; exit 1 ;;
 esac
