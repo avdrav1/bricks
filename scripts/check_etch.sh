@@ -111,6 +111,14 @@
 #      goes on into it ("!" added); Escape drops it. Through an input method on the seat
 #      (scripts/ime_helpers.py): new text shows the composition "かな" (ink, nothing typed
 #      yet), takes the commit "仮名", and Enter puts it on the image.
+# ETCH-13 acceptance: New Image's background, and its size remembered.
+#  18. Ctrl+N's dialog offers White (on), Transparent, and Background colour (described
+#      #FFFFFF, the window's background); Alt+T picks Transparent, and 300x200 makes
+#      Untitled 2: at 100% the checkerboard everywhere in it, light and grey squares and
+#      nothing else. Saved (Save As, /tmp/clear.png) it reads back 300x200 with alpha, its
+#      largest alpha 0. The settings file (~/.config/etch/settings) holds the size and
+#      background; after quitting and starting etch again, Ctrl+N offers 300 by 200,
+#      Transparent on.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -297,6 +305,40 @@ elif cmd == "dark":
     black = sum(1 for x, y in dark if max(at(x, y)) < 60)
     width = max(x for x, _ in dark) - min(x for x, _ in dark) + 1 if dark else 0
     print(f"black {black} width {width}")
+elif cmd == "clear":
+    # The W x H image centred at 100%, 4 px in from its edges: the checkerboard (neutral
+    # greys from its grey to white) everywhere, with both its light and grey squares.
+    at = pixels(sys.argv[2])
+    W, H = int(sys.argv[3]), int(sys.argv[4])
+    cx, cy, cw, ch = canvas()
+    l, t = cx + (cw - W) // 2, cy + (ch - H) // 2
+    box = [at(x, y) for y in range(t + 4, t + H - 4) for x in range(l + 4, l + W - 4)]
+    checker = sum(1 for p in box if min(p) >= 195 and max(p) - min(p) <= 3)
+    light = sum(1 for p in box if min(p) >= 245)
+    grey = sum(1 for p in box if all(195 <= c <= 213 for c in p))
+    every = "all" if checker == len(box) else f"{checker}/{len(box)}"
+    print(f"checker {every} light {min(light, 1)} grey {min(grey, 1)}")
+elif cmd == "alpha":
+    # A PNG as saved: its size, whether it has alpha, and its largest alpha.
+    p = GdkPixbuf.Pixbuf.new_from_file(sys.argv[2])
+    w, h, rs, px = p.get_width(), p.get_height(), p.get_rowstride(), p.get_pixels()
+    top = max(px[y * rs + x * 4 + 3] for y in range(h) for x in range(w)) if p.get_has_alpha() else 255
+    print(f"{w}x{h} alpha {p.get_has_alpha()} max {top}")
+elif cmd == "checked":
+    # The names of the radio and check buttons on.
+    desktop = Atspi.get_desktop(0)
+    stack = [desktop.get_child_at_index(i) for i in range(desktop.get_child_count())]
+    stack = [a for a in stack if a is not None and a.get_name() == "etch"]
+    on = []
+    while stack:
+        n = stack.pop(0)
+        if n is None:
+            continue
+        n.clear_cache()
+        if n.get_role() in (Atspi.Role.RADIO_BUTTON, Atspi.Role.CHECK_BOX) and n.get_state_set().contains(Atspi.StateType.CHECKED):
+            on.append(n.get_name())
+        stack.extend(n.get_child_at_index(i) for i in range(n.get_child_count()))
+    print(", ".join(on) or "none")
 PY
 # The images sections 11 and 12 open.
 cat > /tmp/mk.py <<"PY"
@@ -702,6 +744,31 @@ session() {
   ime "commit 仮名"; shot ime-committed; echo "composed: $(desc)"
   keys -k Return; shot ime-on; echo "ime on: $(title) $(desc)"; echo "ime ink: $(px ink /tmp/shot.png)"
   kill $board
+
+  echo "== 18 new image"
+  pkill -x etch; sleep 1
+  etch >>/tmp/app.log 2>&1 & sleep 3
+  keys -M ctrl n -m ctrl; sleep 1
+  shown dialog | grep -E "^dialog: (White|Transparent|Background colour|#FFFFFF)$"
+  echo "dialog checked: $(px checked)"
+  keys -M alt t -m alt; echo "picked: $(px checked)"
+  keys -M alt w -m alt; keys -M ctrl a -m ctrl; keys 300; keys -k Tab
+  keys -M ctrl a -m ctrl; keys 200; keys -k Return; sleep 2
+  # The first window goes: the new one fills the screen.
+  swaymsg "[title=\"^Untitled$\"] kill" >/dev/null; sleep 1.5
+  keys -M ctrl 0 -m ctrl
+  shown new | grep -E "^new: (Untitled 2|300×200|100%)$"
+  shot transparent; echo "transparent: $(px clear /tmp/shot.png 300 200)"
+  keys -M ctrl s -m ctrl; sleep 1.5
+  keys -M ctrl a -m ctrl; keys /tmp/clear.png; keys -k Return; sleep 3
+  echo "saved: $(px alpha /tmp/clear.png)"
+  pkill -x etch; sleep 1
+  echo "settings: $(tr "\n" " " < ~/.config/etch/settings)"
+  etch >>/tmp/app.log 2>&1 & sleep 3
+  keys -M ctrl n -m ctrl; sleep 1
+  shown again | grep -E "^again: (300|200)$"
+  echo "again checked: $(px checked)"
+  keys -k Escape; sleep 1
   pkill -x etch; sleep 1
   swaymsg exit >/dev/null 2>&1 || true
 }
@@ -896,6 +963,20 @@ check "17: an input method's composition shows in new text, nothing typed yet" "
 check "17: ... and its commit is typed" "17 text" "^composed: 1024×768 image, typing “仮名”$"
 check "17: Enter puts it on the image" "17 text" "^ime on: • Untitled 1024×768 image$"
 absent "17: ... ink and all" "17 text" "^ime ink: 0$"
+check "18: New Image offers White" "18 new" "^dialog: White$"
+check "18: ... Transparent" "18 new" "^dialog: Transparent$"
+check "18: ... and the background colour" "18 new" "^dialog: Background colour$"
+check "18: ... described as the window's background, white" "18 new" "^dialog: #FFFFFF$"
+check "18: ... White on at first" "18 new" "^dialog checked: White$"
+check "18: Alt+T picks Transparent" "18 new" "^picked: Transparent$"
+check "18: a transparent 300×200 image opens in Untitled 2" "18 new" "^new: Untitled 2$"
+check "18: ... 300×200" "18 new" "^new: 300×200$"
+check "18: ... showing the checkerboard everywhere" "18 new" "^transparent: checker all light 1 grey 1$"
+check "18: ... and saves as all alpha 0" "18 new" "^saved: 300x200 alpha True max 0$"
+check "18: the settings file holds the size and background" "18 new" "^settings: new-width=300 new-height=200 new-background=transparent $"
+check "18: after a restart New Image offers 300" "18 new" "^again: 300$"
+check "18: ... by 200" "18 new" "^again: 200$"
+check "18: ... Transparent" "18 new" "^again checked: Transparent$"
 absent "the app logs no errors or panics" "app log" "^etch:|panicked|CRITICAL"
 bench=$(section "8 bench" | sed -n "s/^bench: //p")
 if [ -z "$bench" ]; then echo "FAIL 8: --bench-stroke printed nothing"; fail=1; else

@@ -6,6 +6,7 @@
 use crate::canvas::Canvas;
 use crate::colours;
 use crate::saving::Saver;
+use crate::settings::{self, Background};
 use crate::text;
 use crate::tools::{self, Settings, Tool};
 use gtk::prelude::*;
@@ -14,17 +15,22 @@ use image_io::Format;
 use image_model::{Color, Image, Style, MAX_SIDE};
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::time::Instant;
 
-/// `etch`'s first image, and New Image's size until another is used.
+/// `etch`'s first image (always white: the remembered size and background are New
+/// Image's).
 pub const DEFAULT_SIZE: (u32, u32) = (1024, 768);
 /// The benchmark's image: 8K.
 const BENCH_SIZE: (u32, u32) = (7680, 4320);
 
 thread_local! {
-    /// The size New Image offers: the last one used.
-    static LAST_SIZE: Cell<(u32, u32)> = const { Cell::new(DEFAULT_SIZE) };
+    /// What New Image offers: the size and background last used, read from the settings
+    /// file the first time.
+    static NEW: Cell<Option<settings::Settings>> = const { Cell::new(None) };
+    /// Each window's controls, for New Image's background colour: the active window's.
+    static CONTROLS: RefCell<Vec<(glib::WeakRef<gtk::ApplicationWindow>, Weak<Controls>)>> =
+        const { RefCell::new(Vec::new()) };
     /// The windows of the files open, by canonical path: opening one again shows its window.
     static OPEN: RefCell<Vec<(PathBuf, glib::WeakRef<gtk::ApplicationWindow>)>> =
         const { RefCell::new(Vec::new()) };
@@ -109,21 +115,21 @@ pub fn install_app_actions(app: &gtk::Application) {
 /// A window with a new white image of `size`. The pixels are allocated off the UI thread:
 /// a large image takes a moment.
 pub fn open_blank(app: &gtk::Application, size: (u32, u32)) {
-    open_new(app, size, None);
+    open_new(app, size, Color::WHITE, None);
 }
 
 /// `--bench-stroke FRAMES`: a window with an 8K image at 100%, then the benchmark.
 pub fn open_bench(app: &gtk::Application, frames: u32) {
-    open_new(app, BENCH_SIZE, Some(frames));
+    open_new(app, BENCH_SIZE, Color::WHITE, Some(frames));
 }
 
-fn open_new(app: &gtk::Application, (w, h): (u32, u32), bench: Option<u32>) {
+fn open_new(app: &gtk::Application, (w, h): (u32, u32), color: Color, bench: Option<u32>) {
     let app = app.clone();
     // Running until the window shows, though no window may be open yet.
     let hold = app.hold();
     glib::spawn_future_local(async move {
         let _hold = hold;
-        let made = gio::spawn_blocking(move || Image::new(w, h, Color::WHITE)).await;
+        let made = gio::spawn_blocking(move || Image::new(w, h, color)).await;
         match made {
             Ok(Ok(image)) => {
                 let window = new_window(&app, &untitled(&app));
@@ -678,6 +684,10 @@ fn show(
         showing: Cell::new(false),
     });
     controls.show();
+    CONTROLS.with_borrow_mut(|c| {
+        c.retain(|(w, _)| w.upgrade().is_some());
+        c.push((window.downgrade(), Rc::downgrade(&controls)));
+    });
     let (bar, status) = Status::new();
     bar.prepend(&colour_row(&controls));
     let middle = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -835,15 +845,43 @@ fn show(
     }
 }
 
-/// File → New Image: asks for a width and height, then opens a window with a white image
-/// that size.
+/// New Image's size and background: the last used, from the settings file the first time.
+fn new_settings() -> settings::Settings {
+    NEW.get().unwrap_or_else(|| {
+        let s = settings::Settings::load();
+        NEW.set(Some(s));
+        s
+    })
+}
+
+/// The background colour of `window` (the colour row's); white without one.
+fn background_of(window: Option<&gtk::Window>) -> Color {
+    let found = window.and_then(|window| {
+        CONTROLS.with_borrow(|c| {
+            c.iter()
+                .find(|(w, _)| {
+                    w.upgrade()
+                        .is_some_and(|w| w.upcast_ref::<gtk::Window>() == window)
+                })
+                .and_then(|(_, c)| c.upgrade())
+                .map(|c| c.settings.get().background)
+        })
+    });
+    found.unwrap_or(Settings::default().background)
+}
+
+/// File → New Image: asks for a width, a height, and a background (white, transparent, or
+/// the active window's background colour), offering the last ones used, then opens a
+/// window with an image of them. What was asked is remembered across runs.
 fn ask_new_image(app: &gtk::Application) {
+    let parent = app.active_window();
+    let background = background_of(parent.as_ref());
     let dialog = gtk::Window::builder()
         .title("New Image")
         .modal(true)
         .resizable(false)
         .build();
-    dialog.set_transient_for(app.active_window().as_ref());
+    dialog.set_transient_for(parent.as_ref());
     let grid = gtk::Grid::builder()
         .row_spacing(8)
         .column_spacing(8)
@@ -852,7 +890,8 @@ fn ask_new_image(app: &gtk::Application) {
         .margin_top(16)
         .margin_bottom(16)
         .build();
-    let (w, h) = LAST_SIZE.get();
+    let last = new_settings();
+    let (w, h) = last.new_size;
     let side = |row: i32, label: &str, value: u32| {
         let name = gtk::Label::with_mnemonic(label);
         name.set_xalign(0.0);
@@ -868,6 +907,32 @@ fn ask_new_image(app: &gtk::Application) {
     };
     let width = side(0, "_Width", w);
     let height = side(1, "_Height", h);
+    let name = gtk::Label::new(Some("Background"));
+    name.set_xalign(0.0);
+    name.set_valign(gtk::Align::Start);
+    grid.attach(&name, 0, 2, 1, 1);
+    let choices = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    choices.update_property(&[gtk::accessible::Property::Label("Background")]);
+    let colour = colours::hex(background);
+    let backgrounds = Background::ALL.map(|b| {
+        let label = match b {
+            Background::White => "Wh_ite",
+            Background::Transparent => "_Transparent",
+            Background::Colour => "Back_ground colour",
+        };
+        let button = gtk::CheckButton::with_mnemonic(label);
+        if b == Background::Colour {
+            button.set_tooltip_text(Some(&format!("The background colour, {colour}")));
+            button.update_property(&[gtk::accessible::Property::Description(&colour)]);
+        }
+        button.set_active(b == last.new_background);
+        choices.append(&button);
+        button
+    });
+    for b in &backgrounds[1..] {
+        b.set_group(Some(&backgrounds[0]));
+    }
+    grid.attach(&choices, 1, 2, 2, 1);
     let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     buttons.set_halign(gtk::Align::End);
     buttons.set_margin_top(8);
@@ -876,7 +941,7 @@ fn ask_new_image(app: &gtk::Application) {
     create.add_css_class("suggested-action");
     buttons.append(&cancel);
     buttons.append(&create);
-    grid.attach(&buttons, 0, 2, 3, 1);
+    grid.attach(&buttons, 0, 3, 3, 1);
     dialog.set_child(Some(&grid));
     dialog.set_default_widget(Some(&create));
 
@@ -893,12 +958,24 @@ fn ask_new_image(app: &gtk::Application) {
         move |_| {
             width.update();
             height.update();
-            let size = (width.value() as u32, height.value() as u32);
-            LAST_SIZE.set(size);
+            let chosen = settings::Settings {
+                new_size: (width.value() as u32, height.value() as u32),
+                new_background: Background::ALL
+                    .into_iter()
+                    .zip(&backgrounds)
+                    .find(|(_, b)| b.is_active())
+                    .map_or(Background::White, |(b, _)| b),
+            };
             if let Some(d) = dialog.upgrade() {
                 d.close();
             }
-            open_blank(&app, size);
+            remember(&app, chosen);
+            open_new(
+                &app,
+                chosen.new_size,
+                chosen.new_background.color(background),
+                None,
+            );
         }
     });
     let escape = gtk::ShortcutController::new();
@@ -908,6 +985,26 @@ fn ask_new_image(app: &gtk::Application) {
     ));
     dialog.add_controller(escape);
     dialog.present();
+}
+
+/// Makes `chosen` what New Image offers, and writes it to the settings file off the UI
+/// thread (the app runs until it's written).
+fn remember(app: &gtk::Application, chosen: settings::Settings) {
+    if NEW.get() == Some(chosen) {
+        return;
+    }
+    NEW.set(Some(chosen));
+    let hold = app.hold();
+    glib::spawn_future_local(async move {
+        let _hold = hold;
+        let path = settings::path();
+        let shown = path.clone();
+        match gio::spawn_blocking(move || settings::write(&path, &chosen)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => tracing::warn!("cannot save {}: {e}", shown.display()),
+            Err(_) => tracing::warn!("saving {} failed unexpectedly", shown.display()),
+        }
+    });
 }
 
 /// ETCH-6's benchmark: from the process's start until the end of the first frame that drew
