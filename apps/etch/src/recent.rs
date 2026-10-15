@@ -110,6 +110,11 @@ mod tests {
 
     #[test]
     fn the_list_lives_in_etchs_state_folder() {
-        assert!(store().ends_with("etch/recent"));
+        let folder = if cfg!(target_os = "macos") {
+            "Library/Application Support/dev.cronkite.Etch/recent"
+        } else {
+            "etch/recent"
+        };
+        assert!(store().ends_with(folder), "{}", store().display());
     }
 }

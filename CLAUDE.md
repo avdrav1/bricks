@@ -39,10 +39,10 @@ Everything below about stories, invariants, crates, benchmarks, and ADRs is Bric
 
 | Crate | Owns |
 | --- | --- |
-| `suite-core` | `AppKind` and other app-independent primitives |
+| `suite-core` | `AppKind` (display name, command, app ID) and other app-independent primitives |
 | `suite-ui` | UI conventions shared by the apps |
-| `suite-platform` | OS integration (Linux, macOS) |
-| `suite-file` | format-independent file infrastructure (document names, atomic save, crash recovery journals' directory: owner locks, atomic journal writes, crashed sessions; the recent files list, Brick's and Etch's) |
+| `suite-platform` | OS integration (Linux, macOS): the platform check, each app's per-user folders (`dirs`: XDG on Linux, `~/Library/Application Support` and `~/Library/Caches` on macOS); toolkit-free, so engine crates use it too |
+| `suite-file` | format-independent file infrastructure (document names, atomic save, owner locks telling which processes keeping files in a folder still run, crash recovery journals' directory: atomic journal writes, crashed sessions; the recent files list, Brick's and Etch's) |
 
 Brick's crates, in `apps/brick/crates/`:
 
