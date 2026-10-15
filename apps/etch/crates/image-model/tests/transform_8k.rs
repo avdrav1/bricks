@@ -1,8 +1,9 @@
 //! The Image menu's transforms on an 8K image (7680×4320). The app runs them off the UI
-//! thread on a copy of the image, so what the UI thread pays is the copy (and undo and
-//! redo, which swap the whole image in and out); the transform itself is timed to show how
-//! long the canvas waits. Release only (`cargo test --release -p image-model -- --ignored
-//! --nocapture` prints the numbers).
+//! thread on a copy of the image, so what the UI thread pays is the copy, and undo and
+//! redo: swapping the whole image in and out, or for rotate and flip applying the
+//! inverse and the transform again (each under 200 ms); the transform itself is timed
+//! to show how long the canvas waits. Release only (`cargo test --release -p image-model
+//! -- --ignored --nocapture` prints the numbers).
 
 use image_model::{Color, Document, Image, Rect, Transform};
 use std::time::Instant;
@@ -32,7 +33,7 @@ fn worst(name: &str, mut run: impl FnMut()) -> f64 {
 }
 
 /// Times `transform` on the 8K image off the UI thread, and the UI thread's share: the
-/// copy before it, and undo and redo after.
+/// copy before it, and undo and redo after (a swap, or the inverse and the transform).
 fn time(name: &str, transform: Transform) {
     let image = base();
     let copy = worst(&format!("{name}: copying the image (UI thread)"), || {
@@ -48,11 +49,25 @@ fn time(name: &str, transform: Transform) {
     let mut doc = Document::new(image.clone());
     let result = transform.apply(&image).unwrap();
     doc.install(transform, result);
-    let swap = worst(&format!("{name}: undo and redo (UI thread)"), || {
+    let budget = match transform.inverse() {
+        Some(_) => UI_MS,
+        None => 1.0,
+    };
+    let ms = |t: Instant| t.elapsed().as_secs_f64() * 1e3;
+    let (mut undo, mut redo) = (0f64, 0f64);
+    for _ in 0..5 {
+        let t = Instant::now();
         doc.undo();
+        undo = undo.max(ms(t));
+        let t = Instant::now();
         doc.redo();
-    });
-    assert!(swap < 1.0, "undo and redo took {swap:.1} ms");
+        redo = redo.max(ms(t));
+    }
+    eprintln!("{name}: undo {undo:.1} ms, redo {redo:.1} ms worst (UI thread)");
+    assert!(
+        undo < budget && redo < budget,
+        "undo {undo:.1} ms, redo {redo:.1} ms"
+    );
 }
 
 #[test]
@@ -99,5 +114,20 @@ fn resizing_the_canvas_8k() {
                 fill: Color::TRANSPARENT,
             },
         );
+    }
+}
+
+#[test]
+#[ignore = "perf: run in release with --ignored"]
+fn rotating_and_flipping_8k() {
+    use image_model::{Flip, Turn};
+    for t in [
+        Transform::Rotate(Turn::Right),
+        Transform::Rotate(Turn::Left),
+        Transform::Rotate(Turn::Half),
+        Transform::Flip(Flip::Horizontal),
+        Transform::Flip(Flip::Vertical),
+    ] {
+        time(&format!("{t:?} 7680×4320"), t);
     }
 }

@@ -423,9 +423,10 @@ impl Document {
         changed
     }
 
-    /// Transforms the whole image ([`Transform`]: crop), as one undo step keeping the
-    /// image from before it. Nothing when the transform would leave the image as it is or
-    /// have no pixels. Returns the new image's bounds. Ends any stroke under way.
+    /// Transforms the whole image ([`Transform`]), as one undo step: one that loses pixels
+    /// keeps the image from before it, one with an exact inverse (rotate, flip) keeps
+    /// nothing. Nothing when the transform would leave the image as it is or have no
+    /// pixels. Returns the new image's bounds. Ends any stroke under way.
     pub fn transform(&mut self, transform: Transform) -> Option<Rect> {
         if transform.unchanged(&self.image) {
             return None;
@@ -443,10 +444,15 @@ impl Document {
             return None;
         }
         let before = std::mem::replace(&mut self.image, result);
+        // An exact inverse undoes it: the image before isn't needed.
+        let other = match transform.inverse() {
+            Some(_) => None,
+            None => Some(before),
+        };
         self.done.push(Step {
             op: Operation::Transform(transform),
             before: Saved::default(),
-            other: Some(before),
+            other,
             id: self.next_id,
         });
         self.next_id += 1;
@@ -475,16 +481,22 @@ impl Document {
     }
 
     /// Takes back the last step (finishing a stroke under way first). A transform's undo
-    /// gives back the whole image from before it, its size too.
+    /// gives back the whole image from before it, its size too: the image kept, or the
+    /// transform's inverse applied.
     pub fn undo(&mut self) -> Option<Rect> {
         self.end_stroke();
         let mut step = self.done.pop()?;
-        let changed = match step.other.as_mut() {
-            Some(other) => {
+        let inverse = match &step.op {
+            Operation::Transform(t) => t.inverse(),
+            _ => None,
+        };
+        let changed = match (step.other.as_mut(), inverse) {
+            (Some(other), _) => {
                 std::mem::swap(&mut self.image, other);
                 Some(self.image.bounds())
             }
-            None => step.before.restore(&mut self.image),
+            (None, Some(inverse)) => Operation::Transform(inverse).apply(&mut self.image),
+            (None, None) => step.before.restore(&mut self.image),
         };
         self.undone.push(step);
         changed

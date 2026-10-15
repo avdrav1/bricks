@@ -197,6 +197,17 @@
 #      area indigo (3f48ccff). Shrinking to 300 by 200 at the centre crops 50 px off each
 #      side (the red half's edge at x 150, the blue corner at 299,199); Ctrl+Z gives back
 #      400×300 with every region.
+# ETCH-20 acceptance: rotate and flip.
+#  25. `etch rot.png` (a copy of t.png): Ctrl+H turns it 90° right: the status says
+#      300×400, the title is marked, and on screen the red half is on top and the
+#      checkerboard bottom right; saved, its corners are the old ones turned (ff0000ff at
+#      0,0, 0000ff80 at 0,399, the transparent 00ff0000 at 299,399). One Ctrl+Z gives back
+#      400×300 and every region. The Image menu by keyboard (Alt+I, V) flips it
+#      vertically, Ctrl+G turns it 90° left, Ctrl+J 180°, and Alt+I, H flips it
+#      horizontally: each saved with its corners where the turn or mirror puts them, and
+#      each undone by one Ctrl+Z (400×300). Four Ctrl+H give back 400×300, and saved, the
+#      file's pixels are t.png's exactly; one Ctrl+Z after them leaves three turns
+#      (300×400).
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -457,6 +468,13 @@ elif cmd == "rgba":
         x, y = map(int, xy.split(","))
         out.append(bytes(data[y * rs + x * nc:y * rs + x * nc + nc]).hex())
     print(*out)
+elif cmd == "same":
+    # Whether two image files have the same size and every pixel the same, alpha too.
+    def rows(path):
+        p = GdkPixbuf.Pixbuf.new_from_file(path)
+        rs, n, data = p.get_rowstride(), p.get_width() * p.get_n_channels(), p.get_pixels()
+        return p.get_width(), p.get_height(), [bytes(data[y * rs:y * rs + n]) for y in range(p.get_height())]
+    print("same" if rows(sys.argv[2]) == rows(sys.argv[3]) else "different")
 PY
 # Section 21: another GTK 4 app on the clipboard. "read X,Y ...": its window takes the
 # keyboard (Wayland offers the clipboard to the focused window), waits for an image there,
@@ -1181,6 +1199,40 @@ session() {
   echo "shrink undone: $(size)"
   px opened /tmp/shot.png 400 300 | sed "s/^/shrink undone: /"
   pkill -x etch; sleep 1
+
+  echo "== 25 rotate"
+  cp /tmp/t.png /tmp/rot.png
+  etch /tmp/rot.png >>/tmp/app.log 2>&1 & sleep 3
+  # Saves, then prints the file pixels at X,Y ...
+  saved() { keys -M ctrl s -m ctrl; sleep 2; px rgba /tmp/rot.png "$@"; }
+  keys -M ctrl h -m ctrl; sleep 1.5; shot rotated-right
+  read cx cy cw ch <<<"$(px canvas)"
+  l=$((cx + (cw - 300) / 2)); t=$((cy + (ch - 400) / 2))
+  echo "right: $(size) $(titled rot.png)"
+  echo "right: red $(centred 300 400 0 0 300 200 FF0000) clear $(px checkered /tmp/shot.png $((l + 154)) $((t + 204)) $((l + 296)) $((t + 396)))"
+  echo "right saved: $(saved 0,0 0,399 299,399)"
+  keys -M ctrl z -m ctrl; sleep 1; shot rotate-undone
+  echo "right undone: $(size)"
+  px opened /tmp/shot.png 400 300 | sed "s/^/right undone: /"
+  keys -M alt i -m alt; sleep 1; keys v; sleep 1.5
+  echo "vertical: $(size) $(saved 0,0 399,0 399,299)"
+  keys -M ctrl z -m ctrl; sleep 1; echo "vertical undone: $(size)"
+  keys -M ctrl g -m ctrl; sleep 1.5
+  echo "left: $(size) $(saved 0,0 0,399 299,0)"
+  keys -M ctrl z -m ctrl; sleep 1; echo "left undone: $(size)"
+  keys -M ctrl j -m ctrl; sleep 1.5
+  echo "half: $(size) $(saved 0,0 399,299 0,299)"
+  keys -M ctrl z -m ctrl; sleep 1; echo "half undone: $(size)"
+  keys -M alt i -m alt; sleep 1; keys h; sleep 1.5
+  echo "horizontal: $(size) $(saved 0,0 0,299 399,0)"
+  keys -M ctrl z -m ctrl; sleep 1; shot flip-undone
+  echo "horizontal undone: $(size)"
+  px opened /tmp/shot.png 400 300 | sed "s/^/horizontal undone: /"
+  for i in 1 2 3 4; do keys -M ctrl h -m ctrl; sleep 1.5; done
+  keys -M ctrl s -m ctrl; sleep 2
+  echo "four turns: $(size) $(titled rot.png) $(px same /tmp/rot.png /tmp/t.png)"
+  keys -M ctrl z -m ctrl; sleep 1; echo "three turns: $(size) $(titled rot.png)"
+  pkill -x etch; sleep 1
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -1481,6 +1533,26 @@ check "24: Ctrl+Z gives back 400×300" "24 canvas" "^shrink undone: 400×300$"
 check "24: ... red" "24 canvas" "^shrink undone: red all$"
 check "24: ... transparent" "24 canvas" "^shrink undone: checker all light 1 grey 1 green 0$"
 check "24: ... and blue" "24 canvas" "^shrink undone: blended all$"
+check "25: Ctrl+H turns it 90° right: 300×400, marked" "25 rotate" "^right: 300×400 • rot\.png$"
+check "25: ... the red half on top, the checkerboard bottom right" "25 rotate" "^right: red all clear checker all light 1 grey 1$"
+check "25: ... saved with the corners turned" "25 rotate" "^right saved: 300x400 ff0000ff 0000ff80 00ff0000$"
+check "25: one Ctrl+Z gives back 400×300" "25 rotate" "^right undone: 400×300$"
+check "25: ... red" "25 rotate" "^right undone: red all$"
+check "25: ... transparent" "25 rotate" "^right undone: checker all light 1 grey 1 green 0$"
+check "25: ... and blue, as they were" "25 rotate" "^right undone: blended all$"
+check "25: the Image menu's V flips it vertically" "25 rotate" "^vertical: 400×300 400x300 ff0000ff 0000ff80 00ff0000$"
+check "25: ... and Ctrl+Z undoes it" "25 rotate" "^vertical undone: 400×300$"
+check "25: Ctrl+G turns it 90° left" "25 rotate" "^left: 300×400 300x400 00ff0000 ff0000ff 0000ff80$"
+check "25: ... and Ctrl+Z undoes it" "25 rotate" "^left undone: 400×300$"
+check "25: Ctrl+J turns it 180°" "25 rotate" "^half: 400×300 400x300 0000ff80 ff0000ff 00ff0000$"
+check "25: ... and Ctrl+Z undoes it" "25 rotate" "^half undone: 400×300$"
+check "25: the Image menu's H flips it horizontally" "25 rotate" "^horizontal: 400×300 400x300 00ff0000 0000ff80 ff0000ff$"
+check "25: ... and Ctrl+Z undoes it" "25 rotate" "^horizontal undone: 400×300$"
+check "25: ... every region as it was: red" "25 rotate" "^horizontal undone: red all$"
+check "25: ... transparent" "25 rotate" "^horizontal undone: checker all light 1 grey 1 green 0$"
+check "25: ... and blue" "25 rotate" "^horizontal undone: blended all$"
+check "25: four quarter turns give back t.png exactly" "25 rotate" "^four turns: 400×300 rot\.png same$"
+check "25: one Ctrl+Z after them leaves three turns" "25 rotate" "^three turns: 300×400 • rot\.png$"
 absent "the app logs no errors or panics" "app log" "^etch:|panicked|CRITICAL"
 bench=$(section "8 bench" | sed -n "s/^bench: //p")
 if [ -z "$bench" ]; then echo "FAIL 8: --bench-stroke printed nothing"; fail=1; else

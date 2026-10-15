@@ -2,34 +2,74 @@
 //! one undo step run off the UI thread ([`Canvas::transform`]).
 //!
 //! Keys (the spec gives none; Paint.NET's): Ctrl+Shift+X crops to the selection, Ctrl+R
-//! resizes the image, Ctrl+Shift+R resizes the canvas.
+//! resizes the image, Ctrl+Shift+R resizes the canvas, Ctrl+H rotates 90° right, Ctrl+G
+//! 90° left, Ctrl+J 180°; the flips have none.
 
 use crate::canvas::Canvas;
 use crate::colours;
 use gtk::prelude::*;
 use gtk::{gdk, gio};
-use image_model::{Anchor, Color, Resampling, Transform, MAX_SIDE};
+use image_model::{Anchor, Color, Flip, Resampling, Transform, Turn, MAX_SIDE};
 use std::cell::Cell;
 use std::rc::Rc;
 
 /// The Image menu, each command's key shown beside it (the window's key handler takes the
-/// shifted ones, as it does Ctrl+Shift+S; [`set_accels`] the others).
+/// shifted ones, as it does Ctrl+Shift+S; [`set_accels`] the others), in sections: crop,
+/// resize, rotate, flip.
 pub fn menu() -> gio::Menu {
     let menu = gio::Menu::new();
-    let item = gio::MenuItem::new(Some("_Crop to Selection"), Some("win.crop"));
-    item.set_attribute_value("accel", Some(&"<Control><Shift>x".to_variant()));
-    menu.append_item(&item);
-    menu.append(Some("_Resize Image…"), Some("win.resize-image"));
-    let item = gio::MenuItem::new(Some("Resize Ca_nvas…"), Some("win.resize-canvas"));
-    item.set_attribute_value("accel", Some(&"<Control><Shift>r".to_variant()));
-    menu.append_item(&item);
+    let section = |items: &[(&str, &str, Option<&str>)]| {
+        let section = gio::Menu::new();
+        for &(label, action, shifted) in items {
+            let item = gio::MenuItem::new(Some(label), Some(action));
+            if let Some(accel) = shifted {
+                item.set_attribute_value("accel", Some(&accel.to_variant()));
+            }
+            section.append_item(&item);
+        }
+        menu.append_section(None, &section);
+    };
+    section(&[("_Crop to Selection", "win.crop", Some("<Control><Shift>x"))]);
+    section(&[
+        ("_Resize Image…", "win.resize-image", None),
+        (
+            "Resize Ca_nvas…",
+            "win.resize-canvas",
+            Some("<Control><Shift>r"),
+        ),
+    ]);
+    section(&[
+        ("Rotate 90° Righ_t", "win.rotate-right", None),
+        ("Rotate 90° _Left", "win.rotate-left", None),
+        ("Rotate 1_80°", "win.rotate-half", None),
+    ]);
+    section(&[
+        ("Flip _Horizontal", "win.flip-horizontal", None),
+        ("Flip _Vertical", "win.flip-vertical", None),
+    ]);
     menu
 }
 
 /// The Image menu's accelerators: its unshifted keys.
 pub fn set_accels(app: &gtk::Application) {
-    app.set_accels_for_action("win.resize-image", &["<Control>r"]);
+    for (action, key) in [
+        ("win.resize-image", "<Control>r"),
+        ("win.rotate-right", "<Control>h"),
+        ("win.rotate-left", "<Control>g"),
+        ("win.rotate-half", "<Control>j"),
+    ] {
+        app.set_accels_for_action(action, &[key]);
+    }
 }
+
+/// The commands that only run a transform, and it.
+const TRANSFORMS: [(&str, Transform); 5] = [
+    ("rotate-right", Transform::Rotate(Turn::Right)),
+    ("rotate-left", Transform::Rotate(Turn::Left)),
+    ("rotate-half", Transform::Rotate(Turn::Half)),
+    ("flip-horizontal", Transform::Flip(Flip::Horizontal)),
+    ("flip-vertical", Transform::Flip(Flip::Vertical)),
+];
 
 /// The window's Image menu actions, acting on `canvas`.
 pub fn add_actions(window: &gtk::ApplicationWindow, canvas: &Canvas) {
@@ -44,6 +84,12 @@ pub fn add_actions(window: &gtk::ApplicationWindow, canvas: &Canvas) {
         action("resize-image", ask_resize_image),
         action("resize-canvas", ask_resize_canvas),
     ]);
+    window.add_action_entries(TRANSFORMS.map(|(name, transform)| {
+        let canvas = canvas.clone();
+        gio::ActionEntry::builder(name)
+            .activate(move |_: &gtk::ApplicationWindow, _, _| canvas.transform(transform))
+            .build()
+    }));
 }
 
 /// Enables the commands that can run now: none while one runs, Crop to Selection only
@@ -53,6 +99,9 @@ pub fn update(window: &gtk::ApplicationWindow, canvas: &Canvas) {
     enable(window, "crop", idle && canvas.selection_size().is_some());
     enable(window, "resize-image", idle);
     enable(window, "resize-canvas", idle);
+    for (name, _) in TRANSFORMS {
+        enable(window, name, idle);
+    }
 }
 
 fn enable(window: &gtk::ApplicationWindow, name: &str, on: bool) {

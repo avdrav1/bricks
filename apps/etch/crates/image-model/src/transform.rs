@@ -1,8 +1,9 @@
 //! [`Transform`]: the Image menu's commands, which make a new image from the whole of the
-//! old one, its size changing (crop, resize, resize canvas). A transform reads the image
-//! and builds the new one without touching it, so the app can run it off the UI thread
-//! and hand the result to [`crate::Document::install`].
+//! old one, its size changing (crop, resize, resize canvas, rotate) or not (flip). A
+//! transform reads the image and builds the new one without touching it, so the app can
+//! run it off the UI thread and hand the result to [`crate::Document::install`].
 
+use crate::orient::{self, Flip, Turn};
 use crate::resample;
 use crate::{Color, Image, Rect, SizeError};
 
@@ -84,6 +85,10 @@ pub enum Transform {
         anchor: Anchor,
         fill: Color,
     },
+    /// Rotate: the image turned a quarter either way (width and height swapped) or half.
+    Rotate(Turn),
+    /// Flip: the image mirrored left to right or top to bottom.
+    Flip(Flip),
 }
 
 impl Transform {
@@ -124,11 +129,20 @@ impl Transform {
                 }
                 Ok(out)
             }
+            Transform::Rotate(turn) => {
+                let (w, h, data) = orient::rotate(image, turn);
+                Image::from_rgba(w, h, data)
+            }
+            Transform::Flip(flip) => {
+                let data = orient::flip(image, flip);
+                Image::from_rgba(image.width(), image.height(), data)
+            }
         }
     }
 
     /// Whether it would give `image` back as it is (a crop to the whole image, a resize or
-    /// a canvas of the same size), so it makes no step.
+    /// a canvas of the same size), so it makes no step. A rotation or flip always makes one,
+    /// even of an image that looks the same turned.
     pub fn unchanged(&self, image: &Image) -> bool {
         match *self {
             Transform::Crop(rect) => rect.intersect(image.bounds()) == Some(image.bounds()),
@@ -136,6 +150,19 @@ impl Transform {
             | Transform::ResizeCanvas { width, height, .. } => {
                 (width, height) == (image.width(), image.height())
             }
+            Transform::Rotate(_) | Transform::Flip(_) => false,
+        }
+    }
+
+    /// The transform that exactly undoes this one, for those that move every pixel whole
+    /// (a rotation the other way, the same flip): their steps undo by it, keeping no
+    /// image. `None` for those that lose pixels (crop, resize, resize canvas).
+    pub fn inverse(&self) -> Option<Transform> {
+        match *self {
+            Transform::Rotate(Turn::Right) => Some(Transform::Rotate(Turn::Left)),
+            Transform::Rotate(Turn::Left) => Some(Transform::Rotate(Turn::Right)),
+            Transform::Rotate(Turn::Half) | Transform::Flip(_) => Some(*self),
+            Transform::Crop(_) | Transform::Resize { .. } | Transform::ResizeCanvas { .. } => None,
         }
     }
 }

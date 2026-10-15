@@ -667,7 +667,7 @@ impl Canvas {
         let size = self.image_size();
         let changed = self.with_doc(step);
         if self.image_size() != size {
-            self.reshaped();
+            self.reshaped(size);
         } else {
             self.invalidate(changed);
         }
@@ -722,8 +722,9 @@ impl Canvas {
                 Ok(Ok(image)) => {
                     let size = (image.width(), image.height());
                     tracing::info!("{transform:?} to {}×{} in {ms:.1} ms", size.0, size.1);
+                    let before = canvas.image_size();
                     canvas.with_doc(|d| d.install(transform, image));
-                    canvas.reshaped();
+                    canvas.reshaped(before);
                 }
                 Ok(Err(e)) => {
                     tracing::warn!("{transform:?}: {e}");
@@ -738,15 +739,18 @@ impl Canvas {
         });
     }
 
-    /// After the image's size changed (a transform, or undoing one): every tile texture
-    /// goes, the selection goes, and the image shows as an opened one does, at 100%
-    /// centred or fitted when larger than the canvas.
-    fn reshaped(&self) {
+    /// After a transform, or undoing or redoing one that changed the size (the image was
+    /// `before` in size): every tile texture goes and the selection goes; when the size
+    /// changed the image shows as an opened one does, at 100% centred or fitted when
+    /// larger than the canvas, else the view stays (a flip keeps the zoom and the part in
+    /// view).
+    fn reshaped(&self, before: (u32, u32)) {
         let imp = self.imp();
         imp.tiles.borrow_mut().clear();
         imp.selection.set(None);
-        if let Some(v) = imp.view.get() {
-            imp.view.set(Some(View::new(self.image_size(), v.size)));
+        let size = self.image_size();
+        if let (Some(v), true) = (imp.view.get(), size != before) {
+            imp.view.set(Some(View::new(size, v.size)));
         }
         self.describe();
         self.queue_draw();
