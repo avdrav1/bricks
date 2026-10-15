@@ -7,7 +7,8 @@
 //! shows through transparency; around them, a one-pixel line marks the image's edge.
 //!
 //! Input: a primary-button drag draws with the tool's tip (with the fill, a click fills
-//! with the foreground and a right-click with the background), a middle-button drag or a
+//! with the foreground and a right-click with the background; with the colour picker, a
+//! click picks the foreground and a right-click the background), a middle-button drag or a
 //! drag with Space held pans, the wheel pans (Shift+wheel sideways), and Ctrl+wheel zooms
 //! around the pointer. The widget emits `changed` whenever what the status bar or the Edit
 //! menu shows may have changed: the view, the history, or the pixel under the pointer.
@@ -70,8 +71,11 @@ mod imp {
         pub drawn: Cell<u64>,
         /// Whether the next allocation should show the image at 100% rather than fitted.
         pub actual_size: Cell<bool>,
-        /// What the pointer's buttons do: draw with a tip, or fill.
+        /// What the pointer's buttons do: draw with a tip, fill, or pick a colour.
         pub action: Cell<Option<Action>>,
+        /// What a pick does with the colour picked.
+        #[allow(clippy::type_complexity)]
+        pub picked: RefCell<Option<std::rc::Rc<dyn Fn(Color, bool)>>>,
     }
 
     #[glib::object_subclass]
@@ -161,7 +165,7 @@ mod imp {
         pub(super) fn tip(&self) -> Option<Tip> {
             match self.action.get()? {
                 Action::Draw(tip) => Some(tip),
-                Action::Fill { .. } => None,
+                Action::Fill { .. } | Action::Pick => None,
             }
         }
 
@@ -444,6 +448,27 @@ impl Canvas {
         self.invalidate(changed);
     }
 
+    /// The colour picker: hands the colour of the pixel under widget point `at`, alpha
+    /// included, to [`Canvas::connect_picked`]'s callback with `background` (a
+    /// right-click). Nothing off the image.
+    pub fn pick(&self, at: (f64, f64), background: bool) {
+        let Some(view) = self.view() else { return };
+        let (x, y) = view.to_image(at);
+        if x < 0.0 || y < 0.0 {
+            return;
+        }
+        let colour = self.with_doc(|d| d.image().pixel(x as u32, y as u32));
+        let picked = self.imp().picked.borrow().clone();
+        if let (Some(colour), Some(picked)) = (colour, picked) {
+            picked(colour, background);
+        }
+    }
+
+    /// What a pick does with the colour: `f(colour, background)`.
+    pub fn connect_picked(&self, f: impl Fn(Color, bool) + 'static) {
+        self.imp().picked.replace(Some(std::rc::Rc::new(f)));
+    }
+
     /// Continues the stroke to widget point `to`.
     pub fn draw_to(&self, to: (f64, f64)) {
         let Some(view) = self.view() else { return };
@@ -510,17 +535,20 @@ impl Canvas {
                 };
                 canvas.grab_focus();
                 let imp = canvas.imp();
-                let fill = match imp.action.get() {
-                    Some(Action::Fill {
-                        foreground,
-                        background,
-                    }) => Some((foreground, background)),
-                    _ => None,
-                };
-                match (g.current_button(), fill) {
-                    (1, Some((fg, _))) if !imp.space.get() => canvas.fill((x, y), fg),
-                    (3, Some((_, bg))) if !imp.space.get() => canvas.fill((x, y), bg),
-                    (1, None) if !imp.space.get() => canvas.draw_begin((x, y)),
+                let (button, space) = (g.current_button(), imp.space.get());
+                let secondary = button == 3;
+                match (button, imp.action.get()) {
+                    (
+                        1 | 3,
+                        Some(Action::Fill {
+                            foreground,
+                            background,
+                        }),
+                    ) if !space => {
+                        canvas.fill((x, y), if secondary { background } else { foreground })
+                    }
+                    (1 | 3, Some(Action::Pick)) if !space => canvas.pick((x, y), secondary),
+                    (1, _) if !space => canvas.draw_begin((x, y)),
                     (1 | 2, _) => {
                         imp.drag.set(Drag::Pan { last: (0.0, 0.0) });
                         canvas.set_cursor_from_name(Some("grabbing"));

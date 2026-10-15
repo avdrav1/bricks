@@ -537,12 +537,24 @@ fn show(
                 let picked = state.and_then(|s| s.str()).and_then(Tool::from_id);
                 if let (Some(t), Some(state)) = (picked, state) {
                     action.set_state(state);
-                    controls.update(|s| s.tool = t);
+                    controls.update(|s| s.set_tool(t));
                 }
             }
         })
         .build();
     window.add_action_entries([tool]);
+    // A pick sets the colour and goes back to the tool used before the picker.
+    canvas.connect_picked({
+        let (window, controls) = (window.downgrade(), Rc::downgrade(&controls));
+        move |colour, background| {
+            let (Some(window), Some(controls)) = (window.upgrade(), controls.upgrade()) else {
+                return;
+            };
+            let mut back = Tool::default();
+            controls.update(|s| back = s.pick(colour, background));
+            ActionGroupExt::activate_action(&window, "tool", Some(&back.id().to_variant()));
+        }
+    });
 
     // Space held: dragging pans. Ctrl+Shift+Z redoes, Ctrl+Shift+S is Save As, and
     // Ctrl+Shift+E Export (shifted, a letter may arrive upper case, which an accelerator

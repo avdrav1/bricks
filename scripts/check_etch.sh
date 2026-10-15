@@ -76,6 +76,13 @@
 #      the box fills it red to its edges, the white outside untouched; a right-click
 #      outside fills the outside indigo, the inside staying red. Ctrl+Z takes back the
 #      outside, another Ctrl+Z the inside, and Ctrl+Y fills the inside again.
+# ETCH-10 acceptance: the colour picker.
+#  15. `etch t.png` (section 11's image), the brush the tool: I picks the colour picker
+#      (the tool column shows it on) and hides the size; a click on the red half makes the
+#      foreground #FF0000 (the colour row's accessible description) and goes back to the
+#      brush; I and a click on the half-transparent blue make it #0000FF80, alpha
+#      included; I and a right-click on the transparent green make the background
+#      #00FF0000. Picking changes no pixel: the title stays unmarked.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -538,6 +545,24 @@ session() {
   keys -M ctrl z -m ctrl; shot fill-undone2; echo "undone inside: inside white $(inside FFFFFF)"
   keys -M ctrl y -m ctrl; shot fill-redone; echo "redone: inside red $(inside ED1C24)"
   pkill -x etch; sleep 1
+
+  echo "== 15 picker"
+  etch /tmp/t.png >>/tmp/app.log 2>&1 & sleep 3
+  read cx cy cw ch <<<"$(px canvas)"
+  l=$((cx + (cw - 400) / 2)); t=$((cy + (ch - 300) / 2))
+  colours() { python3 /tmp/a11y.py text | grep "^Foreground" | head -1 | sed "s/^/$1: /"; }
+  picker() { python3 /tmp/a11y.py state "Colour Picker" 2>&1; }
+  colours start
+  keys b; keys i; echo "key i: picker $(picker) brush $(tool Brush)"
+  echo "sizes shown: $(python3 /tmp/a11y.py text | grep -c "^Size$")"
+  python3 /scripts/dnd_helpers.py click $((l + 100)) $((t + 150)); sleep 0.5
+  colours red; echo "after red: picker $(picker) brush $(tool Brush)"
+  keys i; python3 /scripts/dnd_helpers.py click $((l + 300)) $((t + 225)); sleep 0.5
+  colours blue; echo "after blue: picker $(picker) brush $(tool Brush)"
+  keys i; python3 /scripts/dnd_helpers.py click $((l + 300)) $((t + 75)) 1 right; sleep 0.5
+  colours clear; echo "after clear: picker $(picker) brush $(tool Brush)"
+  echo "title: $(python3 /tmp/a11y.py text | grep -E "^(• )?t\.png$" | head -1)"
+  pkill -x etch; sleep 1
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -676,6 +701,17 @@ check "14: a right-click fills the outside with the background" "14 fill" "^righ
 check "14: Ctrl+Z takes back the outside's fill" "14 fill" "^undone outside: inside red all outside white all$"
 check "14: another Ctrl+Z the inside's" "14 fill" "^undone inside: inside white all$"
 check "14: Ctrl+Y fills it again" "14 fill" "^redone: inside red all$"
+# ETCH-10: the colour picker.
+check "15: I picks the colour picker" "15 picker" "^key i: picker on brush off$"
+check "15: ... which has no size" "15 picker" "^sizes shown: 0$"
+check "15: the colours start black on white" "15 picker" "^start: Foreground #000000, background #FFFFFF$"
+check "15: a click on red makes it the foreground" "15 picker" "^red: Foreground #FF0000, background #FFFFFF$"
+check "15: ... and goes back to the brush" "15 picker" "^after red: picker off brush on$"
+check "15: a click on half-transparent blue picks its alpha too" "15 picker" "^blue: Foreground #0000FF80, background #FFFFFF$"
+check "15: ... back to the brush again" "15 picker" "^after blue: picker off brush on$"
+check "15: a right-click on transparent green makes it the background" "15 picker" "^clear: Foreground #0000FF80, background #00FF0000$"
+check "15: ... back to the brush" "15 picker" "^after clear: picker off brush on$"
+check "15: picking changes no pixel: the title stays unmarked" "15 picker" "^title: t\.png$"
 absent "the app logs no errors or panics" "app log" "^etch:|panicked|CRITICAL"
 bench=$(section "8 bench" | sed -n "s/^bench: //p")
 if [ -z "$bench" ]; then echo "FAIL 8: --bench-stroke printed nothing"; fail=1; else

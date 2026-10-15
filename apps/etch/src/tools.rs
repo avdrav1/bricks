@@ -17,6 +17,7 @@ pub enum Tool {
     Brush,
     Eraser,
     Fill,
+    Picker,
 }
 
 /// What the canvas does with the pointer's buttons under the current tool.
@@ -30,10 +31,19 @@ pub enum Action {
         foreground: Color,
         background: Color,
     },
+    /// A click makes the pixel under it the foreground colour, a right-click the
+    /// background.
+    Pick,
 }
 
 impl Tool {
-    pub const ALL: [Tool; 4] = [Tool::Pencil, Tool::Brush, Tool::Eraser, Tool::Fill];
+    pub const ALL: [Tool; 5] = [
+        Tool::Pencil,
+        Tool::Brush,
+        Tool::Eraser,
+        Tool::Fill,
+        Tool::Picker,
+    ];
 
     /// The `tool` action's target for it.
     pub fn id(self) -> &'static str {
@@ -42,6 +52,7 @@ impl Tool {
             Tool::Brush => "brush",
             Tool::Eraser => "eraser",
             Tool::Fill => "fill",
+            Tool::Picker => "picker",
         }
     }
 
@@ -55,6 +66,7 @@ impl Tool {
             Tool::Brush => "Brush",
             Tool::Eraser => "Eraser",
             Tool::Fill => "Fill",
+            Tool::Picker => "Colour Picker",
         }
     }
 
@@ -65,6 +77,7 @@ impl Tool {
             Tool::Brush => 'B',
             Tool::Eraser => 'E',
             Tool::Fill => 'F',
+            Tool::Picker => 'I',
         }
     }
 
@@ -85,6 +98,10 @@ impl Tool {
             Tool::Fill => {
                 "M 2.5 8 L 7.5 3 L 12.5 8 L 8 12.5 L 7 12.5 Z M 2.5 8 L 12.5 8 M 7.5 3 L 5.5 1 M 13.5 10 C 12.5 11.5 12.3 13.5 13.5 13.5 C 14.7 13.5 14.5 11.5 13.5 10 Z"
             }
+            // An eyedropper leaning right: its glass tube, the bulb's collar, the bulb.
+            Tool::Picker => {
+                "M 2 14 L 2.5 11.5 L 8.5 5.5 L 10.5 7.5 L 4.5 13.5 Z M 7.5 4.5 L 11.5 8.5 M 9.5 6.5 L 12 4 C 13 3 14.5 3 13.5 2.5 C 13 1.5 13 3 12 4"
+            }
         }
     }
 }
@@ -98,6 +115,8 @@ pub struct Settings {
     pub background: Color,
     /// The brush's edge: soft (falling off to transparent) or hard.
     pub soft: bool,
+    /// The tool before the colour picker, which a pick goes back to.
+    before_picker: Tool,
     pencil_width: u32,
     brush_width: u32,
     eraser_width: u32,
@@ -110,6 +129,7 @@ impl Default for Settings {
             foreground: Color::BLACK,
             background: Color::WHITE,
             soft: true,
+            before_picker: Tool::Pencil,
             pencil_width: 1,
             brush_width: 8,
             eraser_width: 9,
@@ -118,13 +138,31 @@ impl Default for Settings {
 }
 
 impl Settings {
-    /// The current tool's size; the fill has none.
+    /// Makes `tool` the tool, remembering the one before the colour picker.
+    pub fn set_tool(&mut self, tool: Tool) {
+        if tool == Tool::Picker && self.tool != Tool::Picker {
+            self.before_picker = self.tool;
+        }
+        self.tool = tool;
+    }
+
+    /// A pick: `colour` becomes the background (a right-click) or the foreground. Returns
+    /// the tool to go back to, the one used before the picker, as Paint does.
+    pub fn pick(&mut self, colour: Color, background: bool) -> Tool {
+        match background {
+            true => self.background = colour,
+            false => self.foreground = colour,
+        }
+        self.before_picker
+    }
+
+    /// The current tool's size; the fill and the picker have none.
     pub fn width(&self) -> Option<u32> {
         match self.tool {
             Tool::Pencil => Some(self.pencil_width),
             Tool::Brush => Some(self.brush_width),
             Tool::Eraser => Some(self.eraser_width),
-            Tool::Fill => None,
+            Tool::Fill | Tool::Picker => None,
         }
     }
 
@@ -135,7 +173,7 @@ impl Settings {
             Tool::Pencil => self.pencil_width = w,
             Tool::Brush => self.brush_width = w,
             Tool::Eraser => self.eraser_width = w,
-            Tool::Fill => {}
+            Tool::Fill | Tool::Picker => {}
         }
     }
 
@@ -145,7 +183,8 @@ impl Settings {
     }
 
     /// What the canvas does with the current tool: the pencil and the brush draw in the
-    /// foreground, the eraser to transparency, each at its size; the fill fills.
+    /// foreground, the eraser to transparency, each at its size; the fill fills; the
+    /// picker picks.
     pub fn action(&self) -> Action {
         match self.tool {
             Tool::Pencil => Action::Draw(Tip::Pencil(Pencil {
@@ -162,6 +201,7 @@ impl Settings {
                 foreground: self.foreground,
                 background: self.background,
             },
+            Tool::Picker => Action::Pick,
         }
     }
 }
@@ -314,5 +354,22 @@ mod tests {
                 background: red
             }
         );
+    }
+
+    #[test]
+    fn a_pick_sets_a_colour_alpha_included_and_goes_back_to_the_tool_before() {
+        let mut s = Settings::default();
+        s.set_tool(Tool::Brush);
+        s.set_tool(Tool::Picker);
+        assert_eq!((s.action(), s.width()), (Action::Pick, None));
+        let clear = Color::rgba(0, 0, 255, 128);
+        assert_eq!(s.pick(clear, false), Tool::Brush);
+        assert_eq!(s.foreground, clear);
+        // Picking the picker again keeps the tool to go back to.
+        s.set_tool(Tool::Fill);
+        s.set_tool(Tool::Picker);
+        s.set_tool(Tool::Picker);
+        assert_eq!(s.pick(Color::TRANSPARENT, true), Tool::Fill);
+        assert_eq!((s.foreground, s.background), (clear, Color::TRANSPARENT));
     }
 }
