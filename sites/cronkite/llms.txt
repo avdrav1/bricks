@@ -70,8 +70,8 @@ Each file is one object: `version`, `date`, `url` (the x86_64 Linux `.tar.gz`), 
 
 An explainer, narrated, with burned-in English captions. The apps in it are recreated in HTML from the real ones (`video/` in the repository), not screen recordings.
 
-- [Cronkite in a minute](https://dl.cronkite.cc/video/8127b4d80cba/cronkite-explainer-short.mp4): 56 seconds, MP4.
-- [The full tour](https://dl.cronkite.cc/video/8127b4d80cba/cronkite-explainer.mp4): about 6 minutes, MP4.
+- [Cronkite in a minute](https://dl.cronkite.cc/video/4a11d08de20a/cronkite-explainer-short.mp4): 56 seconds, MP4.
+- [The full tour](https://dl.cronkite.cc/video/4a11d08de20a/cronkite-explainer.mp4): about 6 minutes, MP4.
 
 ## Source
 
