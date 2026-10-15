@@ -139,6 +139,7 @@ pub fn install_app_actions(app: &gtk::Application) {
     view.append(Some("_Fit to Window"), Some("win.fit"));
     menu.append_submenu(Some("_View"), &view);
     menu.append_submenu(Some("_Image"), &image_menu::menu());
+    image_menu::set_accels(app);
     app.set_menubar(Some(&menu));
 }
 

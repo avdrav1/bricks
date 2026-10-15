@@ -43,14 +43,21 @@ impl fmt::Debug for Image {
 }
 
 impl Image {
-    /// An image every pixel of which is `fill`.
-    pub fn new(width: u32, height: u32, fill: Color) -> Result<Image, SizeError> {
+    /// Whether an image can be `width` × `height`: at least one pixel and at most
+    /// [`MAX_SIDE`] a side.
+    pub(crate) fn check_size(width: u32, height: u32) -> Result<(), SizeError> {
         if width == 0 || height == 0 {
             return Err(SizeError::Empty);
         }
         if width > MAX_SIDE || height > MAX_SIDE {
             return Err(SizeError::TooLarge { width, height });
         }
+        Ok(())
+    }
+
+    /// An image every pixel of which is `fill`.
+    pub fn new(width: u32, height: u32, fill: Color) -> Result<Image, SizeError> {
+        Image::check_size(width, height)?;
         let data = fill.to_bytes().repeat(width as usize * height as usize);
         Ok(Image {
             width,
@@ -66,12 +73,7 @@ impl Image {
     ///
     /// If `data` isn't `width * height * 4` bytes.
     pub fn from_rgba(width: u32, height: u32, data: Vec<u8>) -> Result<Image, SizeError> {
-        if width == 0 || height == 0 {
-            return Err(SizeError::Empty);
-        }
-        if width > MAX_SIDE || height > MAX_SIDE {
-            return Err(SizeError::TooLarge { width, height });
-        }
+        Image::check_size(width, height)?;
         assert_eq!(
             data.len(),
             width as usize * height as usize * 4,

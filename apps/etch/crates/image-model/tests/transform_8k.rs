@@ -63,3 +63,24 @@ fn cropping_8k() {
         Transform::Crop(Rect::new(300, 200, 7000, 4000)),
     );
 }
+
+#[test]
+#[ignore = "perf: run in release with --ignored"]
+fn resizing_8k() {
+    use image_model::Resampling::{Nearest, Smooth};
+    for (w, h, resampling) in [
+        (3840, 2160, Smooth),
+        (15360, 8640, Smooth),
+        (3840, 2160, Nearest),
+        (15360, 8640, Nearest),
+    ] {
+        time(
+            &format!("resize 7680×4320 to {w}×{h} {resampling:?}"),
+            Transform::Resize {
+                width: w,
+                height: h,
+                resampling,
+            },
+        );
+    }
+}

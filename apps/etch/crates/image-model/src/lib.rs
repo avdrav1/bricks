@@ -6,8 +6,8 @@
 //! each returns the [`Rect`] of pixels it may have changed, so the canvas redraws only
 //! that. History keeps each step's operation and the image's [`TILE`]-pixel tiles from
 //! before it touched them: undo writes the tiles back, redo replays the operation. A
-//! transform of the whole image ([`Transform`]: crop) keeps instead the whole image on
-//! its step's other side, which undo and redo swap in.
+//! transform of the whole image ([`Transform`]: crop, resize) keeps instead the whole
+//! image on its step's other side, which undo and redo swap in.
 
 mod blend;
 mod brush;
@@ -16,7 +16,9 @@ mod document;
 mod fill;
 mod geom;
 mod image;
+mod par;
 mod pencil;
+mod resample;
 mod select;
 mod shape;
 mod transform;
@@ -31,7 +33,7 @@ pub use image::{Image, SizeError, MAX_SIDE};
 pub use pencil::Pencil;
 pub use select::{spanning, Floating};
 pub use shape::{Kind, Shape, ShapeTool, Style};
-pub use transform::Transform;
+pub use transform::{Resampling, Transform};
 
 /// The side of the square tiles history saves pixels in.
 pub const TILE: u32 = 64;

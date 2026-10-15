@@ -171,6 +171,19 @@
 #      moved and still floating land first: a 100x80 red selection dragged 200 px right
 #      and cropped (Ctrl+Shift+X) leaves a 100×80 image all red; one Ctrl+Z gives back
 #      400×300 with the moved pixels landed.
+# ETCH-18 acceptance: resize image.
+#  23. `etch resize.png` (a copy of t.png): Ctrl+R asks Resize Image with Width 400,
+#      Height 300, Keep aspect ratio on, and Smooth on (Nearest neighbour the other
+#      choice); Escape closes it, changing nothing. Again, Width 600 typed (Alt+W) sets
+#      Height to 450 (linked); Alt+N picks Nearest neighbour and Enter in the width
+#      resizes: the status says 600×450, the title is marked, and on screen the left half
+#      is red, the top right the checkerboard, the bottom right blue blended. Saved, the
+#      file is 600x450 with the halves meeting exactly at x 300 and y 225 (ff0000ff, the
+#      transparent pixel still hiding its green 00ff0000, 0000ff80): nearest copies
+#      pixels. One Ctrl+Z gives back 400×300 and every region. Smooth to 200x150: the
+#      pixels either side of the red half's edge are red at alpha 223 and 32 (ff0000df,
+#      ff000020), their colour unmixed with the transparent green beside it (the triangle
+#      filter over 4 source pixels, weighted by alpha); Ctrl+Z gives back 400×300.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -1076,6 +1089,37 @@ session() {
   keys -M ctrl z -m ctrl; sleep 1; shot float-crop-undone
   echo "float crop undone: $(size) red $(centred 400 300 250 50 350 130 FF0000) left $(px checkered /tmp/shot.png $((l + 54)) $((t + 54)) $((l + 146)) $((t + 126)))"
   pkill -x etch; sleep 1
+
+  echo "== 23 resize"
+  cp /tmp/t.png /tmp/resize.png
+  etch /tmp/resize.png >>/tmp/app.log 2>&1 & sleep 3
+  # The number in the field named NAME.
+  field() { python3 /tmp/a11y.py text | grep -A3 "^$1$" | grep -E "^[0-9]+$" | head -1; }
+  keys -M ctrl r -m ctrl; sleep 1
+  shown dialog | grep -E "^dialog: (Resize Image|Keep aspect ratio|Smooth|Nearest neighbour)$"
+  echo "dialog: width $(field Width) height $(field Height) checked $(px checked)"
+  keys -k Escape; sleep 1
+  echo "cancelled: $(size) $(titled resize.png) $(python3 /tmp/a11y.py text | grep -c "^Resize Image$")"
+  keys -M ctrl r -m ctrl; sleep 1
+  keys -M alt w -m alt; keys -M ctrl a -m ctrl; keys 600; keys -k Tab; sleep 0.5
+  echo "linked: width $(field Width) height $(field Height)"
+  keys -M alt n -m alt; echo "picked: $(px checked)"
+  keys -M alt w -m alt; keys -k Return; sleep 2; shot resized-nearest
+  echo "nearest: $(size) $(sel) $(titled resize.png)"
+  px opened /tmp/shot.png 600 450 | sed "s/^/nearest: /"
+  keys -M ctrl s -m ctrl; sleep 2
+  echo "nearest saved: $(px rgba /tmp/resize.png 299,0 300,0 300,225 599,449)"
+  keys -M ctrl z -m ctrl; sleep 1; shot resize-undone
+  echo "resize undone: $(size) $(titled resize.png)"
+  px opened /tmp/shot.png 400 300 | sed "s/^/resize undone: /"
+  keys -M ctrl r -m ctrl; sleep 1
+  keys -M alt w -m alt; keys -M ctrl a -m ctrl; keys 200; keys -k Tab; sleep 0.5
+  keys -M alt w -m alt; keys -k Return; sleep 2; shot resized-smooth
+  echo "smooth: $(size) $(titled resize.png)"
+  keys -M ctrl s -m ctrl; sleep 2
+  echo "smooth saved: $(px rgba /tmp/resize.png 0,0 99,10 100,10)"
+  keys -M ctrl z -m ctrl; sleep 1; echo "smooth undone: $(size)"
+  pkill -x etch; sleep 1
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -1335,6 +1379,26 @@ check "22: ... and half-transparent blue" "22 crop" "^crop undone: blended all$"
 check "22: Ctrl+Y crops again (the file's image: unmarked)" "22 crop" "^crop redone: 100×100 crop\.png$"
 check "22: floating pixels land, then the image is cropped to them" "22 crop" "^float cropped: 100×80 no selection red all$"
 check "22: ... and one Ctrl+Z gives back 400×300 with them landed" "22 crop" "^float crop undone: 400×300 red all left checker all light 1 grey 1$"
+check "23: Ctrl+R asks Resize Image" "23 resize" "^dialog: Resize Image$"
+check "23: ... with Keep aspect ratio" "23 resize" "^dialog: Keep aspect ratio$"
+check "23: ... Smooth" "23 resize" "^dialog: Smooth$"
+check "23: ... and Nearest neighbour" "23 resize" "^dialog: Nearest neighbour$"
+check "23: ... offering the image's 400 by 300, aspect kept and Smooth on" "23 resize" "^dialog: width 400 height 300 checked Keep aspect ratio, Smooth$"
+check "23: Escape closes it, changing nothing" "23 resize" "^cancelled: 400×300 resize\.png 0$"
+check "23: a width of 600 sets the height to 450" "23 resize" "^linked: width 600 height 450$"
+check "23: Alt+N picks Nearest neighbour" "23 resize" "^picked: Keep aspect ratio, Nearest neighbour$"
+check "23: Enter resizes to 600×450, marked" "23 resize" "^nearest: 600×450 no selection • resize\.png$"
+check "23: ... the red half on the left" "23 resize" "^nearest: red all$"
+check "23: ... the transparent quarter top right" "23 resize" "^nearest: checker all light 1 grey 1 green 0$"
+check "23: ... the half-transparent quarter bottom right" "23 resize" "^nearest: blended all$"
+check "23: nearest copies pixels: the halves meet exactly, hidden colour kept" "23 resize" "^nearest saved: 600x450 ff0000ff 00ff0000 0000ff80 0000ff80$"
+check "23: one Ctrl+Z gives back 400×300" "23 resize" "^resize undone: 400×300 • resize\.png$"
+check "23: ... red" "23 resize" "^resize undone: red all$"
+check "23: ... transparent" "23 resize" "^resize undone: checker all light 1 grey 1 green 0$"
+check "23: ... and blue, as they were" "23 resize" "^resize undone: blended all$"
+check "23: Smooth to 200 wide makes 200×150" "23 resize" "^smooth: 200×150 • resize\.png$"
+check "23: ... its red edge fading in alpha, never tinted by the transparent green" "23 resize" "^smooth saved: 200x150 ff0000ff ff0000df ff000020$"
+check "23: ... and Ctrl+Z gives back 400×300" "23 resize" "^smooth undone: 400×300$"
 absent "the app logs no errors or panics" "app log" "^etch:|panicked|CRITICAL"
 bench=$(section "8 bench" | sed -n "s/^bench: //p")
 if [ -z "$bench" ]; then echo "FAIL 8: --bench-stroke printed nothing"; fail=1; else
