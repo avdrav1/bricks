@@ -2,6 +2,12 @@
 
 Releases are added by the ship-it skill.
 
+## Etch v0.2.1 (2026-10-15)
+
+The canvas draws cleanly on HiDPI screens: at a display scale of 2 (or 1.5), faint pale lines no longer cross the image every 256 pixels, and the checkerboard behind transparent pixels has crisp squares right up to the image's edge, with any GTK renderer.
+
+- ETCH-26: Draw the canvas in device pixels so tiles meet without seams
+
 ## Etch v0.2.0 (2026-10-15)
 
 Etch edits real images now, milestones ET1 to ET3: the V0.1 the spec defines. Open PNG, JPEG, and BMP files (Etch becomes their default app when installed), or drop them on a window, and save them back atomically; closing an edited image asks first. Draw with the brush (hard or soft), fill with a tolerance, pick colours from the image, draw lines, rectangles, and ellipses (outlined, filled, or both, previewed as you drag), and type text in any font through your input method. Select and move pixels, cut, copy, and paste with other apps, crop, resize the image or the canvas, rotate, and flip. Every step undoes. Colours come from a hex field and GTK's colour chooser too, every tool has its Paint key, Open Recent lists the last ten images, and after a crash Etch offers back your unsaved images without touching their files.
