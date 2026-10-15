@@ -1,4 +1,4 @@
-//! The outline view (FRAME-13, ADR 0006): the header bar's Outline (Ctrl+Shift+O) shows
+//! The outline view (FRAME-13, ADR 0006): the toolbar's Outline (Ctrl+Shift+O) shows
 //! every slide's title and bullets as one editable outline in place of the canvas and the
 //! inspector; the slide list stays. Titles are bold, after their slide's number; bullets
 //! are indented by level; a slide's other items (text outside its title and body, shapes,
@@ -129,7 +129,7 @@ impl OutlineView {
         &self.stack
     }
 
-    /// The header bar's Outline button.
+    /// The toolbar's Outline button (the header bar's on Linux).
     pub fn button(&self) -> &gtk::ToggleButton {
         &self.button
     }

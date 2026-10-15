@@ -1,4 +1,4 @@
-//! Inserting (FRAME-12, spec "Content goes where it belongs"). The header bar's Insert
+//! Inserting (FRAME-12, spec "Content goes where it belongs"). The toolbar's Insert
 //! menu adds a text box (its text selected, so typing replaces it), a shape, a picture
 //! (chosen in the file dialog), or a table to the slide shown, and selects it. Pictures
 //! also come by drop, image files on the canvas, and by paste (Ctrl+V): a picture fills

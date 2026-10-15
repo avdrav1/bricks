@@ -21,6 +21,7 @@ V0.1 ships at the end of M3; the curl-installer release (per user, on Arch, Ubun
 - Crate tags match the PRD workspace: `csv-engine`, `data-model`, `grid`, `commands`, `app`, plus `bench` for the harness.
 - Every story carries acceptance criteria. A story is done when its criteria pass in CI on the test corpus.
 - Shortcuts are written once with the primary modifier (`apps/brick/src/keys.rs`, MAC-3): on macOS, Command replaces Ctrl in every shortcut; Redo is ⇧⌘Z (no Ctrl+Y), Replace ⌥⌘F, and Control stays for ⌃Space and ⇧⌃Space (selections), ⌃⇧digit number formats, and ⌃Page Down/Up (sheets), as in Excel for Mac.
+- On macOS (MAC-4) the menus are in the menu bar: GTK's app menu (About Brick, Settings, Services, Hide, Quit ⌘Q), then File (New, Open, Open Recent, Close Window ⌘W, Save, Save As), Edit (Undo, Redo, Cut, Copy, Paste, Find, Replace, Go To), Sheet (New, Next, and Previous Sheet; insert and delete rows and columns), Format (bold, italic, underline, strikethrough, Number Format, Clear Formatting, merging), Data (sorting), and Window (Minimize ⌘M, Zoom, the windows), each item with its key. Windows keep macOS's title bar; the header bar's file buttons are the File menu's there, and the delimiter and Header row are a toolbar row over the format bar. Linux keeps the header bar.
 
 The roadmap below shows each milestone and the gate that closes it.
 
