@@ -84,6 +84,36 @@ impl Image {
         })
     }
 
+    /// An image of RGBA8 rows, straight alpha, `stride` bytes apart (a pasted texture's,
+    /// whose rows may be padded): `width × height` pixels, or, past [`MAX_SIDE`] on a
+    /// side, its top-left [`MAX_SIDE`] pixels on that side.
+    ///
+    /// # Panics
+    ///
+    /// If `stride` is less than `width * 4` or `data` is shorter than `height` such rows.
+    pub fn from_rows(
+        width: u32,
+        height: u32,
+        data: &[u8],
+        stride: usize,
+    ) -> Result<Image, SizeError> {
+        if width == 0 || height == 0 {
+            return Err(SizeError::Empty);
+        }
+        let row = width as usize * 4;
+        assert!(
+            stride >= row && data.len() >= stride * (height as usize).saturating_sub(1) + row,
+            "RGBA8 rows for {width}×{height}, {stride} bytes apart"
+        );
+        let (w, h) = (width.min(MAX_SIDE), height.min(MAX_SIDE));
+        let kept = w as usize * 4;
+        let mut out = Vec::with_capacity(kept * h as usize);
+        for y in 0..h as usize {
+            out.extend_from_slice(&data[y * stride..y * stride + kept]);
+        }
+        Image::from_rgba(w, h, out)
+    }
+
     pub fn width(&self) -> u32 {
         self.width
     }

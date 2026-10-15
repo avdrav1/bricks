@@ -102,19 +102,34 @@ pub fn install_app_actions(app: &gtk::Application) {
     let edit = gio::Menu::new();
     edit.append(Some("_Undo"), Some("win.undo"));
     edit.append(Some("_Redo"), Some("win.redo"));
-    let selection = gio::Menu::new();
-    for (label, action, accel) in [
-        ("Select _All", "win.select-all", "<Control>a"),
-        ("_Deselect", "win.deselect", "Escape"),
-        ("De_lete", "win.delete", "Delete"),
-    ] {
-        // The keys show beside the command; the window's key handler takes them, so a
-        // field or the text being typed keeps its own Ctrl+A, Escape, and Delete.
-        let item = gio::MenuItem::new(Some(label), Some(action));
-        item.set_attribute_value("accel", Some(&accel.to_variant()));
-        selection.append_item(&item);
-    }
-    edit.append_section(None, &selection);
+    // The keys show beside each command; the window's key handler takes them, so a field
+    // or the text being typed keeps its own Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A, Escape, and
+    // Delete.
+    let section = |items: &[(&str, &str, &str)]| {
+        let section = gio::Menu::new();
+        for &(label, action, accel) in items {
+            let item = gio::MenuItem::new(Some(label), Some(action));
+            item.set_attribute_value("accel", Some(&accel.to_variant()));
+            section.append_item(&item);
+        }
+        section
+    };
+    edit.append_section(
+        None,
+        &section(&[
+            ("Cu_t", "win.cut", "<Control>x"),
+            ("_Copy", "win.copy", "<Control>c"),
+            ("_Paste", "win.paste", "<Control>v"),
+        ]),
+    );
+    edit.append_section(
+        None,
+        &section(&[
+            ("Select _All", "win.select-all", "<Control>a"),
+            ("_Deselect", "win.deselect", "Escape"),
+            ("De_lete", "win.delete", "Delete"),
+        ]),
+    );
     menu.append_submenu(Some("_Edit"), &edit);
     let view = gio::Menu::new();
     view.append(Some("Zoom _In"), Some("win.zoom-in"));
@@ -769,13 +784,23 @@ fn show(
         action("delete", |c| {
             c.delete_selection();
         }),
+        action("cut", |c| {
+            c.cut();
+        }),
+        action("copy", |c| {
+            c.copy();
+        }),
     ]);
-    window.add_action_entries([gio::ActionEntry::builder("select-all")
-        .activate({
-            let canvas = canvas.clone();
-            move |window: &gtk::ApplicationWindow, _, _| select_all(window, &canvas)
-        })
-        .build()]);
+    let with_window = |name: &str, f: fn(&gtk::ApplicationWindow, &Canvas)| {
+        let canvas = canvas.clone();
+        gio::ActionEntry::builder(name)
+            .activate(move |window: &gtk::ApplicationWindow, _, _| f(window, &canvas))
+            .build()
+    };
+    window.add_action_entries([
+        with_window("select-all", select_all),
+        with_window("paste", paste),
+    ]);
     // The tool: the tool column's buttons and the tool keys set it.
     let tool = gio::ActionEntry::builder("tool")
         .parameter_type(Some(glib::VariantTy::STRING))
@@ -812,8 +837,9 @@ fn show(
 
     // Space held: dragging pans. Escape drops a shape being dragged, or deselects.
     // Ctrl+Shift+Z redoes, Ctrl+Shift+S is Save As, and Ctrl+Shift+E Export (shifted, a
-    // letter may arrive upper case, which an accelerator misses). Ctrl+A selects all,
-    // Delete deletes the selection, and the arrows move it a pixel (Shift: ten).
+    // letter may arrive upper case, which an accelerator misses). Ctrl+X, Ctrl+C, and
+    // Ctrl+V cut, copy, and paste, Ctrl+A selects all, Delete deletes the selection, and
+    // the arrows move it a pixel (Shift: ten).
     // Unmodified, a tool's key picks it and X swaps the colours. None of them while a
     // text field (the size) has the keys, and only the Ctrl+Shift ones while text is
     // typed on the canvas: its keys are its letters.
@@ -856,8 +882,18 @@ fn show(
             if text {
                 return glib::Propagation::Proceed;
             }
-            if mods == gdk::ModifierType::CONTROL_MASK && matches!(key, gdk::Key::a | gdk::Key::A) {
-                select_all(&window, &canvas);
+            if mods == gdk::ModifierType::CONTROL_MASK {
+                match key {
+                    gdk::Key::a | gdk::Key::A => select_all(&window, &canvas),
+                    gdk::Key::x | gdk::Key::X => {
+                        canvas.cut();
+                    }
+                    gdk::Key::c | gdk::Key::C => {
+                        canvas.copy();
+                    }
+                    gdk::Key::v | gdk::Key::V => paste(&window, &canvas),
+                    _ => return glib::Propagation::Proceed,
+                }
                 return glib::Propagation::Stop;
             }
             if mods.is_empty() || mods == gdk::ModifierType::SHIFT_MASK {
@@ -921,6 +957,8 @@ fn show(
                 ("redo", canvas.can_redo()),
                 ("deselect", selected),
                 ("delete", selected),
+                ("cut", selected),
+                ("copy", selected),
             ] {
                 if let Some(a) = window
                     .lookup_action(name)
@@ -939,6 +977,43 @@ fn show(
         Some(Bench::Open { start, read_ms }) => bench_open(app, window, &canvas, start, read_ms),
         None => {}
     }
+}
+
+/// Edit → Paste: reads the clipboard's image without waiting for it, converts it to the
+/// image's pixels off the UI thread, then picks the selection tool (as Paint does, so the
+/// pasted pixels can be moved at once) and floats them over the image. Nothing happens
+/// when the clipboard holds no image.
+fn paste(window: &gtk::ApplicationWindow, canvas: &Canvas) {
+    let clipboard = canvas.clipboard();
+    let (window, canvas) = (window.downgrade(), canvas.downgrade());
+    glib::spawn_future_local(async move {
+        let texture = match clipboard.read_texture_future().await {
+            Ok(Some(texture)) => texture,
+            Ok(None) => return,
+            Err(e) => {
+                tracing::info!("nothing to paste: {e}");
+                return;
+            }
+        };
+        let converted = gio::spawn_blocking(move || crate::canvas::pasted(&texture)).await;
+        let (pixels, shown) = match converted {
+            Ok(Ok(pasted)) => pasted,
+            Ok(Err(e)) => {
+                tracing::warn!("cannot paste the clipboard's image: {e}");
+                return;
+            }
+            Err(_) => {
+                tracing::warn!("pasting failed unexpectedly");
+                return;
+            }
+        };
+        let (Some(window), Some(canvas)) = (window.upgrade(), canvas.upgrade()) else {
+            return;
+        };
+        let selection = Tool::Selection.id().to_variant();
+        ActionGroupExt::activate_action(&window, "tool", Some(&selection));
+        canvas.paste(pixels, shown);
+    });
 }
 
 /// Edit → Select All: the selection becomes the tool (as in Paint, so the selection can be

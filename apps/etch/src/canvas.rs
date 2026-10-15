@@ -14,11 +14,12 @@
 //! and the text shows over the image until Enter or a click elsewhere puts it on, Escape
 //! dropping it; with the selection, a drag selects a rectangle, outlined in dashes, and a
 //! drag inside it lifts its pixels, which float over the image, leaving transparency where
-//! they were, until they land as one undo step), a middle-button drag or a drag with
-//! Space held pans, the wheel pans (Shift+wheel sideways), and Ctrl+wheel zooms around
-//! the pointer. The widget emits `changed` whenever what the status bar or the Edit menu
-//! shows may have changed: the view, the history, the selection, or the pixel under the
-//! pointer.
+//! they were, until they land as one undo step; pixels pasted from the clipboard float
+//! the same way, and the selection's pixels are copied to it), a middle-button drag or a
+//! drag with Space held pans, the wheel pans (Shift+wheel sideways), and Ctrl+wheel zooms
+//! around the pointer. The widget emits `changed` whenever what the status bar or the
+//! Edit menu shows may have changed: the view, the history, the selection, or the pixel
+//! under the pointer.
 
 use crate::colours;
 use crate::text::{KeyOutcome, TextBox, TextLook};
@@ -513,6 +514,19 @@ fn texture(image: &Image, rect: Rect) -> gdk::Texture {
     .upcast()
 }
 
+/// A clipboard image's pixels, straight-alpha RGBA8 whatever the texture's own format,
+/// with the texture that shows them as they'll land ([`Canvas::paste`]). Copies every
+/// pixel twice: run it off the UI thread.
+pub fn pasted(clipboard: &gdk::Texture) -> Result<(Image, gdk::Texture), image_model::SizeError> {
+    let mut downloader = gdk::TextureDownloader::new(clipboard);
+    downloader.set_format(gdk::MemoryFormat::R8g8b8a8);
+    let (bytes, stride) = downloader.download_bytes();
+    let (w, h) = (clipboard.width() as u32, clipboard.height() as u32);
+    let pixels = Image::from_rows(w, h, &bytes, stride)?;
+    let shown = texture(&pixels, pixels.bounds());
+    Ok((pixels, shown))
+}
+
 fn tile_rect(image: &Image, col: u32, row: u32) -> Rect {
     let (x, y) = (col * TILE_PX, row * TILE_PX);
     Rect::new(
@@ -991,6 +1005,51 @@ impl Canvas {
     pub fn commit(&self) {
         self.commit_text();
         self.land();
+    }
+
+    /// Edit → Copy: puts the selection's pixels (the floating ones while they float) on
+    /// the clipboard as an image, straight alpha, which GTK offers other apps as PNG and
+    /// the other image types it writes. Whether there was a selection.
+    pub fn copy(&self) -> bool {
+        let imp = self.imp();
+        let texture = match imp.floating_texture.borrow().clone() {
+            Some(t) => t,
+            None => {
+                let Some(r) = imp.selection.get() else {
+                    return false;
+                };
+                let doc = imp.doc.borrow();
+                texture(doc.as_ref().expect("a canvas has a document").image(), r)
+            }
+        };
+        self.clipboard().set_texture(&texture);
+        true
+    }
+
+    /// Edit → Cut: copies the selection, then deletes it ([`Canvas::delete_selection`]),
+    /// one undo step. Whether there was a selection.
+    pub fn cut(&self) -> bool {
+        self.copy() && self.delete_selection()
+    }
+
+    /// Edit → Paste, once the clipboard's image is read: the selection goes (floating
+    /// pixels landing), and `pixels` (shown as `shown`, from [`pasted`]) float
+    /// over the image with their top-left pixel at the top-left of the image's visible
+    /// part (the image's own top-left when that shows), until they land as one undo step
+    /// as moved pixels do. Pixels larger than the image float whole and land clipped.
+    pub fn paste(&self, pixels: Image, shown: gdk::Texture) {
+        self.commit_text();
+        self.deselect();
+        let (w, h) = self.image_size();
+        let at = self.view().map_or((0, 0), |view| {
+            let (x, y) = self.to_shown(&view, (0.0, 0.0));
+            let first = |v: f64, side: u32| (v.ceil().max(0.0) as i64).min(side as i64 - 1);
+            (first(x, w), first(y, h))
+        });
+        let imp = self.imp();
+        imp.floating_texture.replace(Some(shown));
+        imp.floating.replace(Some(Floating::new(pixels, at)));
+        self.selection_shown();
     }
 
     /// A primary-button press at widget point `at` with the selection: inside the

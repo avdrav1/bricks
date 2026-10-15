@@ -141,6 +141,22 @@
 #      Escape deselects. Delete clears a selection to transparency (the checkerboard),
 #      marking the title, and Ctrl+Z gives the red back. While text is typed, Delete
 #      deletes a character and Ctrl+A selects nothing.
+# ETCH-16 acceptance: cut, copy, and paste through the system clipboard.
+#  21. `etch t.png`: a 100x80 selection over red, transparent, and half-transparent blue
+#      pixels, Ctrl+C: the clipboard offers image/png (wl-paste -l), and another GTK 4 app
+#      (/tmp/clip.py, its own window) reads it as a 100x80 texture with the pixels exact,
+#      straight alpha: red, transparent, blue at alpha 128. Ctrl+X clears it to
+#      transparency, marking the title, and the other app reads the same image; one
+#      Ctrl+Z gives the red back, unmarked. The other app puts a 60x40 image (left half
+#      opaque blue, right half blue at alpha 128) on the clipboard; Ctrl+V in Etch picks
+#      the selection and floats it at the image's top-left: the status says
+#      "Selection: 60×40", the screen shows it blue, the title stays unmarked. Ctrl+Z
+#      drops it (red, no selection); pasted again and dragged 100 px right and down, the
+#      red shows again where it was and it's blue where it went, still unmarked; Escape
+#      lands it, marking the title, and Select All and Copy give the other app the image
+#      with it in place (opaque blue, blue at alpha 128, red beside). Ctrl+Z takes the
+#      paste back (red there, unmarked) and Ctrl+Y lands it again. While text is typed
+#      Ctrl+V pastes nothing.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -154,14 +170,15 @@ out=$(docker run --rm --cap-add SYS_NICE -v "$bin:/usr/local/bin/etch:ro" \
   -v "$PWD/scripts:/scripts:ro" "${shots[@]}" archlinux:latest bash -c '
 set -uo pipefail
 pacman -Syu --noconfirm --needed sway wtype grim gtk4 ttf-dejavu wqy-zenhei dbus python-gobject \
-  at-spi2-core python-pywayland wlr-protocols wayland pkgconf >/dev/null 2>&1
+  at-spi2-core python-pywayland wlr-protocols wayland pkgconf wl-clipboard >/dev/null 2>&1
 mkdir -p /shots /tmp/rt /tmp/proto && chmod 700 /tmp/rt && touch /tmp/proto/__init__.py
 python -m pywayland.scanner -i /usr/share/wayland/wayland.xml \
   /usr/share/wlr-protocols/unstable/wlr-virtual-pointer-unstable-v1.xml -o /tmp/proto/wlr_proto >/dev/null
 python -m pywayland.scanner -i /usr/share/wayland/wayland.xml \
   /scripts/protocols/input-method-unstable-v2.xml -o /tmp/proto/im_proto >/dev/null 2>&1
 export PYTHONPATH=/tmp/proto XDG_RUNTIME_DIR=/tmp/rt GDK_DEBUG=no-portals GDK_BACKEND=wayland
-printf "output HEADLESS-1 resolution 1280x720 position 0 0\ndefault_border none\n" > /tmp/sway.conf
+# The other app of section 21 floats in a corner, clear of the image.
+printf "output HEADLESS-1 resolution 1280x720 position 0 0\ndefault_border none\nfor_window [app_id=dev.cronkite.ClipCheck] floating enable, resize set 160 80, move position 1100 600\n" > /tmp/sway.conf
 sed "s/^APP = .*/APP = \"etch\"/" /scripts/a11y_helpers.py > /tmp/a11y.py
 cat > /tmp/px.py <<"PY"
 import sys
@@ -391,6 +408,72 @@ elif cmd == "checkered":
     grey = sum(1 for p in box if all(195 <= c <= 213 for c in p))
     every = "all" if checker == len(box) else f"{checker}/{len(box)}"
     print(f"checker {every} light {min(light, 1)} grey {min(grey, 1)}")
+PY
+# Section 21: another GTK 4 app on the clipboard. "read X,Y ...": its window takes the
+# keyboard (Wayland offers the clipboard to the focused window), waits for an image there,
+# reads it as a texture, and prints its size and its pixels at each X,Y as straight-alpha
+# RRGGBBAA. "set": a key pressed in its window (Wayland takes a selection only with an
+# input event serial) puts a 60x40 image on the clipboard, the left half opaque blue and
+# the right half blue at alpha 128, and it stays there until the app is killed.
+cat > /tmp/clip.py <<"PY"
+import sys
+import gi
+gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
+from gi.repository import Gdk, Gio, GLib, Gtk
+
+mode, points = sys.argv[1], sys.argv[2:]
+app = Gtk.Application(application_id="dev.cronkite.ClipCheck", flags=Gio.ApplicationFlags.NON_UNIQUE)
+
+def read(clipboard):
+    def done(cb, result):
+        try:
+            texture = cb.read_texture_finish(result)
+        except GLib.Error as e:
+            print(f"clipboard: error {e.message}", flush=True)
+            app.quit()
+            return
+        d = Gdk.TextureDownloader.new(texture)
+        d.set_format(Gdk.MemoryFormat.R8G8B8A8)
+        data, stride = d.download_bytes()
+        data = data.get_data()
+        px = []
+        for p in points:
+            x, y = map(int, p.split(","))
+            px.append(data[y * stride + x * 4:y * stride + x * 4 + 4].hex())
+        print(f"clipboard: {texture.get_width()}x{texture.get_height()} " + " ".join(px), flush=True)
+        app.quit()
+    tries = [0]
+    def poll():
+        if clipboard.get_formats().contain_mime_type("image/png"):
+            clipboard.read_texture_async(None, done)
+            return False
+        tries[0] += 1
+        if tries[0] > 50:
+            print("clipboard: no image", flush=True)
+            app.quit()
+            return False
+        return True
+    GLib.timeout_add(200, poll)
+
+def put(clipboard):
+    row = bytes([0, 0, 255, 255] * 30 + [0, 0, 255, 128] * 30)
+    texture = Gdk.MemoryTexture.new(60, 40, Gdk.MemoryFormat.R8G8B8A8, GLib.Bytes.new(row * 40), 240)
+    clipboard.set_content(Gdk.ContentProvider.new_for_bytes("image/png", texture.save_to_png_bytes()))
+    print("set: 60x40", flush=True)
+
+def activate(app):
+    win = Gtk.ApplicationWindow(application=app, title="Clip check")
+    if mode == "read":
+        read(win.get_clipboard())
+    else:
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", lambda *_: put(win.get_clipboard()) or True)
+        win.add_controller(keys)
+    win.present()
+
+app.connect("activate", activate)
+app.run([])
 PY
 # The images sections 11, 12, and 19 open.
 cat > /tmp/mk.py <<"PY"
@@ -888,6 +971,49 @@ session() {
   echo "typing: $(desc) $(sel) text $(tool Text) selection $(tool Selection)"
   keys -k Escape
   pkill -x etch; sleep 1
+
+  echo "== 21 clipboard"
+  etch /tmp/t.png >>/tmp/app.log 2>&1 & sleep 3
+  read cx cy cw ch <<<"$(px canvas)"
+  l=$((cx + (cw - 400) / 2)); t=$((cy + (ch - 300) / 2))
+  focus() { swaymsg "[app_id=dev.cronkite.Etch] focus" >/dev/null; sleep 0.5; }
+  # The other app reads the clipboard: its size and the pixels at X,Y ...
+  other() { timeout 20 python3 /tmp/clip.py read "$@" 2>>/tmp/clip.log; focus; }
+  keys s
+  # Image pixels 150 to 250 across and 110 to 190 down: red, transparent, and blue.
+  python3 /scripts/dnd_helpers.py drag $((l + 150)) $((t + 110)) $((l + 250)) $((t + 190)); sleep 0.5
+  keys -M ctrl c -m ctrl; sleep 0.5
+  echo "offered: $(wl-paste -l | grep -c "^image/png$") $(sel) $(title)"
+  other 0,0 99,0 99,79 | sed "s/^/copied /"
+  keys -M ctrl x -m ctrl; shot cut; echo "cut: $(sel) $(title) $(hole 150 110 200 190)"
+  other 0,0 99,0 99,79 | sed "s/^/cut /"
+  keys -M ctrl z -m ctrl; shot cut-undone; echo "cut undone: $(title) red $(red 150 110 200 190)"
+  keys -k Escape
+  python3 /tmp/clip.py set >>/tmp/clip.log 2>&1 & setter=$!; sleep 3
+  # The PNG on the clipboard now: its size, from its header.
+  keys c; echo "other set: $(wl-paste -t image/png | python3 -c "import struct, sys; print(*struct.unpack(\">II\", sys.stdin.buffer.read()[16:24]), sep=\"x\")")"
+  focus
+  keys -M ctrl v -m ctrl; sleep 1; shot pasted
+  echo "pasted: $(sel) $(title) selection $(tool Selection) blue $(px count /tmp/shot.png $(inset 0 0 30 40) 0000FF)"
+  keys -M ctrl z -m ctrl; shot paste-dropped; echo "dropped: $(sel) $(title) red $(red 0 0 60 40)"
+  keys -M ctrl v -m ctrl; sleep 1
+  python3 /scripts/dnd_helpers.py drag $((l + 15)) $((t + 20)) $((l + 115)) $((t + 120)); sleep 0.5
+  shot paste-moved
+  echo "paste moved: $(sel) $(title) left red $(red 0 0 60 40) blue $(px count /tmp/shot.png $(inset 100 100 130 140) 0000FF)"
+  keys -k Escape; shot paste-landed; echo "paste landed: $(sel) $(title)"
+  keys -M ctrl a -m ctrl; keys -M ctrl c -m ctrl; sleep 0.5
+  other 100,100 145,100 99,100 | sed "s/^/landed /"
+  keys -k Escape
+  keys -M ctrl z -m ctrl; shot paste-undone; echo "paste undone: $(title) red $(red 100 100 160 140)"
+  keys -M ctrl y -m ctrl; shot paste-redone
+  echo "paste redone: $(title) blue $(px count /tmp/shot.png $(inset 100 100 130 140) 0000FF)"
+  kill $setter 2>/dev/null
+  keys t; click $((l + 50)) $((t + 250)); keys ab
+  keys -M ctrl v -m ctrl; sleep 1
+  echo "typing: $(desc) $(sel)"
+  keys -k Escape
+  pkill -x etch; sleep 1
+  echo "clip log: $(grep -c . /tmp/clip.log)"; sed "s/^/clip: /" /tmp/clip.log
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -1119,6 +1245,20 @@ check "20: Escape deselects" "20 selection" "^deselected: no selection t\.png$"
 check "20: Delete clears the selection to transparency" "20 selection" "^deleted: Selection: 100×80 • t\.png checker all light 1 grey 1$"
 check "20: ... and Ctrl+Z gives it back" "20 selection" "^delete undone: t\.png red all$"
 check "20: while text is typed Delete deletes a character and Ctrl+A selects nothing" "20 selection" "^typing: 400×300 image, typing “a” no selection text on selection off$"
+check "21: Copy offers the selection as image/png" "21 clipboard" "^offered: 1 Selection: 100×80 t\.png$"
+check "21: another GTK app reads it as the image, straight alpha" "21 clipboard" "^copied clipboard: 100x80 ff0000ff [0-9a-f]{6}00 0000ff80$"
+check "21: Cut clears it to transparency, marking the title" "21 clipboard" "^cut: Selection: 100×80 • t\.png checker all light 1 grey 1$"
+check "21: ... and the other app reads the same image" "21 clipboard" "^cut clipboard: 100x80 ff0000ff [0-9a-f]{6}00 0000ff80$"
+check "21: one Ctrl+Z undoes the cut" "21 clipboard" "^cut undone: t\.png red all$"
+check "21: the other app puts a 60×40 image on the clipboard" "21 clipboard" "^other set: 60x40$"
+check "21: an image the other app copied pastes as a floating selection, unmarked" "21 clipboard" "^pasted: Selection: 60×40 t\.png selection on blue all$"
+check "21: Ctrl+Z drops it while it floats" "21 clipboard" "^dropped: no selection t\.png red all$"
+check "21: dragged, it moves, the image untouched" "21 clipboard" "^paste moved: Selection: 60×40 t\.png left red all blue all$"
+check "21: Escape lands it, marking the title" "21 clipboard" "^paste landed: no selection • t\.png$"
+check "21: ... exactly: opaque blue, blue at alpha 128, red beside" "21 clipboard" "^landed clipboard: 400x300 0000ffff 0000ff80 ff0000ff$"
+check "21: one Ctrl+Z takes the paste back" "21 clipboard" "^paste undone: t\.png red all$"
+check "21: ... and Ctrl+Y lands it again" "21 clipboard" "^paste redone: • t\.png blue all$"
+check "21: while text is typed Ctrl+V pastes nothing" "21 clipboard" "^typing: 400×300 image, typing “ab” no selection$"
 absent "the app logs no errors or panics" "app log" "^etch:|panicked|CRITICAL"
 bench=$(section "8 bench" | sed -n "s/^bench: //p")
 if [ -z "$bench" ]; then echo "FAIL 8: --bench-stroke printed nothing"; fail=1; else
