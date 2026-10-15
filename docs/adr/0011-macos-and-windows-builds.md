@@ -1,6 +1,6 @@
 # ADR 0011: Building and Shipping the Suite on macOS and Windows
 
-Status: Proposed
+Status: Accepted (2026-10-15), macOS first; Windows follows under the same decision
 
 Date: 2026-10-15
 
@@ -32,7 +32,7 @@ GTK 4 itself builds and runs on both platforms (MSYS2 GTK 4.24.1, gvsbuild 4.22.
 
 Not exercised on either: GPU rendering on real hardware, HiDPI (Windows), input methods, drag and drop, printing, screen readers. The runner VMs' timings say nothing about performance.
 
-## Decision (proposed)
+## Decision
 
 1. **Toolchains: build natively, on GitHub's runners.**
    - Windows: MSYS2 UCRT64 (`x86_64-pc-windows-gnu`, MSYS2's GTK 4) on `windows-latest`. It worked first time and packages GTK; MSVC with gvsbuild also works and stays the fallback. Cross-compiling from Linux is not a release path: Fedora's MinGW GTK is a development snapshot that drew black windows, and Wine misdraws fonts.
@@ -56,11 +56,11 @@ Not exercised on either: GPU rendering on real hardware, HiDPI (Windows), input 
    - macOS: one `.app` per app (`dylibbundler` plus the GTK data: schemas, icons, pixbuf loaders), in a DMG, signed with a Developer ID, with the hardened runtime, and notarized ($99 a year).
    - Linux is unchanged. `ship.sh` grows a platform argument; each app's `latest.json` gains per-platform entries, and its download page offers the visitor's platform first.
 7. **CI:** `ci.yml` gains Windows and macOS jobs running clippy and the tests (the GUI checks stay Linux-only). Release builds and signing run on the runners from tags. A smoke job on each platform starts each app with a sample file and keeps a screenshot, as the spike's workflows did.
-8. **Mac and Windows conventions** that make the apps feel native are separate stories after a first unsigned preview:
+8. **Mac and Windows conventions** make the apps feel native:
    - menus in the macOS menu bar;
    - Command shortcuts and Mac dialogs;
-   - dark mode;
-5. Minimum OS versions: macOS 14 or later follows from the runner. For Windows, 10 or later is expected but not checked by the spike; confirm it against MSYS2's GTK 4.
+   - native title bars on macOS;
+   - dark mode.
 
 ## Consequences
 
@@ -74,10 +74,22 @@ Not exercised on either: GPU rendering on real hardware, HiDPI (Windows), input 
 - **Testing:** the GUI checks (`check_*.sh`, docker and sway) stay Linux-only. The other platforms get tests and smoke screenshots in CI, so platform regressions in interaction (keys, menus, dialogs, input methods) need hand checks before releases.
 - **Revisit if:** GL draws black on real hardware (renderer choice), GTK's macOS backend can't give native menus well enough (the Mac conventions stories), or bundle sizes matter (a shared GTK runtime on Windows instead of one per app).
 
-## Open questions for the user
+## The user's decisions (2026-10-15)
 
-1. Ship unsigned previews first, or wait for signing? Signing needs the Apple account, and a Windows certificate or Azure Trusted Signing.
-2. Which first: macOS (closer to working: it compiles as is) or Windows?
-3. Native folders (`~/Library`, `%APPDATA%`) or the XDG layout everywhere?
-4. On macOS, native title bars or the apps' GNOME-style header bars?
-5. Minimum OS versions (macOS 14+ follows from the runner; Windows 10 1809+ follows from GTK 4).
+1. **macOS first**, then Windows.
+2. **An unsigned preview first.** Each app is ad-hoc signed (`codesign -s -`, free; Apple Silicon runs nothing unsigned).
+   - The suite's usual curl installer puts it in `~/Applications`. curl doesn't set the quarantine attribute, so Gatekeeper doesn't stop it.
+   - A DMG downloaded in a browser is quarantined. Its download page says how to allow it: on macOS 15 and later, System Settings → Privacy & Security → Open Anyway (right-click → Open no longer does it), or `xattr -dr com.apple.quarantine`.
+   - Developer ID signing and notarization come later, once there's an Apple Developer account.
+3. **Native folders:**
+   - settings, state, and recovery in `~/Library/Application Support/<App>`;
+   - caches in `~/Library/Caches/<App>`;
+   - Linux keeps XDG.
+4. **Mac-like windows:**
+   - menus in the macOS menu bar, with the app menu (About, Hide, Quit);
+   - Command shortcuts;
+   - native title bars instead of GNOME-style header bars.
+5. **All four apps** ship for macOS in the first release.
+6. **Minimum OS:**
+   - macOS 14 or later, which follows from the build runner;
+   - for Windows, 10 or later is expected; confirm it against MSYS2's GTK 4 when the Windows work starts.
