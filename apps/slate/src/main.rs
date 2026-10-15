@@ -66,6 +66,8 @@ thread_local! {
     static SAVER: RefCell<Saver> = RefCell::new(Saver::default());
     /// Watches the settings file for changes made by other Slate processes.
     static SETTINGS_MONITOR: RefCell<Option<gio::FileMonitor>> = const { RefCell::new(None) };
+    /// The menus, built on first use.
+    static MENUS: Menus = Menus::new();
 }
 
 fn main() -> glib::ExitCode {
@@ -154,6 +156,10 @@ fn main() -> glib::ExitCode {
             })
             .build();
         app.add_action_entries([new, open, close, quit, text_width]);
+        suite_ui::chrome::install(app, APP, env!("CARGO_PKG_VERSION"));
+        if suite_ui::chrome::MENU_BAR {
+            app.set_menubar(Some(&MENUS.with(Menus::bar)));
+        }
         for (action, accels) in keys::accels(Primary::HERE) {
             app.set_accels_for_action(
                 action,
@@ -206,6 +212,73 @@ fn moved(window: &gtk::ApplicationWindow, path: &Path) {
     });
 }
 
+/// Slate's menus (MAC-4), built once for every window: File, Edit, Format, and View. Linux
+/// shows them in the header bar's menu (`primary`, with Quit), macOS in the menu bar.
+struct Menus {
+    file: gio::Menu,
+    edit: gio::Menu,
+    format: gio::Menu,
+    view: gio::Menu,
+    primary: gio::Menu,
+}
+
+impl Menus {
+    fn new() -> Self {
+        let file = gio::Menu::new();
+        file.append_item(&item("New", "app.new", Does::Action("app.new")));
+        file.append(Some("Open…"), Some("app.open"));
+        file.append_item(&item("Save", "win.save", Does::Action("win.save")));
+        file.append_item(&item(
+            "Save As…",
+            "win.save-as",
+            Does::Action("win.save-as"),
+        ));
+        file.append(Some("Close Window"), Some("app.close"));
+        // View → Text Width: a radio item per width, checked by `app.text-width`'s state.
+        let widths = gio::Menu::new();
+        for width in TextWidth::ALL {
+            let item = gio::MenuItem::new(Some(width.label()), None);
+            item.set_action_and_target_value(
+                Some("app.text-width"),
+                Some(&width.id().to_variant()),
+            );
+            widths.append_item(&item);
+        }
+        let view = gio::Menu::new();
+        view.append_submenu(Some("Text Width"), &widths);
+        let (edit, format) = (edit_menu(), format_menu());
+        // The header bar's menu (Linux): every menu a section, then Quit.
+        let quit = gio::Menu::new();
+        quit.append(Some("Quit"), Some("app.quit"));
+        let primary = gio::Menu::new();
+        primary.append_section(None, &file);
+        primary.append_section(Some("View"), &view);
+        primary.append_section(Some("Edit"), &edit);
+        primary.append_section(Some("Format"), &format);
+        primary.append_section(None, &quit);
+        Menus {
+            file,
+            edit,
+            format,
+            view,
+            primary,
+        }
+    }
+
+    /// The menu bar (macOS): File, Edit, Format, View, and the Window menu; Quit is in the
+    /// app menu.
+    fn bar(&self) -> gio::Menu {
+        suite_ui::chrome::menu_bar(&[
+            ("File", &self.file),
+            ("Edit", &self.edit),
+            ("Format", &self.format),
+            ("View", &self.view),
+        ])
+    }
+}
+
+/// A window's header bar (Linux; macOS windows keep their own title bar): Open, the
+/// title, and the menu.
 fn header(title: &str) -> gtk::HeaderBar {
     let header = gtk::HeaderBar::new();
     let open = gtk::Button::from_icon_name("document-open-symbolic");
@@ -213,37 +286,10 @@ fn header(title: &str) -> gtk::HeaderBar {
     open.set_action_name(Some("app.open"));
     open.update_property(&[gtk::accessible::Property::Label("Open")]);
     header.pack_start(&open);
-    let file = gio::Menu::new();
-    file.append_item(&item("New", "app.new", Does::Action("app.new")));
-    file.append(Some("Open…"), Some("app.open"));
-    file.append_item(&item("Save", "win.save", Does::Action("win.save")));
-    file.append_item(&item(
-        "Save As…",
-        "win.save-as",
-        Does::Action("win.save-as"),
-    ));
-    file.append(Some("Close Window"), Some("app.close"));
-    // View → Text Width: a radio item per width, checked by `app.text-width`'s state.
-    let widths = gio::Menu::new();
-    for width in TextWidth::ALL {
-        let item = gio::MenuItem::new(Some(width.label()), None);
-        item.set_action_and_target_value(Some("app.text-width"), Some(&width.id().to_variant()));
-        widths.append_item(&item);
-    }
-    let view = gio::Menu::new();
-    view.append_submenu(Some("Text Width"), &widths);
-    let quit = gio::Menu::new();
-    quit.append(Some("Quit"), Some("app.quit"));
-    let menu = gio::Menu::new();
-    menu.append_section(None, &file);
-    menu.append_section(Some("View"), &view);
-    menu.append_section(Some("Edit"), &edit_menu());
-    menu.append_section(Some("Format"), &format_menu());
-    menu.append_section(None, &quit);
     // The primary menu: F10 opens it.
     let button = gtk::MenuButton::builder()
         .icon_name("open-menu-symbolic")
-        .menu_model(&menu)
+        .menu_model(&MENUS.with(|m| m.primary.clone()))
         .tooltip_text("Menu")
         .primary(true)
         .build();
@@ -253,6 +299,14 @@ fn header(title: &str) -> gtk::HeaderBar {
     label.add_css_class("title");
     header.set_title_widget(Some(&label));
     header
+}
+
+/// `window`'s chrome: the header bar titled `title` on Linux; nothing on macOS, whose
+/// title bar shows the window's title and whose menu bar has the menus.
+fn put_header(window: &gtk::ApplicationWindow, title: &str) {
+    if !suite_ui::chrome::MENU_BAR {
+        window.set_titlebar(Some(&header(title)));
+    }
 }
 
 /// A menu item for `action` with the key that does `does` shown beside it (the page
@@ -391,7 +445,7 @@ fn start_window(app: &gtk::Application) {
         .default_height(520)
         .name(START_WINDOW)
         .build();
-    window.set_titlebar(Some(&header("Slate")));
+    put_header(&window, "Slate");
     let heading = gtk::Label::new(Some("Open a document"));
     heading.add_css_class("title-2");
     let hint = gtk::Label::new(Some(
@@ -562,7 +616,7 @@ fn open_window(
         .default_width(width)
         .default_height(height)
         .build();
-    window.set_titlebar(Some(&header(&name)));
+    put_header(&window, &name);
 
     let spinner = gtk::Spinner::builder().spinning(true).build();
     let opening = gtk::Box::builder()

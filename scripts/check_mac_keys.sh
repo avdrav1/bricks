@@ -24,60 +24,8 @@ mkdir -p "$out/shots" "$out/files" "$out/logs"
 out=$(cd "$out" && pwd)
 shots=$out/shots files=$out/files logs=$out/logs
 root=$(cd "$(dirname "$0")/.." && pwd)
-export GSK_RENDERER=cairo
-failed=0
-
-note() { echo "$*" | tee -a "$out/summary.txt"; }
-pass() { note "ok   $*"; }
-fail() { note "FAIL $*"; failed=1; }
-
-# The windows on screen of process $1, one per line: layer, title, bounds.
-cat >"$out/windows.swift" <<'EOF'
-import CoreGraphics
-import Foundation
-let pid = Int(CommandLine.arguments[1]) ?? 0
-let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
-for w in list where (w[kCGWindowOwnerPID as String] as? Int) == pid {
-    let b = w[kCGWindowBounds as String] as? [String: Any] ?? [:]
-    print("\(w[kCGWindowLayer as String] ?? 0)\t\(w[kCGWindowName as String] ?? "")\t\(b["X"] ?? 0),\(b["Y"] ?? 0) \(b["Width"] ?? 0)x\(b["Height"] ?? 0)")
-}
-EOF
-swiftc -O "$out/windows.swift" -o "$out/windows" >"$logs/swiftc.log" 2>&1 || {
-    note "FAIL the window lister didn't build"; cat "$logs/swiftc.log"; exit 1
-}
-windows() { "$out/windows" "$1"; }
-
-# osascript that can't hang the job on a permission prompt.
-osa() {
-    osascript -e "$1" >>"$logs/osascript.log" 2>&1 &
-    local p=$! i
-    for i in $(seq 40); do kill -0 "$p" 2>/dev/null || break; sleep 0.5; done
-    if kill -0 "$p" 2>/dev/null; then kill "$p"; note "osascript timed out: $1"; return 1; fi
-    wait "$p"
-}
-# A key with modifiers (`command down`, `{command down, shift down}`), or none.
-key() { osa "tell application \"System Events\" to keystroke \"$1\"${2:+ using $2}"; sleep 0.3; }
-# Characters one at a time.
-type_slowly() {
-    local s=$1 i
-    for ((i = 0; i < ${#s}; i++)); do key "${s:i:1}"; done
-}
-code() { osa "tell application \"System Events\" to key code $1"; sleep 0.3; }
-front() { osa "tell application \"System Events\" to set frontmost of (first process whose unix id is $1) to true"; sleep 1; }
-shot() { sleep "${2:-1}"; screencapture -x "$shots/$1.png" || note "screencapture $1 failed"; }
-
-# Start app $1 on file $2; sets $pid.
-start() {
-    "$bin/$1" "$2" >"$logs/$1.log" 2>&1 &
-    pid=$!
-    sleep 8
-    if ! kill -0 "$pid" 2>/dev/null; then fail "$1 exited at start"; cat "$logs/$1.log"; return 1; fi
-    front "$pid"
-    windows "$pid" >"$logs/$1-windows-start.txt"
-}
-stop() {
-    kill "$pid" 2>/dev/null; sleep 1; kill -9 "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
-}
+# shellcheck source=scripts/mac_helpers.sh
+source "$root/scripts/mac_helpers.sh"
 
 # ⌘O shows the open panel: one window more for the app; Escape closes it.
 open_panel() {
@@ -172,16 +120,7 @@ size() { sips -g pixelWidth -g pixelHeight "$1" | awk '/pixel/ { printf "%s%s", 
 # Etch: a 64x32 PNG.
 etch() {
     local f=$files/wide.png
-    python3 - "$f" <<'EOF'
-import struct, sys, zlib
-w, h = 64, 32
-raw = b"".join(b"\0" + bytes([200, 40, 40]) * (w // 2) + bytes([40, 40, 200]) * (w // 2) for _ in range(h))
-def chunk(t, d):
-    return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d))
-png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
-png += chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
-open(sys.argv[1], "wb").write(png)
-EOF
+    wide_png "$f"
     start etch "$f" || return
     shot etch-0-start
     key g "command down"

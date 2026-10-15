@@ -1,11 +1,14 @@
 //! User-interface conventions shared by every app in the suite, in GTK 4
 //! (docs/adr/0002-gtk4-for-the-suite.md): [`keys`], the primary modifier every shortcut
-//! uses (Control on Linux, Command on macOS), and [`im`], input methods for the apps' own
-//! text widgets.
+//! uses (Control on Linux, Command on macOS), [`im`], input methods for the apps' own
+//! text widgets, and [`chrome`], where menus and a window's buttons go (header bars on
+//! Linux; the menu bar, native title bars, and a toolbar row on macOS) and the About
+//! dialog.
 //!
-//! Menus, the command palette, toolbars, dialogs, themes, and window chrome may move here
-//! once two apps need the same one.
+//! The command palette, dialogs, and themes may move here once two apps need the same
+//! one.
 
+pub mod chrome;
 pub mod im;
 pub mod keys;
 

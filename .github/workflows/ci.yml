@@ -53,6 +53,15 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@v4
         with: { name: macos-keys, path: out/mac-keys, if-no-files-found: warn }
+      # The menu bar and title bars (MAC-4): System Events reads each app's menus, their
+      # keys, and its window's title bar buttons, opens About, and quits with ⌘Q; the
+      # screenshots show the menus open.
+      - name: Menus are in the menu bar and windows have macOS's title bar
+        if: always()
+        run: scripts/check_mac_ui.sh target/release
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: macos-ui, path: out/mac-ui, if-no-files-found: warn }
   bench:
     # Prints the apps/brick/docs/BENCHMARKS.md table. Runner numbers are informational: gates use the
     # reference box, and rows that open a window are skipped (no display).

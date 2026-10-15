@@ -51,7 +51,8 @@ enum Bench {
     Open { start: Instant, read_ms: f64 },
 }
 
-/// The app's actions, shortcuts, menu bar (every window shows it), and style.
+/// The app's actions, shortcuts, menu bar (every window shows it on Linux; on macOS it's
+/// the system's, after GTK's app menu with About and Quit), and style.
 pub fn install_app_actions(app: &gtk::Application) {
     colours::install_style();
     let new = gio::ActionEntry::builder("new")
@@ -78,6 +79,7 @@ pub fn install_app_actions(app: &gtk::Application) {
         })
         .build();
     app.add_action_entries([new, open, open_recent, quit]);
+    suite_ui::chrome::install(app, crate::APP, env!("CARGO_PKG_VERSION"));
     for (action, accels) in keys::accels(Primary::HERE) {
         let accels: Vec<&str> = accels.iter().map(String::as_str).collect();
         app.set_accels_for_action(action, &accels);
@@ -94,7 +96,6 @@ pub fn install_app_actions(app: &gtk::Application) {
         append(&menu, items);
         menu
     };
-    let menu = gio::Menu::new();
     let file = menu_of(&[("_New Image…", "app.new"), ("_Open…", "app.open")]);
     file.append_submenu(Some("Open _Recent"), &recent::menu());
     append(
@@ -104,10 +105,12 @@ pub fn install_app_actions(app: &gtk::Application) {
             ("Save _As…", "win.save-as"),
             ("_Export…", "win.export"),
             ("_Close", "window.close"),
-            ("_Quit", "app.quit"),
         ],
     );
-    menu.append_submenu(Some(&keys::mnemonic("File")), &file);
+    // macOS has Quit in the app menu.
+    if !suite_ui::chrome::MENU_BAR {
+        append(&file, &[("_Quit", "app.quit")]);
+    }
     let edit = menu_of(&[("_Undo", "win.undo"), ("_Redo", "win.redo")]);
     edit.append_section(
         None,
@@ -125,15 +128,19 @@ pub fn install_app_actions(app: &gtk::Application) {
             ("De_lete", "win.delete"),
         ]),
     );
-    menu.append_submenu(Some(&keys::mnemonic("Edit")), &edit);
     let view = menu_of(&[
         ("Zoom _In", "win.zoom-in"),
         ("Zoom _Out", "win.zoom-out"),
         ("_Actual Size", "win.actual-size"),
         ("_Fit to Window", "win.fit"),
     ]);
-    menu.append_submenu(Some(&keys::mnemonic("View")), &view);
-    menu.append_submenu(Some(&keys::mnemonic("Image")), &image_menu::menu());
+    let labels = ["File", "Edit", "View", "Image"].map(keys::mnemonic);
+    let menu = suite_ui::chrome::menu_bar(&[
+        (&labels[0], &file),
+        (&labels[1], &edit),
+        (&labels[2], &view),
+        (&labels[3], &image_menu::menu()),
+    ]);
     app.set_menubar(Some(&menu));
 }
 

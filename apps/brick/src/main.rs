@@ -28,6 +28,7 @@ mod grid_view;
 mod keys;
 mod looks;
 mod malformed;
+mod menus;
 mod recovery;
 mod sheets;
 mod state;
@@ -50,6 +51,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use suite_core::AppKind;
 use suite_file::recent;
+use suite_ui::chrome::Toolbar;
 use suite_ui::keys::Primary;
 use xlsx::{ImportError, Imported};
 
@@ -201,10 +203,32 @@ fn main() -> glib::ExitCode {
                 if let Err(e) = state::recent().clear() {
                     eprintln!("brick: cannot clear recent files: {e}");
                 }
+                menus::refresh_recent();
             })
             .build();
-        app.add_action_entries([open, new, open_recent, clear_recent]);
-        // Open and New, and Replace (each window's action): from `keys::WINDOW` (MAC-3).
+        // The menu bar's Close Window and Quit (macOS). Quit closes each window, so a
+        // window with unsaved edits asks first.
+        let close = gtk::gio::ActionEntry::builder("close")
+            .activate(|app: &gtk::Application, _, _| {
+                if let Some(w) = app.active_window() {
+                    w.close();
+                }
+            })
+            .build();
+        let quit = gtk::gio::ActionEntry::builder("quit")
+            .activate(|app: &gtk::Application, _, _| {
+                for window in app.windows() {
+                    window.close();
+                }
+            })
+            .build();
+        app.add_action_entries([open, new, open_recent, clear_recent, close, quit]);
+        suite_ui::chrome::install(app, APP, env!("CARGO_PKG_VERSION"));
+        if suite_ui::chrome::MENU_BAR {
+            app.set_menubar(Some(&menus::bar()));
+        }
+        // Open and New, and Replace (each window's action): from `keys::WINDOW` (MAC-3);
+        // on macOS Close Window and Quit too.
         for (action, accels) in keys::accels(Primary::HERE) {
             let accels: Vec<&str> = accels.iter().map(String::as_str).collect();
             app.set_accels_for_action(action, &accels);
@@ -414,7 +438,10 @@ fn start_window(app: &gtk::Application) -> gtk::ApplicationWindow {
         .build();
     window.set_widget_name(START_WINDOW);
     accept_file_drops(app, &window);
-    window.set_titlebar(Some(&gtk::HeaderBar::new()));
+    // Linux's empty header bar; macOS keeps its own title bar.
+    if !suite_ui::chrome::MENU_BAR {
+        window.set_titlebar(Some(&gtk::HeaderBar::new()));
+    }
     // Enter acts on it: Restore after a crash, else Open.
     let first = restore.unwrap_or(open);
     window.set_default_widget(Some(&first));
@@ -457,22 +484,7 @@ fn recent_menu() -> gtk::MenuButton {
         .build();
     button.set_create_popup_func(|button| {
         let menu = gtk::gio::Menu::new();
-        let files = gtk::gio::Menu::new();
-        for file in state::recent().files() {
-            // A path that isn't UTF-8 can't travel in the action's string.
-            let Some(path) = file.to_str() else { continue };
-            let (name, dir) = recent::label(file);
-            let item = gtk::gio::MenuItem::new(Some(&format!("{name}  ({dir})")), None);
-            item.set_action_and_target_value(Some("app.open-recent"), Some(&path.to_variant()));
-            files.append_item(&item);
-        }
-        if files.n_items() == 0 {
-            files.append(Some("No recent files"), Some("app.none"));
-        }
-        menu.append_section(None, &files);
-        let clear = gtk::gio::Menu::new();
-        clear.append(Some("Clear Recent Files"), Some("app.clear-recent"));
-        menu.append_section(None, &clear);
+        menus::fill_recent(&menu);
         button.set_menu_model(Some(&menu));
     });
     button
@@ -483,6 +495,7 @@ fn remember(path: &Path) {
     if let Err(e) = state::recent().add(path) {
         eprintln!("brick: cannot update recent files: {e}");
     }
+    menus::refresh_recent();
 }
 
 const START_WINDOW: &str = "start";
@@ -937,44 +950,44 @@ fn build_window(
         ),
     );
     let delimiter = delimiter_dropdown(session, &grid);
-    let open = gtk::Button::from_icon_name("document-open-symbolic");
-    open.set_tooltip_text(Some(&format!(
-        "Open… ({})",
-        keys::label(keys::Command::Open)
-    )));
-    open.set_action_name(Some("app.open"));
-    let new = gtk::Button::from_icon_name("document-new-symbolic");
-    new.set_tooltip_text(Some(&format!("New ({})", keys::label(keys::Command::New))));
-    new.set_action_name(Some("app.new"));
     let save = Rc::new(RefCell::new(SaveState::Idle));
-    let save_as_button = gtk::Button::from_icon_name("document-save-as-symbolic");
-    save_as_button.set_tooltip_text(Some(&format!(
-        "Save As… ({})",
-        keys::label(keys::Command::SaveAs)
-    )));
-    save_as_button.connect_clicked({
-        let (window, grid, session, save) = (
-            window.downgrade(),
-            grid.downgrade(),
-            session.clone(),
-            save.clone(),
-        );
-        move |_| {
-            if let (Some(window), Some(grid)) = (window.upgrade(), grid.upgrade()) {
-                grid.finish_editing();
-                save_as(&window, &grid, &session, &save, false);
-            }
+    // The window's buttons. Linux: the header bar with Open, Recent, New, and Save As, then
+    // the delimiter and Header row. macOS has those commands in the menu bar: the delimiter
+    // and Header row are a toolbar row over the format bar.
+    let toolbar = Toolbar::new();
+    if !suite_ui::chrome::MENU_BAR {
+        let open = gtk::Button::from_icon_name("document-open-symbolic");
+        open.set_tooltip_text(Some(&format!(
+            "Open… ({})",
+            keys::label(keys::Command::Open)
+        )));
+        open.set_action_name(Some("app.open"));
+        let new = gtk::Button::from_icon_name("document-new-symbolic");
+        new.set_tooltip_text(Some(&format!("New ({})", keys::label(keys::Command::New))));
+        new.set_action_name(Some("app.new"));
+        let save_as_button = gtk::Button::from_icon_name("document-save-as-symbolic");
+        save_as_button.set_tooltip_text(Some(&format!(
+            "Save As… ({})",
+            keys::label(keys::Command::SaveAs)
+        )));
+        save_as_button.set_action_name(Some("win.save-as"));
+        toolbar.pack_start(&open);
+        toolbar.pack_start(&recent_menu());
+        toolbar.pack_start(&new);
+        toolbar.pack_start(&save_as_button);
+    }
+    toolbar.pack_end(&delimiter);
+    let header_row = header_toggle(session, &grid);
+    toolbar.pack_end(&header_row);
+    if let Some(row) = toolbar.put_on(&window) {
+        layout.attach(&row, 0, -1, 2, 1);
+    }
+    // Another brick may have changed the recent files meanwhile (File → Open Recent).
+    window.connect_is_active_notify(|window| {
+        if window.is_active() {
+            menus::refresh_recent();
         }
     });
-    let header = gtk::HeaderBar::new();
-    header.pack_start(&open);
-    header.pack_start(&recent_menu());
-    header.pack_start(&new);
-    header.pack_start(&save_as_button);
-    header.pack_end(&delimiter);
-    let header_row = header_toggle(session, &grid);
-    header.pack_end(&header_row);
-    window.set_titlebar(Some(&header));
 
     // Mouse wheel and touchpad.
     let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::BOTH_AXES);
@@ -1002,13 +1015,9 @@ fn build_window(
         }
     });
 
-    // The window's keys (`keys::WINDOW`, MAC-3): Primary+S saves (asking where, for an
-    // untitled table) and Primary+Shift+S saves as; Primary+Z undoes, Primary+Shift+Z (and
-    // Ctrl+Y on Linux) redo (CMD-1); Esc cancels a running save (SAVE-3). Navigation keys
-    // belong to the grid (GRID-3); the cell editor's entry keeps its own text undo, and the
-    // grid lets Esc through when no editor is open.
-    let keys = gtk::EventControllerKey::new();
-    keys.connect_key_pressed({
+    // What a window command does, for the window's keys and the menu bar's items (macOS).
+    // `false`: it's an accelerator's (Open, New, Replace, Close Window, Quit), not this.
+    let run: Rc<dyn Fn(keys::Command) -> bool> = Rc::new({
         let (window, grid, save, session, find, tabs, formula_bar, format_bar) = (
             window.downgrade(),
             grid.downgrade(),
@@ -1019,26 +1028,10 @@ fn build_window(
             formula_bar.clone(),
             format_bar.clone(),
         );
-        move |_, key, _, mods| {
+        move |command| {
             use keys::Command as C;
             let (Some(window), Some(grid)) = (window.upgrade(), grid.upgrade()) else {
-                return glib::Propagation::Proceed;
-            };
-            if key == gtk::gdk::Key::Escape {
-                if let Some(job) = session.importing.borrow().as_ref() {
-                    job.cancel();
-                    return glib::Propagation::Stop;
-                }
-                if let SaveState::Saving(r) = &*save.borrow() {
-                    r.job.cancel();
-                    return glib::Propagation::Stop;
-                }
-                if grid.cancel_job() {
-                    return glib::Propagation::Stop;
-                }
-            }
-            let Some(command) = keys::window_command(Primary::HERE, key, mods) else {
-                return glib::Propagation::Proceed;
+                return false;
             };
             match command {
                 // The name box (FML-9).
@@ -1080,10 +1073,42 @@ fn build_window(
                 C::Redo => {
                     grid.redo();
                 }
-                // Accelerators, not the handler's.
-                C::Open | C::New | C::Replace => return glib::Propagation::Proceed,
+                C::Open | C::New | C::Replace | C::Close | C::Quit => return false,
             }
-            glib::Propagation::Stop
+            true
+        }
+    });
+
+    // The window's keys (`keys::WINDOW`, MAC-3): Primary+S saves (asking where, for an
+    // untitled table) and Primary+Shift+S saves as; Primary+Z undoes, Primary+Shift+Z (and
+    // Ctrl+Y on Linux) redo (CMD-1); Esc cancels a running save (SAVE-3). Navigation keys
+    // belong to the grid (GRID-3); the cell editor's entry keeps its own text undo, and the
+    // grid lets Esc through when no editor is open.
+    let keys = gtk::EventControllerKey::new();
+    keys.connect_key_pressed({
+        let (grid, save, session, run) =
+            (grid.downgrade(), save.clone(), session.clone(), run.clone());
+        move |_, key, _, mods| {
+            let Some(grid) = grid.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
+            if key == gtk::gdk::Key::Escape {
+                if let Some(job) = session.importing.borrow().as_ref() {
+                    job.cancel();
+                    return glib::Propagation::Stop;
+                }
+                if let SaveState::Saving(r) = &*save.borrow() {
+                    r.job.cancel();
+                    return glib::Propagation::Stop;
+                }
+                if grid.cancel_job() {
+                    return glib::Propagation::Stop;
+                }
+            }
+            match keys::window_command(Primary::HERE, key, mods) {
+                Some(command) if run(command) => glib::Propagation::Stop,
+                _ => glib::Propagation::Proceed,
+            }
         }
     });
     window.add_controller(keys);
@@ -1101,6 +1126,7 @@ fn build_window(
         })
         .build();
     window.add_action_entries([replace]);
+    menus::add_window_actions(&window, &grid, run);
 
     // Closing with unsaved edits asks first (APP-9): Save, Don't Save, or Cancel. Closing
     // while a save runs waits for it and closes once it succeeds; a failed or cancelled
