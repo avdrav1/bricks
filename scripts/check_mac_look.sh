@@ -202,16 +202,26 @@ shot frame-dark; check "frame draws dark" dark "$TOP"; stop
 start etch-dark 10 "$bin/etch" "$work/picture.png"
 shot etch-dark; check "etch draws dark" dark "$MIDDLE"; stop
 
-# 3. Changes while running.
+# 3. Changes while running. The runner's virtual display ticks GTK's frame clock slowly
+# (DEC-11: Brick saw 0.1 Hz), so a restyled window can take seconds to draw again: shoot
+# until it shows the change, for up to about 30 s, and say how long it took.
+until_shot() { # until_shot dark|light NAME DESCRIPTION
+  local t0=$SECONDS
+  for _ in $(seq 8); do
+    shot "$2"
+    "$1" "$TOP" && break
+    sleep 1
+  done
+  say "$2: $1 after $((SECONDS - t0)) s"
+  check "$3" "$1" "$TOP"
+}
 appearance light
 start slate-live 20 "$bin/slate" "$work/office-fonts.docx"
 shot slate-live-1-light; check "slate starts light" light "$TOP"
 appearance dark
-sleep 3
-shot slate-live-2-dark; check "slate turns dark with the Mac" dark "$TOP"
+until_shot dark slate-live-2-dark "slate turns dark with the Mac"
 appearance light
-sleep 3
-shot slate-live-3-light; check "slate turns light again" light "$TOP"
+until_shot light slate-live-3-light "slate turns light again"
 stop
 
 if ((failed)); then say "LOOK FAILED"; exit 1; fi
