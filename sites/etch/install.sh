@@ -1,17 +1,18 @@
 #!/bin/sh
-# Etch installer (ETCH-5). Installs or updates the latest release for this user, without
-# sudo:
+# Etch installer (ETCH-5, ETCH-6). Installs or updates the latest release for this user,
+# without sudo:
 #
 #   curl -fsSL https://etch.cronkite.cc/install.sh | sh
 #   curl -fsSL https://etch.cronkite.cc/install.sh | sh -s -- --uninstall
 #
-# Puts the binary in ~/.local/bin and its icon and desktop entry in ~/.local/share. Etch
-# doesn't open files yet, so it takes over no file types: ~/.config/mimeapps.list is never
-# touched. The download is checked against the release's sha256 before anything is
-# installed. GTK 4 comes from the system: if it is missing, this says how to install it. A
-# release is a latest.json ({"version", "url", "sha256"}) beside a tarball holding one
-# folder with `etch`, dev.cronkite.Etch.desktop, and dev.cronkite.Etch.svg, as the other
-# apps' are (sites/frame/install.sh).
+# Puts the binary in ~/.local/bin, its icon and desktop entry in ~/.local/share, and makes
+# it the default for PNG, JPEG, and BMP images (~/.config/mimeapps.list), so
+# double-clicking an image opens it in Etch; uninstalling drops those defaults, and every
+# other type's stays as it was. The download is checked against the release's sha256
+# before anything is installed. GTK 4 comes from the system: if it is missing, this says
+# how to install it. A release is a latest.json ({"version", "url", "sha256"}) beside a
+# tarball holding one folder with `etch`, dev.cronkite.Etch.desktop, and
+# dev.cronkite.Etch.svg, as the other apps' are (sites/frame/install.sh).
 set -eu
 
 # Where latest.json is: filled in when the page is deployed (scripts/ship.sh etch site).
@@ -21,8 +22,11 @@ ID=dev.cronkite.Etch
 
 BIN_DIR="$HOME/.local/bin"
 DATA="${XDG_DATA_HOME:-$HOME/.local/share}"
+CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}"
 DESKTOP="$DATA/applications/$ID.desktop"
 ICON="$DATA/icons/hicolor/scalable/apps/$ID.svg"
+MIMEAPPS="$CONFIG/mimeapps.list"
+TYPES="image/png image/jpeg image/bmp"
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'etch install: %s\n' "$*" >&2; exit 1; }
@@ -48,7 +52,33 @@ refresh_caches() {
     gtk-update-icon-cache -q -t "$DATA/icons/hicolor" 2>/dev/null || true
 }
 
+# Make APP.desktop the default for each of $TYPES in mimeapps.list, or with no app, drop
+# the defaults that point at us (another app's stay). Every other line stays as it is.
+set_defaults() { # APP.desktop or empty
+  mkdir -p "$CONFIG"
+  [ -f "$MIMEAPPS" ] || : > "$MIMEAPPS"
+  out="$MIMEAPPS.new.$$"
+  awk -v app="$1" -v ours="$ID.desktop" -v types="$TYPES" '
+    BEGIN { n = split(types, t, " "); for (i = 1; i <= n; i++) mine[t[i]] = 1 }
+    function add() { if (app != "" && !done) { for (i = 1; i <= n; i++) print t[i] "=" app; done = 1 } }
+    function flush() { for (; held > 0; held--) print "" }
+    /^\[/ { if (section == "[Default Applications]") add(); flush(); section = $0; print; next }
+    section == "[Default Applications]" {
+      if ($0 == "") { held++; next } # blank lines go after our entries
+      split($0, kv, "=")
+      if ((kv[1] in mine) && (app != "" || kv[2] == ours)) next
+    }
+    { flush(); print }
+    END {
+      if (section == "[Default Applications]") add()
+      else if (app != "" && !done) { print "[Default Applications]"; add() }
+      flush()
+    }' "$MIMEAPPS" > "$out"
+  mv "$out" "$MIMEAPPS"
+}
+
 uninstall() {
+  [ -f "$MIMEAPPS" ] && set_defaults ""
   rm -f "$BIN_DIR/$APP" "$DESKTOP" "$ICON"
   refresh_caches
   say "Removed Etch. Your images are untouched."
@@ -97,11 +127,12 @@ install_app() {
   cp "$dir/$ID.svg" "$ICON"
   # The full path, so it starts from a launcher even when ~/.local/bin isn't on its PATH.
   sed "s|^Exec=$APP\$|Exec=$BIN_DIR/$APP|; s|^Exec=$APP |Exec=$BIN_DIR/$APP |" "$dir/$ID.desktop" > "$DESKTOP"
+  set_defaults "$ID.desktop"
   refresh_caches
 
   if [ -n "$before" ] && [ "$before" != "$version" ]; then say "Updated Etch $before -> $version"
   else say "Installed Etch $version"; fi
-  say "  $BIN_DIR/$APP; start it from your app menu"
+  say "  $BIN_DIR/$APP; PNG, JPEG, and BMP images open with it"
   case ":$PATH:" in *":$BIN_DIR:"*) ;; *) say "  $BIN_DIR is not on your PATH: start it from your app menu, or add it to PATH" ;; esac
 
   if ! err=$("$BIN_DIR/$APP" --version 2>&1 >/dev/null); then

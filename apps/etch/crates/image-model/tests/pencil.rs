@@ -66,6 +66,22 @@ fn an_image_needs_a_pixel_and_at_most_max_side_on_each_side() {
 }
 
 #[test]
+fn an_image_from_rgba_holds_those_pixels() {
+    let data: Vec<u8> = (0..3 * 2 * 4).map(|v| v as u8).collect();
+    let image = Image::from_rgba(3, 2, data.clone()).unwrap();
+    assert_eq!(image.data(), &data[..]);
+    assert_eq!(image.pixel(2, 1), Some(Color::rgba(20, 21, 22, 23)));
+    assert_eq!(Image::from_rgba(0, 2, Vec::new()), Err(SizeError::Empty));
+    assert_eq!(
+        Image::from_rgba(MAX_SIDE + 1, 1, Vec::new()),
+        Err(SizeError::TooLarge {
+            width: MAX_SIDE + 1,
+            height: 1
+        })
+    );
+}
+
+#[test]
 fn a_one_pixel_line_sets_exactly_bresenhams_pixels() {
     let mut doc = white(10, 6);
     // Fractions floor to the pixel they're in.

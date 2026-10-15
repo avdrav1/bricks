@@ -1,6 +1,6 @@
 //! Windows: one per image, with the app's menu bar, the tool column, the canvas, and the
-//! colour row and status bar below; the New Image dialog; and the stroke benchmark
-//! (`--bench-stroke`).
+//! colour row and status bar below; opening files (the command line and File → Open);
+//! the New Image dialog; and the benchmarks (`--bench-stroke`, `--bench-open`).
 
 use crate::canvas::Canvas;
 use crate::colours;
@@ -9,6 +9,7 @@ use gtk::prelude::*;
 use gtk::{gdk, gio, glib};
 use image_model::{Color, Image, MAX_SIDE};
 use std::cell::{Cell, RefCell};
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -20,6 +21,19 @@ const BENCH_SIZE: (u32, u32) = (7680, 4320);
 thread_local! {
     /// The size New Image offers: the last one used.
     static LAST_SIZE: Cell<(u32, u32)> = const { Cell::new(DEFAULT_SIZE) };
+    /// The windows of the files open, by canonical path: opening one again shows its window.
+    static OPEN: RefCell<Vec<(PathBuf, glib::WeakRef<gtk::ApplicationWindow>)>> =
+        const { RefCell::new(Vec::new()) };
+}
+
+/// What a window runs once its image shows.
+#[derive(Clone, Copy)]
+enum Bench {
+    /// `--bench-stroke FRAMES`.
+    Stroke(u32),
+    /// `--bench-open FILE`: the process started at `start`; reading and decoding the file
+    /// took `read_ms`.
+    Open { start: Instant, read_ms: f64 },
 }
 
 /// The app's actions, shortcuts, menu bar (every window shows it), and style.
@@ -28,12 +42,16 @@ pub fn install_app_actions(app: &gtk::Application) {
     let new = gio::ActionEntry::builder("new")
         .activate(|app: &gtk::Application, _, _| ask_new_image(app))
         .build();
+    let open = gio::ActionEntry::builder("open")
+        .activate(|app: &gtk::Application, _, _| choose_and_open(app))
+        .build();
     let quit = gio::ActionEntry::builder("quit")
         .activate(|app: &gtk::Application, _, _| app.quit())
         .build();
-    app.add_action_entries([new, quit]);
+    app.add_action_entries([new, open, quit]);
     for (action, keys) in [
         ("app.new", &["<Control>n"][..]),
+        ("app.open", &["<Control>o"]),
         ("app.quit", &["<Control>q"]),
         ("window.close", &["<Control>w"]),
         ("win.undo", &["<Control>z"]),
@@ -54,6 +72,7 @@ pub fn install_app_actions(app: &gtk::Application) {
     let menu = gio::Menu::new();
     let file = gio::Menu::new();
     file.append(Some("_New Image…"), Some("app.new"));
+    file.append(Some("_Open…"), Some("app.open"));
     file.append(Some("_Close"), Some("window.close"));
     file.append(Some("_Quit"), Some("app.quit"));
     menu.append_submenu(Some("_File"), &file);
@@ -89,7 +108,10 @@ fn open_new(app: &gtk::Application, (w, h): (u32, u32), bench: Option<u32>) {
         let _hold = hold;
         let made = gio::spawn_blocking(move || Image::new(w, h, Color::WHITE)).await;
         match made {
-            Ok(Ok(image)) => show(&app, image, bench),
+            Ok(Ok(image)) => {
+                let window = new_window(&app, &untitled(&app));
+                show(&app, &window, image, bench.map(Bench::Stroke));
+            }
             Ok(Err(e)) => alert(&app, "Cannot make the image", &e.to_string()).await,
             Err(_) => {
                 alert(
@@ -101,6 +123,143 @@ fn open_new(app: &gtk::Application, (w, h): (u32, u32), bench: Option<u32>) {
             }
         }
     });
+}
+
+/// "Images" (PNG, JPEG, BMP) and "All files", the first as the default.
+fn file_filters() -> (gio::ListStore, gtk::FileFilter) {
+    let images = gtk::FileFilter::new();
+    images.set_name(Some("Images (PNG, JPEG, BMP)"));
+    for mime in ["image/png", "image/jpeg", "image/bmp"] {
+        images.add_mime_type(mime);
+    }
+    for suffix in ["png", "jpg", "jpeg", "bmp"] {
+        images.add_suffix(suffix);
+    }
+    let all = gtk::FileFilter::new();
+    all.set_name(Some("All files"));
+    all.add_pattern("*");
+    let filters = gio::ListStore::new::<gtk::FileFilter>();
+    filters.append(&images);
+    filters.append(&all);
+    (filters, images)
+}
+
+/// File → Open (Ctrl+O): the desktop's file dialog (xdg-desktop-portal through
+/// `gtk::FileDialog`, GTK's own without a portal), filtered to images. The image opens in
+/// a window of its own, as in the suite's other apps: an Untitled window stays as it is.
+fn choose_and_open(app: &gtk::Application) {
+    let (filters, images) = file_filters();
+    let dialog = gtk::FileDialog::builder()
+        .title("Open")
+        .modal(true)
+        .filters(&filters)
+        .default_filter(&images)
+        .build();
+    let (app, parent) = (app.clone(), app.active_window());
+    glib::spawn_future_local(async move {
+        match dialog.open_future(parent.as_ref()).await {
+            Ok(file) => match file.path() {
+                Some(path) => open(&app, &path, None),
+                None => {
+                    alert(
+                        &app,
+                        &format!("Cannot open {}", file.uri()),
+                        "Only local files can be opened.",
+                    )
+                    .await
+                }
+            },
+            Err(e) if e.matches(gtk::DialogError::Dismissed) => {}
+            Err(e) => alert(&app, "Cannot show the file dialog", &e.to_string()).await,
+        }
+    });
+}
+
+/// Open the image file at `path` in its own window: its existing one, or a new one titled
+/// with the file's name that says "Opening…" while the file is read and decoded off the UI
+/// thread. A file that can't be opened gives an alert naming it and the reason, and its
+/// window closes. `bench`: `--bench-open`, started at that instant.
+pub fn open(app: &gtk::Application, path: &Path, bench: Option<Instant>) {
+    if let Some(window) = window_for(path) {
+        window.present();
+        return;
+    }
+    let name = path.file_name().map_or_else(
+        || path.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    let window = new_window(app, &name);
+    let opening = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    opening.set_halign(gtk::Align::Center);
+    opening.set_valign(gtk::Align::Center);
+    let spinner = gtk::Spinner::new();
+    spinner.start();
+    opening.append(&spinner);
+    opening.append(&gtk::Label::new(Some("Opening…")));
+    window.set_child(Some(&opening));
+    OPEN.with_borrow_mut(|open| open.push((canonical(path), window.downgrade())));
+    window.present();
+
+    let (app, path) = (app.clone(), path.to_owned());
+    glib::spawn_future_local(async move {
+        let p = path.clone();
+        let read = gio::spawn_blocking(move || {
+            let t = Instant::now();
+            (image_io::read(&p), t.elapsed())
+        })
+        .await;
+        let error = match read {
+            Ok((Ok(image), took)) => {
+                let read_ms = took.as_secs_f64() * 1e3;
+                let (w, h) = (image.width(), image.height());
+                tracing::info!("opened {}: {w}×{h} in {read_ms:.0} ms", path.display());
+                let bench = bench.map(|start| Bench::Open { start, read_ms });
+                show(&app, &window, image, bench);
+                return;
+            }
+            Ok((Err(e), _)) => e.to_string(),
+            Err(_) => "Reading it failed unexpectedly.".to_owned(),
+        };
+        eprintln!("etch: cannot open {}: {error}", path.display());
+        if bench.is_some() {
+            std::process::exit(1);
+        }
+        let _ = gtk::AlertDialog::builder()
+            .message(format!("Cannot open “{name}”"))
+            .detail(&error)
+            .buttons(["Close"])
+            .modal(true)
+            .build()
+            .choose_future(Some(&window))
+            .await;
+        window.close();
+    });
+}
+
+/// The window `path` is open in, if any.
+fn window_for(path: &Path) -> Option<gtk::ApplicationWindow> {
+    let path = canonical(path);
+    OPEN.with_borrow_mut(|open| {
+        open.retain(|(_, w)| w.upgrade().is_some());
+        open.iter()
+            .find(|(p, _)| *p == path)
+            .and_then(|(_, w)| w.upgrade())
+    })
+}
+
+fn canonical(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned())
+}
+
+/// An empty window titled `title`, with the menu bar.
+fn new_window(app: &gtk::Application, title: &str) -> gtk::ApplicationWindow {
+    gtk::ApplicationWindow::builder()
+        .application(app)
+        .title(title)
+        .default_width(1100)
+        .default_height(800)
+        .show_menubar(true)
+        .build()
 }
 
 async fn alert(app: &gtk::Application, message: &str, detail: &str) {
@@ -237,8 +396,15 @@ fn colour_row(controls: &Rc<Controls>) -> gtk::Box {
     row
 }
 
-fn show(app: &gtk::Application, image: Image, bench: Option<u32>) {
-    let canvas = Canvas::new(image, bench.is_some());
+/// Fill `window` with the image's view: the tool column, the canvas showing `image`, the
+/// colour row, and the status bar; then run `bench`, if given.
+fn show(
+    app: &gtk::Application,
+    window: &gtk::ApplicationWindow,
+    image: Image,
+    bench: Option<Bench>,
+) {
+    let canvas = Canvas::new(image, matches!(bench, Some(Bench::Stroke(_))));
     let controls = Rc::new(Controls {
         settings: Cell::new(Settings::default()),
         canvas: canvas.clone(),
@@ -260,14 +426,7 @@ fn show(app: &gtk::Application, image: Image, bench: Option<u32>) {
     content.append(&middle);
     content.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
     content.append(&bar);
-    let window = gtk::ApplicationWindow::builder()
-        .application(app)
-        .title(untitled(app))
-        .default_width(1100)
-        .default_height(800)
-        .show_menubar(true)
-        .child(&content)
-        .build();
+    window.set_child(Some(&content));
 
     let action = |name: &str, f: fn(&Canvas)| {
         let canvas = canvas.clone();
@@ -379,8 +538,10 @@ fn show(app: &gtk::Application, image: Image, bench: Option<u32>) {
     });
     window.present();
     canvas.grab_focus();
-    if let Some(frames) = bench {
-        bench_stroke(app, &canvas, frames);
+    match bench {
+        Some(Bench::Stroke(frames)) => bench_stroke(app, &canvas, frames),
+        Some(Bench::Open { start, read_ms }) => bench_open(app, window, &canvas, start, read_ms),
+        None => {}
     }
 }
 
@@ -457,6 +618,46 @@ fn ask_new_image(app: &gtk::Application) {
     ));
     dialog.add_controller(escape);
     dialog.present();
+}
+
+/// ETCH-6's benchmark: from the process's start until the end of the first frame that drew
+/// the opened image (the frame clock's after-paint once the canvas has snapshotted it, so
+/// the frame rendered its tiles); prints a JSON line and quits. `read_ms`: reading and
+/// decoding the file, off the UI thread.
+fn bench_open(
+    app: &gtk::Application,
+    window: &gtk::ApplicationWindow,
+    canvas: &Canvas,
+    start: Instant,
+    read_ms: f64,
+) {
+    let shown_ms = start.elapsed().as_secs_f64() * 1e3;
+    let Some(clock) = window.frame_clock() else {
+        eprintln!("etch: the window has no frame clock");
+        std::process::exit(1);
+    };
+    let done = Cell::new(false);
+    canvas.queue_draw();
+    let (app, canvas) = (app.clone(), canvas.downgrade());
+    clock.connect_after_paint(move |_| {
+        let Some(canvas) = canvas.upgrade() else {
+            return;
+        };
+        if done.get() || canvas.frames_drawn() == 0 {
+            return;
+        }
+        done.set(true);
+        let (w, h) = canvas.image_size();
+        println!(
+            r#"{{"image":[{w},{h}],"canvas":[{},{}],"zoom":"{}","read_ms":{read_ms:.1},"shown_ms":{shown_ms:.1},"snapshot_ms":{:.1},"first_frame_ms":{:.1}}}"#,
+            canvas.width(),
+            canvas.height(),
+            canvas.view().map(|v| v.percent()).unwrap_or_default(),
+            canvas.last_draw_ms(),
+            start.elapsed().as_secs_f64() * 1e3,
+        );
+        app.quit();
+    });
 }
 
 /// ETCH-2's benchmark: draws a stroke one segment a frame, 16 widget pixels apart (a brisk

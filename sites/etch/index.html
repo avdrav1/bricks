@@ -78,7 +78,7 @@
       </ul>
       <section id="install">
         <h2>Install</h2>
-        <p>For your user, no sudo: the app and its menu entry. Start it from your app menu or with <code>etch</code>. Run the command again to update. Etch doesn't take over any file types.</p>
+        <p>For your user, no sudo: the app and its menu entry. Start it from your app menu or with <code>etch</code>. Run the command again to update. It makes Etch the default app for PNG, JPEG, and BMP images, so double-clicking one opens it in Etch; other file types keep their apps, and removing Etch drops its defaults.</p>
         <pre id="cmd">curl -fsSL https://this-site/install.sh | sh</pre>
         <p>It needs GTK 4, which GNOME desktops have; otherwise the installer says how to get it. Or download the tarball above and check it against the published sha256. To remove it:</p>
         <pre id="uninstall">curl -fsSL https://this-site/install.sh | sh -s -- --uninstall</pre>

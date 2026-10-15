@@ -59,6 +59,31 @@ impl Image {
         })
     }
 
+    /// An image of `data`'s pixels: RGBA8, straight alpha, rows top to bottom, `width * 4`
+    /// bytes a row (a decoded file's).
+    ///
+    /// # Panics
+    ///
+    /// If `data` isn't `width * height * 4` bytes.
+    pub fn from_rgba(width: u32, height: u32, data: Vec<u8>) -> Result<Image, SizeError> {
+        if width == 0 || height == 0 {
+            return Err(SizeError::Empty);
+        }
+        if width > MAX_SIDE || height > MAX_SIDE {
+            return Err(SizeError::TooLarge { width, height });
+        }
+        assert_eq!(
+            data.len(),
+            width as usize * height as usize * 4,
+            "RGBA8 data for {width}×{height}"
+        );
+        Ok(Image {
+            width,
+            height,
+            data,
+        })
+    }
+
     pub fn width(&self) -> u32 {
         self.width
     }

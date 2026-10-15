@@ -64,6 +64,8 @@ mod imp {
         pub notches: Cell<f64>,
         /// How long the last snapshot took to build, in milliseconds.
         pub last_ms: Cell<f64>,
+        /// How many snapshots have drawn the image.
+        pub drawn: Cell<u64>,
         /// Whether the next allocation should show the image at 100% rather than fitted.
         pub actual_size: Cell<bool>,
         /// What a primary-button drag draws with.
@@ -148,6 +150,7 @@ mod imp {
             self.draw_tip_outline(snapshot, &view);
             snapshot.pop();
             self.last_ms.set(t0.elapsed().as_secs_f64() * 1e3);
+            self.drawn.set(self.drawn.get() + 1);
         }
     }
 
@@ -381,6 +384,11 @@ impl Canvas {
     /// How long the last snapshot took to build, in milliseconds.
     pub fn last_draw_ms(&self) -> f64 {
         self.imp().last_ms.get()
+    }
+
+    /// How many snapshots have drawn the image: none until it first shows.
+    pub fn frames_drawn(&self) -> u64 {
+        self.imp().drawn.get()
     }
 
     pub fn connect_changed<F: Fn(&Canvas) + 'static>(&self, f: F) -> glib::SignalHandlerId {

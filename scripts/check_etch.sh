@@ -40,6 +40,16 @@
 #      draw a red line 7 px thick (the canvas column through it); X swaps the colours,
 #      and the next line is indigo, 7 px; the eraser keeps its own size (9) and the
 #      pencil its 7.
+# ETCH-6 acceptance: opening images.
+#  11. `etch t.png` (400x300: the left half opaque red, the right half's top fully
+#      transparent green, its bottom half-transparent blue) opens it in a window titled
+#      t.png, at 100%, the status saying 400×300; on screen the left half is red, the top
+#      right shows the checkerboard (white and grey, no green), and the bottom right blue
+#      blended over it. In an Untitled window, Ctrl+O shows the file dialog; typing a path
+#      (Ctrl+L) to a 320x200 JPEG opens it in a new window titled c.jpg (320×200) beside
+#      the Untitled one. `etch bad.png` (t.png cut short) alerts "Cannot open “bad.png”"
+#      with the reason, and Enter closes the alert and its window (etch exits);
+#      `etch notes.png` (text) alerts that it isn't an image Etch can open.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -164,6 +174,51 @@ elif cmd == "where":
                 sys.exit(0)
         stack.extend(n.get_child_at_index(i) for i in range(n.get_child_count()))
     sys.exit("nothing named " + sys.argv[2])
+elif cmd == "opened":
+    # The opened W x H image, centred at 100%: its left half, top right, and bottom right
+    # (4 px in from each edge).
+    at = pixels(sys.argv[2])
+    W, H = int(sys.argv[3]), int(sys.argv[4])
+    cx, cy, cw, ch = canvas()
+    l, t = cx + (cw - W) // 2, cy + (ch - H) // 2
+    def region(x0, x1, y0, y1):
+        return [at(x, y) for y in range(t + y0 + 4, t + y1 - 4) for x in range(l + x0 + 4, l + x1 - 4)]
+    every = lambda n, ps: "all" if n == len(ps) else f"{n}/{len(ps)}"
+    left = region(0, W // 2, 0, H)
+    red = sum(1 for r, g, b in left if r >= 240 and g <= 15 and b <= 15)
+    clear = region(W // 2, W, 0, H // 2)
+    light = sum(1 for p in clear if min(p) >= 245)
+    grey = sum(1 for p in clear if all(195 <= c <= 213 for c in p))
+    # The checkerboard: neutral greys from its grey to white (the edges of its squares may
+    # fall between pixels and blend).
+    checker = sum(1 for p in clear if min(p) >= 195 and max(p) - min(p) <= 3)
+    green = sum(1 for r, g, b in clear if g > 200 and r < 100)
+    half = region(W // 2, W, H // 2, H)
+    # Blue at alpha 128 over white is (127, 127, 255), over the grey (102, 102, 230).
+    blended = sum(1 for r, g, b in half if b >= 220 and 90 <= r <= 140 and abs(r - g) <= 6)
+    print(f"red {every(red, left)}")
+    print(f"checker {every(checker, clear)} light {min(light, 1)} grey {min(grey, 1)} green {green}")
+    print(f"blended {every(blended, half)}")
+PY
+# The images section 11 opens.
+cat > /tmp/mk.py <<"PY"
+import gi
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import GdkPixbuf, GLib
+
+def make(path, w, h, colour, kind, alpha, keys=(), values=()):
+    data = bytes(c for y in range(h) for x in range(w) for c in colour(x, y))
+    n = 4 if alpha else 3
+    pb = GdkPixbuf.Pixbuf.new_from_bytes(GLib.Bytes.new(data), GdkPixbuf.Colorspace.RGB, alpha, 8, w, h, w * n)
+    pb.savev(path, kind, list(keys), list(values))
+
+def t(x, y):
+    if x < 200:
+        return (255, 0, 0, 255)
+    return (0, 255, 0, 0) if y < 150 else (0, 0, 255, 128)
+
+make("/tmp/t.png", 400, 300, t, "png", True)
+make("/tmp/c.jpg", 320, 200, lambda x, y: (x * 255 // 319, y * 255 // 199, 128), "jpeg", False, ["quality"], ["90"])
 PY
 session() {
   WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 sway --unsupported-gpu -c /tmp/sway.conf >/tmp/sway.log 2>&1 &
@@ -300,6 +355,30 @@ session() {
   echo "red still: $(px column /tmp/shot.png $mx ED1C24)"
   keys e; echo "eraser size: $(python3 /tmp/a11y.py text | grep -A1 "^Size$" | tail -1)"
   keys p; echo "pencil size: $(python3 /tmp/a11y.py text | grep -A1 "^Size$" | tail -1)"
+  pkill -x etch; sleep 1
+
+  echo "== 11 open"
+  python3 /tmp/mk.py
+  etch /tmp/t.png >>/tmp/open.log 2>&1 & sleep 3
+  shown opened | grep -E "^opened: (t\.png|400×300|[0-9.]+%)$"
+  shot opened; px opened /tmp/shot.png 400 300 | sed "s/^/opened: /"
+  pkill -x etch; sleep 1
+  etch >>/tmp/app.log 2>&1 & sleep 3
+  keys -M ctrl o -m ctrl; sleep 1.5
+  shown chooser | grep -E "^chooser: (Open|Images \(PNG, JPEG, BMP\))$"
+  keys -M ctrl l -m ctrl; keys /tmp/c.jpg; keys -k Return; sleep 3
+  shot ctrl-o; shown ctrl-o | grep -E "^ctrl-o: (c\.jpg|320×200|Untitled)$"
+  pkill -x etch; sleep 1
+  head -c 200 /tmp/t.png > /tmp/bad.png
+  etch /tmp/bad.png >>/tmp/open.log 2>&1 & sleep 3
+  shot damaged; shown damaged | grep -E "Cannot open|damaged"
+  keys -k Return; sleep 1.5
+  pgrep -x etch >/dev/null && echo "after alert: running" || echo "after alert: exited"
+  printf "shopping: eggs, milk\n" > /tmp/notes.png
+  etch /tmp/notes.png >>/tmp/open.log 2>&1 & sleep 3
+  shown unsupported | grep -E "Cannot open|image Etch can open"
+  pkill -x etch; sleep 1
+  grep -E "^etch: cannot open|panicked|CRITICAL" /tmp/open.log | sed "s/^/log: /"
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -364,6 +443,25 @@ check "10: ... and the next line is indigo, 7 px thick" "10 colours" "^indigo co
 check "10: ... beside the red one" "10 colours" "^red still: 7$"
 check "10: the eraser keeps its own size" "10 colours" "^eraser size: 9$"
 check "10: ... and the pencil its" "10 colours" "^pencil size: 7$"
+# ETCH-6: opening images.
+check "11: etch t.png opens it in a window titled t.png" "11 open" "^opened: t\.png$"
+check "11: ... the status saying 400×300" "11 open" "^opened: 400×300$"
+check "11: ... at 100%" "11 open" "^opened: 100%$"
+check "11: ... its opaque half red on screen" "11 open" "^opened: red all$"
+check "11: ... its transparent quarter the checkerboard, no colour" "11 open" "^opened: checker all light 1 grey 1 green 0$"
+check "11: ... its half-transparent quarter blue blended over it" "11 open" "^opened: blended all$"
+check "11: Ctrl+O shows the file dialog" "11 open" "^chooser: Open$"
+check "11: ... filtered to images" "11 open" "^chooser: Images \(PNG, JPEG, BMP\)$"
+check "11: ... and opens the JPEG typed in a window titled c.jpg" "11 open" "^ctrl-o: c\.jpg$"
+check "11: ... 320×200" "11 open" "^ctrl-o: 320×200$"
+check "11: ... beside the Untitled window" "11 open" "^ctrl-o: Untitled$"
+check "11: a damaged file alerts naming it" "11 open" "^damaged: Cannot open “bad\.png”$"
+check "11: ... and why" "11 open" "^damaged: It's a damaged or incomplete PNG image"
+check "11: ... and closing the alert closes its window" "11 open" "^after alert: exited$"
+check "11: a text file named .png alerts naming it" "11 open" "^unsupported: Cannot open “notes\.png”$"
+check "11: ... and why" "11 open" "^unsupported: It isn't an image Etch can open: PNG, JPEG, or BMP\.$"
+check "11: the failures are logged with the reason" "11 open" "^log: etch: cannot open /tmp/bad\.png: It's a damaged"
+absent "11: opening logs no panics" "11 open" "^log: .*(panicked|CRITICAL)"
 absent "the app logs no errors or panics" "app log" "^etch:|panicked|CRITICAL"
 bench=$(section "8 bench" | sed -n "s/^bench: //p")
 if [ -z "$bench" ]; then echo "FAIL 8: --bench-stroke printed nothing"; fail=1; else
