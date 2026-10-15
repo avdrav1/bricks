@@ -49,6 +49,14 @@ shoot() {
     return 0
 }
 
+# shoot with GTK's default renderer, then again with cairo (software).
+both() {
+    local name=$1 wait=$2; shift 2
+    shoot "$name" "$wait" "$@"
+    [[ -x $1 ]] && shoot "$name-cairo" "$wait" env GSK_RENDERER=cairo "$@"
+    return 0
+}
+
 # osascript that can't hang the job on a permission prompt.
 osa() {
     osascript -e "$1" >>"$logs/osascript.log" 2>&1 &
@@ -121,12 +129,39 @@ env)
     ;;
 check)
     step check cargo check --workspace
-    step check-all-targets cargo check --workspace --all-targets
-    step clippy cargo clippy --workspace --all-targets --all-features -- -D warnings
+    step check-all-targets cargo check --workspace --all-targets --keep-going
+    grep -E '^error: could not compile' "$logs/check-all-targets.log" | sort -u | tee -a "$logs/summary.txt"
+    step clippy cargo clippy --workspace --all-targets --all-features --keep-going -- -D warnings
+    grep -E '^error: could not compile' "$logs/clippy.log" | sort -u | tee -a "$logs/summary.txt"
+    exit 0
     ;;
 test)
-    step test cargo test --workspace --no-fail-fast
-    grep -E '^test result|^error|FAILED|panicked' "$logs/test.log" >"$logs/test-summary.txt"
+    # Target by target, so a test file that doesn't compile doesn't stop the rest.
+    cargo metadata --no-deps --format-version 1 | python3 -c '
+import json, sys
+for p in json.load(sys.stdin)["packages"]:
+    for t in p["targets"]:
+        k = t["kind"][0]
+        if k == "lib": print(p["name"], "lib", t["name"]); print(p["name"], "doc", t["name"])
+        elif k in ("bin", "test"): print(p["name"], k, t["name"])
+' >"$out/targets.txt"
+    : >"$logs/test-matrix.txt"
+    while read -r pkg kind name; do
+        case $kind in
+        lib) sel=(--lib) ;; doc) sel=(--doc) ;; bin) sel=(--bin "$name") ;; test) sel=(--test "$name") ;;
+        esac
+        log=$logs/test/$pkg-$kind-$name.log
+        mkdir -p "$logs/test"
+        cargo test -p "$pkg" "${sel[@]}" --no-fail-fast </dev/null >"$log" 2>&1
+        rc=$?
+        res=$(grep -E '^test result' "$log" | tail -1 | sed 's/ finished in.*//')
+        grep -q 'could not compile' "$log" && res="COMPILE ERROR: $(grep -m1 -E '^error(\[|:)' "$log")"
+        fails=$(grep -E '^test .* FAILED$' "$log" | sed 's/^test //; s/ \.\.\. FAILED//' | tr '\n' ' ')
+        echo "$pkg $kind $name: exit $rc; $res ${fails:+; failed: $fails}" >>"$logs/test-matrix.txt"
+    done <"$out/targets.txt"
+    note "test targets: $(wc -l <"$out/targets.txt"), non-zero exit: $(grep -vc 'exit 0;' "$logs/test-matrix.txt")"
+    grep -v 'exit 0;' "$logs/test-matrix.txt" | tee -a "$logs/summary.txt"
+    exit 0
     ;;
 build)
     for a in "${apps[@]}"; do step "build-$a" cargo build --release -p "$a"; done
@@ -142,25 +177,26 @@ build)
 run)
     samples
     s=$out/samples
-    shoot brick 10 "$rel/brick" "$s/people.csv"
-    shoot brick-xlsx 10 "$rel/brick" apps/brick/crates/xlsx/tests/data/fixture.xlsx
+    both brick 10 "$rel/brick" "$s/people.csv"
+    both brick-xlsx 10 "$rel/brick" apps/brick/crates/xlsx/tests/data/fixture.xlsx
     shoot slate 10 "$rel/slate" "$s/readme.md"
     shoot frame 10 "$rel/frame" "$s/fixture.pptx"
     shoot etch 10 "$rel/etch" "$s/picture.png"
+    exit 0
     ;;
 patched)
     # One-line experiment: let suite-platform accept macOS so Slate, Frame, and Etch start.
     git apply "$here/allow-macos.patch" && note "allow-macos.patch applied"
     for a in slate frame etch; do step "build-patched-$a" cargo build --release -p "$a"; done
     s=$out/samples
-    shoot p-slate 10 "$rel/slate" "$s/readme.md"
-    shoot p-slate-docx 10 "$rel/slate" "$s/fixture.docx"
-    shoot p-slate-start 8 "$rel/slate"
-    shoot p-frame 10 "$rel/frame" "$s/fixture.pptx"
-    shoot p-frame-blank 8 "$rel/frame"
-    shoot p-etch 10 "$rel/etch" "$s/picture.png"
-    shoot p-etch-shot 10 "$rel/etch" "$shots/brick.png"
-    for g in cairo gl ngl vulkan; do shoot "p-frame-gsk-$g" 8 env GSK_RENDERER=$g "$rel/frame" "$s/fixture.pptx"; done
+    both p-slate 10 "$rel/slate" "$s/readme.md"
+    both p-slate-docx 10 "$rel/slate" "$s/fixture.docx"
+    both p-slate-start 8 "$rel/slate"
+    both p-frame 10 "$rel/frame" "$s/fixture.pptx"
+    both p-frame-blank 8 "$rel/frame"
+    both p-etch 10 "$rel/etch" "$s/picture.png"
+    both p-etch-shot 10 "$rel/etch" "$shots/brick-cairo.png"
+    for g in gl ngl vulkan; do shoot "p-frame-gsk-$g" 8 env GSK_RENDERER=$g "$rel/frame" "$s/fixture.pptx"; done
     # Benchmark modes: they open a window, measure, print, and quit.
     timed bench-brick-scroll 120 "$rel/brick" "$s/people.csv" --bench-scroll 120
     timed bench-slate-flow 180 "$rel/slate" "$s/fixture.docx" --bench-flow
@@ -220,5 +256,76 @@ EOF
     du -sh "$p/share/icons/Adwaita" "$p/share/icons/hicolor" "$p/share/glib-2.0/schemas" "$p/lib/gdk-pixbuf-2.0" "$p/share/locale" >"$logs/bundle-data.txt" 2>&1
     note "bundle data: $(tr '\n' ' ' <"$logs/bundle-data.txt")"
     ;;
+minos)
+    # Which macOS a Homebrew-built bundle would need: each Mach-O's minimum OS.
+    p=$(brew --prefix)
+    for f in "$rel/brick" "$p/opt/gtk4/lib/libgtk-4.1.dylib" "$p/opt/glib/lib/libglib-2.0.0.dylib" "$p/opt/pango/lib/libpango-1.0.0.dylib"; do
+        echo "$f: $(otool -l "$f" | awk '/LC_BUILD_VERSION/{b=1} b&&/minos/{print $2; exit}')"
+    done >"$logs/minos.txt" 2>&1
+    note "minos: $(tr '\n' ' ' <"$logs/minos.txt")"
+    ;;
+sigbus)
+    # F2: csv-engine's SIGBUS guard (a file truncated while mapped) on macOS.
+    step sigbus cargo test -p csv-engine --lib truncat -- --nocapture
+    grep -E '^test |test result' "$logs/sigbus.log" | tee -a "$logs/summary.txt"
+    ;;
+sweep)
+    # F13: Slate's Original::sweep looks for /proc/<pid>; macOS has no /proc.
+    s=$out/samples
+    cache=$HOME/.cache/slate
+    KEEP=1 shoot sw-a 10 "$rel/slate" "$s/fixture.docx"
+    a=$(cat "$out/pid")
+    note "sweep: slate A pid $a running; cache: $(ls "$cache" | tr '\n' ' ')"
+    KEEP=1 shoot sw-b 10 "$rel/slate" "$s/readme.md"
+    b=$(cat "$out/pid")
+    note "sweep: slate B pid $b started; A alive: $(kill -0 "$a" 2>/dev/null && echo yes || echo no); cache now: $(ls "$cache" | tr '\n' ' ')"
+    kill "$a" "$b"; sleep 1; kill -9 "$a" "$b" 2>/dev/null
+    ;;
+app)
+    # F34 and bundling: a minimal Slate.app (binary + Info.plist, Homebrew's dylibs) opened
+    # through LaunchServices, then a self-contained Brick.app (dylibbundler) and its DMG.
+    s=$out/samples
+    lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+    app=$out/app/Slate.app
+    mkdir -p "$app/Contents/MacOS"
+    cp "$rel/slate" "$app/Contents/MacOS/slate"
+    cp "$here/Slate.Info.plist" "$app/Contents/Info.plist"
+    $lsregister -f "$app" && note "lsregister Slate.app ok"
+    open --stdout "$logs/app-slate.out" --stderr "$logs/app-slate.err" -a "$app" "$s/readme.md"
+    note "open -a Slate.app readme.md: exit $?"
+    sleep 10
+    "$out/windows" >"$logs/windows-app-1.txt" 2>&1
+    screencapture -x "$shots/app-1-open-a.png"
+    open -a "$app" "$s/fixture.docx"
+    note "open -a Slate.app fixture.docx (second, app running): exit $?"
+    sleep 8
+    "$out/windows" >"$logs/windows-app-2.txt" 2>&1
+    screencapture -x "$shots/app-2-second-open.png"
+    pkill -f "$app/Contents/MacOS/slate"; sleep 1
+    open -n -a "$app" --args "$s/readme.md"
+    note "open -n -a Slate.app --args readme.md: exit $?"
+    sleep 8
+    "$out/windows" >"$logs/windows-app-3.txt" 2>&1
+    screencapture -x "$shots/app-3-open-args.png"
+    pkill -f "$app/Contents/MacOS/slate"
+    note "pgrep slate after: $(pgrep -fl slate | tr '\n' ' ')"
+
+    brew install dylibbundler >"$logs/brew-dylibbundler.log" 2>&1
+    bapp=$out/app/Brick.app
+    mkdir -p "$bapp/Contents/MacOS" "$bapp/Contents/Frameworks"
+    cp "$rel/brick" "$bapp/Contents/MacOS/brick"
+    sed -e 's/Slate/Brick/g; s/slate/brick/g' "$here/Slate.Info.plist" >"$bapp/Contents/Info.plist"
+    step dylibbundler dylibbundler -of -b -x "$bapp/Contents/MacOS/brick" -d "$bapp/Contents/Frameworks" -p @executable_path/../Frameworks/
+    note "Brick.app: $(du -sh "$bapp" | cut -f1), $(ls "$bapp/Contents/Frameworks" | wc -l) dylibs"
+    step codesign-verify codesign --verify --deep --strict -v "$bapp"
+    shoot app-brick-bundled 10 "$bapp/Contents/MacOS/brick" "$s/people.csv"
+    step codesign-adhoc codesign --force --deep -s - "$bapp"
+    shoot app-brick-bundled-signed 10 "$bapp/Contents/MacOS/brick" "$s/people.csv"
+    step dmg hdiutil create -volname Brick -srcfolder "$bapp" -format UDZO -ov "$out/app/Brick.dmg"
+    note "Brick.dmg: $(stat -f %z "$out/app/Brick.dmg" 2>/dev/null) bytes"
+    step spctl spctl --assess --type execute -vv "$bapp"
+    rm -rf "$out/app"
+    ;;
 *) echo "unknown phase $phase"; exit 2 ;;
 esac
+exit 0

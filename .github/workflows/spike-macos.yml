@@ -26,8 +26,18 @@ jobs:
       - run: spikes/dec-11/macos/ci/run.sh build
       - run: spikes/dec-11/macos/ci/run.sh run
       - run: spikes/dec-11/macos/ci/run.sh patched
+      # Interaction phases draw with cairo: run 1 showed Brick's window all black with the
+      # default renderer on the Intel runner VM.
       - run: spikes/dec-11/macos/ci/run.sh input
+        env: { GSK_RENDERER: cairo }
       - run: spikes/dec-11/macos/ci/run.sh dark
+        env: { GSK_RENDERER: cairo }
+      - run: spikes/dec-11/macos/ci/run.sh sweep
+        env: { GSK_RENDERER: cairo }
+      - run: spikes/dec-11/macos/ci/run.sh sigbus
+      - run: spikes/dec-11/macos/ci/run.sh app
+        env: { GSK_RENDERER: cairo }
+      - run: spikes/dec-11/macos/ci/run.sh minos
       - run: spikes/dec-11/macos/ci/run.sh bundle
       - if: always()
         run: cat out/logs/summary.txt
