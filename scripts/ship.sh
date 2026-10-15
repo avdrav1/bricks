@@ -162,6 +162,17 @@ suite-site)
   # The custom domain cronkite.cc is attached to the project once, in the dashboard.
   need CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CF_SUITE_PAGES_PROJECT
   rm -rf dist/cronkite-site; cp -r sites/cronkite dist/cronkite-site
+  # Browsers keep a screenshot for hours under its name (Pages: max-age=14400), so the page
+  # names each one with its content's hash (shots/x.webp?v=1a2b3c4d): a retaken shot gets a
+  # new address and shows at once.
+  python3 -c 'import hashlib, os, re, sys
+site = sys.argv[1]
+page = os.path.join(site, "index.html")
+html = open(page).read()
+def stamp(m):
+    data = open(os.path.join(site, m.group(1)), "rb").read()
+    return m.group(1) + "?v=" + hashlib.sha256(data).hexdigest()[:8]
+open(page, "w").write(re.sub(r"(shots/[A-Za-z0-9_.-]+\.webp)", stamp, html))' dist/cronkite-site
   pages_project "$CF_SUITE_PAGES_PROJECT"
   run wr pages deploy dist/cronkite-site --project-name "$CF_SUITE_PAGES_PROJECT" --branch main --commit-dirty=true
   ;;
