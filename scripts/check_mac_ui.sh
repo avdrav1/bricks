@@ -145,7 +145,10 @@ check() {
     for i in $(seq 20); do kill -0 "$pid" 2>/dev/null || break; sleep 0.5; done
     if kill -0 "$pid" 2>/dev/null; then
         shot "$app-6-still-running"
-        fail "$app: ⌘Q didn't quit"
+        # What it's doing: its windows and its threads' stacks.
+        windows "$pid" >"$logs/$app-windows-quit.txt"
+        sample "$pid" 3 -file "$logs/$app-sample.txt" >/dev/null 2>&1
+        fail "$app: ⌘Q didn't quit ($(wc -l <"$logs/$app-windows-quit.txt") windows; stacks in logs/$app-sample.txt)"
         stop
     else
         wait "$pid" 2>/dev/null
