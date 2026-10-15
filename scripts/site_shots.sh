@@ -15,9 +15,9 @@
 #   slate-find       notes.md with Ctrl+F tune-up highlighting its matches
 #   frame-deck       review.pptx on the chart slide, slide list and inspector beside it
 #   frame-outline    the same deck in the outline view (Ctrl+Shift+O)
-#   etch-paint       a scene painted on Etch's blank image with the pencil, in the
-#                    palette's colours and several sizes (scripts/etch_scene.py, through a
-#                    virtual pointer)
+#   etch-paint       a poster designed on Etch's blank image with its fill, ellipse, line,
+#                    rectangle, and text tools (scripts/etch_poster.py, through a virtual
+#                    pointer and the accessibility tree)
 # and each becomes NAME.webp (2880 px wide), NAME-1920.webp, and NAME-960.webp.
 # Needs docker, curl, LibreOffice with Python UNO, ImageMagick, and the corpus
 # (python3 scripts/gen_corpus.py; CORPUS=DIR points at another worktree's corpus/).
@@ -54,7 +54,7 @@ log=$(docker run --rm --cap-add SYS_NICE -v "$tmp/bin:/opt/bin:ro" -v "$tmp/file
 set -uo pipefail
 pacman -Syu --noconfirm --needed sway wtype grim gtk4 dbus adwaita-fonts adwaita-icon-theme \
   noto-fonts ttf-liberation ttf-carlito ttf-caladea shared-mime-info python-gobject \
-  python-pywayland wlr-protocols wayland pkgconf >/dev/null 2>&1
+  python-pywayland wlr-protocols wayland pkgconf at-spi2-core >/dev/null 2>&1
 mkdir -p /tmp/rt /tmp/home /tmp/f /tmp/proto && chmod 700 /tmp/rt && cp /data/* /tmp/f/
 touch /tmp/proto/__init__.py
 python -m pywayland.scanner -i /usr/share/wayland/wayland.xml \
@@ -105,12 +105,16 @@ key -M ctrl -M shift -k o -m shift -m ctrl
 shot frame-outline
 quit frame
 
-etch >>/tmp/app.log 2>&1 & sleep 4
-key -M ctrl 0 -m ctrl
-sleep 1; grim /tmp/blank.png
-python3 /scripts/etch_scene.py /tmp/blank.png 1440 900 2 >>/tmp/app.log 2>&1 || echo "etch scene failed"
-shot etch-paint
-quit etch
+# The Etch poster presses the tool bar through the accessibility tree: a D-Bus session.
+etch_poster() {
+  etch >>/tmp/app.log 2>&1 & sleep 4
+  key -M ctrl 0 -m ctrl
+  sleep 1; grim /tmp/blank.png
+  python3 /scripts/etch_poster.py /tmp/blank.png 1440 900 2 >>/tmp/app.log 2>&1 || echo "etch poster failed"
+  shot etch-paint
+  quit etch
+}
+dbus-run-session -- bash -c "$(declare -f key shot quit etch_poster); etch_poster" 2>/tmp/dbus.log
 swaymsg exit >/dev/null 2>&1 || true
 echo "== app log"; cat /tmp/app.log
 ' 2>&1) || { echo "$log"; exit 1; }
