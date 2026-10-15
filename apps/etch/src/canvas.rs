@@ -739,6 +739,15 @@ impl Canvas {
         });
     }
 
+    /// Crash recovery: `image` (a journal's pixels) becomes the image as one undo step
+    /// ([`Document::replace`]), shown anew; one undo gives back the image there was.
+    pub fn restore(&self, image: Image) {
+        self.commit();
+        let before = self.image_size();
+        self.with_doc(|d| d.replace(image));
+        self.reshaped(before);
+    }
+
     /// After a transform, or undoing or redoing one that changed the size (the image was
     /// `before` in size): every tile texture goes and the selection goes; when the size
     /// changed the image shows as an opened one does, at 100% centred or fitted when

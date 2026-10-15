@@ -12,9 +12,11 @@
 //!
 //! The window's title starts with "• " while the image differs from its file (by history
 //! position: undoing back to the saved image clears it), and closing it then asks whether
-//! to save.
+//! to save. Meanwhile its unsaved changes are journaled for crash recovery
+//! ([`crate::recovery`]).
 
 use crate::canvas::Canvas;
+use crate::recovery::{self, Header, WRITE_AFTER};
 use gtk::prelude::*;
 use gtk::{gio, glib};
 use image_io::Format;
@@ -48,6 +50,14 @@ type Then = Box<dyn FnOnce()>;
 /// A save asked for while another runs.
 type Waiting = Box<dyn FnOnce(&Rc<Saver>)>;
 
+/// The file a window's image was read from.
+pub struct Opened {
+    pub path: PathBuf,
+    pub format: Format,
+    /// Its size and modification time as read ([`recovery::identity`]).
+    pub identity: Option<(u64, u64)>,
+}
+
 /// A window's image file: where it is, its format, and whether it is saved.
 pub struct Saver {
     window: glib::WeakRef<gtk::ApplicationWindow>,
@@ -56,6 +66,8 @@ pub struct Saver {
     path: RefCell<Option<PathBuf>>,
     /// What Save writes: the format the file was read or last saved in.
     format: Cell<Format>,
+    /// The file's size and modification time when it was read or last saved.
+    identity: Cell<Option<(u64, u64)>>,
     /// The name of an image not saved yet: its window's first title ("Untitled 2").
     untitled: String,
     /// The canvas's position when the file was read or last saved; `None` never matches
@@ -66,32 +78,53 @@ pub struct Saver {
     waiting: RefCell<VecDeque<Waiting>>,
     /// Closing goes ahead without asking (the user chose).
     closing: Cell<bool>,
+    /// This window's crash recovery journal; `None`: not journaled (a benchmark's).
+    journal: Option<PathBuf>,
+    journaling: RefCell<Journaling>,
+}
+
+/// Where the crash recovery journal stands.
+#[derive(Default)]
+struct Journaling {
+    /// The journal file is there.
+    exists: bool,
+    /// The canvas's position the journal holds (`Some(None)`: written mid-stroke).
+    written: Option<Option<u64>>,
+    /// The write that is due.
+    due: Option<glib::SourceId>,
+    writing: bool,
+    /// The window closed: no more journal.
+    closed: bool,
 }
 
 impl Saver {
-    /// The saver of `window`, whose canvas shows the image of `file` (its path and format;
-    /// `None`: a new image). Adds the window's `save`, `save-as`, and `export` actions,
-    /// marks the title while there are changes, and asks before a window with changes
-    /// closes.
+    /// The saver of `window`, whose canvas shows the image of `file` (`None`: a new
+    /// image). Adds the window's `save`, `save-as`, and `export` actions, marks the title
+    /// while there are changes, asks before a window with changes closes, and journals
+    /// unsaved changes (unless not to `journal`: a benchmark's window).
     pub fn attach(
         window: &gtk::ApplicationWindow,
         canvas: &Canvas,
-        file: Option<(PathBuf, Format)>,
+        file: Option<Opened>,
+        journal: bool,
     ) {
-        let (path, format) = match file {
-            Some((path, format)) => (Some(path), format),
-            None => (None, Format::Png),
+        let (path, format, identity) = match file {
+            Some(f) => (Some(f.path), f.format, f.identity),
+            None => (None, Format::Png, None),
         };
         let saver = Rc::new(Saver {
             window: window.downgrade(),
             canvas: canvas.downgrade(),
             path: RefCell::new(path),
             format: Cell::new(format),
+            identity: Cell::new(identity),
             untitled: window.title().map(String::from).unwrap_or_default(),
             saved: Cell::new(canvas.position()),
             saving: Cell::new(false),
             waiting: RefCell::new(VecDeque::new()),
             closing: Cell::new(false),
+            journal: journal.then(|| recovery::store().new_journal()),
+            journaling: RefCell::default(),
         });
         // The window's actions and handlers own the saver; it holds the window weakly.
         let action = |name: &str, run: fn(&Rc<Saver>)| {
@@ -107,7 +140,10 @@ impl Saver {
         ]);
         canvas.connect_changed({
             let saver = saver.clone();
-            move |_| saver.show_title()
+            move |_| {
+                saver.show_title();
+                saver.journal_changed();
+            }
         });
         window.connect_close_request(move |_| {
             // Text being typed and floating pixels go on the image first: closing never
@@ -119,9 +155,117 @@ impl Saver {
                 saver.ask_before_closing();
                 glib::Propagation::Stop
             } else {
+                // Saved, or the user chose to discard: nothing to recover.
+                saver.close_journal();
                 glib::Propagation::Proceed
             }
         });
+    }
+
+    /// The image changed or was saved: journal it within [`WRITE_AFTER`] while it has
+    /// unsaved changes the journal doesn't hold, else remove the journal.
+    fn journal_changed(self: &Rc<Self>) {
+        let Some(journal) = &self.journal else {
+            return;
+        };
+        let position = self.canvas.upgrade().map(|c| c.position());
+        let modified = self.modified();
+        let mut j = self.journaling.borrow_mut();
+        if j.closed || j.writing {
+            return; // the write in progress looks again when it ends
+        }
+        if !modified {
+            if let Some(due) = j.due.take() {
+                due.remove();
+            }
+            if j.exists {
+                recovery::store().remove(journal);
+                (j.exists, j.written) = (false, None);
+            }
+        } else if j.due.is_none() && j.written != position {
+            let saver = self.clone();
+            j.due = Some(glib::timeout_add_local_once(WRITE_AFTER, move || {
+                saver.journaling.borrow_mut().due = None;
+                saver.write_journal();
+            }));
+        }
+    }
+
+    /// Write the image to the journal off the UI thread (copied on it, as a save does),
+    /// then look again.
+    fn write_journal(self: &Rc<Self>) {
+        let (Some(canvas), Some(journal)) = (self.canvas.upgrade(), self.journal.clone()) else {
+            return;
+        };
+        if !self.modified() || self.journaling.borrow().closed {
+            self.journal_changed();
+            return;
+        }
+        let started = Instant::now();
+        let (image, position) = canvas.copy_image();
+        let copy_ms = started.elapsed().as_secs_f64() * 1e3;
+        let (path, file) = (self.path.borrow().clone(), self.identity.get());
+        self.journaling.borrow_mut().writing = true;
+        let saver = self.clone();
+        glib::spawn_future_local(async move {
+            let written = gio::spawn_blocking({
+                let journal = journal.clone();
+                move || {
+                    let t = Instant::now();
+                    let header = Header {
+                        // The file's whole path, so an etch started in another folder
+                        // finds it.
+                        path: path.as_deref().map(crate::window::canonical),
+                        file,
+                        saved_ms: recovery::now_ms(),
+                        size: (image.width(), image.height()),
+                    };
+                    recovery::write(&recovery::store(), &journal, &header, &image)
+                        .map(|bytes| (bytes, t.elapsed()))
+                }
+            })
+            .await;
+            {
+                let mut j = saver.journaling.borrow_mut();
+                j.writing = false;
+                match written {
+                    Ok(Ok((bytes, took))) => {
+                        (j.exists, j.written) = (true, Some(position));
+                        tracing::info!(
+                            "journaled {}: copied in {copy_ms:.1} ms, {bytes} bytes written \
+                             in {:.0} ms",
+                            journal.display(),
+                            took.as_secs_f64() * 1e3
+                        );
+                    }
+                    Ok(Err(e)) => tracing::warn!("cannot write the recovery journal: {e}"),
+                    Err(_) => tracing::warn!("writing the recovery journal failed"),
+                }
+                if j.closed {
+                    // Closed while it was being written.
+                    recovery::store().remove(&journal);
+                    j.exists = false;
+                    return;
+                }
+            }
+            saver.journal_changed();
+        });
+    }
+
+    /// The window closes with nothing to recover: no journal.
+    fn close_journal(&self) {
+        let Some(journal) = &self.journal else {
+            return;
+        };
+        let mut j = self.journaling.borrow_mut();
+        j.closed = true;
+        if let Some(due) = j.due.take() {
+            due.remove();
+        }
+        if j.exists && !j.writing {
+            recovery::store().remove(journal);
+            j.exists = false;
+        }
     }
 
     /// The file's name, or the Untitled name of an image not saved yet.
@@ -286,7 +430,7 @@ impl Saver {
                 gio::spawn_blocking(move || {
                     let t = Instant::now();
                     image_io::save(&dest, &image, format)
-                        .map(|()| t.elapsed())
+                        .map(|()| (t.elapsed(), recovery::identity(&dest)))
                         .map_err(|e| reason(&e))
                 })
                 .await
@@ -298,7 +442,7 @@ impl Saver {
             drop(image);
             saver.saving.set(false);
             match result {
-                Ok(Some(took)) => {
+                Ok(Some((took, identity))) => {
                     tracing::info!(
                         "saved {} as {}: copied in {copy_ms:.1} ms, written in {:.0} ms",
                         dest.display(),
@@ -306,7 +450,8 @@ impl Saver {
                         took.as_secs_f64() * 1e3
                     );
                     if kind == Kind::Save {
-                        saver.saved(dest, format, position);
+                        saver.saved(dest, format, position, identity);
+                        saver.journal_changed();
                     }
                     if let Some(then) = then {
                         then();
@@ -328,9 +473,15 @@ impl Saver {
         });
     }
 
-    /// The image at `position` is now the file at `dest`, in `format`, which goes to the top
-    /// of the recent files.
-    fn saved(&self, dest: PathBuf, format: Format, position: Option<u64>) {
+    /// The image at `position` is now the file at `dest`, in `format`, of `identity`, which
+    /// goes to the top of the recent files.
+    fn saved(
+        &self,
+        dest: PathBuf,
+        format: Format,
+        position: Option<u64>,
+        identity: Option<(u64, u64)>,
+    ) {
         if self.path.borrow().as_deref() != Some(dest.as_path()) {
             if let Some(window) = self.window.upgrade() {
                 crate::window::moved(&window, &dest);
@@ -339,6 +490,7 @@ impl Saver {
         crate::recent::add(&dest);
         self.path.replace(Some(dest));
         self.format.set(format);
+        self.identity.set(identity);
         self.saved.set(position);
         self.show_title();
     }

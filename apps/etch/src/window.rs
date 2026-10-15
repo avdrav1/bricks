@@ -1,6 +1,7 @@
 //! Windows: one per image, with the app's menu bar, the tool column, the canvas, and the
-//! colour row and status bar below; opening files (the command line and File → Open);
-//! the New Image dialog; and the benchmarks (`--bench-stroke`, `--bench-open`). Saving is
+//! colour row and status bar below; opening files (the command line and File → Open), and
+//! crashed images again to offer their unsaved pixels back ([`crate::recovery`]); the New
+//! Image dialog; and the benchmarks (`--bench-stroke`, `--bench-open`). Saving is
 //! [`crate::saving`]'s.
 
 use crate::canvas::Canvas;
@@ -8,13 +9,13 @@ use crate::colours;
 use crate::image_menu;
 use crate::keys::{self, Command, Focus, Mods};
 use crate::recent;
-use crate::saving::Saver;
+use crate::recovery::{self, Crashed, Recovered};
+use crate::saving::{Opened, Saver};
 use crate::settings::{self, Background};
 use crate::text;
 use crate::tools::{self, Settings, Tool};
 use gtk::prelude::*;
 use gtk::{gdk, gio, glib};
-use image_io::Format;
 use image_model::{Color, Image, Style, MAX_SIDE};
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
@@ -138,25 +139,58 @@ pub fn install_app_actions(app: &gtk::Application) {
 /// A window with a new white image of `size`. The pixels are allocated off the UI thread:
 /// a large image takes a moment.
 pub fn open_blank(app: &gtk::Application, size: (u32, u32)) {
-    open_new(app, size, Color::WHITE, None);
+    open_new(app, size, Color::WHITE, None, None);
 }
 
 /// `--bench-stroke FRAMES`: a window with an 8K image at 100%, then the benchmark.
 pub fn open_bench(app: &gtk::Application, frames: u32) {
-    open_new(app, BENCH_SIZE, Color::WHITE, Some(frames));
+    open_new(app, BENCH_SIZE, Color::WHITE, Some(frames), None);
 }
 
-fn open_new(app: &gtk::Application, (w, h): (u32, u32), color: Color, bench: Option<u32>) {
+/// Crash recovery: the image of `crashed` opened again, its window offering the journal's
+/// pixels back: its file as it is now, or a new white Untitled image of the journal's
+/// size.
+pub fn reopen(app: &gtk::Application, crashed: Crashed) {
+    match crashed.header.path.clone() {
+        Some(path) => open_with(app, &path, None, Some(crashed)),
+        None => {
+            let size = crashed.header.size;
+            open_new(app, size, Color::WHITE, None, Some(crashed));
+        }
+    }
+}
+
+/// A window with a new image of `size` all `color`, then `bench` or offering back the
+/// pixels of `crashed`, read with it.
+fn open_new(
+    app: &gtk::Application,
+    (w, h): (u32, u32),
+    color: Color,
+    bench: Option<u32>,
+    crashed: Option<Crashed>,
+) {
     let app = app.clone();
     // Running until the window shows, though no window may be open yet.
     let hold = app.hold();
     glib::spawn_future_local(async move {
         let _hold = hold;
-        let made = gio::spawn_blocking(move || Image::new(w, h, color)).await;
+        let made = gio::spawn_blocking(move || {
+            // An Untitled image's journal goes onto it whatever it holds.
+            Image::new(w, h, color)
+                .map(|image| (image, crashed.and_then(|c| Recovered::read(c, None))))
+        })
+        .await;
         match made {
-            Ok(Ok(image)) => {
+            Ok(Ok((image, recovered))) => {
                 let window = new_window(&app, &untitled(&app));
-                show(&app, &window, image, None, bench.map(Bench::Stroke));
+                show(
+                    &app,
+                    &window,
+                    image,
+                    None,
+                    bench.map(Bench::Stroke),
+                    recovered,
+                );
             }
             Ok(Err(e)) => alert(&app, "Cannot make the image", &e.to_string()).await,
             Err(_) => {
@@ -233,9 +267,21 @@ fn open_file(app: &gtk::Application, file: &gio::File) {
 /// with the file's name that says "Opening…" while the file is read and decoded off the UI
 /// thread. A file that can't be opened gives an alert naming it and the reason, and its
 /// window closes. The file goes to the top of the recent files, or, when it can't be
-/// opened, leaves them. `bench`: `--bench-open`, started at that instant (the recent files
-/// left alone).
+/// opened, leaves them. A crashed session's unsaved pixels for the file are offered back
+/// ([`crate::recovery`]). `bench`: `--bench-open`, started at that instant (the recent
+/// files and crashed sessions left alone).
 pub fn open(app: &gtk::Application, path: &Path, bench: Option<Instant>) {
+    open_with(app, path, bench, None);
+}
+
+/// [`open`], offering back the pixels of `crashed` (else of the file's own crashed
+/// session, if it has one).
+fn open_with(
+    app: &gtk::Application,
+    path: &Path,
+    bench: Option<Instant>,
+    crashed: Option<Crashed>,
+) {
     if let Some(window) = window_for(path) {
         window.present();
         recent::add(path);
@@ -262,11 +308,25 @@ pub fn open(app: &gtk::Application, path: &Path, bench: Option<Instant>) {
         let p = path.clone();
         let read = gio::spawn_blocking(move || {
             let t = Instant::now();
-            (image_io::read(&p), t.elapsed())
+            let identity = recovery::identity(&p);
+            let read = image_io::read(&p);
+            let took = t.elapsed();
+            let crashed = match crashed {
+                Some(c) => Some(c),
+                None if bench.is_none() => recovery::crashed_for(&canonical(&p)),
+                None => None,
+            };
+            // Read, the journal's pixels go onto the file if it's as it was; else the
+            // journal is only kept or discarded.
+            let recovery = match &read {
+                Ok(_) => Ok(crashed.and_then(|c| Recovered::read(c, identity))),
+                Err(_) => Err(crashed.filter(|c| c.journal.exists())),
+            };
+            (read, took, identity, recovery)
         })
         .await;
-        let error = match read {
-            Ok((Ok((image, format)), took)) => {
+        let (error, crashed) = match read {
+            Ok((Ok((image, format)), took, identity, recovery)) => {
                 let read_ms = took.as_secs_f64() * 1e3;
                 let (w, h) = (image.width(), image.height());
                 tracing::info!("opened {}: {w}×{h} in {read_ms:.0} ms", path.display());
@@ -274,11 +334,17 @@ pub fn open(app: &gtk::Application, path: &Path, bench: Option<Instant>) {
                 if bench.is_none() {
                     recent::add(&path);
                 }
-                show(&app, &window, image, Some((path, format)), bench);
+                let file = Opened {
+                    path,
+                    format,
+                    identity,
+                };
+                let recovered = recovery.ok().flatten();
+                show(&app, &window, image, Some(file), bench, recovered);
                 return;
             }
-            Ok((Err(e), _)) => e.to_string(),
-            Err(_) => "Reading it failed unexpectedly.".to_owned(),
+            Ok((Err(e), _, _, recovery)) => (e.to_string(), recovery.err().flatten()),
+            Err(_) => ("Reading it failed unexpectedly.".to_owned(), None),
         };
         eprintln!("etch: cannot open {}: {error}", path.display());
         if bench.is_some() {
@@ -293,6 +359,9 @@ pub fn open(app: &gtk::Application, path: &Path, bench: Option<Instant>) {
             .build()
             .choose_future(Some(&window))
             .await;
+        if let Some(crashed) = crashed {
+            recovery::changed(&window, &crashed).await;
+        }
         window.close();
     });
 }
@@ -308,7 +377,7 @@ fn window_for(path: &Path) -> Option<gtk::ApplicationWindow> {
     })
 }
 
-fn canonical(path: &Path) -> PathBuf {
+pub(crate) fn canonical(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned())
 }
 
@@ -872,14 +941,15 @@ fn colour_row(controls: &Rc<Controls>) -> gtk::Box {
 }
 
 /// Fill `window` with the image's view: the tool column, the canvas showing `image` (of
-/// `file`, its path and format; `None` for a new image), the colour row, and the status
-/// bar; then run `bench`, if given.
+/// `file`; `None` for a new image), the colour row, and the status bar; then run `bench`,
+/// if given, or offer back a crashed session's pixels, `recovered`.
 fn show(
     app: &gtk::Application,
     window: &gtk::ApplicationWindow,
     image: Image,
-    file: Option<(PathBuf, Format)>,
+    file: Option<Opened>,
     bench: Option<Bench>,
+    recovered: Option<Recovered>,
 ) {
     let canvas = Canvas::new(image, matches!(bench, Some(Bench::Stroke(_))));
     let (edge, [hard, soft]) = choice(
@@ -1093,13 +1163,17 @@ fn show(
             image_menu::update(&window, canvas);
         }
     });
-    Saver::attach(window, &canvas, file);
+    Saver::attach(window, &canvas, file, bench.is_none());
     window.present();
     canvas.grab_focus();
     match bench {
         Some(Bench::Stroke(frames)) => bench_stroke(app, &canvas, frames),
         Some(Bench::Open { start, read_ms }) => bench_open(app, window, &canvas, start, read_ms),
-        None => {}
+        None => {
+            if let Some(recovered) = recovered {
+                recovered.offer(window, &canvas);
+            }
+        }
     }
 }
 
@@ -1325,6 +1399,7 @@ fn ask_new_image(app: &gtk::Application) {
                 &app,
                 chosen.new_size,
                 chosen.new_background.color(background),
+                None,
                 None,
             );
         }

@@ -10,8 +10,9 @@
 //! background colour), remembered across runs; File → Open (Ctrl+O) picks a file, File →
 //! Open Recent lists the last ten opened or saved, and Save (Ctrl+S), Save As
 //! (Ctrl+Shift+S), and Export (Ctrl+Shift+E) write PNG, JPEG, or BMP; closing or quitting
-//! with changes not saved asks first. The canvas zooms and pans, the
-//! pencil and eraser draw, and every stroke undoes and redoes.
+//! with changes not saved asks first. Unsaved changes are journaled, and after a crash
+//! `etch` opens each crashed image again, offering its changes back. The canvas zooms and
+//! pans, the pencil and eraser draw, and every stroke undoes and redoes.
 //! `--bench-stroke` draws a stroke one segment a frame on a 7680×4320 image at 100% for
 //! FRAMES frames and prints how long each took (ETCH-2's acceptance test); `--bench-open`
 //! opens FILE and prints how long it took to show (ETCH-6's).
@@ -21,6 +22,7 @@ mod colours;
 mod image_menu;
 mod keys;
 mod recent;
+mod recovery;
 mod saving;
 mod settings;
 mod text;
@@ -122,7 +124,8 @@ fn main() -> glib::ExitCode {
             for path in &files {
                 window::open(app, path, None);
             }
-        } else if app.windows().is_empty() {
+        } else if app.windows().is_empty() && !recovery::reopen(app) {
+            // A crash's images open instead of the blank one.
             window::open_blank(app, window::DEFAULT_SIZE);
         }
     });

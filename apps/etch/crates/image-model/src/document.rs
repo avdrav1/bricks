@@ -105,6 +105,10 @@ pub enum Operation {
     /// A transform of the whole image ([`Document::transform`]); its step keeps a whole
     /// image rather than tiles.
     Transform(Transform),
+    /// The whole image replaced by another, of any size ([`Document::replace`]: a crash
+    /// journal's pixels put back). Its step keeps the image on its other side, as a lossy
+    /// transform's does, so undo and redo swap images and it's never applied.
+    Replace,
 }
 
 impl Operation {
@@ -125,6 +129,7 @@ impl Operation {
                 *image = t.apply(image).expect("a recorded transform has pixels");
                 Some(image.bounds())
             }
+            Operation::Replace => unreachable!("a replace step swaps in its other image"),
         }
     }
 }
@@ -458,6 +463,24 @@ impl Document {
         self.next_id += 1;
         self.undone.clear();
         Some(self.image.bounds())
+    }
+
+    /// Replaces the whole image with `image`, whatever its size (a crash journal's pixels
+    /// put back over the file's), as one undo step keeping the image from before it: undo
+    /// gives back that image, its size too, and redo `image`. Always a step, even when the
+    /// pixels are the same. Returns the new image's bounds. Ends any stroke under way.
+    pub fn replace(&mut self, image: Image) -> Rect {
+        self.end_stroke();
+        let before = std::mem::replace(&mut self.image, image);
+        self.done.push(Step {
+            op: Operation::Replace,
+            before: Saved::default(),
+            other: Some(before),
+            id: self.next_id,
+        });
+        self.next_id += 1;
+        self.undone.clear();
+        self.image.bounds()
     }
 
     /// Makes `op`, done, the last step, with the pixels it replaced; drops the redo.

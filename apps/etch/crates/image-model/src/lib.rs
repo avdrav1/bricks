@@ -8,8 +8,9 @@
 //! before it touched them: undo writes the tiles back, redo replays the operation. A
 //! transform of the whole image ([`Transform`]) that loses pixels (crop, resize, resize
 //! canvas) keeps instead the whole image on its step's other side, which undo and redo
-//! swap in; one that moves every pixel whole (rotate, flip) undoes by its inverse and
-//! redoes by applying it again, keeping nothing.
+//! swap in, as does replacing the whole image ([`Document::replace`]); one that moves every
+//! pixel whole (rotate, flip) undoes by its inverse and redoes by applying it again,
+//! keeping nothing.
 
 mod blend;
 mod brush;

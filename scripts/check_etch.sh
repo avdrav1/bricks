@@ -241,6 +241,22 @@
 #      font list's search: the tool stays, and no colour swaps; back on the canvas, B picks
 #      the brush. In an open menu a tool key is the menu's: Alt+V, F fits the image to the
 #      window (the zoom leaves 100%) and the eraser stays the tool.
+# ETCH-25 acceptance: crash recovery.
+#  30. `etch k.png` (a copy of t.png): a stroke of size 5 across its red half marks it; its
+#      journal (in $XDG_STATE_HOME/etch/recovery) appears 5 s after the press, not before
+#      (polled every 0.1 s from 0.5 s before the press). Killed (SIGKILL),
+#      the journal stays and the file is byte for byte as it was. `etch k.png` asks
+#      "Restore unsaved edits?" (Etch closed unexpectedly...) with Discard and Restore;
+#      Restore shows the stroke (black on screen), the title "• k.png", the file still
+#      unchanged, and no crashed journal left; one Ctrl+Z gives back the file's red,
+#      unmarked. Ctrl+Y, killed again: `etch` alone opens k.png and asks; Discard leaves
+#      the file's red and no journal. Edited, a journal; undoing back to the file removes
+#      it; redone, a journal; Ctrl+W and Discard close etch with no journal and the file
+#      unchanged. Edited and killed, then the file touched (its time changed): `etch
+#      k.png` says "“k.png” changed after the crash" with Keep for Later and Discard;
+#      Keep for Later shows the file and keeps the journal. An Untitled image drawn on
+#      and killed: `etch` alone opens an Untitled 1024×768 image and asks (an untitled
+#      image); Restore shows as much ink as was drawn, "• Untitled", and Ctrl+Z none.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -696,6 +712,9 @@ session() {
   near() { # X1 Y1 X2 Y2 DX DY: whether (X2, Y2) is (X1 + DX, Y1 + DY), within a pixel
     python3 -c "import sys; a = list(map(float, sys.argv[1:])); print(\"yes\" if abs(a[2] - a[0] - a[4]) <= 1 and abs(a[3] - a[1] - a[5]) <= 1 else f\"no ({a[0]:.0f},{a[1]:.0f} to {a[2]:.0f},{a[3]:.0f})\")" "$@"
   }
+  # SIGTERM ends etch without closing its windows, so an image with changes not saved
+  # leaves its recovery journal as a crash does (section 30): each section starts without.
+  quit() { pkill -x etch; sleep 1; rm -rf "${XDG_STATE_HOME:-$HOME/.local/state}/etch/recovery"; }
 
   echo "== 1 start"
   etch >>/tmp/app.log 2>&1 & sleep 3
@@ -769,7 +788,7 @@ session() {
   shown closed | grep "New Image" || echo "closed: no dialog"
 
   echo "== 8 bench"
-  pkill -x etch; sleep 1
+  quit
   etch --bench-stroke 120 2>>/tmp/app.log | sed "s/^/bench: /"
 
   echo "== 9 eraser"
@@ -789,7 +808,7 @@ session() {
   echo "unerased: $(same $drawn $(px black /tmp/shot.png)) grey $(px checker /tmp/shot.png)"
   keys p; echo "key p: pencil $(tool Pencil) eraser $(tool Eraser)"
   keys e; echo "key e: pencil $(tool Pencil) eraser $(tool Eraser)"
-  pkill -x etch; sleep 1
+  quit
 
   echo "== 10 colours"
   etch >>/tmp/app.log 2>&1 & sleep 3
@@ -811,20 +830,20 @@ session() {
   echo "red still: $(px column /tmp/shot.png $mx ED1C24)"
   keys e; echo "eraser size: $(python3 /tmp/a11y.py text | grep -A1 "^Size$" | tail -1)"
   keys p; echo "pencil size: $(python3 /tmp/a11y.py text | grep -A1 "^Size$" | tail -1)"
-  pkill -x etch; sleep 1
+  quit
 
   echo "== 11 open"
   python3 /tmp/mk.py
   etch /tmp/t.png >>/tmp/open.log 2>&1 & sleep 3
   shown opened | grep -E "^opened: (t\.png|400×300|[0-9.]+%)$"
   shot opened; px opened /tmp/shot.png 400 300 | sed "s/^/opened: /"
-  pkill -x etch; sleep 1
+  quit
   etch >>/tmp/app.log 2>&1 & sleep 3
   keys -M ctrl o -m ctrl; sleep 1.5
   shown chooser | grep -E "^chooser: (Open|Images \(PNG, JPEG, BMP\))$"
   keys -M ctrl l -m ctrl; keys /tmp/c.jpg; keys -k Return; sleep 3
   shot ctrl-o; shown ctrl-o | grep -E "^ctrl-o: (c\.jpg|320×200|Untitled)$"
-  pkill -x etch; sleep 1
+  quit
   head -c 200 /tmp/t.png > /tmp/bad.png
   etch /tmp/bad.png >>/tmp/open.log 2>&1 & sleep 3
   shot damaged; shown damaged | grep -E "Cannot open|damaged"
@@ -833,7 +852,7 @@ session() {
   printf "shopping: eggs, milk\n" > /tmp/notes.png
   etch /tmp/notes.png >>/tmp/open.log 2>&1 & sleep 3
   shown unsupported | grep -E "Cannot open|image Etch can open"
-  pkill -x etch; sleep 1
+  quit
   grep -E "^etch: cannot open|panicked|CRITICAL" /tmp/open.log | sed "s/^/log: /"
 
   echo "== 12 save"
@@ -885,11 +904,11 @@ session() {
   keys -M ctrl -M shift s -m shift -m ctrl; sleep 1.5
   shown jpeg-chooser | grep -E "^jpeg-chooser: (Save As|s2\.jpg|[A-Z]+ image)$"
   keys -k Escape; sleep 1
-  pkill -x etch; sleep 1
+  quit
   etch >>/tmp/save.log 2>&1 & sleep 3
   stroke 0; keys -M ctrl s -m ctrl; sleep 1.5
   shown untitled | grep -E "^untitled: (Save As|Untitled\.png)$"
-  pkill -x etch; sleep 1
+  quit
   grep -E "saved|cannot save|panicked|CRITICAL" /tmp/save.log | sed "s/^/log: /"
 
   echo "== 13 brush"
@@ -918,7 +937,7 @@ session() {
   keys -M ctrl y -m ctrl; shot soft-redone
   echo "redone soft: $(same "$soft" "$(px profile /tmp/shot.png $mx $((my - 80)) $((my - 40)))")"
   keys p; echo "key p: edge $(tool Hard) $(tool Soft)"
-  pkill -x etch; sleep 1
+  quit
 
   echo "== 14 fill"
   etch >>/tmp/app.log 2>&1 & sleep 3
@@ -943,7 +962,7 @@ session() {
   echo "undone outside: inside red $(inside ED1C24) outside white $(outside FFFFFF)"
   keys -M ctrl z -m ctrl; shot fill-undone2; echo "undone inside: inside white $(inside FFFFFF)"
   keys -M ctrl y -m ctrl; shot fill-redone; echo "redone: inside red $(inside ED1C24)"
-  pkill -x etch; sleep 1
+  quit
 
   echo "== 15 picker"
   etch /tmp/t.png >>/tmp/app.log 2>&1 & sleep 3
@@ -961,7 +980,7 @@ session() {
   keys i; python3 /scripts/dnd_helpers.py click $((l + 300)) $((t + 75)) 1 right; sleep 0.5
   colours clear; echo "after clear: picker $(picker) brush $(tool Brush)"
   echo "title: $(python3 /tmp/a11y.py text | grep -E "^(• )?t\.png$" | head -1)"
-  pkill -x etch; sleep 1
+  quit
 
   echo "== 16 shapes"
   etch >>/tmp/app.log 2>&1 & sleep 3
@@ -1007,7 +1026,7 @@ session() {
   python3 /scripts/dnd_helpers.py drag $l $t $r $b; sleep 0.5; shot line-drawn
   echo "line drawn: $(title) line $(px line /tmp/shot.png $l $t $r $b)"
   keys -M ctrl z -m ctrl; shot line-undone; echo "line undone: $(title) ink $(px ink /tmp/shot.png)"
-  pkill -x etch; sleep 1
+  quit
 
   echo "== 17 text"
   etch >>/tmp/app.log 2>&1 & sleep 3
@@ -1061,7 +1080,7 @@ session() {
   kill $board
 
   echo "== 18 new image"
-  pkill -x etch; sleep 1
+  quit
   etch >>/tmp/app.log 2>&1 & sleep 3
   keys -M ctrl n -m ctrl; sleep 1
   shown dialog | grep -E "^dialog: (White|Transparent|Background colour|#FFFFFF)$"
@@ -1077,14 +1096,14 @@ session() {
   keys -M ctrl s -m ctrl; sleep 1.5
   keys -M ctrl a -m ctrl; keys /tmp/clear.png; keys -k Return; sleep 3
   echo "saved: $(px alpha /tmp/clear.png)"
-  pkill -x etch; sleep 1
+  quit
   echo "settings: $(tr "\n" " " < ~/.config/etch/settings)"
   etch >>/tmp/app.log 2>&1 & sleep 3
   keys -M ctrl n -m ctrl; sleep 1
   shown again | grep -E "^again: (300|200)$"
   echo "again checked: $(px checked)"
   keys -k Escape; sleep 1
-  pkill -x etch; sleep 1
+  quit
 
   echo "== 19 tolerance"
   etch /tmp/n.png >>/tmp/app.log 2>&1 & sleep 3
@@ -1104,7 +1123,7 @@ session() {
     shot tolerance-$tol; echo "at $(tolerance): $(halves)"
   done
   keys p; keys f; echo "kept: $(tolerance)"
-  pkill -x etch; sleep 1
+  quit
 
   echo "== 20 selection"
   etch /tmp/t.png >>/tmp/app.log 2>&1 & sleep 3
@@ -1149,7 +1168,7 @@ session() {
   keys -M ctrl a -m ctrl
   echo "typing: $(desc) $(sel) text $(tool Text) selection $(tool Selection)"
   keys -k Escape
-  pkill -x etch; sleep 1
+  quit
 
   echo "== 21 clipboard"
   etch /tmp/t.png >>/tmp/app.log 2>&1 & sleep 3
@@ -1191,7 +1210,7 @@ session() {
   keys -M ctrl v -m ctrl; sleep 1
   echo "typing: $(desc) $(sel)"
   keys -k Escape
-  pkill -x etch; sleep 1
+  quit
   echo "clip log: $(grep -c . /tmp/clip.log)"; sed "s/^/clip: /" /tmp/clip.log
 
   # The image size in the status; the title of FILE; the W x H image centred at 100% in
@@ -1231,7 +1250,7 @@ session() {
   echo "float cropped: $(size) $(sel) red $(centred 100 80 0 0 100 80 FF0000)"
   keys -M ctrl z -m ctrl; sleep 1; shot float-crop-undone
   echo "float crop undone: $(size) red $(centred 400 300 250 50 350 130 FF0000) left $(px checkered /tmp/shot.png $((l + 54)) $((t + 54)) $((l + 146)) $((t + 126)))"
-  pkill -x etch; sleep 1
+  quit
 
   echo "== 23 resize"
   cp /tmp/t.png /tmp/resize.png
@@ -1262,7 +1281,7 @@ session() {
   keys -M ctrl s -m ctrl; sleep 2
   echo "smooth saved: $(px rgba /tmp/resize.png 0,0 99,10 100,10)"
   keys -M ctrl z -m ctrl; sleep 1; echo "smooth undone: $(size)"
-  pkill -x etch; sleep 1
+  quit
 
   echo "== 24 canvas"
   cp /tmp/t.png /tmp/canvas.png
@@ -1310,7 +1329,7 @@ session() {
   keys -M ctrl z -m ctrl; sleep 1; shot shrink-undone
   echo "shrink undone: $(size)"
   px opened /tmp/shot.png 400 300 | sed "s/^/shrink undone: /"
-  pkill -x etch; sleep 1
+  quit
 
   echo "== 25 rotate"
   cp /tmp/t.png /tmp/rot.png
@@ -1344,7 +1363,7 @@ session() {
   keys -M ctrl s -m ctrl; sleep 2
   echo "four turns: $(size) $(titled rot.png) $(px same /tmp/rot.png /tmp/t.png)"
   keys -M ctrl z -m ctrl; sleep 1; echo "three turns: $(size) $(titled rot.png)"
-  pkill -x etch; sleep 1
+  quit
 
   echo "== 26 drop"
   cp /tmp/t.png /tmp/one.png; cp /tmp/c.jpg /tmp/two.jpg
@@ -1371,7 +1390,7 @@ session() {
   shown alert | grep -E "^alert: (Cannot open|It isn)"
   keys -k Return; sleep 1
   python3 /tmp/tree.py | sed "s/^/after alert: /"
-  pkill -x etch; sleep 1
+  quit
   grep -E "^etch: |panicked|CRITICAL" /tmp/drop.log | sed "s/^/log: /"
 
   echo "== 27 recent"
@@ -1384,11 +1403,11 @@ session() {
   recent_menu() { keys -M alt f -m alt; sleep 1; keys r; sleep 1; }
   # The image items of the menus open, by name, in order.
   items() { px menu | grep -E "\.png  \(" | cut -d" " -f1 | tr "\n" " " | sed "s/ $//"; }
-  for f in r1 r2 r3 r1; do run /tmp/$f.png; pkill -x etch; sleep 1; done
+  for f in r1 r2 r3 r1; do run /tmp/$f.png; quit; done
   echo "opened: $(stored)"
   run; keys -M ctrl s -m ctrl; sleep 1.5
   keys -M ctrl a -m ctrl; keys /tmp/r4.png; keys -k Return; sleep 3
-  pkill -x etch; sleep 1
+  quit
   echo "saved: $(stored)"
   run
   recent_menu; shot recent-menu
@@ -1403,7 +1422,7 @@ session() {
   python3 /tmp/tree.py | grep windows | sed "s/^/missing: /"
   echo "missing: $(stored)"
   recent_menu; echo "after missing: $(items)"
-  keys -k Escape -k Escape; pkill -x etch; sleep 1
+  keys -k Escape -k Escape; quit
   grep -E "^etch: |panicked|CRITICAL" /tmp/recent.log | sed "s/^/log: /"
 
   echo "== 28 colours"
@@ -1443,7 +1462,7 @@ session() {
   read x y <<<"$(px where "Custom…")"; python3 /scripts/dnd_helpers.py click $x $y 1 right; sleep 2
   shown right | grep -E "^right: (Foreground Colour|Background Colour)$"
   custom "Background Colour" "#FFCC00" 1; colours background
-  pkill -x etch; sleep 1
+  quit
 
   echo "== 29 keys"
   etch >>/tmp/app.log 2>&1 & sleep 3
@@ -1477,7 +1496,73 @@ session() {
   python3 /scripts/dnd_helpers.py click $((mx + 600)) $my; sleep 0.5
   # In an open menu a letter picks an item: Alt+V, F fits the image to the window.
   keys e; keys -M alt v -m alt; keys f; sleep 0.5; echo "menu: $(tool_on) $(zoom)"
-  pkill -x etch; sleep 1
+  quit
+
+  echo "== 30 recovery"
+  jdir=${XDG_STATE_HOME:-$HOME/.local/state}/etch/recovery
+  journals() { ls "$jdir"/*.journal 2>/dev/null | wc -l; }
+  title() { python3 /tmp/a11y.py text | grep -E "^(• )?(k\.png|Untitled)$" | head -1; }
+  unchanged() { [ "$(md5sum </tmp/k.png)" = "$sum" ] && echo "file unchanged" || echo "file changed"; }
+  start() { etch "$@" >>/tmp/recovery.log 2>&1 & sleep 3; }
+  # A crash: SIGKILL, so nothing runs on the way out.
+  crash() { pkill -9 -x etch; sleep 1; }
+  # k.png (a copy of t.png) at 100%: the band of its red half where the stroke goes.
+  cp /tmp/t.png /tmp/k.png; sum=$(md5sum </tmp/k.png)
+  start /tmp/k.png
+  read cx cy cw ch <<<"$(px canvas)"
+  l=$((cx + (cw - 400) / 2)); t=$((cy + (ch - 300) / 2))
+  band() { shot "$1"; px count /tmp/shot.png $((l + 30)) $((t + 99)) $((l + 170)) $((t + 102)) "$2"; }
+  keys -M alt s -m alt; keys -M ctrl a -m ctrl; keys 5; keys -k Return
+  t0=$(date +%s.%N)
+  python3 /scripts/dnd_helpers.py drag $((l + 20)) $((t + 100)) $((l + 180)) $((t + 100))
+  for i in $(seq 100); do [ "$(journals)" -gt 0 ] && break; sleep 0.1; done
+  echo "journal after $(python3 -c "import sys, time; print(round(time.time() - float(sys.argv[1]), 1))" $t0) s"
+  echo "drawn: $(title) black $(band drawn 000000)"
+  crash; echo "killed: $(journals) journals, $(unchanged)"
+  start /tmp/k.png
+  shot restore-asked; shown asked | grep -E "Restore unsaved edits|closed unexpectedly|^asked: (Discard|Restore)$"
+  python3 /tmp/a11y.py press Restore; sleep 1
+  echo "restored: $(title) black $(band restored 000000) $(unchanged) $(journals) journals"
+  keys -M ctrl z -m ctrl; sleep 0.5
+  echo "undone: $(title) red $(band restore-undone FF0000)"
+  # Again, then kill it, and etch alone opens k.png to offer it back: Discard.
+  keys -M ctrl y -m ctrl; sleep 6.5
+  crash; echo "again: $(journals) journals"
+  start
+  shown alone | grep -E "^alone: (• )?k\.png$|Restore unsaved edits"
+  python3 /tmp/a11y.py press Discard; sleep 1
+  echo "discarded: $(title) red $(band discarded FF0000) $(journals) journals"
+  # Undoing back to the file removes the journal, and so does closing with Discard.
+  python3 /scripts/dnd_helpers.py drag $((l + 20)) $((t + 100)) $((l + 180)) $((t + 100)); sleep 6.5
+  echo "edited: $(journals) journals"
+  keys -M ctrl z -m ctrl; sleep 1; echo "undone to the file: $(title) $(journals) journals"
+  keys -M ctrl y -m ctrl; sleep 6.5; echo "redone: $(journals) journals"
+  keys -M ctrl w -m ctrl; sleep 1; python3 /tmp/a11y.py press Discard; sleep 1.5
+  pgrep -x etch >/dev/null && echo "closed: running" || echo "closed: exited, $(journals) journals, $(unchanged)"
+  # A file changed after the crash: its journal is only kept or discarded.
+  start /tmp/k.png
+  python3 /scripts/dnd_helpers.py drag $((l + 20)) $((t + 100)) $((l + 180)) $((t + 100)); sleep 6.5
+  crash; touch /tmp/k.png; sum=$(md5sum </tmp/k.png)
+  start /tmp/k.png
+  shot changed; shown changed | grep -E "changed after the crash|^changed: (Keep for Later|Discard)$"
+  python3 /tmp/a11y.py press "Keep for Later"; sleep 1
+  echo "kept: $(title) red $(band kept FF0000) $(journals) journals"
+  quit
+  # The journal of an Untitled image: etch alone offers it back on a new Untitled image.
+  start
+  keys -M ctrl 0 -m ctrl
+  read mx my <<<"$(px centre)"
+  python3 /scripts/dnd_helpers.py drag $((mx - 150)) $((my - 80)) $((mx + 150)) $((my + 80)); sleep 0.5
+  shot untitled-drawn; ink=$(px ink /tmp/shot.png); echo "untitled: $(title) ink $ink"
+  sleep 6.5; crash; echo "untitled killed: $(journals) journals"
+  start
+  shown untitled-asked | grep -E "^untitled-asked: (Untitled|1024×768)$|Restore unsaved edits|an untitled image"
+  python3 /tmp/a11y.py press Restore; sleep 1; keys -M ctrl 0 -m ctrl
+  shot untitled-restored; echo "untitled restored: $(title) ink $(same "$ink" "$(px ink /tmp/shot.png)")"
+  keys -M ctrl z -m ctrl; shot untitled-undone
+  echo "untitled undone: $(title) ink $(px ink /tmp/shot.png)"
+  quit
+  grep -E "journaled|restored| (WARN|ERROR) |panicked|CRITICAL" /tmp/recovery.log | sed -E "s/^.* INFO etch::[a-z_]+: //; s/^/log: /"
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -1852,6 +1937,36 @@ check "29: ... nor in the font list search" "29 keys" "^font search: Text$"
 absent "29: ... swapping no colours in any of them" "29 keys" "^(tolerance|hex|font): Foreground #FFFFFF"
 check "29: in an open menu a tool key is the item's (Alt+V, F fits)" "29 keys" "^menu: Eraser [0-9.]+%$"
 absent "29: ... the zoom no longer 100%" "29 keys" "^menu: .* 100%$"
+# ETCH-25: crash recovery.
+check "30: a stroke across k.png's red half marks it" "30 recovery" "^drawn: • k\.png black all$"
+check "30: its journal appears 5 s after the press (0.5 s into the drag), not before" "30 recovery" "^journal after (5\.[5-9]|6\.[0-9]) s$"
+check "30: killed, the journal stays and the file is unchanged" "30 recovery" "^killed: 1 journals, file unchanged$"
+check "30: etch k.png asks Restore unsaved edits?" "30 recovery" "^asked: Restore unsaved edits\?$"
+check "30: ... saying when Etch closed unexpectedly" "30 recovery" "^asked: Etch closed unexpectedly at [0-9]{2}:[0-9]{2} while “k\.png” had unsaved edits\.$"
+check "30: ... with Discard" "30 recovery" "^asked: Discard$"
+check "30: ... and Restore" "30 recovery" "^asked: Restore$"
+check "30: Restore shows the stroke, marked, the file unchanged, no crashed journal" "30 recovery" "^restored: • k\.png black all file unchanged 0 journals$"
+check "30: one Ctrl+Z gives back the file's pixels, unmarked" "30 recovery" "^undone: k\.png red all$"
+check "30: redone and killed, a journal" "30 recovery" "^again: 1 journals$"
+check "30: etch alone opens k.png" "30 recovery" "^alone: k\.png$"
+check "30: ... and asks" "30 recovery" "^alone: Restore unsaved edits\?$"
+check "30: Discard leaves the file's pixels and no journal" "30 recovery" "^discarded: k\.png red all 0 journals$"
+check "30: an edit is journaled" "30 recovery" "^edited: 1 journals$"
+check "30: undoing back to the file removes the journal" "30 recovery" "^undone to the file: k\.png 0 journals$"
+check "30: redone, journaled again" "30 recovery" "^redone: 1 journals$"
+check "30: closing with Discard leaves no journal and the file unchanged" "30 recovery" "^closed: exited, 0 journals, file unchanged$"
+check "30: a file changed after the crash says so" "30 recovery" "^changed: “k\.png” changed after the crash$"
+check "30: ... offering Keep for Later" "30 recovery" "^changed: Keep for Later$"
+check "30: Keep for Later shows the file and keeps the journal" "30 recovery" "^kept: k\.png red all 1 journals$"
+check "30: an Untitled image drawn on" "30 recovery" "^untitled: • Untitled ink [1-9][0-9]*$"
+check "30: ... killed, its journal stays" "30 recovery" "^untitled killed: 1 journals$"
+check "30: etch alone opens an Untitled image" "30 recovery" "^untitled-asked: Untitled$"
+check "30: ... 1024×768" "30 recovery" "^untitled-asked: 1024×768$"
+check "30: ... asking to restore an untitled image" "30 recovery" "^untitled-asked: .*while an untitled image had unsaved edits\.$"
+check "30: Restore shows as much ink as was drawn, marked" "30 recovery" "^untitled restored: • Untitled ink yes$"
+check "30: one Ctrl+Z takes it all back" "30 recovery" "^untitled undone: Untitled ink 0$"
+check "30: journals are written off the UI thread, logged" "30 recovery" "^log: journaled .* bytes written in [0-9]+ ms$"
+absent "30: no warnings, errors, or panics" "30 recovery" "^log: .*(WARN|ERROR|panicked|CRITICAL)"
 absent "the app logs no errors or panics" "app log" "^etch:|panicked|CRITICAL"
 bench=$(section "8 bench" | sed -n "s/^bench: //p")
 if [ -z "$bench" ]; then echo "FAIL 8: --bench-stroke printed nothing"; fail=1; else
