@@ -14,7 +14,30 @@ pub fn set_dark(dark: bool) {
         std::thread::current().name(),
         glib::MainContext::default().is_owner()
     );
-    glib::MainContext::default().invoke(move || apply(dark));
+    let strategy = std::env::var("MAC6_STRATEGY").unwrap_or_default();
+    let notify = |dark: bool| {
+        apply(dark);
+        if let Some(s) = gtk::Settings::default() {
+            s.notify("gtk-theme-name");
+        }
+    };
+    let prefer = |dark: bool| {
+        apply(dark);
+        if let Some(s) = gtk::Settings::default() {
+            s.set_gtk_application_prefer_dark_theme(dark);
+        }
+    };
+    match strategy.as_str() {
+        "idle" => {
+            glib::idle_add_once(move || apply(dark));
+        }
+        "notify" => glib::MainContext::default().invoke(move || notify(dark)),
+        "idle-notify" => {
+            glib::idle_add_once(move || notify(dark));
+        }
+        "prefer" => glib::MainContext::default().invoke(move || prefer(dark)),
+        _ => glib::MainContext::default().invoke(move || apply(dark)),
+    }
 }
 
 fn apply(dark: bool) {

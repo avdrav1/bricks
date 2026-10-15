@@ -226,6 +226,18 @@ shot slate-live-2b-resized
 appearance light
 until_shot light slate-live-3-light "slate turns light again"
 stop
+# Diagnostic: which way of telling GTK makes a running window follow.
+for strategy in direct idle notify idle-notify prefer; do
+  appearance light
+  start "probe-$strategy" 10 env MAC6_STRATEGY=$strategy "$bin/etch" "$work/picture.png"
+  shot "probe-$strategy-1"
+  appearance dark
+  sleep 8
+  shot "probe-$strategy-2"
+  say "probe $strategy: light $MIDDLE"
+  stop
+done
+appearance light
 
 if ((failed)); then say "LOOK FAILED"; exit 1; fi
 say "LOOK OK"
