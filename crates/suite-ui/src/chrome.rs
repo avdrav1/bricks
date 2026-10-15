@@ -102,7 +102,18 @@ pub fn licence(kind: AppKind) -> String {
     )
 }
 
-/// The app's About dialog: its name, version, what it is, its licence, and its web page.
+/// The app's icon, as packaged for Linux (`packaging/<app id>.svg`).
+fn icon_svg(kind: AppKind) -> &'static [u8] {
+    match kind {
+        AppKind::Brick => include_bytes!("../../../packaging/dev.cronkite.Brick.svg"),
+        AppKind::Slate => include_bytes!("../../../packaging/dev.cronkite.Slate.svg"),
+        AppKind::Frame => include_bytes!("../../../packaging/dev.cronkite.Frame.svg"),
+        AppKind::Etch => include_bytes!("../../../packaging/dev.cronkite.Etch.svg"),
+    }
+}
+
+/// The app's About dialog: its icon, name, version, what it is, its licence, and its web
+/// page.
 pub fn about(parent: Option<&gtk::Window>, kind: AppKind, version: &str) {
     let dialog = gtk::AboutDialog::builder()
         .program_name(kind.display_name())
@@ -115,12 +126,16 @@ pub fn about(parent: Option<&gtk::Window>, kind: AppKind, version: &str) {
         .wrap_license(true)
         .modal(true)
         .build();
-    // The app's icon where the icon theme has it (installed on Linux); none rather than a
-    // missing-image icon where it doesn't.
-    let has_icon = gtk::gdk::Display::default()
+    // The icon theme's icon where it has the app's (installed on Linux), else the packaged
+    // one decoded here (macOS has no icon theme with it); none if neither can be had.
+    let themed = gtk::gdk::Display::default()
         .is_some_and(|d| gtk::IconTheme::for_display(&d).has_icon(kind.app_id()));
-    if has_icon {
+    if themed {
         dialog.set_logo_icon_name(Some(kind.app_id()));
+    } else if let Ok(texture) =
+        gtk::gdk::Texture::from_bytes(&glib::Bytes::from_static(icon_svg(kind)))
+    {
+        dialog.set_logo(Some(&texture));
     }
     dialog.set_transient_for(parent);
     dialog.present();
@@ -261,5 +276,14 @@ mod tests {
         }
         assert_eq!(website(AppKind::Brick), "https://brick.cronkite.cc");
         assert_eq!(website(AppKind::Etch), "https://etch.cronkite.cc");
+    }
+
+    #[test]
+    fn each_apps_icon_decodes_for_the_about_dialog() {
+        for kind in APPS {
+            let texture = gtk::gdk::Texture::from_bytes(&glib::Bytes::from_static(icon_svg(kind)))
+                .unwrap_or_else(|e| panic!("{kind:?}: {e}"));
+            assert_eq!((texture.width(), texture.height()), (128, 128), "{kind:?}");
+        }
     }
 }
