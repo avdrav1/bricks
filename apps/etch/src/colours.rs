@@ -46,6 +46,35 @@ pub fn hex(c: Color) -> String {
     }
 }
 
+/// The colour `text` names in hex: `#RGB` (each digit doubled), `#RRGGBB` (opaque), or
+/// `#RRGGBBAA`, in either case, the `#` optional, spaces around ignored. Anything else is
+/// `None`.
+pub fn parse_hex(text: &str) -> Option<Color> {
+    let digits = text.trim();
+    let digits = digits.strip_prefix('#').unwrap_or(digits);
+    if !digits.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let at = |i: usize, n: usize| u8::from_str_radix(&digits[i..i + n], 16).ok();
+    match digits.len() {
+        3 => Some(Color::rgb(at(0, 1)? * 17, at(1, 1)? * 17, at(2, 1)? * 17)),
+        6 => Some(Color::rgb(at(0, 2)?, at(2, 2)?, at(4, 2)?)),
+        8 => Some(Color::rgba(at(0, 2)?, at(2, 2)?, at(4, 2)?, at(6, 2)?)),
+        _ => None,
+    }
+}
+
+/// The colour GDK gives (a colour chooser's), each channel to the nearest of 256 levels.
+pub fn from_rgba(c: &gdk::RGBA) -> Color {
+    let level = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    Color::rgba(
+        level(c.red()),
+        level(c.green()),
+        level(c.blue()),
+        level(c.alpha()),
+    )
+}
+
 /// The colour as GDK draws it.
 pub fn rgba(c: Color) -> gdk::RGBA {
     gdk::RGBA::new(
@@ -264,5 +293,53 @@ mod tests {
     fn hex_shows_alpha_only_when_translucent() {
         assert_eq!(hex(Color::rgb(0xED, 0x1C, 0x24)), "#ED1C24");
         assert_eq!(hex(Color::rgba(1, 2, 3, 4)), "#01020304");
+    }
+
+    #[test]
+    fn hex_reads_three_six_or_eight_digits_and_nothing_else() {
+        assert_eq!(parse_hex("#3366CC"), Some(Color::rgb(0x33, 0x66, 0xCC)));
+        assert_eq!(parse_hex("#3366cc"), Some(Color::rgb(0x33, 0x66, 0xCC)));
+        assert_eq!(parse_hex(" 3366CC "), Some(Color::rgb(0x33, 0x66, 0xCC)));
+        assert_eq!(parse_hex("#36C"), Some(Color::rgb(0x33, 0x66, 0xCC)));
+        assert_eq!(
+            parse_hex("#3366CC80"),
+            Some(Color::rgba(0x33, 0x66, 0xCC, 0x80))
+        );
+        assert_eq!(parse_hex("#00FF0000"), Some(Color::rgba(0, 255, 0, 0)));
+        for bad in [
+            "",
+            "#",
+            "#12",
+            "#1234",
+            "#12345",
+            "#1234567",
+            "#123456789",
+            "#GG0000",
+            "red",
+            "#+12345",
+            "##336699",
+            "#33 66CC",
+            "#３３６６ＣＣ",
+        ] {
+            assert_eq!(parse_hex(bad), None, "{bad:?}");
+        }
+        // What the colour row shows reads back as the same colour.
+        for c in [Color::rgb(1, 2, 3), Color::rgba(0xED, 0x1C, 0x24, 0x7F)] {
+            assert_eq!(parse_hex(&hex(c)), Some(c));
+        }
+    }
+
+    #[test]
+    fn a_chosen_colour_keeps_its_alpha() {
+        let chosen = gdk::RGBA::new(0.2, 0.4, 0.8, 0.5);
+        assert_eq!(from_rgba(&chosen), Color::rgba(0x33, 0x66, 0xCC, 0x80));
+        assert_eq!(
+            from_rgba(&rgba(Color::rgba(1, 2, 3, 4))),
+            Color::rgba(1, 2, 3, 4)
+        );
+        assert_eq!(
+            from_rgba(&gdk::RGBA::new(1.5, -0.1, 0.0, 1.0)),
+            Color::rgb(255, 0, 0)
+        );
     }
 }

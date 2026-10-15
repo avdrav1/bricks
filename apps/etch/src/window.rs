@@ -474,6 +474,9 @@ struct Controls {
     settings: Cell<Settings>,
     canvas: Canvas,
     indicator: colours::Indicator,
+    /// The foreground colour in hex, which typing sets (while it has the keys, what's
+    /// typed stays as it is).
+    hex: gtk::Entry,
     /// The size's label, field, and unit, shown while the tool has a size.
     sizing: gtk::Box,
     size: gtk::SpinButton,
@@ -522,6 +525,9 @@ impl Controls {
         self.showing.set(true);
         self.canvas.set_action(s.action());
         self.indicator.set(s.foreground, s.background);
+        if !self.hex_has_keys() {
+            self.show_hex(s.foreground);
+        }
         self.sizing.set_visible(s.width().is_some());
         let sizes = s.sizes();
         self.size
@@ -568,6 +574,80 @@ impl Controls {
                 }
             });
         }
+    }
+
+    /// Whether the hex field is where the window's keys go (even while another window has
+    /// them: switching away and back keeps what's typed).
+    fn hex_has_keys(&self) -> bool {
+        let window = self.hex.root().and_downcast::<gtk::Window>();
+        window
+            .and_then(|w| GtkWindowExt::focus(&w))
+            .is_some_and(|f| f.is_ancestor(&self.hex))
+    }
+
+    /// The hex field shows `colour`, valid.
+    fn show_hex(&self, colour: Color) {
+        self.hex.set_text(&colours::hex(colour));
+        self.hex.remove_css_class("error");
+        self.hex.update_state(&[gtk::accessible::State::Invalid(
+            gtk::AccessibleInvalidState::False,
+        )]);
+    }
+
+    /// Enter in the hex field: a colour sets the foreground and gives the keys back to the
+    /// image; anything else is marked invalid and changes nothing.
+    fn hex_entered(&self) {
+        match colours::parse_hex(&self.hex.text()) {
+            Some(colour) => {
+                self.update(|s| s.foreground = colour);
+                self.show_hex(colour);
+                self.canvas.grab_focus();
+            }
+            None => {
+                self.hex.add_css_class("error");
+                self.hex.update_state(&[gtk::accessible::State::Invalid(
+                    gtk::AccessibleInvalidState::True,
+                )]);
+                self.hex.error_bell();
+            }
+        }
+    }
+
+    /// GTK's colour chooser, alpha included, for the foreground colour (`background`: the
+    /// background), offering the colour it is.
+    fn choose(self: &Rc<Self>, background: bool) {
+        let s = self.settings.get();
+        let (title, colour) = match background {
+            true => ("Background Colour", s.background),
+            false => ("Foreground Colour", s.foreground),
+        };
+        let dialog = gtk::ColorDialog::builder()
+            .title(title)
+            .modal(true)
+            .with_alpha(true)
+            .build();
+        let parent = self.canvas.root().and_downcast::<gtk::Window>();
+        let controls = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let chosen = dialog
+                .choose_rgba_future(parent.as_ref(), Some(&colours::rgba(colour)))
+                .await;
+            let Some(controls) = controls.upgrade() else {
+                return;
+            };
+            match chosen {
+                Ok(c) => {
+                    let c = colours::from_rgba(&c);
+                    controls.update(|s| match background {
+                        true => s.background = c,
+                        false => s.foreground = c,
+                    });
+                }
+                Err(e) if e.matches(gtk::DialogError::Dismissed) => {}
+                Err(e) => tracing::warn!("cannot show the colour chooser: {e}"),
+            }
+            controls.back_to_text();
+        });
     }
 }
 
@@ -632,11 +712,66 @@ fn font_controls(context: &gtk::pango::Context) -> (gtk::Box, &'static [String],
     (row, families, family)
 }
 
-/// The colour row and the size, left of the status: the colours, the palette, the
-/// current tool's size, the text's font, the brush's edge, and the shapes' style.
+/// The hex field (the foreground colour, typed: Enter sets it; Alt+H, its label's
+/// mnemonic, puts the keys in it) and the Custom… button, which opens GTK's colour chooser
+/// for the foreground, a right-click for the background.
+fn hex_controls(controls: &Rc<Controls>) -> gtk::Box {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    row.set_valign(gtk::Align::Center);
+    let hex = &controls.hex;
+    let label = gtk::Label::with_mnemonic("_Hex");
+    label.set_mnemonic_widget(Some(hex));
+    row.append(&label);
+    hex.set_width_chars(9);
+    hex.set_max_width_chars(9);
+    hex.set_tooltip_text(Some(
+        "The foreground colour in hex: #RGB, #RRGGBB, or #RRGGBBAA with alpha (Enter sets it)",
+    ));
+    hex.update_property(&[gtk::accessible::Property::Label("Hex")]);
+    hex.connect_activate({
+        let controls = Rc::downgrade(controls);
+        move |_| {
+            if let Some(c) = controls.upgrade() {
+                c.hex_entered();
+            }
+        }
+    });
+    row.append(hex);
+    let custom = gtk::Button::with_label("Custom…");
+    custom.set_tooltip_text(Some(
+        "Choose the foreground colour, alpha too (right-click: the background)",
+    ));
+    custom.set_focusable(false);
+    custom.connect_clicked({
+        let controls = Rc::downgrade(controls);
+        move |_| {
+            if let Some(c) = controls.upgrade() {
+                c.choose(false);
+            }
+        }
+    });
+    let right = gtk::GestureClick::new();
+    right.set_button(gdk::BUTTON_SECONDARY);
+    right.connect_pressed({
+        let controls = Rc::downgrade(controls);
+        move |_, _, _, _| {
+            if let Some(c) = controls.upgrade() {
+                c.choose(true);
+            }
+        }
+    });
+    custom.add_controller(right);
+    row.append(&custom);
+    row
+}
+
+/// The colour row and the size, left of the status: the colours, their hex and chooser,
+/// the palette, the current tool's size, the text's font, the brush's edge, and the
+/// shapes' style.
 fn colour_row(controls: &Rc<Controls>) -> gtk::Box {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     row.append(&controls.indicator);
+    row.append(&hex_controls(controls));
     let pick: Rc<dyn Fn(Color, bool)> = {
         let controls = Rc::downgrade(controls);
         Rc::new(move |colour, background| {
@@ -792,6 +927,7 @@ fn show(
         settings: Cell::new(Settings::default()),
         canvas: canvas.clone(),
         indicator: colours::Indicator::new(),
+        hex: gtk::Entry::new(),
         sizing: gtk::Box::new(gtk::Orientation::Horizontal, 12),
         size: gtk::SpinButton::with_range(
             *tools::SIZES.start() as f64,
@@ -819,6 +955,16 @@ fn show(
     });
     let (bar, status) = Status::new();
     bar.prepend(&colour_row(&controls));
+    // The keys going elsewhere in the window undo what was typed in the hex field but not
+    // entered; another window taking them leaves it be (the window keeps its focus).
+    window.connect_focus_widget_notify({
+        let controls = Rc::downgrade(&controls);
+        move |_| {
+            if let Some(c) = controls.upgrade().filter(|c| !c.hex_has_keys()) {
+                c.show_hex(c.settings.get().foreground);
+            }
+        }
+    });
     let middle = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     middle.append(&tools::column());
     middle.append(&gtk::Separator::new(gtk::Orientation::Vertical));

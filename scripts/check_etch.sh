@@ -224,6 +224,15 @@
 #      item's text is in the label it's labelled by), and Enter opens r4.png. After r2.png
 #      is deleted, choosing it alerts "Cannot open “r2.png”" ("The file doesn't exist.")
 #      and it leaves the list and the menu.
+# ETCH-23 acceptance: hex entry and the colour chooser.
+#  28. Alt+H puts the keys in the hex field; "#3366CC" and Enter make the foreground
+#      #3366CC, "#f80" #FF8800, "#3366CC80" #3366CC80. Every tool key and X typed there
+#      ("pebfilrostx") is text: the pencil stays the tool; Enter marks the field invalid
+#      and keeps the colour, as "#12345" does; a click on the canvas shows the colour
+#      again. Custom… opens GTK's chooser titled Foreground Colour; Cancel changes
+#      nothing; its editor (+) with "#20A040" and alpha 0.25 makes the foreground
+#      #20A04040. A right-click on Custom… opens Background Colour: "#FFCC00" makes the
+#      background #FFCC00.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -511,6 +520,47 @@ elif cmd == "menu":
                         if t is not None:
                             print(Atspi.Text.get_text(t, 0, Atspi.Text.get_character_count(t)))
         stack[:0] = [n.get_child_at_index(i) for i in range(n.get_child_count())]
+elif cmd in ("at", "set", "invalid", "pressed"):
+    def walk(n):
+        if n is None:
+            return
+        n.clear_cache()
+        yield n
+        for i in range(n.get_child_count()):
+            yield from walk(n.get_child_at_index(i))
+    desktop = Atspi.get_desktop(0)
+    apps = [desktop.get_child_at_index(i) for i in range(desktop.get_child_count())]
+    nodes = [n for a in apps if a is not None and a.get_name() == "etch" for n in walk(a)]
+    # The first widget named NAME, not counting labels (a label names its field).
+    named = lambda name: next((n for n in nodes if n.get_name() == name and n.get_role() != Atspi.Role.LABEL), None) or sys.exit("nothing named " + name)
+    if cmd == "at":
+        # The screen centre of the widget named NAME in the window titled TITLE: its place
+        # in the window, offset by where sway put the window (a dialog floats).
+        import json, subprocess
+        name, title = sys.argv[2], sys.argv[3]
+        tree = json.loads(subprocess.run(["swaymsg", "-t", "get_tree"], capture_output=True, text=True).stdout)
+        def cons(n):
+            yield n
+            for c in n.get("nodes", []) + n.get("floating_nodes", []):
+                yield from cons(c)
+        rect = next(c["rect"] for c in cons(tree) if c.get("name") == title)
+        window = next(w for w in nodes if w.get_role() in (Atspi.Role.FRAME, Atspi.Role.DIALOG) and w.get_name() == title)
+        n = next(n for n in walk(window) if n.get_name() == name)
+        e = n.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
+        print(rect["x"] + e.x + e.width // 2, rect["y"] + e.y + e.height // 2)
+    elif cmd == "set":
+        # The slider named NAME set to VALUE.
+        v = named(sys.argv[2]).get_value_iface()
+        Atspi.Value.set_current_value(v, float(sys.argv[3]))
+    elif cmd == "invalid":
+        # Whether the field named NAME is marked invalid.
+        invalid = named(sys.argv[2]).get_state_set().contains(Atspi.StateType.INVALID_ENTRY)
+        print("invalid" if invalid else "valid")
+    else:
+        # The toggle buttons pressed: the tool on, and the choices shown.
+        on = [n.get_name() for n in nodes if n.get_role() == Atspi.Role.TOGGLE_BUTTON
+              and (n.get_state_set().contains(Atspi.StateType.CHECKED) or n.get_state_set().contains(Atspi.StateType.PRESSED))]
+        print(", ".join(on) or "none")
 PY
 # Section 21: another GTK 4 app on the clipboard. "read X,Y ...": its window takes the
 # keyboard (Wayland offers the clipboard to the focused window), waits for an image there,
@@ -1347,6 +1397,45 @@ session() {
   recent_menu; echo "after missing: $(items)"
   keys -k Escape -k Escape; pkill -x etch; sleep 1
   grep -E "^etch: |panicked|CRITICAL" /tmp/recent.log | sed "s/^/log: /"
+
+  echo "== 28 colours"
+  etch >>/tmp/app.log 2>&1 & sleep 3
+  colours() { python3 /tmp/a11y.py text | grep "^Foreground" | head -1 | sed "s/^/$1: /"; }
+  # What the hex field shows (after the label and the field named Hex, and its tooltip).
+  field() { python3 /tmp/a11y.py text | grep -A2 "^Hex$" | tail -1; }
+  # Alt+H puts the keys in the hex field, its text selected; TEXT typed, then Enter.
+  hex() { keys -M alt h -m alt; keys "$1"; keys -k Return; sleep 0.5; }
+  # In the chooser titled TITLE: + (a custom colour) opens the editor; its hex field
+  # takes HEX, its alpha slider ALPHA (0 to 1); then Select.
+  custom() {
+    read x y <<<"$(px at "Add Color" "$1")"; python3 /scripts/dnd_helpers.py click $x $y; sleep 1.5
+    read x y <<<"$(px at "Hexadecimal color or color name" "$1")"
+    python3 /scripts/dnd_helpers.py click $x $y 3; sleep 0.5; keys "$2"; keys -k Return; sleep 0.5
+    px set "Alpha value" $3; sleep 0.5; shot "editor-$2"
+    python3 /tmp/a11y.py press Select; sleep 1
+  }
+  colours start
+  echo "start: $(field)"
+  hex "#3366CC"; colours typed; echo "typed: $(field) $(px invalid Hex)"
+  hex "#f80"; colours short
+  hex "#3366CC80"; colours alpha
+  # Every tool key and X typed in the field: text, not commands.
+  keys -M alt h -m alt; keys pebfilrostx; sleep 0.5; echo "keys: $(field) tools $(px pressed)"
+  keys -k Return; sleep 0.5; shot hex-invalid
+  colours invalid; echo "invalid: $(px invalid Hex) tools $(px pressed)"
+  hex "#12345"; colours five; echo "five: $(px invalid Hex)"
+  # Clicking the canvas leaves the field showing the colour again.
+  read mx my <<<"$(px centre)"; python3 /scripts/dnd_helpers.py click $mx $my; sleep 0.5
+  keys -M ctrl z -m ctrl; echo "left: $(field) $(px invalid Hex)"
+  python3 /tmp/a11y.py press "Custom…"; sleep 2; shot chooser
+  shown chooser | grep -E "^chooser: (Foreground Colour|Background Colour|Select|Cancel)$"
+  python3 /tmp/a11y.py press Cancel; sleep 1; colours cancelled
+  python3 /tmp/a11y.py press "Custom…"; sleep 2
+  custom "Foreground Colour" "#20A040" 0.25; colours chosen; echo "chosen: $(field)"
+  read x y <<<"$(px where "Custom…")"; python3 /scripts/dnd_helpers.py click $x $y 1 right; sleep 2
+  shown right | grep -E "^right: (Foreground Colour|Background Colour)$"
+  custom "Background Colour" "#FFCC00" 1; colours background
+  pkill -x etch; sleep 1
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -1689,6 +1778,22 @@ check "27: ... and it leaves the list" "27 recent" "^missing: r4\.png r1\.png r3
 check "27: ... and the menu" "27 recent" "^after missing: r4\.png r1\.png r3\.png$"
 check "27: the failure is logged" "27 recent" "^log: etch: cannot open /tmp/r2\.png: The file doesn.t exist\.$"
 absent "27: ... and nothing else goes wrong" "27 recent" "^log: .*(panicked|CRITICAL)"
+check "28: the hex field shows the foreground" "28 colours" "^start: #000000$"
+check "28: typing #3366CC sets the foreground" "28 colours" "^typed: Foreground #3366CC, background #FFFFFF$"
+check "28: ... the field showing it, valid" "28 colours" "^typed: #3366CC valid$"
+check "28: #RGB doubles each digit" "28 colours" "^short: Foreground #FF8800, background #FFFFFF$"
+check "28: #RRGGBBAA sets alpha too" "28 colours" "^alpha: Foreground #3366CC80, background #FFFFFF$"
+check "28: tool keys and X typed in the field are text, switching no tool" "28 colours" "^keys: pebfilrostx tools Pencil$"
+check "28: ... rejected: the colour stays" "28 colours" "^invalid: Foreground #3366CC80, background #FFFFFF$"
+check "28: ... the field marked invalid, the pencil still the tool" "28 colours" "^invalid: invalid tools Pencil$"
+check "28: five digits are rejected too" "28 colours" "^five: Foreground #3366CC80, background #FFFFFF$"
+check "28: leaving the field shows the colour again" "28 colours" "^left: #3366CC80 valid$"
+check "28: Custom… opens the chooser for the foreground" "28 colours" "^chooser: Foreground Colour$"
+check "28: ... Cancel changes nothing" "28 colours" "^cancelled: Foreground #3366CC80, background #FFFFFF$"
+check "28: the chooser's colour, alpha included, sets the foreground" "28 colours" "^chosen: Foreground #20A04040, background #FFFFFF$"
+check "28: ... and the field" "28 colours" "^chosen: #20A04040$"
+check "28: a right-click on Custom… chooses the background" "28 colours" "^right: Background Colour$"
+check "28: ... which takes the colour chosen" "28 colours" "^background: Foreground #20A04040, background #FFCC00$"
 absent "the app logs no errors or panics" "app log" "^etch:|panicked|CRITICAL"
 bench=$(section "8 bench" | sed -n "s/^bench: //p")
 if [ -z "$bench" ]; then echo "FAIL 8: --bench-stroke printed nothing"; fail=1; else
