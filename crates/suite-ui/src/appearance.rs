@@ -8,36 +8,14 @@ use gtk::prelude::*;
 /// Ask GTK for the dark (`true`) or light variant of the theme. Safe from any thread: GTK
 /// is told on the main context, at once when the caller already runs there.
 pub fn set_dark(dark: bool) {
-    tracing::info!(
-        "appearance: {} (thread {:?}, main context owner {})",
-        if dark { "dark" } else { "light" },
-        std::thread::current().name(),
-        glib::MainContext::default().is_owner()
-    );
-    let strategy = std::env::var("MAC6_STRATEGY").unwrap_or_default();
-    let notify = |dark: bool| {
-        apply(dark);
-        if let Some(s) = gtk::Settings::default() {
-            s.notify("gtk-theme-name");
-        }
-    };
-    let prefer = |dark: bool| {
-        apply(dark);
-        if let Some(s) = gtk::Settings::default() {
-            s.set_gtk_application_prefer_dark_theme(dark);
-        }
-    };
-    match strategy.as_str() {
-        "idle" => {
-            glib::idle_add_once(move || apply(dark));
-        }
-        "notify" => glib::MainContext::default().invoke(move || notify(dark)),
-        "idle-notify" => {
-            glib::idle_add_once(move || notify(dark));
-        }
-        "prefer" => glib::MainContext::default().invoke(move || prefer(dark)),
-        _ => glib::MainContext::default().invoke(move || apply(dark)),
-    }
+    tracing::info!("appearance: {}", if dark { "dark" } else { "light" });
+    let context = glib::MainContext::default();
+    context.invoke(move || apply(dark));
+    // On macOS the change arrives from the run loop GDK waits in while GLib polls, so on
+    // the main thread but inside GLib's poll. GLib wakes a polling context only for work
+    // queued from other threads, so the restyle and redraw GTK just queued would wait for
+    // the next input event (MAC-6 saw windows stay light for good): wake it.
+    context.wakeup();
 }
 
 fn apply(dark: bool) {
@@ -57,14 +35,4 @@ fn apply(dark: bool) {
         }
         None => {}
     }
-    if new_exists() {
-        tracing::info!(
-            "appearance applied: {:?}",
-            settings.property_value("gtk-interface-color-scheme")
-        );
-    }
-}
-
-fn new_exists() -> bool {
-    glib::Type::from_name("GtkInterfaceColorScheme").is_some()
 }

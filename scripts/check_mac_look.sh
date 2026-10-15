@@ -15,7 +15,7 @@
 #   2. Dark appearance, set as System Settings does (System Events): Brick, Slate, Frame,
 #      and Etch draw dark.
 #   3. Following changes: Slate starts light; the appearance turns dark, then light,
-#      while it runs, and its window follows.
+#      while it runs, and its window follows; Brick's window, grid included, turns dark.
 # Dark or light is the mean brightness (0-255) of a strip across the top of the app's
 # window (the header bar; Etch, with the Mac's own title bar, its window's middle): dark
 # under 100, light over 150. The screenshots are for looking at: text in Carlito and
@@ -220,23 +220,14 @@ start slate-live 20 "$bin/slate" "$work/office-fonts.docx"
 shot slate-live-1-light; check "slate starts light" light "$TOP"
 appearance dark
 until_shot dark slate-live-2-dark "slate turns dark with the Mac"
-# Diagnostic: does a resize (a new frame for sure) show the dark look?
-osascript -e "tell application \"System Events\" to tell (first process whose unix id is $pid) to set size of window 1 to {880, 840}" >>"$logs/osascript.log" 2>&1
-shot slate-live-2b-resized
 appearance light
 until_shot light slate-live-3-light "slate turns light again"
 stop
-# Diagnostic: which way of telling GTK makes a running window follow.
-for strategy in direct idle notify idle-notify prefer; do
-  appearance light
-  start "probe-$strategy" 10 env MAC6_STRATEGY=$strategy "$bin/etch" "$work/picture.png"
-  shot "probe-$strategy-1"
-  appearance dark
-  sleep 8
-  shot "probe-$strategy-2"
-  say "probe $strategy: light $MIDDLE"
-  stop
-done
+start brick-live 10 "$bin/brick" "$work/people.csv"
+shot brick-live-1-light; check "brick starts light" light "$TOP"
+appearance dark
+until_shot dark brick-live-2-dark "brick turns dark with the Mac"
+stop
 appearance light
 
 if ((failed)); then say "LOOK FAILED"; exit 1; fi
