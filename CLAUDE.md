@@ -41,7 +41,7 @@ Everything below about stories, invariants, crates, benchmarks, and ADRs is Bric
 | --- | --- |
 | `suite-core` | `AppKind` and other app-independent primitives |
 | `suite-ui` | UI conventions shared by the apps |
-| `suite-platform` | OS integration (Linux) |
+| `suite-platform` | OS integration (Linux, macOS) |
 | `suite-file` | format-independent file infrastructure (document names, atomic save, crash recovery journals' directory: owner locks, atomic journal writes, crashed sessions; the recent files list, Brick's and Etch's) |
 
 Brick's crates, in `apps/brick/crates/`:

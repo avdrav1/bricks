@@ -26,7 +26,7 @@ Code becomes shared when at least two applications genuinely need the same abstr
 | --- | --- | --- |
 | `suite-core` | application-independent primitives: app identity, later common IDs, error and value types | `AppKind` with `display_name()` |
 | `suite-ui` | UI conventions: later menus, command palette, toolbars, dialogs, themes, window chrome, shortcuts | `startup_message()` |
-| `suite-platform` | OS integration, Linux first: later file dialogs, clipboard, desktop integration, drag and drop, Wayland/X11, system theme | `current()` platform check |
+| `suite-platform` | OS integration, Linux and macOS (ADR 0011): later file dialogs, clipboard, desktop integration, drag and drop, Wayland/X11, system theme | `current()` platform check (`Linux`, `MacOs`) |
 | `suite-file` | format-independent file infrastructure: later atomic writes, save/save-as, recent files, temp files, autosave and recovery | `document_name()` |
 
 Format parsers (CSV, XLSX, DOCX, PPTX) never go in `suite-file`; they belong to the app that reads the format.
