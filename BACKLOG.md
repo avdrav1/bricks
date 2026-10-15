@@ -27,6 +27,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 - [x] ET1: etch opens PNG, JPEG, and BMP files and draws on them with the brush, fill, colour picker, line, rectangle, ellipse, and text, each step undoable; Save and Save As write PNG, JPEG, and BMP that read back with the same pixels (JPEG within its loss, alpha composited onto white), atomically; closing an edited image asks Save, Discard, or Cancel
 - [x] ET2: etch selects a rectangle and moves its pixels, cuts, copies, and pastes through the system clipboard (to and from another app), crops to the selection, resizes the image and the canvas, rotates and flips, all with undo: the spec's V0.1 definition of done
 - [x] ET3: etch opens dropped files, lists recent files, picks colours by chooser and hex, switches every tool by its key, and after a crash offers back unsaved images without touching their files
+- [ ] XP0: a decision record (ADR, accepted by the user) says how the suite builds, packages, and tests on macOS and Windows, from a spike that built and started every app there and listed what breaks
 
 ## Stories
 
@@ -192,6 +193,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 | ETCH-24 | ET3 | P0 | done | ETCH-12 | Every tool on its key | Each tool key in the spec selects its tool, none while typing text, and no key is bound twice (test over the shortcut table) |
 | ETCH-25 | ET3 | P0 | done | ETCH-7 | Crash recovery through suite-file journals | check_etch.sh: after etch is killed with unsaved strokes, the next start offers the image back with them and the file is untouched |
 | ETCH-26 | ET3 | P0 | done | ETCH-2 | Canvas tiles meet without seams; the checkerboard snaps to pixels | check_etch.sh: an opaque single-colour image larger than a tile shows no pixel of another colour inside its boundary at 100%, at Fit (below and above 100%), at 50%, and at 200%, at output scale 1, 2, and 1.5, with the default renderer (GL) and with the software (cairo) renderer; the checkerboard's squares are crisp (only its two greys) up to the image's edge, at either half-pixel offset and at Fit |
+| DEC-11 | XP0 | P1 | in-progress | - | Spike: macOS and Windows builds of every app; what breaks on each | For Windows (x86_64) and macOS (arm64): every crate checked, tested, and every app built, with each failure listed by cause; each app started on the platform (a CI runner or Wine) with what works and what doesn't recorded, screenshots where possible; Linux-only code inventoried (paths, `/proc`, installers, desktop integration, file atomicity, input, menus, keys); `docs/adr/0011-*` proposed with the recommended toolchain, packaging, signing, and CI per platform and the work it implies |
 
 ## Notes
 
