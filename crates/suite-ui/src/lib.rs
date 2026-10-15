@@ -1,9 +1,11 @@
-//! User-interface conventions shared by every app in the suite.
+//! User-interface conventions shared by every app in the suite, in GTK 4
+//! (docs/adr/0002-gtk4-for-the-suite.md): [`keys`], the primary modifier every shortcut
+//! uses (Control on Linux, Command on macOS).
 //!
-//! Menus, the command palette, toolbars, dialogs, themes, window chrome, and shortcut
-//! handling may move here once two apps need the same one. The suite's toolkit is GTK 4
-//! (docs/adr/0002-gtk4-for-the-suite.md); this crate adds the `gtk` dependency when it first
-//! holds a widget.
+//! Menus, the command palette, toolbars, dialogs, themes, and window chrome may move here
+//! once two apps need the same one.
+
+pub mod keys;
 
 use suite_core::AppKind;
 

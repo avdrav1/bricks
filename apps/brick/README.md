@@ -46,6 +46,8 @@ Insert and delete rows with Ctrl++ (as many empty rows as the selection spans, a
 
 Ctrl+Z undoes the last edit and moves the cursor to the cell it changed; Ctrl+Shift+Z or Ctrl+Y redoes it. History keeps the last 1,000 steps within 50 MB, whatever the file size, dropping the oldest first. Undo waits while a save runs, and the history starts over after a save.
 
+On macOS, Command replaces Ctrl in every shortcut (⌘S, ⌘Z, ⌘C, ⌘Home, …); Redo is ⇧⌘Z, Replace ⌥⌘F, and as in Excel for Mac a few stay on Control: ⌃Space and ⇧⌃Space select columns and everything, ⌃⇧1, ⌃⇧3, ⌃⇧4, ⌃⇧5 and ⌃⇧~ set number formats, and ⌃Page Down/Up switch sheets.
+
 Resize a column or row by dragging its border in the column letters or row numbers; selected whole columns resize together. Double-click a column border to fit the text on screen, or a row border to restore its height. Sizes stay with their rows and columns through inserts, deletes, undo, and saving, and last while the window is open (CSV has nowhere to store them).
 
 A header row is detected on open: when the first row names the columns, it becomes the column titles (next to the letters) and isn't counted as data. The **Header row** button in the header bar flips it; your choice holds when the delimiter changes or the file is saved. The file itself never changes: a save writes the first row as it is.

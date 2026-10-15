@@ -27,6 +27,7 @@ mod caret;
 mod find;
 mod shaper;
 
+use crate::keys::{Does, Erase, Move};
 use crate::settings::TextWidth;
 use document_edit::{
     Change, Container, Edit, Flag, Fragment, History, LookPatch, Looks, Match, Pos, SizeChange,
@@ -43,6 +44,7 @@ use std::ops::Range;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use suite_ui::keys::Primary;
 
 /// The smallest margin beside the column, when the window is narrower than the text width
 /// (and on each side of a Full column).
@@ -764,10 +766,8 @@ mod imp {
                 };
                 let imp = page.imp();
                 imp.dragging.set(None);
-                let ctrl = gesture
-                    .current_event_state()
-                    .contains(gdk::ModifierType::CONTROL_MASK);
-                if ctrl && dx.abs() < 3.0 && dy.abs() < 3.0 {
+                let primary = suite_ui::keys::is_primary(gesture.current_event_state());
+                if primary && dx.abs() < 3.0 && dy.abs() < 3.0 {
                     if let Some((x, y)) = gesture.start_point() {
                         if let Some(url) = imp.link_at(x, y) {
                             open_link(&page, url);
@@ -837,54 +837,27 @@ mod imp {
 
         fn key(&self, key: gdk::Key, mods: gdk::ModifierType) -> glib::Propagation {
             use gdk::Key as K;
-            let ctrl = mods.contains(gdk::ModifierType::CONTROL_MASK);
-            let shift = mods.contains(gdk::ModifierType::SHIFT_MASK);
-            if ctrl {
-                let digit = key.to_unicode().and_then(|c| c.to_digit(10));
-                if matches!(key, K::s | K::S) {
-                    // The window's File → Save and Save As (`saving`).
-                    let action = if shift { "win.save-as" } else { "win.save" };
-                    let _ = self.obj().activate_action(action, None);
-                    return glib::Propagation::Stop;
+            if let Some((does, extend)) = crate::keys::page_key(Primary::HERE, key, mods) {
+                match does {
+                    // The window's actions: File → Save and Save As (`saving`), the find
+                    // bar (`find_bar`).
+                    Does::Action(action) => {
+                        let _ = self.obj().activate_action(action, None);
+                    }
+                    Does::Command(command) => self.command(command),
+                    Does::Move(to) => self.move_caret(false, extend, |st, c| match to {
+                        Move::WordLeft => caret::word_left(st, c),
+                        Move::WordRight => caret::word_right(st, c),
+                        Move::LineStart => caret::line_edge(st, c, false),
+                        Move::LineEnd => caret::line_edge(st, c, true),
+                        Move::DocumentStart => caret::first(st).unwrap_or(c),
+                        Move::DocumentEnd => caret::last(st).unwrap_or(c),
+                    }),
+                    Does::Erase(what) => self.erase(what),
                 }
-                if matches!(key, K::f | K::F | K::h | K::H) {
-                    // The window's find bar (`find_bar`).
-                    let action = if matches!(key, K::f | K::F) {
-                        "win.find"
-                    } else {
-                        "win.replace"
-                    };
-                    let _ = self.obj().activate_action(action, None);
-                    return glib::Propagation::Stop;
-                }
-                let command = match key {
-                    K::z | K::Z => Some(if shift { Command::Redo } else { Command::Undo }),
-                    K::y | K::Y => Some(Command::Redo),
-                    K::b | K::B => Some(Command::Bold),
-                    K::i | K::I => Some(Command::Italic),
-                    K::u | K::U => Some(Command::Underline),
-                    K::l | K::L => Some(Command::Align(Align::Start)),
-                    K::e | K::E => Some(Command::Align(Align::Center)),
-                    K::r | K::R => Some(Command::Align(Align::End)),
-                    K::j | K::J => Some(Command::Align(Align::Justify)),
-                    K::bracketright => Some(Command::Size(true)),
-                    K::bracketleft => Some(Command::Size(false)),
-                    K::asterisk | K::_8 if shift => Some(Command::Bullets),
-                    K::ampersand | K::_7 if shift => Some(Command::Numbers),
-                    K::a | K::A => Some(Command::SelectAll),
-                    K::c | K::C | K::Insert => Some(Command::Copy),
-                    K::x | K::X => Some(Command::Cut),
-                    K::v | K::V => Some(Command::Paste),
-                    _ => match digit {
-                        Some(n @ 0..=6) if !shift => Some(Command::Style(n as u8)),
-                        _ => None,
-                    },
-                };
-                if let Some(command) = command {
-                    self.command(command);
-                    return glib::Propagation::Stop;
-                }
+                return glib::Propagation::Stop;
             }
+            let shift = mods.contains(gdk::ModifierType::SHIFT_MASK);
             match key {
                 K::Insert | K::KP_Insert if shift => self.command(Command::Paste),
                 K::Delete | K::KP_Delete if shift => self.command(Command::Cut),
@@ -895,15 +868,13 @@ mod imp {
                 K::Tab | K::KP_Tab | K::ISO_Left_Tab => self.tab(shift || key == K::ISO_Left_Tab),
                 K::Left | K::KP_Left => {
                     self.move_caret(false, shift, |st, c| match caret::selection(st) {
-                        Some((s, _)) if !ctrl && !shift => s,
-                        _ if ctrl => caret::word_left(st, c),
+                        Some((s, _)) if !shift => s,
                         _ => caret::left(st, c),
                     })
                 }
                 K::Right | K::KP_Right => {
                     self.move_caret(false, shift, |st, c| match caret::selection(st) {
-                        Some((_, e)) if !ctrl && !shift => e,
-                        _ if ctrl => caret::word_right(st, c),
+                        Some((_, e)) if !shift => e,
                         _ => caret::right(st, c),
                     })
                 }
@@ -914,12 +885,6 @@ mod imp {
                         st.goal = goal;
                         to
                     });
-                }
-                K::Home | K::KP_Home if ctrl => {
-                    self.move_caret(false, shift, |st, c| caret::first(st).unwrap_or(c))
-                }
-                K::End | K::KP_End if ctrl => {
-                    self.move_caret(false, shift, |st, c| caret::last(st).unwrap_or(c))
                 }
                 K::Home | K::KP_Home => {
                     self.move_caret(false, shift, |st, c| caret::line_edge(st, c, false))
@@ -1455,31 +1420,49 @@ mod imp {
         }
 
         fn backspace(&self) {
-            self.edit_with(false, |st| {
-                let doc = st.flow.document();
-                if let Some((s, e)) = caret::selection(st) {
-                    return document_edit::delete(doc, s, e);
-                }
-                let c = st.caret?;
-                match caret::char_before(st, c) {
-                    Some(before) => {
-                        document_edit::replace(doc, before, c, "", &RunStyle::default())
-                    }
-                    None => document_edit::join_backward(doc, c),
-                }
-            });
+            self.erase_to(false, |st, c| caret::char_before(st, c));
         }
 
         fn delete(&self) {
+            self.erase_to(true, |st, c| caret::char_after(st, c));
+        }
+
+        /// macOS's ⌥⌫, ⌥⌦, and ⌘⌫ (`keys`): delete the word before or after the caret, or
+        /// back to its line's start; at the line's start, the character before.
+        fn erase(&self, what: Erase) {
+            match what {
+                Erase::WordBack => self.erase_to(false, |st, c| Some(caret::word_left(st, c))),
+                Erase::WordForward => self.erase_to(true, |st, c| Some(caret::word_right(st, c))),
+                Erase::LineStart => self.erase_to(false, |st, c| {
+                    Some(caret::line_edge(st, c, false))
+                        .filter(|&p| p != c)
+                        .or_else(|| caret::char_before(st, c))
+                }),
+            }
+        }
+
+        /// Delete the selection, else from the caret to where `to` says, behind it (or
+        /// `ahead` of it) in the caret's paragraph; with nothing there to delete, join the
+        /// paragraph to the one before (after).
+        fn erase_to(&self, ahead: bool, to: impl FnOnce(&mut State, Pos) -> Option<Pos>) {
             self.edit_with(false, |st| {
-                let doc = st.flow.document();
                 if let Some((s, e)) = caret::selection(st) {
-                    return document_edit::delete(doc, s, e);
+                    return document_edit::delete(st.flow.document(), s, e);
                 }
                 let c = st.caret?;
-                match caret::char_after(st, c) {
-                    Some(after) => document_edit::replace(doc, c, after, "", &RunStyle::default()),
-                    None => document_edit::join_forward(doc, c),
+                let to = to(st, c).filter(|&p| {
+                    p != c
+                        && Pos {
+                            offset: p.offset,
+                            ..c
+                        } == p
+                });
+                let doc = st.flow.document();
+                match (to, ahead) {
+                    (Some(p), false) => document_edit::replace(doc, p, c, "", &RunStyle::default()),
+                    (Some(p), true) => document_edit::replace(doc, c, p, "", &RunStyle::default()),
+                    (None, false) => document_edit::join_backward(doc, c),
+                    (None, true) => document_edit::join_forward(doc, c),
                 }
             });
         }

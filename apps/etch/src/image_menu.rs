@@ -3,7 +3,8 @@
 //!
 //! Keys ([`crate::keys::BINDINGS`]; Paint.NET's): Ctrl+Shift+X crops to the selection,
 //! Ctrl+R resizes the image, Ctrl+Shift+R resizes the canvas, Ctrl+H rotates 90° right,
-//! Ctrl+G 90° left, Ctrl+J 180°; the flips have none.
+//! Ctrl+G 90° left, Ctrl+J 180°; the flips have none. On macOS ⌘ replaces Ctrl, and ⌘]
+//! rotates right, as ⌘H hides the app.
 
 use crate::canvas::Canvas;
 use crate::colours;

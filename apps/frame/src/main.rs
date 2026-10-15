@@ -19,6 +19,7 @@ mod editing;
 mod fit;
 mod insert;
 mod inspector;
+mod keys;
 mod outline;
 mod render;
 mod saving;
@@ -103,10 +104,10 @@ fn main() -> glib::ExitCode {
             .activate(|app: &gtk::Application, _, _| window::choose_and_open(app))
             .build();
         app.add_action_entries([new, open]);
-        app.set_accels_for_action("app.new", &["<Control>n"]);
-        app.set_accels_for_action("app.open", &["<Control>o"]);
-        app.set_accels_for_action("win.slideshow", &["F5"]);
-        app.set_accels_for_action("win.slideshow-here", &["<Shift>F5"]);
+        for (action, accels) in keys::accels() {
+            let accels: Vec<&str> = accels.iter().map(String::as_str).collect();
+            app.set_accels_for_action(action, &accels);
+        }
     });
     let (file, bench) = (RefCell::new(args.file), args.bench);
     app.connect_activate(move |app| match file.take() {

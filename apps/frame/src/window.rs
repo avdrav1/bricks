@@ -11,6 +11,7 @@ use crate::editing;
 use crate::fit;
 use crate::insert;
 use crate::inspector::{self, Inspector};
+use crate::keys::{self, Action, Via};
 use crate::outline::{self, OutlineView};
 use crate::saving;
 use crate::slide_list::{self, THUMB_WIDTH};
@@ -22,6 +23,7 @@ use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Instant;
+use suite_ui::keys::Primary;
 
 thread_local! {
     /// Each open deck's window, by canonical path: opening a file again brings its
@@ -56,12 +58,12 @@ fn header() -> gtk::HeaderBar {
     let bar = gtk::HeaderBar::new();
     let new = gtk::Button::from_icon_name("document-new-symbolic");
     new.set_action_name(Some("app.new"));
-    new.set_tooltip_text(Some("New (Ctrl+N)"));
+    new.set_tooltip_text(Some(&format!("New ({})", keys::label(Action::New))));
     new.update_property(&[gtk::accessible::Property::Label("New")]);
     bar.pack_start(&new);
     let open = gtk::Button::from_icon_name("document-open-symbolic");
     open.set_action_name(Some("app.open"));
-    open.set_tooltip_text(Some("Open… (Ctrl+O)"));
+    open.set_tooltip_text(Some(&format!("Open… ({})", keys::label(Action::Open))));
     open.update_property(&[gtk::accessible::Property::Label("Open")]);
     bar.pack_start(&open);
     bar
@@ -723,29 +725,26 @@ fn show_deck(
         let view = view.clone();
         move |_, key, _, mods| {
             use gdk::{Key, ModifierType};
-            let ctrl = mods.contains(ModifierType::CONTROL_MASK);
             let shift = mods.contains(ModifierType::SHIFT_MASK);
-            let alt = mods.contains(ModifierType::ALT_MASK);
             let outline = view.outline.has_focus();
             let text = view.canvas.editing().is_some() || outline;
-            // Ctrl+Z undoes, Ctrl+Shift+Z and Ctrl+Y redo: the deck's one history, before
-            // the canvas's input method sees the keys. Shifted, z arrives as Z. Ctrl+M
-            // adds a slide even while text is edited; Ctrl+D, Ctrl+Up, and Ctrl+Down
-            // are the slide's only when no text is (on the canvas or in the outline).
-            // Ctrl+V pastes a picture (crate::insert), outside the inspector and the
-            // outline. Ctrl+Shift+O shows the outline or the canvas.
-            if ctrl && !alt {
-                match key {
-                    Key::z | Key::Z if !shift => view.undo(),
-                    Key::z | Key::Z | Key::y | Key::Y => view.redo(),
-                    Key::m | Key::M if !shift => slide_list::new_slide(&view),
-                    Key::s | Key::S if !shift => saving::save(&view),
-                    Key::s | Key::S => saving::save_as(&view),
-                    Key::o | Key::O if shift => view.outline.toggle(),
-                    Key::d | Key::D if !shift && !text => slide_list::duplicate(&view),
-                    Key::Up | Key::KP_Up if !shift && !text => slide_list::move_by(&view, -1),
-                    Key::Down | Key::KP_Down if !shift && !text => slide_list::move_by(&view, 1),
-                    Key::v | Key::V if !shift && !view.inspector.has_focus() && !outline => {
+            // Undo and Redo: the deck's one history, before the canvas's input method
+            // sees the keys. New Slide adds a slide even while text is edited; Duplicate
+            // and moving the slide up and down are the slide's only when no text is (on
+            // the canvas or in the outline). Paste pastes a picture (crate::insert),
+            // outside the inspector and the outline. The keys are crate::keys'.
+            if let Some(action) = keys::find(Primary::HERE, Via::Window, key, mods) {
+                match action {
+                    Action::Undo => view.undo(),
+                    Action::Redo => view.redo(),
+                    Action::NewSlide => slide_list::new_slide(&view),
+                    Action::Save => saving::save(&view),
+                    Action::SaveAs => saving::save_as(&view),
+                    Action::Outline => view.outline.toggle(),
+                    Action::Duplicate if !text => slide_list::duplicate(&view),
+                    Action::MoveUp if !text => slide_list::move_by(&view, -1),
+                    Action::MoveDown if !text => slide_list::move_by(&view, 1),
+                    Action::Paste if !view.inspector.has_focus() && !outline => {
                         if !insert::paste(&view) {
                             return glib::Propagation::Proceed;
                         }
@@ -756,7 +755,8 @@ fn show_deck(
             }
             // While text is edited, the keys are the text's (crate::editing, or
             // crate::outline); in the inspector, its controls'.
-            if text || ctrl || alt || view.inspector.has_focus() {
+            let modified = keys::modified(Primary::HERE, mods);
+            if text || modified || view.inspector.has_focus() {
                 return glib::Propagation::Proceed;
             }
             // A selected shape: the arrows nudge it a pixel (Shift: ten), Escape lets go,
@@ -833,7 +833,7 @@ fn show_deck(
         insert::attach(&view, &bar);
         let save = gtk::Button::from_icon_name("document-save-symbolic");
         save.set_action_name(Some("win.save"));
-        save.set_tooltip_text(Some("Save (Ctrl+S)"));
+        save.set_tooltip_text(Some(&format!("Save ({})", keys::label(Action::Save))));
         save.update_property(&[gtk::accessible::Property::Label("Save")]);
         bar.pack_start(&save);
         let play = gtk::Button::from_icon_name("media-playback-start-symbolic");

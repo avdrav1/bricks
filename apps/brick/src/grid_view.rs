@@ -1,6 +1,7 @@
 //! The grid widget: draws the cells `grid::GridCache` holds with GSK + Pango (ADR 0001).
 
 use crate::editor::{self, Action, ClipCommand, Mode, ShapeCommand, Start};
+use crate::keys::{self, GridKey};
 use crate::looks::{Dash, Line, Look, Looks};
 use crate::status::ClipView;
 
@@ -26,6 +27,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use suite_ui::keys::Primary;
 
 /// Default row height and column width; GRID-5 lets the user resize each one.
 pub const ROW_H: f64 = 22.0;
@@ -1142,28 +1144,26 @@ impl GridView {
                 if g.imp().editing.get().is_some() {
                     return glib::Propagation::Proceed;
                 }
-                if let Some((key, mods)) = nav_key(key, state) {
-                    g.press(key, mods);
-                } else if let Some(cmd) = editor::clip_command(key, state) {
-                    match cmd {
-                        ClipCommand::Copy => g.copy_selection(false),
-                        ClipCommand::Cut => g.copy_selection(true),
-                        ClipCommand::Paste => g.paste_clipboard(),
-                    }
-                } else if let Some(cmd) = editor::shape_command(key, state) {
-                    let columns = g.imp().selection.get().whole_columns().is_some();
-                    match (cmd, columns) {
-                        (ShapeCommand::Insert, false) => g.insert_rows_above(),
-                        (ShapeCommand::Delete, false) => g.delete_rows(),
-                        (ShapeCommand::Insert, true) => g.insert_cols_left(),
-                        (ShapeCommand::Delete, true) => g.delete_cols(),
-                    }
-                } else if editor::clears(key, state) {
-                    g.clear_selected();
-                } else if let Some(start) = editor::start(key, state) {
-                    g.start_edit(start);
-                } else {
+                // The grid's keys (`keys.rs`, MAC-3), with this platform's modifier.
+                let Some(grid_key) = keys::grid_key(Primary::HERE, key, state) else {
                     return glib::Propagation::Proceed;
+                };
+                match grid_key {
+                    GridKey::Nav(key, mods) => g.press(key, mods),
+                    GridKey::Clip(ClipCommand::Copy) => g.copy_selection(false),
+                    GridKey::Clip(ClipCommand::Cut) => g.copy_selection(true),
+                    GridKey::Clip(ClipCommand::Paste) => g.paste_clipboard(),
+                    GridKey::Shape(cmd) => {
+                        let columns = g.imp().selection.get().whole_columns().is_some();
+                        match (cmd, columns) {
+                            (ShapeCommand::Insert, false) => g.insert_rows_above(),
+                            (ShapeCommand::Delete, false) => g.delete_rows(),
+                            (ShapeCommand::Insert, true) => g.insert_cols_left(),
+                            (ShapeCommand::Delete, true) => g.delete_cols(),
+                        }
+                    }
+                    GridKey::Clear => g.clear_selected(),
+                    GridKey::Edit(start) => g.start_edit(start),
                 }
                 glib::Propagation::Stop
             }
@@ -5274,13 +5274,21 @@ pub enum Edge {
     Row(u64),
 }
 
-/// Map a GDK key press to a navigation key (GRID-3/GRID-4). `None` lets it through (Ctrl+S,
-/// plain Space, and Ctrl+arrows, which are not built yet).
-fn nav_key(key: gdk::Key, state: gdk::ModifierType) -> Option<(Key, Mods)> {
+/// Map a GDK key press to a navigation key (GRID-3/GRID-4). `None` lets it through
+/// (Primary+S, plain Space, and Primary+arrows, which are not built yet). `Mods.ctrl` is
+/// the primary modifier for Home and End (Ctrl, ⌘ on macOS) but Control for Space on both
+/// (⌘Space is Spotlight; `keys.rs`'s `GRID` lists them); the other one held is not ours.
+pub(crate) fn nav_key(
+    primary: Primary,
+    key: gdk::Key,
+    state: gdk::ModifierType,
+) -> Option<(Key, Mods)> {
     use gdk::Key as K;
+    use gdk::ModifierType as M;
+    let control = state.contains(M::CONTROL_MASK);
     let mut mods = Mods {
-        shift: state.contains(gdk::ModifierType::SHIFT_MASK),
-        ctrl: state.contains(gdk::ModifierType::CONTROL_MASK),
+        shift: state.contains(M::SHIFT_MASK),
+        ctrl: false,
     };
     let nav = match key {
         K::Up | K::KP_Up => Key::Up,
@@ -5297,10 +5305,18 @@ fn nav_key(key: gdk::Key, state: gdk::ModifierType) -> Option<(Key, Mods)> {
         K::End | K::KP_End => Key::End,
         K::Page_Up | K::KP_Page_Up => Key::PageUp,
         K::Page_Down | K::KP_Page_Down => Key::PageDown,
-        K::space | K::KP_Space if mods.shift || mods.ctrl => Key::Space,
+        K::space | K::KP_Space if mods.shift || control => Key::Space,
         _ => return None,
     };
-    if mods.ctrl && !matches!(nav, Key::Home | Key::End | Key::Space) {
+    // On Linux both are Control, so `stray` is never set.
+    let wanted = if nav == Key::Space {
+        M::CONTROL_MASK
+    } else {
+        primary.mask()
+    };
+    let stray = (M::CONTROL_MASK | primary.mask()).difference(wanted);
+    mods.ctrl = state.contains(wanted);
+    if state.intersects(stray) || (mods.ctrl && !matches!(nav, Key::Home | Key::End | Key::Space)) {
         return None;
     }
     Some((nav, mods))

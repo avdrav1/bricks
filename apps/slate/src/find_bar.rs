@@ -11,6 +11,7 @@
 use crate::view::Page;
 use gtk::prelude::*;
 use gtk::{gdk, gio, glib};
+use suite_ui::keys::Primary;
 
 /// Put the find bar above `page` in `content` (the window's column of page and status), and
 /// give `window` its `find` and `replace` actions.
@@ -184,22 +185,18 @@ pub fn attach(window: &gtk::ApplicationWindow, content: &gtk::Box, page: &Page) 
             }
         }
     };
-    // Escape anywhere in the bar closes it; Ctrl+F and Ctrl+H switch rows there too.
+    // Escape anywhere in the bar closes it; Find and Replace's keys switch rows there too.
     let keys = gtk::EventControllerKey::new();
     keys.set_propagation_phase(gtk::PropagationPhase::Capture);
     keys.connect_key_pressed({
         let hide = hide.clone();
         move |keys, key, _, mods| {
-            use gdk::Key as K;
-            let ctrl = mods.contains(gdk::ModifierType::CONTROL_MASK);
-            let action = match key {
-                K::Escape => {
-                    hide();
-                    return glib::Propagation::Stop;
-                }
-                K::f | K::F if ctrl => "win.find",
-                K::h | K::H if ctrl => "win.replace",
-                _ => return glib::Propagation::Proceed,
+            if key == gdk::Key::Escape {
+                hide();
+                return glib::Propagation::Stop;
+            }
+            let Some(action) = crate::keys::bar_key(Primary::HERE, key, mods) else {
+                return glib::Propagation::Proceed;
             };
             if let Some(w) = keys.widget() {
                 let _ = w.activate_action(action, None);

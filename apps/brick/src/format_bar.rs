@@ -6,6 +6,7 @@
 //! formats anything.
 
 use crate::grid_view::{FontToggle, GridView};
+use crate::keys::{self, Command};
 use data_model::{BorderPreset, Color, HAlign, StylePatch, Underline, VAlign};
 use gtk::{gdk, glib, prelude::*};
 use std::cell::Cell;
@@ -162,17 +163,26 @@ impl FormatBar {
         size.set_digits(1);
         size.set_width_chars(4);
         named(&size, "Font Size", "Font size");
-        let bold = toggle("format-text-bold-symbolic", "Bold", "Bold (Ctrl+B)");
-        let italic = toggle("format-text-italic-symbolic", "Italic", "Italic (Ctrl+I)");
+        let tip = |text: &str, command: Command| format!("{text} ({})", keys::label(command));
+        let bold = toggle(
+            "format-text-bold-symbolic",
+            "Bold",
+            &tip("Bold", Command::Font(FontToggle::Bold)),
+        );
+        let italic = toggle(
+            "format-text-italic-symbolic",
+            "Italic",
+            &tip("Italic", Command::Font(FontToggle::Italic)),
+        );
         let underline = toggle(
             "format-text-underline-symbolic",
             "Underline",
-            "Underline (Ctrl+U)",
+            &tip("Underline", Command::Font(FontToggle::Underline)),
         );
         let strike = toggle(
             "format-text-strikethrough-symbolic",
             "Strikethrough",
-            "Strikethrough (Ctrl+5)",
+            &tip("Strikethrough", Command::Font(FontToggle::Strike)),
         );
         let colors = || {
             let dialog = gtk::ColorDialog::new();
@@ -196,7 +206,14 @@ impl FormatBar {
         let mut names: Vec<&str> = NUMBER_FORMATS.iter().map(|(n, _)| *n).collect();
         names.push("Custom…");
         let number = gtk::DropDown::from_strings(&names);
-        named(&number, "Number Format", "Number format (Ctrl+1: custom)");
+        named(
+            &number,
+            "Number Format",
+            &format!(
+                "Number format ({}: custom)",
+                keys::label(Command::CustomFormat)
+            ),
+        );
         let custom_entry = gtk::Entry::new();
         custom_entry.set_width_chars(28);
         named(

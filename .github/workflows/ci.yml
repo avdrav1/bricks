@@ -45,6 +45,14 @@ jobs:
           sleep 1
           grep FULLFSYNC "$RUNNER_TEMP/fs_usage.log" | grep atomic | head -20
           grep FULLFSYNC "$RUNNER_TEMP/fs_usage.log" | grep -q atomic
+      # Command keys (MAC-3): System Events drives each release build with ⌘O, ⌘S, and ⌘Z
+      # and the files show the saves; the screenshots are the artifact.
+      - run: cargo build --release -p brick -p slate -p frame -p etch
+      - name: Command keys drive each app
+        run: scripts/check_mac_keys.sh target/release
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: macos-keys, path: out/mac-keys, if-no-files-found: warn }
   bench:
     # Prints the apps/brick/docs/BENCHMARKS.md table. Runner numbers are informational: gates use the
     # reference box, and rows that open a window are skipped (no display).

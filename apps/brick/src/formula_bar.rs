@@ -5,6 +5,7 @@
 //! that a result came from the file.
 
 use crate::grid_view::GridView;
+use crate::keys::{self, Command};
 use gtk::{gdk, glib, prelude::*};
 use std::rc::Rc;
 
@@ -21,7 +22,7 @@ impl FormulaBar {
         let name = gtk::Entry::new();
         name.set_width_chars(14);
         name.set_max_width_chars(14);
-        name.set_tooltip_text(Some("Name box (Ctrl+G)"));
+        name.set_tooltip_text(Some(&format!("Name box ({})", keys::label(Command::GoTo))));
         let fx = gtk::Label::new(Some("ƒx"));
         fx.add_css_class("dim-label");
         let input = gtk::Entry::new();

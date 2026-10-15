@@ -2,23 +2,31 @@
 //! shortcuts, the window's own keys (the selection's, Space), and the mnemonics of the
 //! menu bar and the colour row. The app takes them from it: GTK's accelerators
 //! ([`accels`]), the keys the menus show ([`menu_item`]), the window's key handler
-//! ([`window_binding`]), the labels' underlined letters ([`mnemonic`]), and the tools' keys
+//! ([`window_key`]), the labels' underlined letters ([`mnemonic`]), and the tools' keys
 //! ([`tool_key`]). A menu's own items and a dialog's mnemonics work only while it's open,
 //! so they aren't here.
 //!
+//! The table's shortcuts hold the platform's primary modifier (MAC-3, `suite_ui::keys`):
+//! Ctrl on Linux, ⌘ on macOS. A binding can be one platform's alone ([`Binding::on`]):
+//! Ctrl+Y redoes on Linux only, and Rotate 90° Right is Ctrl+H on Linux and ⌘] on macOS,
+//! where ⌘H hides the app.
+//!
 //! Where a key goes depends on what has the keys ([`Focus`], [`takes`]): a field (the
 //! size, the tolerance, the hex field, the font list's search) keeps every key, and text
-//! being typed on the canvas every key but the Ctrl+Shift ones, so tool keys and X are
-//! letters there (docs/specs/etch.md).
+//! being typed on the canvas every key but the primary+Shift ones (Ctrl+Shift, ⇧⌘), so
+//! tool keys and X are letters there (docs/specs/etch.md).
 
 use crate::tools::Tool;
+use gtk::gdk;
 use gtk::gio;
 use gtk::prelude::*;
+use suite_ui::keys::Primary;
 
-/// The modifiers held with a key.
+/// The modifiers held with a key. `primary` is the platform's primary modifier: Ctrl on
+/// Linux, ⌘ on macOS.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Mods {
-    pub ctrl: bool,
+    pub primary: bool,
     pub shift: bool,
     pub alt: bool,
 }
@@ -26,21 +34,27 @@ pub struct Mods {
 impl Mods {
     pub const NONE: Mods = Mods::new(false, false, false);
     pub const SHIFT: Mods = Mods::new(false, true, false);
-    pub const CTRL: Mods = Mods::new(true, false, false);
-    pub const CTRL_SHIFT: Mods = Mods::new(true, true, false);
+    pub const PRIMARY: Mods = Mods::new(true, false, false);
+    pub const PRIMARY_SHIFT: Mods = Mods::new(true, true, false);
     pub const ALT: Mods = Mods::new(false, false, true);
 
-    const fn new(ctrl: bool, shift: bool, alt: bool) -> Mods {
-        Mods { ctrl, shift, alt }
+    const fn new(primary: bool, shift: bool, alt: bool) -> Mods {
+        Mods {
+            primary,
+            shift,
+            alt,
+        }
     }
 
-    /// The modifiers of a key event's `state` (Caps Lock and Num Lock aside); `None` with
-    /// Super, Hyper, or Meta held, which nothing binds.
-    pub fn of(state: gtk::gdk::ModifierType) -> Option<Mods> {
-        use gtk::gdk::ModifierType as M;
-        let others = M::SUPER_MASK | M::HYPER_MASK | M::META_MASK;
+    /// The modifiers of a key event's `state` with `p` the primary modifier (Caps Lock and
+    /// Num Lock aside); `None` with any other held, which nothing binds: Super, Hyper, and
+    /// Meta on Linux, Super, Hyper, and Control (⌃) on macOS, where ⌘ is Meta.
+    pub fn of(p: Primary, state: gdk::ModifierType) -> Option<Mods> {
+        use gdk::ModifierType as M;
+        let others =
+            (M::SUPER_MASK | M::HYPER_MASK | M::META_MASK | M::CONTROL_MASK).difference(p.mask());
         (state & others).is_empty().then(|| Mods {
-            ctrl: state.contains(M::CONTROL_MASK),
+            primary: p.held(state),
             shift: state.contains(M::SHIFT_MASK),
             alt: state.contains(M::ALT_MASK),
         })
@@ -57,20 +71,26 @@ pub struct Combo {
 }
 
 impl Combo {
-    /// As a GTK accelerator: `<Control><Shift>s`.
-    pub fn accel(self) -> String {
-        let mut accel = String::new();
+    /// As the suite writes a shortcut (`suite_ui::keys`): `<Primary><Shift>s`.
+    pub fn spec(self) -> String {
+        let mut spec = String::new();
         for (on, name) in [
-            (self.mods.ctrl, "<Control>"),
+            (self.mods.primary, "<Primary>"),
             (self.mods.shift, "<Shift>"),
             (self.mods.alt, "<Alt>"),
         ] {
             if on {
-                accel.push_str(name);
+                spec.push_str(name);
             }
         }
-        accel.push_str(self.key);
-        accel
+        spec.push_str(self.key);
+        spec
+    }
+
+    /// As a GTK accelerator with `p` the primary modifier: `<Control><Shift>s` on Linux,
+    /// `<Meta><Shift>s` on macOS.
+    pub fn accel(self, p: Primary) -> String {
+        p.accel(&self.spec())
     }
 }
 
@@ -103,9 +123,9 @@ pub enum Via {
     /// The window's key handler, so a field and the text being typed keep the key
     /// ([`takes`]).
     Window,
-    /// The window's key handler, which takes a Ctrl+Shift letter however its case arrives
-    /// (an accelerator can miss an upper case one), and GTK's accelerator while a field
-    /// has the keys.
+    /// The window's key handler, which takes a primary+Shift letter (Ctrl+Shift, ⇧⌘)
+    /// however its case arrives (an accelerator can miss an upper case one), and GTK's
+    /// accelerator while a field has the keys.
     Both,
     /// GTK's mnemonic: the label's underlined letter, with Alt.
     Mnemonic,
@@ -117,6 +137,23 @@ pub struct Binding {
     pub combo: Combo,
     pub command: Command,
     pub via: Via,
+    /// The primary modifier it's bound with alone, if it's one platform's.
+    pub only: Option<Primary>,
+}
+
+impl Binding {
+    /// Whether it's bound with `p` the primary modifier.
+    pub fn on(&self, p: Primary) -> bool {
+        self.only.is_none_or(|o| o == p)
+    }
+
+    /// It, bound with `p` the primary modifier alone.
+    const fn only(self, p: Primary) -> Binding {
+        Binding {
+            only: Some(p),
+            ..self
+        }
+    }
 }
 
 const fn bind(mods: Mods, key: &'static str, command: Command, via: Via) -> Binding {
@@ -124,6 +161,7 @@ const fn bind(mods: Mods, key: &'static str, command: Command, via: Via) -> Bind
         combo: Combo { mods, key },
         command,
         via,
+        only: None,
     }
 }
 
@@ -146,26 +184,27 @@ const fn label(key: &'static str, text: &'static str) -> Binding {
 use Mods as M;
 use Via::{Accel, Both, Window};
 
-/// Every key Etch binds. An action's first binding is the one its menu item shows.
+/// Every key Etch binds. An action's first binding on a platform is the one its menu item
+/// shows there. `M::PRIMARY` is Ctrl on Linux and ⌘ on macOS.
 pub const BINDINGS: &[Binding] = &[
     // File.
-    action(M::CTRL, "n", "app.new", Accel),
-    action(M::CTRL, "o", "app.open", Accel),
-    action(M::CTRL, "s", "win.save", Accel),
-    action(M::CTRL_SHIFT, "s", "win.save-as", Both),
-    action(M::CTRL_SHIFT, "e", "win.export", Both),
-    action(M::CTRL, "w", "window.close", Accel),
-    action(M::CTRL, "q", "app.quit", Accel),
+    action(M::PRIMARY, "n", "app.new", Accel),
+    action(M::PRIMARY, "o", "app.open", Accel),
+    action(M::PRIMARY, "s", "win.save", Accel),
+    action(M::PRIMARY_SHIFT, "s", "win.save-as", Both),
+    action(M::PRIMARY_SHIFT, "e", "win.export", Both),
+    action(M::PRIMARY, "w", "window.close", Accel),
+    action(M::PRIMARY, "q", "app.quit", Accel),
     // Edit. Ctrl+Shift+Z is the window's alone: a field keeps its own redo. Cut, copy,
     // paste, select all, deselect, and delete are the window's so a field and the text
-    // being typed keep theirs.
-    action(M::CTRL, "z", "win.undo", Accel),
-    action(M::CTRL, "y", "win.redo", Accel),
-    action(M::CTRL_SHIFT, "z", "win.redo", Window),
-    action(M::CTRL, "x", "win.cut", Window),
-    action(M::CTRL, "c", "win.copy", Window),
-    action(M::CTRL, "v", "win.paste", Window),
-    action(M::CTRL, "a", "win.select-all", Window),
+    // being typed keep theirs. Ctrl+Y is Linux's alone: macOS redoes with ⇧⌘Z.
+    action(M::PRIMARY, "z", "win.undo", Accel),
+    action(M::PRIMARY, "y", "win.redo", Accel).only(Primary::Control),
+    action(M::PRIMARY_SHIFT, "z", "win.redo", Window),
+    action(M::PRIMARY, "x", "win.cut", Window),
+    action(M::PRIMARY, "c", "win.copy", Window),
+    action(M::PRIMARY, "v", "win.paste", Window),
+    action(M::PRIMARY, "a", "win.select-all", Window),
     action(M::NONE, "Escape", "win.deselect", Window),
     action(M::NONE, "Delete", "win.delete", Window),
     action(M::NONE, "KP_Delete", "win.delete", Window),
@@ -189,21 +228,23 @@ pub const BINDINGS: &[Binding] = &[
     // A shape's drag held with Shift (to constrain it) drops with Shift+Escape too.
     bind(M::SHIFT, "Escape", Command::DropShape, Window),
     // View.
-    action(M::CTRL, "plus", "win.zoom-in", Accel),
-    action(M::CTRL, "equal", "win.zoom-in", Accel),
-    action(M::CTRL, "KP_Add", "win.zoom-in", Accel),
-    action(M::CTRL, "minus", "win.zoom-out", Accel),
-    action(M::CTRL, "KP_Subtract", "win.zoom-out", Accel),
-    action(M::CTRL, "0", "win.actual-size", Accel),
-    action(M::CTRL, "KP_0", "win.actual-size", Accel),
-    action(M::CTRL, "9", "win.fit", Accel),
-    // Image (the spec's; Paint.NET's). The flips have none.
-    action(M::CTRL_SHIFT, "x", "win.crop", Both),
-    action(M::CTRL, "r", "win.resize-image", Accel),
-    action(M::CTRL_SHIFT, "r", "win.resize-canvas", Both),
-    action(M::CTRL, "h", "win.rotate-right", Accel),
-    action(M::CTRL, "g", "win.rotate-left", Accel),
-    action(M::CTRL, "j", "win.rotate-half", Accel),
+    action(M::PRIMARY, "plus", "win.zoom-in", Accel),
+    action(M::PRIMARY, "equal", "win.zoom-in", Accel),
+    action(M::PRIMARY, "KP_Add", "win.zoom-in", Accel),
+    action(M::PRIMARY, "minus", "win.zoom-out", Accel),
+    action(M::PRIMARY, "KP_Subtract", "win.zoom-out", Accel),
+    action(M::PRIMARY, "0", "win.actual-size", Accel),
+    action(M::PRIMARY, "KP_0", "win.actual-size", Accel),
+    action(M::PRIMARY, "9", "win.fit", Accel),
+    // Image (the spec's; Paint.NET's). The flips have none. ⌘H hides the app on macOS, so
+    // Rotate 90° Right is ⌘] there (Pixelmator's; Preview's ⌘R is Resize Image here).
+    action(M::PRIMARY_SHIFT, "x", "win.crop", Both),
+    action(M::PRIMARY, "r", "win.resize-image", Accel),
+    action(M::PRIMARY_SHIFT, "r", "win.resize-canvas", Both),
+    action(M::PRIMARY, "h", "win.rotate-right", Accel).only(Primary::Control),
+    action(M::PRIMARY, "bracketright", "win.rotate-right", Accel).only(Primary::Command),
+    action(M::PRIMARY, "g", "win.rotate-left", Accel),
+    action(M::PRIMARY, "j", "win.rotate-half", Accel),
     // The tools, the colours, and panning.
     tool("p", Tool::Pencil),
     tool("b", Tool::Brush),
@@ -240,53 +281,72 @@ pub enum Focus {
 }
 
 /// Whether the window's key handler takes `binding` with the keys at `focus`: none while
-/// a field has them, only the Ctrl+Shift ones while text is typed.
+/// a field has them, only the primary+Shift ones while text is typed.
 pub fn takes(binding: &Binding, focus: Focus) -> bool {
     matches!(binding.via, Via::Window | Via::Both)
         && match focus {
             Focus::Image => true,
-            Focus::Typing => binding.combo.mods == Mods::CTRL_SHIFT,
+            Focus::Typing => binding.combo.mods == Mods::PRIMARY_SHIFT,
             Focus::Field => false,
         }
 }
 
+/// The bindings with `p` the primary modifier.
+pub fn bindings(p: Primary) -> impl Iterator<Item = &'static Binding> {
+    BINDINGS.iter().filter(move |b| b.on(p))
+}
+
 /// The binding of the key named `key` (GDK's name, a letter in lower case) with `mods`
-/// held that the window's key handler takes with the keys at `focus`.
-pub fn window_binding(key: &str, mods: Mods, focus: Focus) -> Option<&'static Binding> {
-    BINDINGS
-        .iter()
+/// held that the window's key handler takes with the keys at `focus`, `p` the primary
+/// modifier.
+pub fn window_binding(p: Primary, key: &str, mods: Mods, focus: Focus) -> Option<&'static Binding> {
+    bindings(p)
         .find(|b| b.combo.mods == mods && b.combo.key == key)
         .filter(|b| takes(b, focus))
 }
 
-/// The actions' accelerators, each action's in the table's order.
-pub fn accels() -> Vec<(&'static str, Vec<String>)> {
+/// The binding the window's key handler takes for a press of `key` with `state` held at
+/// `focus`, `p` the primary modifier: a letter in either case.
+pub fn window_key(
+    p: Primary,
+    key: gdk::Key,
+    state: gdk::ModifierType,
+    focus: Focus,
+) -> Option<&'static Binding> {
+    Mods::of(p, state)
+        .zip(key.to_lower().name())
+        .and_then(|(mods, name)| window_binding(p, &name, mods, focus))
+}
+
+/// The actions' accelerators with `p` the primary modifier, each action's in the table's
+/// order.
+pub fn accels(p: Primary) -> Vec<(&'static str, Vec<String>)> {
     let mut accels: Vec<(&'static str, Vec<String>)> = Vec::new();
-    for b in BINDINGS {
+    for b in bindings(p) {
         let (Command::Action(name), Via::Accel | Via::Both) = (b.command, b.via) else {
             continue;
         };
         match accels.iter_mut().find(|(n, _)| *n == name) {
-            Some((_, keys)) => keys.push(b.combo.accel()),
-            None => accels.push((name, vec![b.combo.accel()])),
+            Some((_, keys)) => keys.push(b.combo.accel(p)),
+            None => accels.push((name, vec![b.combo.accel(p)])),
         }
     }
     accels
 }
 
-/// The key the menu shows for the action `name`: its first binding's.
-pub fn accel_of(name: &str) -> Option<String> {
-    BINDINGS
-        .iter()
+/// The key the menu shows for the action `name` with `p` the primary modifier: its first
+/// binding's.
+pub fn accel_of(p: Primary, name: &str) -> Option<String> {
+    bindings(p)
         .find(|b| matches!(b.command, Command::Action(n) if n == name))
-        .map(|b| b.combo.accel())
+        .map(|b| b.combo.accel(p))
 }
 
-/// A menu item `label` running the action `name`, showing its key: the window's key
-/// handler's too, which GTK's accelerators don't list.
+/// A menu item `label` running the action `name`, showing its key on this platform: the
+/// window's key handler's too, which GTK's accelerators don't list.
 pub fn menu_item(label: &str, name: &str) -> gio::MenuItem {
     let item = gio::MenuItem::new(Some(label), Some(name));
-    if let Some(accel) = accel_of(name) {
+    if let Some(accel) = accel_of(Primary::HERE, name) {
         item.set_attribute_value("accel", Some(&accel.to_variant()));
     }
     item
@@ -317,25 +377,32 @@ pub fn tool_key(tool: Tool) -> Option<char> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gtk::gdk;
     use std::collections::HashMap;
+    use suite_ui::keys;
 
     const SPEC: &str = include_str!("../../../docs/specs/etch.md");
 
     #[test]
-    fn no_key_combination_is_bound_twice() {
-        let mut seen: HashMap<Combo, Command> = HashMap::new();
-        let mut twice = Vec::new();
-        for b in BINDINGS {
-            if let Some(first) = seen.insert(b.combo, b.command) {
-                twice.push(format!(
-                    "{} ({first:?} and {:?})",
-                    b.combo.accel(),
-                    b.command
-                ));
+    fn no_key_combination_is_bound_twice_nor_one_macos_keeps() {
+        for p in Primary::ALL {
+            let mut seen: HashMap<Combo, Command> = HashMap::new();
+            let mut twice = Vec::new();
+            for b in bindings(p) {
+                if let Some(first) = seen.insert(b.combo, b.command) {
+                    twice.push(format!(
+                        "{} ({first:?} and {:?})",
+                        b.combo.accel(p),
+                        b.command
+                    ));
+                }
             }
+            assert!(twice.is_empty(), "{p:?}: bound twice: {twice:?}");
+            let specs: Vec<(String, String)> = bindings(p)
+                .map(|b| (format!("{:?}", b.command), b.combo.spec()))
+                .collect();
+            let clashes = keys::clashes(p, specs.iter().map(|(n, s)| (n.as_str(), s.as_str())));
+            assert_eq!(clashes, Vec::<String>::new(), "{p:?}");
         }
-        assert!(twice.is_empty(), "bound twice: {twice:?}");
     }
 
     #[test]
@@ -379,62 +446,195 @@ mod tests {
             .iter()
             .filter(|b| matches!(b.command, Command::Tool(_) | Command::Swap));
         assert_eq!(picks.clone().count(), Tool::ALL.len() + 1);
-        for b in picks {
-            let key = b.combo.key;
-            assert!(takes(b, Focus::Image), "{key} on the image");
-            assert!(!takes(b, Focus::Typing), "{key} while text is typed");
-            assert!(!takes(b, Focus::Field), "{key} in a field");
-            assert_eq!(window_binding(key, Mods::NONE, Focus::Typing), None);
-            assert_eq!(window_binding(key, Mods::NONE, Focus::Field), None);
-            assert_eq!(window_binding(key, Mods::NONE, Focus::Image), Some(b));
-        }
-        // Space, the arrows, Delete, Escape, and Ctrl+A, X, C, V are the text's too; a
-        // field keeps every key.
-        for (key, mods) in [
-            ("space", Mods::NONE),
-            ("Left", Mods::NONE),
-            ("Left", Mods::SHIFT),
-            ("Delete", Mods::NONE),
-            ("Escape", Mods::NONE),
-            ("a", Mods::CTRL),
-            ("x", Mods::CTRL),
-            ("c", Mods::CTRL),
-            ("v", Mods::CTRL),
-        ] {
-            assert!(window_binding(key, mods, Focus::Image).is_some(), "{key}");
-            assert_eq!(window_binding(key, mods, Focus::Typing), None, "{key}");
+        for p in Primary::ALL {
+            for b in picks.clone() {
+                let key = b.combo.key;
+                assert!(takes(b, Focus::Image), "{key} on the image");
+                assert!(!takes(b, Focus::Typing), "{key} while text is typed");
+                assert!(!takes(b, Focus::Field), "{key} in a field");
+                assert_eq!(window_binding(p, key, Mods::NONE, Focus::Typing), None);
+                assert_eq!(window_binding(p, key, Mods::NONE, Focus::Field), None);
+                assert_eq!(window_binding(p, key, Mods::NONE, Focus::Image), Some(b));
+            }
+            // Space, the arrows, Delete, Escape, and Ctrl+A, X, C, V (⌘ on macOS) are the
+            // text's too; a field keeps every key.
+            for (key, mods) in [
+                ("space", Mods::NONE),
+                ("Left", Mods::NONE),
+                ("Left", Mods::SHIFT),
+                ("Delete", Mods::NONE),
+                ("Escape", Mods::NONE),
+                ("a", Mods::PRIMARY),
+                ("x", Mods::PRIMARY),
+                ("c", Mods::PRIMARY),
+                ("v", Mods::PRIMARY),
+            ] {
+                assert!(
+                    window_binding(p, key, mods, Focus::Image).is_some(),
+                    "{key}"
+                );
+                assert_eq!(window_binding(p, key, mods, Focus::Typing), None, "{key}");
+            }
+            // While text is typed, the primary+Shift ones still work.
+            let redo = window_binding(p, "z", Mods::PRIMARY_SHIFT, Focus::Typing);
+            assert_eq!(redo.map(|b| b.command), Some(Command::Action("win.redo")));
         }
         for b in BINDINGS {
-            assert!(!takes(b, Focus::Field), "{} in a field", b.combo.accel());
+            assert!(!takes(b, Focus::Field), "{} in a field", b.combo.spec());
         }
-        // While text is typed, the Ctrl+Shift ones still work.
-        let redo = window_binding("z", Mods::CTRL_SHIFT, Focus::Typing);
-        assert_eq!(redo.map(|b| b.command), Some(Command::Action("win.redo")));
+    }
+
+    /// Etch's accelerators on Linux before MAC-3, written out: they stay as they were.
+    const LINUX_ACCELS: &[(&str, &[&str])] = &[
+        ("app.new", &["<Control>n"]),
+        ("app.open", &["<Control>o"]),
+        ("win.save", &["<Control>s"]),
+        ("win.save-as", &["<Control><Shift>s"]),
+        ("win.export", &["<Control><Shift>e"]),
+        ("window.close", &["<Control>w"]),
+        ("app.quit", &["<Control>q"]),
+        ("win.undo", &["<Control>z"]),
+        ("win.redo", &["<Control>y"]),
+        (
+            "win.zoom-in",
+            &["<Control>plus", "<Control>equal", "<Control>KP_Add"],
+        ),
+        ("win.zoom-out", &["<Control>minus", "<Control>KP_Subtract"]),
+        ("win.actual-size", &["<Control>0", "<Control>KP_0"]),
+        ("win.fit", &["<Control>9"]),
+        ("win.crop", &["<Control><Shift>x"]),
+        ("win.resize-image", &["<Control>r"]),
+        ("win.resize-canvas", &["<Control><Shift>r"]),
+        ("win.rotate-right", &["<Control>h"]),
+        ("win.rotate-left", &["<Control>g"]),
+        ("win.rotate-half", &["<Control>j"]),
+    ];
+
+    /// The keys Linux's menus showed before MAC-3 for the window's own actions.
+    const LINUX_MENU_KEYS: &[(&str, &str)] = &[
+        ("win.redo", "<Control>y"),
+        ("win.cut", "<Control>x"),
+        ("win.copy", "<Control>c"),
+        ("win.paste", "<Control>v"),
+        ("win.select-all", "<Control>a"),
+        ("win.deselect", "Escape"),
+        ("win.delete", "Delete"),
+    ];
+
+    fn owned(list: &[(&'static str, &[&str])]) -> Vec<(&'static str, Vec<String>)> {
+        list.iter()
+            .map(|(n, keys)| (*n, keys.iter().map(|k| k.to_string()).collect()))
+            .collect()
     }
 
     #[test]
-    fn accelerators_are_the_actions_keys_in_order() {
-        let accels = accels();
-        let of = |name: &str| {
-            accels
-                .iter()
-                .find(|(n, _)| *n == name)
-                .map(|(_, k)| k.clone())
-        };
+    fn linux_accelerators_are_the_actions_keys_in_order_as_before() {
+        let p = Primary::Control;
+        assert_eq!(accels(p), owned(LINUX_ACCELS));
+        for (name, keys) in LINUX_ACCELS {
+            assert_eq!(accel_of(p, name).as_deref(), Some(keys[0]), "{name}");
+        }
+        for (name, key) in LINUX_MENU_KEYS {
+            assert_eq!(accel_of(p, name).as_deref(), Some(*key), "{name}");
+        }
+        let accels = accels(p);
+        assert!(!accels.iter().any(|(n, _)| *n == "win.cut"));
+        assert_eq!(accel_of(p, "win.flip-vertical"), None);
+    }
+
+    #[test]
+    fn macos_accelerators_are_command_where_linux_has_ctrl() {
+        let p = Primary::Command;
+        // Linux's, with ⌘ for Ctrl; but Ctrl+Y (Linux's alone: macOS redoes with ⇧⌘Z) and
+        // Ctrl+H (⌘H hides the app: ⌘] rotates right).
+        let mac: Vec<(&str, Vec<String>)> = owned(LINUX_ACCELS)
+            .into_iter()
+            .filter(|(n, _)| *n != "win.redo")
+            .map(|(n, keys)| match n {
+                "win.rotate-right" => (n, vec!["<Meta>bracketright".to_owned()]),
+                _ => (
+                    n,
+                    keys.iter()
+                        .map(|k| k.replace("<Control>", "<Meta>"))
+                        .collect(),
+                ),
+            })
+            .collect();
+        assert_eq!(accels(p), mac);
+        assert_eq!(accel_of(p, "win.redo").as_deref(), Some("<Meta><Shift>z"));
+        assert_eq!(accel_of(p, "win.cut").as_deref(), Some("<Meta>x"));
+        assert_eq!(accel_of(p, "win.deselect").as_deref(), Some("Escape"));
+        // No shortcut stays on Control on macOS: Etch has no exceptions.
+        let on_control: Vec<String> = bindings(p)
+            .map(|b| b.combo.accel(p))
+            .filter(|a| a.contains("<Control>"))
+            .collect();
+        assert_eq!(on_control, Vec::<String>::new());
+    }
+
+    #[test]
+    fn rotate_right_and_ctrl_y_are_one_platforms() {
+        // ⌘H is macOS's Hide, so Ctrl+H can't be Rotate 90° Right there.
+        assert!(!keys::clashes(Primary::Command, [("rotate-right", "<Primary>h")]).is_empty());
+        let only: Vec<(String, Option<Primary>)> = BINDINGS
+            .iter()
+            .filter(|b| b.only.is_some())
+            .map(|b| (b.combo.spec(), b.only))
+            .collect();
         assert_eq!(
-            of("win.zoom-in"),
-            Some(vec![
-                "<Control>plus".into(),
-                "<Control>equal".into(),
-                "<Control>KP_Add".into()
-            ])
+            only,
+            [
+                ("<Primary>y".to_owned(), Some(Primary::Control)),
+                ("<Primary>h".to_owned(), Some(Primary::Control)),
+                ("<Primary>bracketright".to_owned(), Some(Primary::Command)),
+            ]
         );
-        assert_eq!(of("win.save-as"), Some(vec!["<Control><Shift>s".into()]));
-        assert_eq!(of("win.redo"), Some(vec!["<Control>y".into()]));
-        assert_eq!(of("win.cut"), None);
-        assert_eq!(accel_of("win.cut").as_deref(), Some("<Control>x"));
-        assert_eq!(accel_of("win.deselect").as_deref(), Some("Escape"));
-        assert_eq!(accel_of("win.flip-vertical"), None);
+        let rotate = |p: Primary| -> Vec<String> {
+            bindings(p)
+                .filter(|b| b.command == Command::Action("win.rotate-right"))
+                .map(|b| b.combo.accel(p))
+                .collect()
+        };
+        assert_eq!(rotate(Primary::Control), ["<Control>h"]);
+        assert_eq!(rotate(Primary::Command), ["<Meta>bracketright"]);
+    }
+
+    #[test]
+    fn the_window_takes_its_keys_with_the_primary_modifier() {
+        use gdk::ModifierType as G;
+        use Primary::{Command as Cmd, Control as Ctl};
+        let run = |p, key, state, focus| window_key(p, key, state, focus).map(|b| b.command);
+        let cut = Some(Command::Action("win.cut"));
+        let redo = Some(Command::Action("win.redo"));
+        // ⌘X cuts on macOS and ⌃X doesn't; Ctrl+X cuts on Linux and Meta+X doesn't.
+        assert_eq!(run(Cmd, gdk::Key::x, G::META_MASK, Focus::Image), cut);
+        assert_eq!(run(Cmd, gdk::Key::x, G::CONTROL_MASK, Focus::Image), None);
+        assert_eq!(run(Ctl, gdk::Key::x, G::CONTROL_MASK, Focus::Image), cut);
+        assert_eq!(run(Ctl, gdk::Key::x, G::META_MASK, Focus::Image), None);
+        // ⇧⌘Z and Ctrl+Shift+Z redo, the letter in either case, while text is typed too.
+        let shifted = G::SHIFT_MASK | G::LOCK_MASK;
+        assert_eq!(
+            run(Cmd, gdk::Key::Z, G::META_MASK | shifted, Focus::Typing),
+            redo
+        );
+        assert_eq!(
+            run(Ctl, gdk::Key::Z, G::CONTROL_MASK | shifted, Focus::Typing),
+            redo
+        );
+        assert_eq!(
+            run(Cmd, gdk::Key::Z, G::CONTROL_MASK | shifted, Focus::Typing),
+            None
+        );
+        // ⌘Z undoes on macOS (an accelerator) and ⌃Z doesn't; Ctrl+Z undoes on Linux.
+        let undo = BINDINGS
+            .iter()
+            .find(|b| b.command == Command::Action("win.undo"))
+            .map(|b| b.combo.spec())
+            .unwrap();
+        assert_eq!(undo, "<Primary>z");
+        assert!(Cmd.matches(&undo, gdk::Key::z, G::META_MASK));
+        assert!(!Cmd.matches(&undo, gdk::Key::z, G::CONTROL_MASK));
+        assert!(Ctl.matches(&undo, gdk::Key::z, G::CONTROL_MASK));
     }
 
     #[test]
@@ -464,7 +664,7 @@ mod tests {
         let mut held = Mods::NONE;
         for m in mods.split('+').filter(|m| !m.is_empty()) {
             match m {
-                "Ctrl" => held.ctrl = true,
+                "Ctrl" => held.primary = true,
                 "Shift" => held.shift = true,
                 "Alt" => held.alt = true,
                 other => panic!("the spec names a modifier {other:?}"),
@@ -562,15 +762,15 @@ mod tests {
         pairs
     }
 
+    /// The spec's table names Linux's keys (Ctrl); macOS's are in the paragraph after it.
     #[test]
     fn every_shortcut_in_the_spec_is_bound_to_its_command() {
         let pairs = spec_shortcuts();
         assert!(pairs.len() >= 30, "the spec's table read: {pairs:?}");
         for (keys, name) in &pairs {
             let (mods, key) = spec_combo(keys);
-            let bound = BINDINGS
-                .iter()
-                .find(|b| b.combo.mods == mods && b.combo.key == key);
+            let bound =
+                bindings(Primary::Control).find(|b| b.combo.mods == mods && b.combo.key == key);
             assert_eq!(
                 bound.map(|b| b.command),
                 Some(spec_command(name)),
@@ -592,15 +792,27 @@ mod tests {
     }
 
     #[test]
-    fn modifiers_beyond_ctrl_shift_and_alt_bind_nothing() {
+    fn modifiers_beyond_the_primary_shift_and_alt_bind_nothing() {
         use gdk::ModifierType as G;
-        assert_eq!(Mods::of(G::empty()), Some(Mods::NONE));
-        assert_eq!(
-            Mods::of(G::CONTROL_MASK | G::SHIFT_MASK),
-            Some(Mods::CTRL_SHIFT)
-        );
-        // Caps Lock and Num Lock aren't modifiers a key is bound with.
-        assert_eq!(Mods::of(G::LOCK_MASK), Some(Mods::NONE));
-        assert_eq!(Mods::of(G::SUPER_MASK), None);
+        for p in Primary::ALL {
+            assert_eq!(Mods::of(p, G::empty()), Some(Mods::NONE));
+            assert_eq!(
+                Mods::of(p, p.mask() | G::SHIFT_MASK),
+                Some(Mods::PRIMARY_SHIFT)
+            );
+            // Caps Lock and Num Lock aren't modifiers a key is bound with.
+            assert_eq!(Mods::of(p, G::LOCK_MASK), Some(Mods::NONE));
+            assert_eq!(Mods::of(p, G::SUPER_MASK), None);
+            assert_eq!(Mods::of(p, G::HYPER_MASK), None);
+        }
+        // Linux: Ctrl is the primary modifier, and Meta binds nothing.
+        let linux = Primary::Control;
+        assert_eq!(Mods::of(linux, G::CONTROL_MASK), Some(Mods::PRIMARY));
+        assert_eq!(Mods::of(linux, G::META_MASK), None);
+        // macOS: ⌘ (GDK's Meta) is, and Control (⌃) binds nothing.
+        let mac = Primary::Command;
+        assert_eq!(Mods::of(mac, G::META_MASK), Some(Mods::PRIMARY));
+        assert_eq!(Mods::of(mac, G::CONTROL_MASK), None);
+        assert_eq!(Mods::of(mac, G::META_MASK | G::CONTROL_MASK), None);
     }
 }

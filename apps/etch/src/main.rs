@@ -12,7 +12,8 @@
 //! (Ctrl+Shift+S), and Export (Ctrl+Shift+E) write PNG, JPEG, or BMP; closing or quitting
 //! with changes not saved asks first. Unsaved changes are journaled, and after a crash
 //! `etch` opens each crashed image again, offering its changes back. The canvas zooms and
-//! pans, the pencil and eraser draw, and every stroke undoes and redoes.
+//! pans, the pencil and eraser draw, and every stroke undoes and redoes. On macOS ⌘
+//! replaces Ctrl in every shortcut ([`keys`]).
 //! `--bench-stroke` draws a stroke one segment a frame on a 7680×4320 image at 100% for
 //! FRAMES frames and prints how long each took (ETCH-2's acceptance test); `--bench-open`
 //! opens FILE and prints how long it took to show (ETCH-6's).

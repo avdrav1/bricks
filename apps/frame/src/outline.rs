@@ -15,6 +15,7 @@
 //! list and the status bar.
 
 use crate::editing;
+use crate::keys::{self, Action, Via};
 use crate::window::DeckWindow;
 use deck_edit::{Change, Edit, Line, LineKind, Outline, OutlineKey, OutlinePos};
 use gtk::prelude::*;
@@ -22,6 +23,7 @@ use gtk::{gdk, glib};
 use presentation_model::Presentation;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use suite_ui::keys::Primary;
 
 /// The outline's left margin, where titles start, in pixels.
 const MARGIN: i32 = 16;
@@ -107,7 +109,8 @@ impl OutlineView {
         stack.add_named(&scrolled, Some("outline"));
         stack.set_visible_child_name("slide");
         let button = gtk::ToggleButton::with_label("Outline");
-        button.set_tooltip_text(Some("Outline (Ctrl+Shift+O)"));
+        let tip = format!("Outline ({})", keys::label(Action::Outline));
+        button.set_tooltip_text(Some(&tip));
         button.update_property(&[gtk::accessible::Property::Label("Outline")]);
         OutlineView {
             stack,
@@ -645,15 +648,14 @@ fn type_text(view: &DeckWindow, from: OutlinePos, to: OutlinePos, text: &str) {
 
 fn key_pressed(view: &DeckWindow, key: gdk::Key, mods: gdk::ModifierType) -> glib::Propagation {
     use gdk::Key;
+    let p = Primary::HERE;
     let shift = mods.contains(gdk::ModifierType::SHIFT_MASK);
-    let ctrl = mods.contains(gdk::ModifierType::CONTROL_MASK);
-    let alt = mods.contains(gdk::ModifierType::ALT_MASK);
     let enter = matches!(key, Key::Return | Key::KP_Enter | Key::ISO_Enter);
-    if alt || (ctrl && (shift || !enter)) {
-        return glib::Propagation::Proceed;
-    }
     let key = match key {
-        _ if ctrl => OutlineKey::NewSlide,
+        _ if keys::find(p, Via::Outline, key, mods) == Some(Action::OutlineSlide) => {
+            OutlineKey::NewSlide
+        }
+        _ if keys::modified(p, mods) => return glib::Propagation::Proceed,
         _ if enter => OutlineKey::Enter,
         Key::ISO_Left_Tab => OutlineKey::ShiftTab,
         Key::Tab | Key::KP_Tab if shift => OutlineKey::ShiftTab,

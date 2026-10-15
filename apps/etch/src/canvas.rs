@@ -18,10 +18,10 @@
 //! drag inside it lifts its pixels, which float over the image, leaving transparency where
 //! they were, until they land as one undo step; pixels pasted from the clipboard float
 //! the same way, and the selection's pixels are copied to it), a middle-button drag or a
-//! drag with Space held pans, the wheel pans (Shift+wheel sideways), and Ctrl+wheel zooms
-//! around the pointer. The widget emits `changed` whenever what the status bar or the
-//! Edit menu shows may have changed: the view, the history, the selection, or the pixel
-//! under the pointer.
+//! drag with Space held pans, the wheel pans (Shift+wheel sideways), and Ctrl+wheel (⌘ on
+//! macOS) zooms around the pointer. The widget emits `changed` whenever what the status
+//! bar or the Edit menu shows may have changed: the view, the history, the selection, or
+//! the pixel under the pointer.
 
 use crate::colours;
 use crate::text::{KeyOutcome, TextBox, TextLook};
@@ -100,7 +100,7 @@ mod imp {
         pub space: Cell<bool>,
         /// The pointer, in widget coordinates, while it's over the canvas.
         pub pointer: Cell<Option<(f64, f64)>>,
-        /// Ctrl+wheel's notches not yet turned into a zoom step.
+        /// Ctrl+wheel's (⌘ on macOS) notches not yet turned into a zoom step.
         pub notches: Cell<f64>,
         /// How long the last snapshot took to build, in milliseconds.
         pub last_ms: Cell<f64>,
@@ -1665,7 +1665,7 @@ impl Canvas {
                 };
                 let state = c.current_event_state();
                 let wheel = c.unit() == gdk::ScrollUnit::Wheel;
-                if state.contains(gdk::ModifierType::CONTROL_MASK) {
+                if suite_ui::keys::is_primary(state) {
                     canvas.wheel_zoom(dy, wheel);
                 } else {
                     let k = if wheel { NOTCH_PX } else { 1.0 };
@@ -1734,8 +1734,8 @@ impl Canvas {
         }
     }
 
-    /// Ctrl+wheel: each notch down a step out, up a step in, around the pointer; a
-    /// touchpad zooms smoothly.
+    /// Ctrl+wheel (⌘ on macOS): each notch down a step out, up a step in, around the
+    /// pointer; a touchpad zooms smoothly.
     fn wheel_zoom(&self, dy: f64, wheel: bool) {
         let imp = self.imp();
         let at = imp.pointer.get();

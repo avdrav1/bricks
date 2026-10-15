@@ -20,6 +20,7 @@ V0.1 ships at the end of M3; the curl-installer release (per user, on Arch, Ubun
 - Sizes: **S** = a day or less, **M** = two to four days, **L** = one to two weeks. Split any L before starting it.
 - Crate tags match the PRD workspace: `csv-engine`, `data-model`, `grid`, `commands`, `app`, plus `bench` for the harness.
 - Every story carries acceptance criteria. A story is done when its criteria pass in CI on the test corpus.
+- Shortcuts are written once with the primary modifier (`apps/brick/src/keys.rs`, MAC-3): on macOS, Command replaces Ctrl in every shortcut; Redo is ⇧⌘Z (no Ctrl+Y), Replace ⌥⌘F, and Control stays for ⌃Space and ⇧⌃Space (selections), ⌃⇧digit number formats, and ⌃Page Down/Up (sheets), as in Excel for Mac.
 
 The roadmap below shows each milestone and the gate that closes it.
 
