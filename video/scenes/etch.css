@@ -31,7 +31,11 @@
 .etch-pair { display: flex; align-items: center; gap: 6px; }
 .etch-sizing, .etch-tolerating { gap: 12px; }
 .etch-entry { height: 34px; padding: 0 8px; line-height: 32px; border: 1px solid #cdc7c2; border-radius: 6px; background: #fff; }
-.etch-hex { width: 98px; }
+.etch-hex { width: 98px; white-space: pre; }
+/* a field with the keys: GTK's focus ring, its text selected as Alt+H or Alt+S gives it the keys, then the caret */
+.etch-entry.focus, .etch-spin.focus { border-color: #3584e4; box-shadow: 0 0 0 1px #3584e4; }
+.etch-selected { background: rgba(53, 132, 228, 0.3); }
+.etch-caret { display: inline-block; width: 1px; height: 17px; margin-left: 1px; vertical-align: -3px; background: #2e3436; }
 .etch-button { height: 34px; padding: 0 16px; line-height: 32px; border: 1px solid #cdc7c2; border-radius: 6px; background: #f6f5f4; box-shadow: inset 0 -1px rgba(0, 0, 0, 0.04); }
 .etch-button.on { background: #d6d1cd; }
 .etch-b, .etch-i { width: 48px; padding: 0; text-align: center; }
@@ -40,9 +44,17 @@
 .etch-pal { flex: none; display: grid; grid-template-columns: repeat(10, 16px); gap: 6px; }
 .etch-pal i { width: 16px; height: 16px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35); }
 .etch-spin { display: flex; height: 34px; border: 1px solid #cdc7c2; border-radius: 6px; background: #fff; overflow: hidden; }
-.etch-spin span { width: 40px; padding: 0 8px; line-height: 32px; font-variant-numeric: tabular-nums; }
+.etch-spin > span { min-width: 40px; padding: 0 8px; line-height: 32px; font-variant-numeric: tabular-nums; white-space: pre; }
 .etch-spin b { width: 34px; text-align: center; line-height: 31px; font-weight: 400; font-size: 18px; border-left: 1px solid #e6e2de; }
 .etch-dd { display: flex; align-items: center; justify-content: space-between; width: 150px; height: 34px; padding: 0 8px 0 10px; border: 1px solid #cdc7c2; border-radius: 6px; background: #f6f5f4; }
+.etch-dd.on { background: #d6d1cd; }
+/* the font family list, popped up above the drop-down: a search entry and the families, the one chosen checked */
+.etch-font { position: relative; }
+.etch-fonts { left: -6px; bottom: 44px; width: 230px; }
+.etch-fsearch { margin-bottom: 6px; }
+.etch-fonts .mi { justify-content: space-between; }
+.etch-check { display: grid; place-items: center; visibility: hidden; color: #2e3436; }
+.etch-fonts .mi.chosen .etch-check { visibility: visible; }
 .etch-seg { display: flex; }
 .etch-seg span { height: 34px; padding: 0 16px; line-height: 32px; border: 1px solid #cdc7c2; margin-left: -1px; background: #f6f5f4; }
 .etch-seg span:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }

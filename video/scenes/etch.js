@@ -1,6 +1,7 @@
-// 3:40 Etch: a drawing filled, brushed, and colour-picked; text and a rectangle; a selection
-// copied, pasted, and moved; Image → Rotate and an undo; an 8K photo opened and zoomed to
-// 3200%.
+// 3:40 Etch: a poster painted with Etch's own tools, as on cronkite.cc (scripts/etch_poster.py
+// drew the site's): colours typed into Hex, a fill, a filled ellipse, lines and outlined
+// ellipses, bold text in Adwaita Sans, a filled rectangle; a selection copied, pasted, moved,
+// and undone; Image → Rotate and an undo; an 8K photo opened and zoomed to 3200%.
 //
 // The Etch window follows apps/etch/src: window.rs (the menu bar: File, Edit, View, Image;
 // the tool column; the canvas; the colour row: the colours' square, Hex, Custom…, the
@@ -29,7 +30,6 @@
     ["White", "FFFFFF"], ["Light Grey", "C3C3C3"], ["Brown", "B97A57"], ["Rose", "FFAEC9"], ["Gold", "FFC90E"],
     ["Light Yellow", "EFE4B0"], ["Lime", "B5E61D"], ["Light Turquoise", "99D9EA"], ["Blue Grey", "7092BE"], ["Lavender", "C8BFE7"],
   ];
-  const hex = Object.fromEntries(PALETTE);
   // tools.rs: id, key, icon.
   const TOOLS = [
     ["pencil", "P", "M 2.5 13.5 L 3 10.5 L 11 2.5 L 13.5 5 L 5.5 13 Z M 9.5 4 L 12 6.5"],
@@ -68,40 +68,66 @@
   }
   const nextZoom = (z) => ZOOMS.find((s) => s > z + 1e-9) ?? z;
 
-  // ---- drawing.png: a house, a tree, a sun, and birds; a level field ------------------------
+  // ---- poster.png: a spring bike ride, scripts/etch_poster.py's geometry ------------------
   const IW = 1024, IH = 768;
-  const SKY = "FFFFFF", CLOUD = [[108, 128], [150, 104], [196, 126], [242, 100], [290, 124], [336, 104], [384, 130]];
-  const COPY = { x: 670, y: 288, w: 178, h: 328 }; // the selection around the tree
-  const PASTED = { x: 40, y: 288 }; // where the copy lands, left of the house
-  const WORDS = { x: 540, y: 648, size: 48, font: "Caladea", text: "Welcome home!" };
-  const CHIMNEY = { x0: 440, y0: 236, x1: 472, y1: 304 };
+  const GREEN = "10392E", AMBER = "F2B134", CORAL = "E4572E", PAPER = "F4F1EA";
+  // Inter stands in for Adwaita Sans (fonts.css), the family the poster's words are in.
+  const POSTER_FONT = "Inter";
+  // Pango puts a layout's top at the pixel clicked; its lines are the font's ascent plus
+  // descent apart (Adwaita Sans's, as Inter's: 0.96875 and 0.2421875 of the size).
+  const ASC = 0.96875, LINE = 1.2109375;
+  // Boxes dragged, from the pixel pressed to the pixel released.
+  const DISC = { x0: 696, y0: 350, x1: 1096, y1: -50 }; // the sun, from its bottom left past the image's top right
+  const ROAD = { x0: 73, x1: 949, y: 696 };
+  const REAR = [595, 598], FRONT = [855, 598], WHEEL_R = 96;
+  const CRANK = [713, 606], SEAT = [679, 458], HEADSET = [833, 458], FORK = [838, 490];
+  const wheelBox = ([cx, cy]) => ({ x0: cx - WHEEL_R, y0: cy - WHEEL_R, x1: cx + WHEEL_R, y1: cy + WHEEL_R });
+  const FRAME = [
+    [REAR, CRANK], [CRANK, SEAT], [SEAT, REAR], [SEAT, HEADSET], [CRANK, FORK], [HEADSET, FRONT],
+    [SEAT, [673, 430]], [[649, 428], [697, 428]], [HEADSET, [829, 430]], [[811, 430], [855, 430]],
+  ];
+  const HUBS = [[REAR, 10], [FRONT, 10], [CRANK, 15]];
+  const HEADLINE = { x: 67, y: 48, size: 128, lines: ["Spring", "Ride"] };
+  const DATE = { x: 70, y: 372, size: 30, text: "Saturday 12 April · 9 am · Riverside Park" };
+  const QUIET = { x: 70, y: 652, size: 20, text: "Bring a bike · All ages welcome" };
+  const TAG = { x0: 72, y0: 436, x1: 217, y1: 480 };
+  const TAG_TEXT = { x: 90, y: 445, size: 22, text: "Free entry" };
+  const COPY = { x: 64, y: 428, w: 162, h: 60 }; // the selection around the tag
+  const PASTED = { x: 236, y: 428 }; // where the copy is dragged, right of it
+
+  // A box's pixels, either way it was dragged.
+  const span = (b) => ({ x: Math.min(b.x0, b.x1), y: Math.min(b.y0, b.y1), w: Math.abs(b.x1 - b.x0) + 1, h: Math.abs(b.y1 - b.y0) + 1 });
+  // An ellipse filling a box; outlined, its stroke inside the box.
+  function ellipseAttrs(b, stroke = 0) {
+    const s = span(b);
+    return { cx: s.x + s.w / 2, cy: s.y + s.h / 2, rx: Math.max(0, (s.w - stroke) / 2), ry: Math.max(0, (s.h - stroke) / 2) };
+  }
+  const rectAttrs = (b) => {
+    const s = span(b);
+    return { x: s.x, y: s.y, width: s.w, height: s.h };
+  };
+  const NONE_E = { cx: 0, cy: 0, rx: 0, ry: 0 }, NONE_R = { x: 0, y: 0, width: 0, height: 0 };
+  const lineSVG = ([a, b]) => `<line x1="${a[0] + 0.5}" y1="${a[1] + 0.5}" x2="${b[0] + 0.5}" y2="${b[1] + 0.5}"/>`;
+  const textSVG = (cls, { x, y, size, text }, weight, fill, extra = "") =>
+    `<text class="${cls}" x="${x}" y="${y + ASC * size}" font-family="${POSTER_FONT}" font-weight="${weight}" font-size="${size}" fill="#${fill}" ${extra}>${text}</text>`;
   function artSVG(u) {
-    const rays = Array.from({ length: 8 }, (_, i) => {
-      const a = (i * Math.PI) / 4 + Math.PI / 8;
-      const [c, s] = [Math.cos(a), Math.sin(a)];
-      return `<line x1="${(880 + 100 * c).toFixed(1)}" y1="${(160 + 100 * s).toFixed(1)}" x2="${(880 + 128 * c).toFixed(1)}" y2="${(160 + 128 * s).toFixed(1)}"/>`;
-    }).join("");
+    const hubs = HUBS.map(([[cx, cy], half]) => `<circle cx="${cx + 0.5}" cy="${cy + 0.5}" r="${half + 0.5}"/>`).join("");
+    const head = HEADLINE.lines.map((_, i) => `<tspan x="${HEADLINE.x}" y="${HEADLINE.y + ASC * HEADLINE.size + i * LINE * HEADLINE.size}"></tspan>`).join("");
     return `<svg class="etch-art" viewBox="0 0 ${IW} ${IH}" preserveAspectRatio="none">
-      <defs>
-        <clipPath id="${u}-clip"><rect x="${COPY.x}" y="${COPY.y}" width="${COPY.w}" height="${COPY.h}"/></clipPath>
-        <filter id="${u}-soft" x="-30%" y="-150%" width="160%" height="400%"><feGaussianBlur stdDeviation="8"/></filter>
-      </defs>
+      <defs><clipPath id="${u}-clip"><rect x="${COPY.x}" y="${COPY.y}" width="${COPY.w}" height="${COPY.h}"/></clipPath></defs>
       <g class="etch-turn">
         <g id="${u}-art">
-          <rect class="etch-sky" width="${IW}" height="${IH}" fill="#${SKY}"/>
-          <rect y="520" width="${IW}" height="${IH - 520}" fill="#B5E61D"/>
-          <g stroke="#FF7F27" stroke-width="9" stroke-linecap="round">${rays}</g>
-          <circle cx="880" cy="160" r="80" fill="#FFC90E"/>
-          <g fill="none" stroke="#7F7F7F" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><polyline points="518,140 543,160 568,140"/><polyline points="600,190 622,208 644,190"/></g>
-          <polyline class="etch-cloud" points="${CLOUD.map((p) => p.join(",")).join(" ")}" pathLength="1" stroke-dasharray="0 2" fill="none" stroke="#fff" stroke-width="44" stroke-linecap="round" stroke-linejoin="round" filter="url(#${u}-soft)"/>
-          <rect x="250" y="330" width="250" height="215" fill="#ED1C24"/>
-          <polygon points="230,336 375,230 520,336" fill="#880015"/>
-          <rect class="etch-chimney" fill="#B97A57" width="0" height="0"/>
-          <rect x="282" y="368" width="56" height="50" fill="#EFE4B0"/><rect x="412" y="368" width="56" height="50" fill="#EFE4B0"/>
-          <rect x="350" y="450" width="50" height="95" fill="#B97A57"/>
-          <rect x="745" y="420" width="22" height="170" fill="#B97A57"/>
-          <circle cx="756" cy="365" r="72" fill="#22B14C"/>
-          <text class="etch-words" x="${WORDS.x}" y="${WORDS.y}" font-family="${WORDS.font}" font-weight="700" font-size="${WORDS.size}" fill="#880015" dominant-baseline="text-before-edge"></text>
+          <rect class="p-ground" width="${IW}" height="${IH}" fill="#FFFFFF"/>
+          <ellipse class="p-sun" fill="#${AMBER}"/>
+          <line class="p-road" x1="${ROAD.x0 + 0.5}" y1="${ROAD.y + 0.5}" y2="${ROAD.y + 0.5}" stroke="#${AMBER}" stroke-width="4" stroke-linecap="round"/>
+          <g fill="none" stroke="#${PAPER}" stroke-width="14"><ellipse class="p-wheel"/><ellipse class="p-wheel"/></g>
+          <g class="p-bike" stroke="#${PAPER}" stroke-width="12" stroke-linecap="round">${FRAME.map(lineSVG).join("")}</g>
+          <g class="p-bike" fill="#${PAPER}">${hubs}</g>
+          <text class="p-head" font-family="${POSTER_FONT}" font-weight="700" font-size="${HEADLINE.size}" fill="#${PAPER}">${head}</text>
+          ${textSVG("p-date", DATE, 400, AMBER)}
+          ${textSVG("p-quiet", QUIET, 400, PAPER, 'fill-opacity="0.7"')}
+          <rect class="p-tag" fill="#${CORAL}"/>
+          ${textSVG("p-tagtext", TAG_TEXT, 700, PAPER)}
         </g>
         <g class="etch-paste" style="display:none"><g class="etch-pastemove"><g clip-path="url(#${u}-clip)"><use href="#${u}-art"/></g></g></g>
       </g>
@@ -212,6 +238,13 @@
   ];
   const imageMenu = () =>
     `<div class="popover etch-menu">${IMAGE_MENU.map((sec) => sec.map(([l, a]) => `<div class="mi" data-label="${l}"><span class="mi-label">${l}</span>${a ? `<span class="accel">${a}</span>` : ""}</div>`).join("")).join('<div class="mi-sep"></div>')}</div>`;
+  // The font family list (window.rs font_controls: a drop-down searched by typing): the
+  // families installed and "Sans", sorted, the one chosen checked. Opened from the colour
+  // row, it pops up above the drop-down.
+  const FAMILIES = ["Adwaita Mono", "Adwaita Sans", "Caladea", "Cantarell", "Carlito", "DejaVu Sans", "DejaVu Serif", "Noto Sans", "Noto Serif", "Sans"];
+  const check = '<svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 8.5l3.2 3.2L13 4.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const fontList = () =>
+    `<div class="popover etch-fonts"><div class="entry etch-fsearch">${V.ui.icon("edit-find")}<span class="ph">Search…</span></div><div class="etch-flist">${FAMILIES.map((f) => `<div class="mi" data-family="${f}"><span class="mi-label">${f}</span><i class="etch-check">${check}</i></div>`).join("")}</div></div>`;
 
   // body: the canvas's contents (the drawing's SVG, or a canvas for the photo).
   function windowHTML({ id = "", x, y, w, h, title, body }) {
@@ -234,7 +267,7 @@
         <div class="etch-pal">${pal}</div>
         <div class="etch-pair etch-sizing"><span>Size</span>${spin("1", "etch-size")}<span>px</span></div>
         <div class="etch-pair etch-tolerating"><span>Tolerance</span>${spin("0")}</div>
-        <div class="etch-pair etch-font"><div class="etch-dd"><span>Sans</span>${V.ui.icon("pan-down")}</div><div class="etch-button etch-b"><b>B</b></div><div class="etch-button etch-i"><i>I</i></div></div>
+        <div class="etch-pair etch-font"><div class="etch-dd"><span>Sans</span>${V.ui.icon("pan-down")}</div><div class="etch-button etch-b"><b>B</b></div><div class="etch-button etch-i"><i>I</i></div>${fontList()}</div>
         ${seg(["Hard", "Soft"], "etch-edge")}
         ${seg(["Outline", "Filled", "Both"], "etch-style")}
         <div class="etch-status"><span class="xy"></span><span class="grow"></span><span class="sel"></span><span class="zoom"></span><span class="size"></span></div>
@@ -288,31 +321,50 @@
       },
       // The image's size changed (a rotation): the view resets as on opening.
       fresh: (size) => api.setView(newView(size, [cw, ch])),
-      // The tool on, and its own controls in the colour row.
-      state({ tool, fg = "000000", bg = "FFFFFF", size = 1, tolerance = 0, soft = true, style = "Outline", family = "Sans", bold = false }) {
+      // The tool on, and its own controls in the colour row. typing: { field: "hex" or
+      // "size", text, all }, the field with the keys (Alt+H or Alt+S): its text all selected
+      // as the keys arrive, then what's typed with the caret. fonts: the family list open,
+      // { hot } the family under the pointer.
+      state({ tool, fg = "000000", bg = "FFFFFF", size = 1, tolerance = 0, soft = true, style = "Outline", family = "Sans", bold = false, typing = null, fonts = null }) {
         tools.forEach((b) => V.cls(b, "on", b.dataset.tool === tool));
         V.css(q(".etch-ind .fg"), { background: `#${fg}` });
         V.css(q(".etch-ind .bg"), { background: `#${bg}` });
-        V.text(q(".etch-hex"), `#${fg}`);
+        // A field's text in `box`, its focus ring on `ring`.
+        const field = (box, ring, name, shown) => {
+          const on = typing?.field === name;
+          V.cls(ring, "focus", on);
+          V.markup(box, on ? (typing.all ? `<span class="etch-selected">${typing.text}</span>` : `${typing.text}<i class="etch-caret"></i>`) : shown);
+        };
+        field(q(".etch-hex"), q(".etch-hex"), "hex", `#${fg}`);
         V.show(parts.sizing, SIZED.has(tool));
-        V.text(q(".etch-size span"), String(size));
+        field(q(".etch-size span"), q(".etch-size"), "size", String(size));
         V.show(parts.tolerating, tool === "fill");
         V.text(q(".etch-tolerating .etch-spin span"), String(tolerance));
         V.show(parts.font, tool === "text");
         V.text(q(".etch-dd span"), family);
+        V.cls(q(".etch-dd"), "on", !!fonts);
+        V.show(q(".etch-fonts"), !!fonts);
+        for (const m of el.querySelectorAll(".etch-fonts .mi")) {
+          V.cls(m, "hot", m.dataset.family === fonts?.hot);
+          V.cls(m, "chosen", m.dataset.family === family);
+        }
         V.cls(q(".etch-b"), "on", bold);
         V.show(parts.edge, tool === "brush");
         for (const s of parts.edge.children) V.cls(s, "on", (s.dataset.v === "Soft") === soft);
         V.show(parts.style, tool === "rectangle" || tool === "ellipse");
         for (const s of parts.style.children) V.cls(s, "on", s.dataset.v === style);
       },
+      // A family in the open list, the drop-down, and Bold, in stage pixels.
+      family: (f) => V.ui.pos(el.querySelector(`.etch-fonts [data-family="${f}"]`)),
+      fontDrop: () => V.ui.pos(q(".etch-dd")),
+      bold: () => V.ui.pos(q(".etch-b")),
       status({ xy = null, sel = null } = {}) {
         V.text(st.xy, xy ? `x: ${xy[0]}  y: ${xy[1]}` : "");
         V.text(st.sel, sel ? `Selection: ${sel[0]}×${sel[1]}` : "");
       },
       // The canvas's overlay, in image pixels: selection rectangles (dashed black on
-      // white), the text's frame and caret, the brush's ring.
-      overlay({ sel = null, frame = null, ring = null } = {}) {
+      // white), and the text's frame and caret (on the line `cy` down the frame, `lh` tall).
+      overlay({ sel = null, frame = null } = {}) {
         const X = (u) => v.origin[0] + u * v.zoom, Y = (w2) => v.origin[1] + w2 * v.zoom;
         let out = "";
         if (sel) {
@@ -325,12 +377,9 @@
           out += `<rect x="${fx}" y="${fy}" width="${fw}" height="${fh}" fill="none" stroke="rgba(255,255,255,.7)"/><rect x="${fx}" y="${fy}" width="${fw}" height="${fh}" fill="none" stroke="rgba(0,0,0,.5)" stroke-dasharray="4 4"/>`;
           if (frame.caret) {
             const cx = Math.round(X(frame.x + frame.cx)) + 0.5;
-            out += `<path d="M${cx + 1} ${Y(frame.y)}V${Y(frame.y + frame.h)}" stroke="rgba(255,255,255,.7)" stroke-width="1"/><path d="M${cx} ${Y(frame.y)}V${Y(frame.y + frame.h)}" stroke="#000" stroke-width="1"/>`;
+            const y0 = Y(frame.y + (frame.cy ?? 0)), y1 = Y(frame.y + (frame.cy ?? 0) + (frame.lh ?? frame.h));
+            out += `<path d="M${cx + 1} ${y0}V${y1}" stroke="rgba(255,255,255,.7)" stroke-width="1"/><path d="M${cx} ${y0}V${y1}" stroke="#000" stroke-width="1"/>`;
           }
-        }
-        if (ring) {
-          const r = (ring.size * v.zoom) / 2;
-          out += `<circle cx="${X(ring.x)}" cy="${Y(ring.y)}" r="${r + 0.5}" fill="none" stroke="rgba(255,255,255,.7)"/><circle cx="${X(ring.x)}" cy="${Y(ring.y)}" r="${r - 0.5}" fill="none" stroke="rgba(0,0,0,.8)"/>`;
         }
         V.markup(ov, out);
       },
@@ -365,68 +414,60 @@
     return api;
   }
 
-  // The drawing's parts a scene changes.
+  // The poster's parts a scene changes.
   function drawing(root) {
     const q = (s) => root.querySelector(s);
-    const cloud = q(".etch-cloud"), chimney = q(".etch-chimney"), words = q(".etch-words"), paste = q(".etch-paste"), move = q(".etch-pastemove"), turn = q(".etch-turn");
+    const attrs = (el, a) => {
+      for (const k in a) {
+        const s = String(a[k]);
+        if (el.getAttribute(k) !== s) el.setAttribute(k, s);
+      }
+    };
+    const wheels = [...root.querySelectorAll(".p-wheel")], bike = [...root.querySelectorAll(".p-bike")];
+    const head = [...root.querySelectorAll(".p-head tspan")];
+    const road = q(".p-road"), paste = q(".etch-paste"), move = q(".etch-pastemove"), turn = q(".etch-turn");
     return {
-      sky: (c) => q(".etch-sky").setAttribute("fill", `#${c}`),
-      cloud: (k) => V.css(cloud, { strokeDasharray: `${k.toFixed(4)} 2` }),
-      chimney(r) {
-        const a = r ? { x: Math.min(r.x0, r.x1), y: Math.min(r.y0, r.y1), width: Math.abs(r.x1 - r.x0), height: Math.abs(r.y1 - r.y0) } : { x: 0, y: 0, width: 0, height: 0 };
-        for (const k in a) if (chimney.getAttribute(k) !== String(a[k])) chimney.setAttribute(k, a[k]);
+      ground: (c) => attrs(q(".p-ground"), { fill: `#${c}` }),
+      // Shapes as dragged so far (boxes, or the road's end), or null for none yet.
+      sun: (box) => attrs(q(".p-sun"), box ? ellipseAttrs(box) : NONE_E),
+      road(x) {
+        V.show(road, x != null);
+        if (x != null) attrs(road, { x2: x + 0.5 });
       },
-      words: (s) => V.text(words, s),
+      wheels: (boxes) => wheels.forEach((w, i) => attrs(w, boxes[i] ? ellipseAttrs(boxes[i], 14) : NONE_E)),
+      bike: (on) => bike.forEach((g) => V.show(g, on)),
+      head: (lines) => head.forEach((s, i) => V.text(s, lines[i] ?? "")),
+      date: (on) => V.show(q(".p-date"), on),
+      quiet: (on) => V.show(q(".p-quiet"), on),
+      tag: (box) => attrs(q(".p-tag"), box ? rectAttrs(box) : NONE_R),
+      tagText: (on) => V.show(q(".p-tagtext"), on),
       // The pasted copy at (px, py), or none.
       paste(at) {
         V.show(paste, !!at);
-        if (at) {
-          const tf = `translate(${(at[0] - COPY.x).toFixed(2)} ${(at[1] - COPY.y).toFixed(2)})`;
-          if (move.getAttribute("transform") !== tf) move.setAttribute("transform", tf);
-        }
+        if (at) attrs(move, { transform: `translate(${(at[0] - COPY.x).toFixed(2)} ${(at[1] - COPY.y).toFixed(2)})` });
       },
-      turned(on) {
-        const tf = on ? `translate(${IH} 0) rotate(90)` : "";
-        if ((turn.getAttribute("transform") || "") !== tf) turn.setAttribute("transform", tf);
-      },
+      turned: (on) => attrs(turn, { transform: on ? `translate(${IH} 0) rotate(90)` : "" }),
     };
   }
 
-  // Each scene's drawing as it starts: what the scenes before it did.
-  const DONE = {
-    paint: { sky: SKY, cloud: 0, words: "", chimney: null, paste: null },
-    shapes: { sky: "99D9EA", cloud: 1, words: "", chimney: null, paste: null },
-    select: { sky: "99D9EA", cloud: 1, words: WORDS.text, chimney: CHIMNEY, paste: null },
-    end: { sky: "99D9EA", cloud: 1, words: WORDS.text, chimney: CHIMNEY, paste: [PASTED.x, PASTED.y] },
-  };
+  // The poster as each scene starts: what the scenes before it did. Between them the bike's
+  // frame and hubs, then the date, the quiet line, and the tag's words are added, as
+  // scripts/etch_poster.py does.
+  const BLANK = { ground: "FFFFFF", sun: null, road: null, wheels: [], bike: false, head: [], date: false, quiet: false, tag: null, tagText: false, paste: null, turned: false };
+  const BIKE = { ...BLANK, ground: GREEN, sun: DISC, road: ROAD.x1, wheels: [wheelBox(REAR), wheelBox(FRONT)], bike: true };
+  const POSTER = { ...BIKE, head: HEADLINE.lines, date: true, quiet: true, tag: TAG, tagText: true };
   function paint(d, s) {
-    d.sky(s.sky);
-    d.cloud(s.cloud);
-    d.words(s.words);
-    d.chimney(s.chimney);
-    d.paste(s.paste);
-    d.turned(false);
+    for (const k of ["ground", "sun", "road", "wheels", "bike", "head", "date", "quiet", "tag", "tagText", "paste", "turned"]) d[k](s[k]);
   }
 
   const W = { x: 110, y: 56, w: 1700, h: 900 };
-  function drawingWindow(root, { id, rect = W, title = "drawing.png" }) {
+  function drawingWindow(root, { id, rect = W, title = "poster.png" }) {
     const u = uid();
     root.insertAdjacentHTML("beforeend", windowHTML({ id, ...rect, title, body: artSVG(u) }));
     const el = root.querySelector(`#${id}`);
     return { el, e: bind(el, { ...rect, image: [IW, IH] }), d: drawing(el) };
   }
 
-  // A pointer along an image-space path: [[t, [u, v]], ...] → [[t, sx, sy, opt]].
-  const along = (pts, k) => {
-    const lens = pts.slice(1).map((p, i) => Math.hypot(p[0] - pts[i][0], p[1] - pts[i][1]));
-    const total = lens.reduce((a, b) => a + b, 0);
-    let d = k * total;
-    for (let i = 0; i < lens.length; i++) {
-      if (d <= lens[i]) return [pts[i][0] + ((pts[i + 1][0] - pts[i][0]) * d) / lens[i], pts[i][1] + ((pts[i + 1][1] - pts[i][1]) * d) / lens[i]];
-      d -= lens[i];
-    }
-    return pts[pts.length - 1];
-  };
   // A drag's pointer path, sampled 60 times a second so it moves smoothly between keys:
   // [[t, sx, sy], ...] from at(t) for t through (t0, t1].
   const drag = (t0, t1, at) => {
@@ -436,17 +477,46 @@
       return [t, ...at(t)];
     });
   };
+  // A shape dragged from box.x0, y0 (pressed at t0) to x1, y1 (released at t1): the box at
+  // t, or null before the press; and the pointer's path, press to release.
+  const dragged = (box, t0, t1) => {
+    const corner = (t) => V.track(t, [[t0, { x: box.x0, y: box.y0 }], [t1 - 0.08, { x: box.x1, y: box.y1 }]]);
+    return {
+      at(t) {
+        if (t < t0) return null;
+        const c = corner(t);
+        return { x0: box.x0, y0: box.y0, x1: Math.round(c.x), y1: Math.round(c.y) };
+      },
+      path: (e) => [
+        [t0 - 0.45, ...e.pt([box.x0 + 0.5, box.y0 + 0.5])], [t0, ...e.pt([box.x0 + 0.5, box.y0 + 0.5]), { down: true }],
+        ...drag(t0, t1 - 0.08, (t) => {
+          const c = corner(t);
+          return e.pt([c.x + 0.5, c.y + 0.5]);
+        }),
+        [t1, ...e.pt([box.x1 + 0.5, box.y1 + 0.5]), { down: false }],
+      ],
+    };
+  };
+  // A field given the keys (Alt+H, Alt+S) at `at`, `text` typed, and Enter: its typing
+  // state at t, or null outside it.
+  const CPS = 14;
+  const entry = (at, text) => {
+    const type = at + 0.2, enter = type + text.length / CPS + 0.15;
+    return { at, enter, text, state: (t, field) => (t >= at && t < enter ? { field, text: t < type ? "" : V.typed(text, t, type, CPS), all: t < type } : null) };
+  };
+  // Until the first key, the field's text before, all selected.
+  const typingOn = (st, was) => (st && st.all ? { ...st, text: was } : st);
 
   // ---- the contract for install-open ---------------------------------------------------------
   V.etch = {
-    window: ({ id, x, y, w, h, title = "drawing.png" }) => {
+    window: ({ id, x, y, w, h, title = "poster.png" }) => {
       const u = uid();
       return windowHTML({ id, x, y, w, h, title, body: artSVG(u) });
     },
-    // Draws the finished drawing in a window made by V.etch.window.
+    // Draws the finished poster in a window made by V.etch.window.
     bind: (el, rect) => {
       const e = bind(el, { ...rect, image: [IW, IH] });
-      paint(drawing(el), DONE.end);
+      paint(drawing(el), POSTER);
       e.state({ tool: "pencil" });
       e.status();
       e.overlay();
@@ -455,107 +525,132 @@
   };
 
   // =======================================================================================
-  // Fill the sky, brush a cloud, pick the roof's colour.
+  // A blank image: the ground filled deep green, typed into Hex; the amber sun, a filled
+  // ellipse; the road, a line; the wheels, outlined ellipses in off-white.
   V.scene({
     id: "etch-paint",
-    beats: [{ say: "Etch is for images. It's closer to Paint than to Photoshop: a fill, a brush, a colour picker, and Paint's own keys.", min: 10.6 }],
+    beats: [{ say: "Etch is for images. It's closer to Paint than to Photoshop: a fill, lines and shapes, any colour by its hex code, and Paint's own keys.", min: 11.6 }],
     build(root) {
       root.innerHTML = V.ui.desktop();
       const { e, d } = drawingWindow(root, { id: "ep-etch" });
-      paint(d, DONE.paint);
-      const tF = 0.9, tTurq = 1.8, tSky = 2.75, tB = 3.4, tWhite = 4.15, tPress = 5.0, tRelease = 6.7, tI = 7.3, tPick = 8.3;
-      const sky = [150, 230], roof = [372, 292];
-      const brushAt = (t) => along(CLOUD, V.p(t, tPress, tRelease, V.ease.inOut));
+      const hGreen = entry(0.3, `#${GREEN}`);
+      const tF = hGreen.enter + 0.3, tFill = tF + 0.5;
+      const hAmber = entry(tFill + 0.35, `#${AMBER}`);
+      const tO = hAmber.enter + 0.25, tFilled = tO + 0.4;
+      const sun = dragged(DISC, tFilled + 0.35, tFilled + 1.25);
+      const tL = tFilled + 1.5;
+      const sRoad = entry(tL + 0.25, "4");
+      const road = dragged({ x0: ROAD.x0, y0: ROAD.y, x1: ROAD.x1, y1: ROAD.y }, sRoad.enter + 0.25, sRoad.enter + 0.9);
+      const hPaper = entry(sRoad.enter + 1.15, `#${PAPER}`);
+      const tO2 = hPaper.enter + 0.25, tOutline = tO2 + 0.35;
+      const sWheel = entry(tOutline + 0.3, "14");
+      const rear = dragged(wheelBox(REAR), sWheel.enter + 0.25, sWheel.enter + 0.75);
+      const front = dragged(wheelBox(FRONT), sWheel.enter + 0.95, sWheel.enter + 1.45);
+      const tEnd = sWheel.enter + 1.45;
+      const fill = [512, 600];
+      const toolAt = (t) => (t >= tO2 ? "ellipse" : t >= tL ? "line" : t >= tO ? "ellipse" : t >= tF ? "fill" : "pencil");
+      // The style controls show only for the shapes: measured with the ellipse on.
+      e.state({ tool: "ellipse" });
+      const segs = { Filled: e.seg("Filled"), Outline: e.seg("Outline") };
       const path = [
-        [0, ...e.pt([600, 600])], [tF + 0.3, ...e.pt([600, 600])],
-        [tTurq - 0.45, ...e.swatch("Light Turquoise")], [tTurq, ...e.swatch("Light Turquoise"), { click: true }],
-        [tSky - 0.5, ...e.pt(sky)], [tSky, ...e.pt(sky), { click: true }],
-        [tB + 0.2, ...e.pt([200, 300])],
-        [tWhite - 0.45, ...e.swatch("White")], [tWhite, ...e.swatch("White"), { click: true }],
-        [tPress - 0.45, ...e.pt(CLOUD[0])], [tPress, ...e.pt(CLOUD[0]), { down: true }],
-        ...drag(tPress, tRelease, (t) => e.pt(brushAt(t))),
-        [tRelease + 0.01, ...e.pt(CLOUD[CLOUD.length - 1]), { down: false }],
-        [tI + 0.2, ...e.pt([420, 250])],
-        [tPick - 0.5, ...e.pt(roof)], [tPick, ...e.pt(roof), { click: true }],
-        [tPick + 1.2, ...e.pt([470, 470])],
+        [0, ...e.pt([560, 560])], [tF, ...e.pt([540, 580])],
+        [tFill - 0.4, ...e.pt(fill)], [tFill, ...e.pt(fill), { click: true }],
+        [tFill + 0.6, ...e.pt([590, 560])], [tO + 0.1, ...e.pt([600, 600])],
+        [tFilled - 0.4, ...segs.Filled], [tFilled, ...segs.Filled, { click: true }],
+        ...sun.path(e),
+        [sRoad.at, ...e.pt([1000, 300])],
+        ...road.path(e),
+        [hPaper.at + 0.3, ...e.pt([900, 640])], [tO2 + 0.1, ...e.pt([880, 650])],
+        [tOutline - 0.4, ...segs.Outline], [tOutline, ...segs.Outline, { click: true }],
+        ...rear.path(e),
+        ...front.path(e),
+        [tEnd + 0.7, ...e.pt([1000, 520])],
       ];
       return (t) => {
-        const tool = t >= tPick ? "brush" : t >= tI ? "picker" : t >= tB ? "brush" : t >= tF ? "fill" : "pencil";
-        const fg = t >= tPick ? hex["Dark Red"] : t >= tWhite ? "FFFFFF" : t >= tTurq ? hex["Light Turquoise"] : "000000";
-        e.state({ tool, fg, size: tool === "brush" ? 44 : 1, soft: true });
-        d.sky(t >= tSky ? hex["Light Turquoise"] : SKY);
-        d.cloud(V.p(t, tPress, tRelease, V.ease.inOut));
-        V.pointer(t, path);
-        const pos = V.track(t, path.map(([at, px, py]) => [at, { x: px, y: py }]));
-        const over = e.at(pos.x, pos.y);
-        e.status({ xy: over });
-        // The brush's tip, a ring around the pointer.
-        const [ru, rv] = e.toImage(pos.x, pos.y);
-        e.overlay({ ring: tool === "brush" && over ? { x: ru, y: rv, size: 44 } : null });
-        V.keys(t, [[tF, "F"], [tB, "B"], [tI, "I"]]);
-      };
-    },
-  });
-
-  // =======================================================================================
-  // Type text on the grass; draw a chimney with the rectangle, previewed while dragged.
-  V.scene({
-    id: "etch-shapes",
-    beats: [{ say: "Type text in any font you have. Shapes show exactly where they'll land while you drag them.", min: 9.8 }],
-    build(root, s) {
-      root.innerHTML = V.ui.desktop();
-      const { e, d } = drawingWindow(root, { id: "es-etch" });
-      paint(d, DONE.shapes);
-      const tT = 0.5, tClick = 1.3, tType = 1.65, cps = 11, tEnter = V.typedEnd(WORDS.text, tType, cps) + 0.5;
-      const tR = Math.max(tEnter + 0.6, s.at(0, "Shapes") - 0.3);
-      const tFilled = tR + 0.75, tBrown = tR + 1.45, tPress = tR + 2.1, tRelease = tR + 3.5;
-      const font = `700 ${WORDS.size}px ${WORDS.font}`;
-      const lineH = WORDS.size * 1.22;
-      const corner = (t) => V.track(t, [[tPress, { x: CHIMNEY.x0, y: CHIMNEY.y0 }], [tPress + 0.5, { x: CHIMNEY.x0 + 12, y: CHIMNEY.y0 + 18 }], [tRelease - 0.2, { x: CHIMNEY.x1, y: CHIMNEY.y1 }]]);
-      const path = [
-        [0, ...e.pt([470, 470])], [tT + 0.2, ...e.pt([470, 520])],
-        [tClick - 0.5, ...e.pt([WORDS.x, WORDS.y])], [tClick, ...e.pt([WORDS.x, WORDS.y]), { click: true }],
-        [tClick + 0.6, ...e.pt([WORDS.x - 30, WORDS.y + 80])],
-        [tFilled - 0.45, ...e.seg("Filled")], [tFilled, ...e.seg("Filled"), { click: true }],
-        [tBrown - 0.45, ...e.swatch("Brown")], [tBrown, ...e.swatch("Brown"), { click: true }],
-        [tPress - 0.5, ...e.pt([CHIMNEY.x0, CHIMNEY.y0])], [tPress, ...e.pt([CHIMNEY.x0, CHIMNEY.y0]), { down: true }],
-        ...drag(tPress, tRelease - 0.2, (t) => {
-          const c = corner(t);
-          return e.pt([c.x, c.y]);
-        }),
-        [tRelease, ...e.pt([CHIMNEY.x1, CHIMNEY.y1]), { down: false }],
-        [tRelease + 1.2, ...e.pt([560, 420])],
-      ];
-      return (t) => {
-        const tool = t >= tR ? "rectangle" : t >= tT ? "text" : "brush";
-        const fg = t >= tBrown ? hex.Brown : hex["Dark Red"];
-        e.state({ tool, fg, size: tool === "text" ? 48 : tool === "brush" ? 44 : 1, family: WORDS.font, bold: true, style: t >= tFilled ? "Filled" : "Outline" });
-        const typed = t >= tClick ? V.typed(WORDS.text, t, tType, cps) : "";
-        d.words(typed);
-        const typing = t >= tClick && t < tEnter;
-        const tw = textW(typed, font);
-        e.overlay({ frame: typing ? { x: WORDS.x, y: WORDS.y, w: Math.max(tw, 1), h: lineH, cx: tw, caret: t < V.typedEnd(WORDS.text, tType, cps) + 0.15 || V.blink(t) } : null });
-        const c = corner(t);
-        d.chimney(t >= tPress ? { x0: CHIMNEY.x0, y0: CHIMNEY.y0, x1: Math.round(c.x), y1: Math.round(c.y) } : null);
+        const tool = toolAt(t);
+        const fg = t >= hPaper.enter ? PAPER : t >= hAmber.enter ? AMBER : t >= hGreen.enter ? GREEN : "000000";
+        const sizes = { pencil: 1, fill: 1, line: t >= sRoad.enter ? 4 : 1, ellipse: t >= sWheel.enter ? 14 : 1 };
+        const typing =
+          typingOn(hGreen.state(t, "hex"), "#000000") ?? typingOn(hAmber.state(t, "hex"), `#${GREEN}`) ?? typingOn(hPaper.state(t, "hex"), `#${AMBER}`) ??
+          typingOn(sRoad.state(t, "size"), "1") ?? typingOn(sWheel.state(t, "size"), "1");
+        e.state({ tool, fg, size: sizes[tool], style: t >= tOutline || t < tFilled ? "Outline" : "Filled", typing });
+        paint(d, { ...BLANK, ground: t >= tFill ? GREEN : "FFFFFF", sun: sun.at(t), road: road.at(t)?.x1 ?? null, wheels: [rear.at(t), front.at(t)] });
         V.pointer(t, path);
         const pos = V.track(t, path.map(([at, px, py]) => [at, { x: px, y: py }]));
         e.status({ xy: e.at(pos.x, pos.y) });
-        V.keys(t, [[tT, "T"], [tEnter, "Enter"], [tR, "R"]]);
+        e.overlay();
+        V.keys(t, [[hGreen.at, "Alt+H"], [tF, "F"], [hAmber.at, "Alt+H"], [tO, "O"], [tL, "L"], [sRoad.at, "Alt+S"], [hPaper.at, "Alt+H"], [tO2, "O"], [sWheel.at, "Alt+S"]]);
       };
     },
   });
 
   // =======================================================================================
-  // Select the tree, copy, paste, move the copy; Image → Rotate 90° Right; Ctrl+Z.
+  // Pick Adwaita Sans, Bold, and type the headline on two lines; the coral tag, a filled
+  // rectangle, previewed while dragged.
+  V.scene({
+    id: "etch-shapes",
+    beats: [{ say: "Type text in any font you have. Shapes show exactly where they'll land while you drag them.", min: 9.0 }],
+    build(root, s) {
+      root.innerHTML = V.ui.desktop();
+      const { e, d } = drawingWindow(root, { id: "es-etch" });
+      const [L1, L2] = HEADLINE.lines;
+      const cps = 12;
+      const tT = 0.3, tDrop = 0.75, tPick = 1.4, tBold = 1.8, tClick = 2.2;
+      const tType = tClick + 0.25, tBreak = V.typedEnd(L1, tType, cps) + 0.15, tType2 = tBreak + 0.15;
+      const tEnter = V.typedEnd(L2, tType2, cps) + 0.3;
+      const tR = Math.max(tEnter + 0.4, s.at(0, "Shapes") - 0.3);
+      const hCoral = entry(tR + 0.35, `#${CORAL}`);
+      const tag = dragged(TAG, hCoral.enter + 0.35, hCoral.enter + 1.45);
+      const font = `700 ${HEADLINE.size}px ${POSTER_FONT}`;
+      const lineH = LINE * HEADLINE.size;
+      // The font controls and the family list show only for the text tool: measured open.
+      e.state({ tool: "text", fonts: {} });
+      const ddAt = e.fontDrop(), famAt = e.family("Adwaita Sans"), boldAt = e.bold();
+      const at0 = [HEADLINE.x + 0.5, HEADLINE.y + 0.5];
+      const path = [
+        [0, ...e.pt([620, 360])], [tT + 0.1, ...e.pt([600, 380])],
+        [tDrop - 0.4, ...ddAt], [tDrop, ...ddAt, { click: true }],
+        [tPick - 0.45, ...famAt], [tPick, ...famAt, { click: true }],
+        [tBold - 0.35, ...boldAt], [tBold, ...boldAt, { click: true }],
+        [tClick - 0.45, ...e.pt(at0)], [tClick, ...e.pt(at0), { click: true }],
+        [tClick + 0.7, ...e.pt([330, 380])],
+        [hCoral.enter, ...e.pt([250, 400])],
+        ...tag.path(e),
+        [hCoral.enter + 2.2, ...e.pt([420, 560])],
+      ];
+      return (t) => {
+        const tool = t >= tR ? "rectangle" : t >= tT ? "text" : "ellipse";
+        const fg = t >= hCoral.enter ? CORAL : PAPER;
+        const family = t >= tPick ? "Adwaita Sans" : "Sans";
+        const fonts = t >= tDrop && t < tPick ? { hot: t >= tPick - 0.3 ? "Adwaita Sans" : "" } : null;
+        e.state({ tool, fg, size: { ellipse: 14, text: HEADLINE.size, rectangle: 1 }[tool], style: "Filled", family, bold: t >= tBold, fonts, typing: typingOn(hCoral.state(t, "hex"), `#${PAPER}`) });
+        // The headline as typed: Shift+Enter starts the second line, Enter puts it on.
+        const lines = t >= tClick ? [V.typed(L1, t, tType, cps), ...(t >= tBreak ? [V.typed(L2, t, tType2, cps)] : [])] : [];
+        paint(d, { ...BIKE, head: lines, tag: tag.at(t) });
+        const typing = t >= tClick && t < tEnter;
+        const last = lines[lines.length - 1] ?? "";
+        const tw = Math.max(1, ...lines.map((l) => textW(l, font)));
+        const caret = t < V.typedEnd(L2, tType2, cps) + 0.15 || V.blink(t);
+        e.overlay({ frame: typing ? { x: HEADLINE.x, y: HEADLINE.y, w: tw, h: lines.length * lineH, cx: textW(last, font), cy: (lines.length - 1) * lineH, lh: lineH, caret } : null });
+        V.pointer(t, path);
+        const pos = V.track(t, path.map(([at, px, py]) => [at, { x: px, y: py }]));
+        e.status({ xy: e.at(pos.x, pos.y) });
+        V.keys(t, [[tT, "T"], [tBreak, "Shift+Enter"], [tEnter, "Enter"], [tR, "R"], [hCoral.at, "Alt+H"]]);
+      };
+    },
+  });
+
+  // =======================================================================================
+  // Select the tag, copy, paste, move the copy, and Ctrl+Z drops it; Image → Rotate 90°
+  // Right; Ctrl+Z.
   V.scene({
     id: "etch-select",
     beats: [{ say: "Select part of a picture to move it, or copy and paste it. Crop, resize, rotate, and flip are in the Image menu, and every step can be undone.", min: 13.5 }],
     build(root, s) {
       root.innerHTML = V.ui.desktop();
       const { e, d } = drawingWindow(root, { id: "ec-etch" });
-      paint(d, DONE.select);
       const tS = 0.4, tPress = 1.1, tRelease = 2.3, tCopy = 2.8, tPaste = 3.4;
-      const tGrab = 4.2, tDrop = 5.4, tAway = 6.3;
+      const tGrab = 4.2, tDrop = 5.4, tDropUndo = 6.2;
       const tMenu = Math.max(7.1, s.at(0, "Crop") + 0.2), tRotate = tMenu + 1.15;
       const tUndo = Math.max(tRotate + 1.6, s.at(0, "every step") + 0.2);
       const menuAt = e.menubar("image");
@@ -565,39 +660,38 @@
       const floatAt = (t) => V.track(t, [[tGrab, { x: 0, y: 0 }], [tDrop - 0.1, { x: PASTED.x, y: PASTED.y }]]);
       const selEnd = (t) => V.track(t, [[tPress, { x: COPY.x, y: COPY.y }], [tRelease - 0.1, { x: COPY.x + COPY.w, y: COPY.y + COPY.h }]]);
       const path = [
-        [0, ...e.pt([560, 420])], [tS + 0.2, ...e.pt([600, 300])],
+        [0, ...e.pt([420, 560])], [tS + 0.2, ...e.pt([300, 540])],
         [tPress - 0.45, ...e.pt([COPY.x, COPY.y])], [tPress, ...e.pt([COPY.x, COPY.y]), { down: true }],
         [tRelease - 0.1, ...e.pt([COPY.x + COPY.w, COPY.y + COPY.h])], [tRelease, ...e.pt([COPY.x + COPY.w, COPY.y + COPY.h]), { down: false }],
         [tGrab - 0.5, ...e.pt(grabOff)], [tGrab, ...e.pt(grabOff), { down: true }],
         [tDrop - 0.1, ...e.pt([PASTED.x + grabOff[0], PASTED.y + grabOff[1]])], [tDrop, ...e.pt([PASTED.x + grabOff[0], PASTED.y + grabOff[1]]), { down: false }],
-        [tAway - 0.45, ...e.pt([600, 700])], [tAway, ...e.pt([600, 700]), { click: true }],
+        [tDropUndo + 0.3, ...e.pt([440, 590])],
         [tMenu - 0.5, ...menuAt], [tMenu, ...menuAt, { click: true }],
         [tRotate - 0.45, ...rotAt], [tRotate, ...rotAt, { click: true }],
         [tRotate + 1.0, rotAt[0] + 260, rotAt[1] + 380],
       ];
       return (t) => {
-        e.state({ tool: t >= tS ? "selection" : "rectangle", fg: hex.Brown, size: 1, style: "Filled" });
-        // The selection while dragged, then the pasted copy floating, then nothing.
+        e.state({ tool: t >= tS ? "selection" : "text", fg: PAPER, size: TAG_TEXT.size, family: "Adwaita Sans", bold: true });
+        // The selection while dragged, then the pasted copy floating until Ctrl+Z drops it.
         let sel = null;
         if (t >= tPress && t < tPaste) {
           const c = selEnd(t);
           sel = { x: COPY.x, y: COPY.y, w: Math.round(c.x) - COPY.x, h: Math.round(c.y) - COPY.y };
         }
-        const floating = t >= tPaste && t < tAway;
+        const floating = t >= tPaste && t < tDropUndo;
         if (floating) {
           const f = floatAt(t);
           sel = { x: Math.round(f.x), y: Math.round(f.y), w: COPY.w, h: COPY.h };
         }
-        d.paste(t >= tPaste ? (floating ? [sel.x, sel.y] : [PASTED.x, PASTED.y]) : null);
         const turned = t >= tRotate && t < tUndo;
-        d.turned(turned);
+        paint(d, { ...POSTER, paste: floating ? [sel.x, sel.y] : null, turned });
         e.fresh(turned ? [IH, IW] : [IW, IH]);
         e.overlay({ sel: turned ? null : sel });
         e.menu(t >= tMenu && t < tRotate, { hot: t >= tRotate - 0.45 ? "Rotate 90° Right" : "" });
         V.pointer(t, path);
         const pos = V.track(t, path.map(([at, px, py]) => [at, { x: px, y: py }]));
         e.status({ xy: t >= tMenu && t < tRotate ? null : e.at(pos.x, pos.y), sel: sel ? [sel.w, sel.h] : null });
-        V.keys(t, [[tS, "S"], [tCopy, "Ctrl+C"], [tPaste, "Ctrl+V"], [tUndo, "Ctrl+Z"]]);
+        V.keys(t, [[tS, "S"], [tCopy, "Ctrl+C"], [tPaste, "Ctrl+V"], [tDropUndo, "Ctrl+Z"], [tUndo, "Ctrl+Z"]]);
       };
     },
   });
@@ -610,7 +704,7 @@
     build(root, s) {
       root.innerHTML = `${V.ui.desktop()}${V.ui.files({
         id: "eb-files", x: 70, y: 120, w: 980, h: 600, path: "Pictures",
-        items: [{ name: "Screenshots", ext: "dir" }, { name: "drawing.png", ext: "png" }, { name: "mountain.png", ext: "png" }],
+        items: [{ name: "Screenshots", ext: "dir" }, { name: "poster.png", ext: "png" }, { name: "mountain.png", ext: "png" }],
       })}`;
       root.insertAdjacentHTML("beforeend", windowHTML({ id: "eb-etch", ...W, title: "mountain.png", body: `<canvas class="etch-photo"></canvas>` }));
       const stat = root.appendChild(V.html(`<div class="etch-stat">${V.tr("etch-stat", "<b>8K</b> PNG open in <b>659 ms</b>")}</div>`));

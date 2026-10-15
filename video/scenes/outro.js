@@ -92,7 +92,7 @@ V.scene({
   build(root) {
     const items = [
       { name: "report.docx", ext: "docx" }, { name: "deck.pptx", ext: "pptx" }, { name: "notes.md", ext: "md" },
-      { name: "budget.xlsx", ext: "xlsx" }, { name: "big.csv", ext: "csv" }, { name: "drawing.png", ext: "png" },
+      { name: "budget.xlsx", ext: "xlsx" }, { name: "big.csv", ext: "csv" }, { name: "poster.png", ext: "png" },
     ];
     root.innerHTML = `${V.ui.desktop()}${V.ui.files({ id: "files", x: 120, y: 110, w: 1000, h: 640, path: "Documents", items })}`;
     // Slate's, Frame's, and Etch's windows come from their scene files.
@@ -109,13 +109,13 @@ V.scene({
     V.etch.bind(etch, etchRect);
     const docx = files.querySelector('[data-name="report.docx"]');
     const pptx = files.querySelector('[data-name="deck.pptx"]');
-    const png = files.querySelector('[data-name="drawing.png"]');
+    const png = files.querySelector('[data-name="poster.png"]');
     const open1 = 1.3, back = 3.6, open2 = 4.6, back2 = 6.6, open3 = 7.6;
     return (t) => {
       const [dx, dy] = V.ui.pos(docx, 0.5, 0.4);
       const [px, py] = V.ui.pos(pptx, 0.5, 0.4);
       const [gx, gy] = V.ui.pos(png, 0.5, 0.4);
-      V.ui.selectFile(files, t >= open3 - 0.2 ? "drawing.png" : t >= open2 - 0.2 ? "deck.pptx" : t >= open1 - 0.2 ? "report.docx" : "");
+      V.ui.selectFile(files, t >= open3 - 0.2 ? "poster.png" : t >= open2 - 0.2 ? "deck.pptx" : t >= open1 - 0.2 ? "report.docx" : "");
       // Back to Files for each next file: the apps opened stay open behind it.
       V.css(files, { zIndex: t >= back2 ? 5 : t >= back ? 3 : 1 });
       V.css(slate, { zIndex: 2 });

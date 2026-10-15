@@ -38,7 +38,7 @@
       hi: "या बस एक आउटलाइन टाइप कीजिए।",
     },
     {
-      scene: "etch-paint", from: 0.6, to: 7.0,
+      scene: "etch-shapes", from: 0.6, to: 7.4,
       en: "Etch edits images, closer to Paint than to Photoshop.",
     },
     {
