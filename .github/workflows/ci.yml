@@ -56,6 +56,15 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@v4
         with: { name: macos-keys, path: out/mac-keys, if-no-files-found: warn }
+      # Files from Launch Services (MAC-5): `open -a` with a file, a second file while the
+      # app runs, and no file, through a minimal bundle per app (scripts/mac_app.py), drawn
+      # with the renderer the apps choose on macOS (cairo); the screenshots are the artifact.
+      - name: Launch Services opens files in each app
+        if: success() || failure()
+        run: scripts/check_mac_open.sh target/release
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: macos-open, path: "out/mac-open/shots\nout/mac-open/logs\nout/mac-open/summary.txt", if-no-files-found: warn }
   bench:
     # Prints the apps/brick/docs/BENCHMARKS.md table. Runner numbers are informational: gates use the
     # reference box, and rows that open a window are skipped (no display).

@@ -22,7 +22,7 @@ jobs:
       - name: Probe launch order and renderers
         if: always()
         run: |
-          o=out/mac-open; l=$o/logs; s=$o/shots; f=$o/files
+          set +e; o=$PWD/out/mac-open; l=$o/logs; s=$o/shots; f=$o/files
           win() { "$o/windows" "$1"; }
           # Terminal launch, no Launch Services, no file.
           for a in frame etch slate brick; do

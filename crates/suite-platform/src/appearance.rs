@@ -10,50 +10,20 @@
 
 #![allow(unsafe_code)]
 
-use std::ffi::{c_char, c_void};
+use crate::cf::{
+    cf_string, CFNotificationCenterAddObserver, CFNotificationCenterGetDistributedCenter,
+    CFNotificationCenterRef, CFStringRef, CFTypeRef, DELIVER_IMMEDIATELY,
+};
+use std::ffi::c_void;
 use std::sync::{LazyLock, OnceLock};
-
-type CFTypeRef = *const c_void;
-type CFStringRef = *const c_void;
-type CFNotificationCenterRef = *const c_void;
-type CFNotificationCallback = extern "C" fn(
-    center: CFNotificationCenterRef,
-    observer: *mut c_void,
-    name: CFStringRef,
-    object: *const c_void,
-    user_info: CFTypeRef,
-);
-
-const UTF8: u32 = 0x0800_0100; // kCFStringEncodingUTF8
-const DELIVER_IMMEDIATELY: isize = 4; // CFNotificationSuspensionBehaviorDeliverImmediately
 
 #[link(name = "CoreFoundation", kind = "framework")]
 extern "C" {
     static kCFPreferencesAnyApplication: CFStringRef;
-    fn CFStringCreateWithCString(
-        alloc: *const c_void,
-        s: *const c_char,
-        encoding: u32,
-    ) -> CFStringRef;
     fn CFPreferencesAppSynchronize(app: CFStringRef) -> u8;
     fn CFPreferencesCopyAppValue(key: CFStringRef, app: CFStringRef) -> CFTypeRef;
     fn CFEqual(a: CFTypeRef, b: CFTypeRef) -> u8;
     fn CFRelease(cf: CFTypeRef);
-    fn CFNotificationCenterGetDistributedCenter() -> CFNotificationCenterRef;
-    fn CFNotificationCenterAddObserver(
-        center: CFNotificationCenterRef,
-        observer: *const c_void,
-        callback: CFNotificationCallback,
-        name: CFStringRef,
-        object: *const c_void,
-        suspension: isize,
-    );
-}
-
-/// A CFString that lives as long as the process: a constant, made once.
-fn cf_string(s: &'static std::ffi::CStr) -> CFStringRef {
-    // SAFETY: a NUL-terminated UTF-8 string; the result is owned and never released.
-    unsafe { CFStringCreateWithCString(std::ptr::null(), s.as_ptr(), UTF8) }
 }
 
 /// Whether the Mac is in dark mode now.

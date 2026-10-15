@@ -8,7 +8,8 @@
 //!   the app without arguments and sends an Apple Event, which GTK turns into
 //!   `g_application_open` in the running process. GTK answers it only for an app with
 //!   `HANDLES_OPEN` (`gtkapplication-quartz.c`); without it the spike's opens were dropped
-//!   (DEC-11 C3).
+//!   (DEC-11 C3). The app's `activate` comes first, so [`no_file`] holds back the window
+//!   for no file until the launch has finished and shows it only if no file opened.
 //!
 //! The apps stay `NON_UNIQUE`: on Linux each launch is its own process, as before; on
 //! macOS Launch Services keeps one process per app and GTK delivers its opens inside it,
@@ -25,6 +26,25 @@ pub fn run(app: &impl IsA<gio::Application>, files: &[PathBuf]) -> glib::ExitCod
     #[cfg(target_os = "macos")]
     crate::probe::attach(app.upcast_ref());
     app.run_with_args_os(&args(files))
+}
+
+/// `activate`'s work: `f` makes the app's window for no file (a start window, a new
+/// document), unless a window is open by the time the launch has finished. `after_launch`
+/// says when that is (`suite_platform::launch::when_finished`): on macOS a file from
+/// Finder reaches `open` after `activate`, and only its window shows; elsewhere it's now.
+/// The app is held meanwhile, so it doesn't quit for want of a window.
+pub fn no_file(
+    app: &gtk::Application,
+    after_launch: fn(Box<dyn FnOnce()>),
+    f: impl FnOnce(&gtk::Application) + 'static,
+) {
+    let (app, hold) = (app.clone(), app.hold());
+    after_launch(Box::new(move || {
+        if app.windows().is_empty() {
+            f(&app);
+        }
+        drop(hold);
+    }));
 }
 
 /// The arguments GApplication gets: the program, then each file as an absolute path.

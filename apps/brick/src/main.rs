@@ -233,9 +233,9 @@ fn main() -> glib::ExitCode {
         }
     });
     app.connect_activate(|app| {
-        if app.windows().is_empty() {
+        suite_ui::launch::no_file(app, suite_platform::launch::when_finished, |app| {
             start_window(app);
-        }
+        })
     });
     suite_ui::launch::run(&app, args.file.as_slice())
 }

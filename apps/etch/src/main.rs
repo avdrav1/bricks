@@ -131,9 +131,13 @@ fn main() -> glib::ExitCode {
             window::open(app, path, Some(start));
         } else if let Some(frames) = stroke {
             window::open_bench(app, frames);
-        } else if app.windows().is_empty() && !recovery::reopen(app) {
-            // A crash's images open instead of the blank one.
-            window::open_blank(app, window::DEFAULT_SIZE);
+        } else {
+            suite_ui::launch::no_file(app, suite_platform::launch::when_finished, |app| {
+                // A crash's images open instead of the blank one.
+                if !recovery::reopen(app) {
+                    window::open_blank(app, window::DEFAULT_SIZE);
+                }
+            });
         }
     });
     suite_ui::launch::run(&app, &args.files)

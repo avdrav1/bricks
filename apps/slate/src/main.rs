@@ -184,9 +184,7 @@ fn main() -> glib::ExitCode {
         }
     });
     app.connect_activate(|app| {
-        if app.windows().is_empty() {
-            start_window(app);
-        }
+        suite_ui::launch::no_file(app, suite_platform::launch::when_finished, start_window)
     });
     suite_ui::launch::run(&app, &files)
 }
