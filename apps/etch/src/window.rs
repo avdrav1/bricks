@@ -377,6 +377,9 @@ struct Controls {
     /// The size's label, field, and unit, shown while the tool has a size.
     sizing: gtk::Box,
     size: gtk::SpinButton,
+    /// The fill's tolerance, its label and field, shown while the fill is the tool.
+    tolerating: gtk::Box,
+    tolerance: gtk::SpinButton,
     /// The brush's Hard and Soft buttons, shown while the brush is the tool.
     edge: gtk::Box,
     hard: gtk::ToggleButton,
@@ -425,6 +428,10 @@ impl Controls {
             .set_range(*sizes.start() as f64, *sizes.end() as f64);
         if let Some(w) = s.width().filter(|&w| self.size.value() as u32 != w) {
             self.size.set_value(w as f64);
+        }
+        self.tolerating.set_visible(s.tool == Tool::Fill);
+        if self.tolerance.value() as u8 != s.tolerance {
+            self.tolerance.set_value(s.tolerance as f64);
         }
         self.edge.set_visible(s.tool == Tool::Brush);
         let edge = if s.soft { &self.soft } else { &self.hard };
@@ -571,6 +578,26 @@ fn colour_row(controls: &Rc<Controls>) -> gtk::Box {
     controls.sizing.append(&controls.size);
     controls.sizing.append(&gtk::Label::new(Some("px")));
     row.append(&controls.sizing);
+    let label = gtk::Label::with_mnemonic("_Tolerance");
+    label.set_mnemonic_widget(Some(&controls.tolerance));
+    controls.tolerating.append(&label);
+    controls.tolerance.set_valign(gtk::Align::Center);
+    controls.tolerance.set_tooltip_text(Some(
+        "Tolerance: how far, 0 to 255 in any channel, a colour may be from the clicked one and still fill (0: exactly its colour)",
+    ));
+    controls
+        .tolerance
+        .update_property(&[gtk::accessible::Property::Label("Tolerance")]);
+    controls.tolerance.connect_value_changed({
+        let controls = Rc::downgrade(controls);
+        move |spin| {
+            if let Some(c) = controls.upgrade() {
+                c.changed(|s| s.tolerance = spin.value() as u8);
+            }
+        }
+    });
+    controls.tolerating.append(&controls.tolerance);
+    row.append(&controls.tolerating);
     controls.family.connect_selected_notify({
         let controls = Rc::downgrade(controls);
         move |d| {
@@ -671,6 +698,8 @@ fn show(
             *tools::SIZES.end() as f64,
             1.0,
         ),
+        tolerating: gtk::Box::new(gtk::Orientation::Horizontal, 12),
+        tolerance: gtk::SpinButton::with_range(0.0, 255.0, 1.0),
         edge,
         hard,
         soft,

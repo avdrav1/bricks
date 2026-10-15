@@ -602,11 +602,12 @@ impl Canvas {
         self.invalidate(changed);
     }
 
-    /// Fills the region under widget point `at` with `color` (exact colour), one undo
-    /// step. Synchronous: an 8K fill takes under 200 ms (ETCH-9).
-    pub fn fill(&self, at: (f64, f64), color: Color) {
+    /// Fills the region under widget point `at` with `color`, taking colours within
+    /// `tolerance` of the clicked pixel's, one undo step. Synchronous: an 8K fill takes
+    /// under 200 ms (ETCH-9).
+    pub fn fill(&self, at: (f64, f64), color: Color, tolerance: u8) {
         let Some(view) = self.view() else { return };
-        let changed = self.with_doc(|d| d.fill(view.to_image(at), color, 0));
+        let changed = self.with_doc(|d| d.fill(view.to_image(at), color, tolerance));
         self.invalidate(changed);
     }
 
@@ -983,10 +984,13 @@ impl Canvas {
                         Some(Action::Fill {
                             foreground,
                             background,
+                            tolerance,
                         }),
-                    ) if !space => {
-                        canvas.fill((x, y), if secondary { background } else { foreground })
-                    }
+                    ) if !space => canvas.fill(
+                        (x, y),
+                        if secondary { background } else { foreground },
+                        tolerance,
+                    ),
                     (1 | 3, Some(Action::Pick)) if !space => canvas.pick((x, y), secondary),
                     (1, Some(Action::Shape(_))) if !space => canvas.shape_begin((x, y)),
                     (1, Some(Action::Text(look))) if !space => canvas.text_click((x, y), look),

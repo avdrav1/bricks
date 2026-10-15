@@ -295,9 +295,10 @@ impl Document {
     }
 
     /// Fills the 4-connected region of the pixel at `at` (in image pixels; fractions floor)
-    /// with `color`: every pixel reached through neighbours whose channels are each within
-    /// `tolerance` of the clicked pixel's (0: its exact colour; fully transparent pixels
-    /// match each other whatever colour they carry). One undo step, keeping only the tiles
+    /// with `color`: every pixel reached through neighbours whose colour is within
+    /// `tolerance` of the clicked pixel's: no channel, alpha included, differs by more
+    /// (0: its exact colour). With a fully transparent pixel only alpha counts, so fully
+    /// transparent pixels match each other whatever colour they carry. One undo step, keeping only the tiles
     /// the fill wrote to. Nothing happens off the image or when an exact fill would put
     /// down the colour already there. Ends any stroke under way.
     pub fn fill(&mut self, at: (f64, f64), color: Color, tolerance: u8) -> Option<Rect> {

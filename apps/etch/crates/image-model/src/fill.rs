@@ -4,8 +4,8 @@
 use crate::geom::Rect;
 use crate::{Color, Image};
 
-/// A fill: where it was clicked, the colour it puts down, and how far a pixel's channels may
-/// stray from the clicked pixel's and still be filled (0: exactly its colour).
+/// A fill: where it was clicked, the colour it puts down, and how far a pixel may be from
+/// the clicked pixel's colour and still be filled ([`distance`]; 0: exactly its colour).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Fill {
     pub at: (u32, u32),
@@ -13,15 +13,25 @@ pub struct Fill {
     pub tolerance: u8,
 }
 
-/// Whether pixel `p` belongs to the region of `seed`: each channel within `tolerance` of
-/// the seed's. Fully transparent pixels all look alike, so they match each other whatever
-/// colour they carry.
+/// How far apart two pixels' colours are, 0 to 255: the largest difference of any channel,
+/// alpha included. A fully transparent pixel's colour can't be seen, so with one of them
+/// only alpha counts: fully transparent pixels are all one colour.
+#[inline]
+fn distance(p: [u8; 4], q: [u8; 4]) -> u8 {
+    if p[3] == 0 || q[3] == 0 {
+        return p[3].abs_diff(q[3]);
+    }
+    p.iter()
+        .zip(q)
+        .map(|(&a, b)| a.abs_diff(b))
+        .max()
+        .unwrap_or(0)
+}
+
+/// Whether pixel `p` belongs to the region of `seed`: within `tolerance` of it.
 #[inline]
 fn matches(p: [u8; 4], seed: [u8; 4], tolerance: u8) -> bool {
-    if p == seed || (p[3] == 0 && seed[3] == 0) {
-        return true;
-    }
-    tolerance > 0 && p.iter().zip(seed).all(|(&a, b)| a.abs_diff(b) <= tolerance)
+    p == seed || distance(p, seed) <= tolerance
 }
 
 /// Pixels already filled, when the colour put down still matches the seed (possible only

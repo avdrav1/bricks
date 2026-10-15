@@ -119,6 +119,12 @@
 #      largest alpha 0. The settings file (~/.config/etch/settings) holds the size and
 #      background; after quitting and starting etch again, Ctrl+N offers 300 by 200,
 #      Transparent on.
+# ETCH-14 acceptance: the fill's tolerance.
+#  19. `etch n.png` (400x300: the left half white, the right half 249,249,249, six levels
+#      off): Tolerance hides while the pencil is the tool and shows beside the fill (F), 0
+#      at first. Red the foreground, a click on the left half at 0 fills it and leaves the
+#      right half; Ctrl+Z, then at 5 (Alt+T, typed) the same; Ctrl+Z, then at 6 both halves
+#      fill red. Switching to the pencil and back keeps 6.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -340,7 +346,7 @@ elif cmd == "checked":
         stack.extend(n.get_child_at_index(i) for i in range(n.get_child_count()))
     print(", ".join(on) or "none")
 PY
-# The images sections 11 and 12 open.
+# The images sections 11, 12, and 19 open.
 cat > /tmp/mk.py <<"PY"
 import gi
 gi.require_version("GdkPixbuf", "2.0")
@@ -360,6 +366,7 @@ def t(x, y):
 make("/tmp/t.png", 400, 300, t, "png", True)
 make("/tmp/s.png", 400, 300, lambda x, y: (255, 255, 255, 255), "png", True)
 make("/tmp/c.jpg", 320, 200, lambda x, y: (x * 255 // 319, y * 255 // 199, 128), "jpeg", False, ["quality"], ["90"])
+make("/tmp/n.png", 400, 300, lambda x, y: (255,) * 3 if x < 200 else (249,) * 3, "png", False)
 PY
 session() {
   WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 sway --unsupported-gpu -c /tmp/sway.conf >/tmp/sway.log 2>&1 &
@@ -770,6 +777,26 @@ session() {
   echo "again checked: $(px checked)"
   keys -k Escape; sleep 1
   pkill -x etch; sleep 1
+
+  echo "== 19 tolerance"
+  etch /tmp/n.png >>/tmp/app.log 2>&1 & sleep 3
+  # The text of the field, after its name and its description (the tooltip).
+  tolerance() { python3 /tmp/a11y.py text | grep -A2 "^Tolerance$" | grep -E "^[0-9]+$" | tail -1; }
+  echo "pencil: tolerance $(python3 /tmp/a11y.py text | grep -c "^Tolerance$")"
+  keys f; echo "fill: $(tool Fill) tolerance $(tolerance)"
+  python3 /tmp/a11y.py press Red; sleep 0.5
+  read mx my <<<"$(px centre)"
+  halves() { echo "left $(px count /tmp/shot.png $((mx - 196)) $((my - 146)) $((mx - 4)) $((my + 146)) ED1C24) right $(px count /tmp/shot.png $((mx + 4)) $((my - 146)) $((mx + 196)) $((my + 146)) ED1C24)"; }
+  for tol in 0 5 6; do
+    if [ $tol != 0 ]; then
+      keys -M ctrl z -m ctrl
+      keys -M alt t -m alt; keys -M ctrl a -m ctrl; keys $tol; keys -k Return
+    fi
+    python3 /scripts/dnd_helpers.py click $((mx - 100)) $my; sleep 0.5
+    shot tolerance-$tol; echo "at $(tolerance): $(halves)"
+  done
+  keys p; keys f; echo "kept: $(tolerance)"
+  pkill -x etch; sleep 1
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -977,6 +1004,12 @@ check "18: the settings file holds the size and background" "18 new" "^settings:
 check "18: after a restart New Image offers 300" "18 new" "^again: 300$"
 check "18: ... by 200" "18 new" "^again: 200$"
 check "18: ... Transparent" "18 new" "^again checked: Transparent$"
+check "19: Tolerance hides while the pencil is the tool" "19 tolerance" "^pencil: tolerance 0$"
+check "19: ... and shows beside the fill, 0 at first" "19 tolerance" "^fill: on tolerance 0$"
+check "19: at 0 a fill takes the white half and not the half six levels off" "19 tolerance" "^at 0: left all right 0/"
+check "19: ... nor at 5" "19 tolerance" "^at 5: left all right 0/"
+check "19: at 6 it takes both" "19 tolerance" "^at 6: left all right all$"
+check "19: the fill keeps its tolerance across tools" "19 tolerance" "^kept: 6$"
 absent "the app logs no errors or panics" "app log" "^etch:|panicked|CRITICAL"
 bench=$(section "8 bench" | sed -n "s/^bench: //p")
 if [ -z "$bench" ]; then echo "FAIL 8: --bench-stroke printed nothing"; fail=1; else

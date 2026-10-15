@@ -34,10 +34,11 @@ pub enum Action {
     /// A primary-button drag draws with the tip.
     Draw(Tip),
     /// A click fills the region under it with the foreground, a right-click with the
-    /// background.
+    /// background, taking colours within `tolerance` of the clicked pixel's.
     Fill {
         foreground: Color,
         background: Color,
+        tolerance: u8,
     },
     /// A click makes the pixel under it the foreground colour, a right-click the
     /// background.
@@ -163,6 +164,9 @@ pub struct Settings {
     pub family: &'static str,
     pub bold: bool,
     pub italic: bool,
+    /// The fill's tolerance: how far, 0 to 255, a pixel's colour may be from the clicked
+    /// one's and still fill (`image_model::Document::fill`); 0, exact, at first.
+    pub tolerance: u8,
     /// The tool before the colour picker, which a pick goes back to.
     before_picker: Tool,
     pencil_width: u32,
@@ -185,6 +189,7 @@ impl Default for Settings {
             family: DEFAULT_FAMILY,
             bold: false,
             italic: false,
+            tolerance: 0,
             before_picker: Tool::Pencil,
             pencil_width: 1,
             brush_width: 8,
@@ -298,6 +303,7 @@ impl Settings {
             Tool::Fill => Action::Fill {
                 foreground: self.foreground,
                 background: self.background,
+                tolerance: self.tolerance,
             },
             Tool::Picker => Action::Pick,
             Tool::Text => Action::Text(TextLook {
@@ -459,7 +465,20 @@ mod tests {
             s.action(),
             Action::Fill {
                 foreground: Color::WHITE,
-                background: red
+                background: red,
+                tolerance: 0,
+            }
+        );
+        // The tolerance set is the fill's; switching tools keeps it.
+        s.tolerance = 32;
+        s.set_tool(Tool::Pencil);
+        s.set_tool(Tool::Fill);
+        assert_eq!(
+            s.action(),
+            Action::Fill {
+                foreground: Color::WHITE,
+                background: red,
+                tolerance: 32,
             }
         );
     }
