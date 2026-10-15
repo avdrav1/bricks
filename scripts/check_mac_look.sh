@@ -38,6 +38,7 @@ check() { # check NAME CONDITION...
 # The bounds of process $1's largest on-screen window, as "x y w h" in screen points.
 cat >"$work/bounds.swift" <<'SWIFT'
 import CoreGraphics
+import Foundation
 let pid = Int(CommandLine.arguments[1])!
 let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
 var best: (Int, Int, Int, Int)? = nil

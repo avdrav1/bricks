@@ -69,6 +69,7 @@ mod mac {
 
     #[link(name = "fontconfig")]
     extern "C" {
+        fn FcConfigGetCurrent() -> *mut c_void;
         fn FcConfigAppFontAddDir(config: *mut c_void, dir: *const c_char) -> c_int;
         fn FcConfigParseAndLoadFromMemory(
             config: *mut c_void,
@@ -84,10 +85,7 @@ mod mac {
             std::env::set_var("PANGOCAIRO_BACKEND", "fc");
         }
         let t0 = Instant::now();
-        let alias = CString::new(SYSTEM_FONT).expect("no NUL in the alias");
-        // SAFETY: a NUL-terminated buffer, null for fontconfig's current configuration
-        // (which this loads: Pango's font map then uses it).
-        if unsafe { FcConfigParseAndLoadFromMemory(std::ptr::null_mut(), alias.as_ptr(), 1) } == 0 {
+        if !alias_system_font() {
             tracing::warn!("fontconfig refused the system font's alias");
         }
         let exe = std::env::current_exe().and_then(std::fs::canonicalize);
@@ -104,15 +102,29 @@ mod mac {
         }
     }
 
-    /// Add every font file in `dir` to fontconfig's current configuration as this
-    /// process's application fonts. Whether fontconfig could.
+    /// Fontconfig's current configuration, the one Pango's font map uses; the first call
+    /// loads it with the system's fonts. Not thread-safe to change: one thread at a time.
+    fn current() -> *mut c_void {
+        // SAFETY: no arguments; the configuration is borrowed and lives while the process.
+        unsafe { FcConfigGetCurrent() }
+    }
+
+    /// Add [`SYSTEM_FONT`]'s alias to the current configuration. Whether fontconfig could.
+    pub fn alias_system_font() -> bool {
+        let alias = CString::new(SYSTEM_FONT).expect("no NUL in the alias");
+        // SAFETY: a live configuration and a NUL-terminated buffer, parsed before return.
+        unsafe { FcConfigParseAndLoadFromMemory(current(), alias.as_ptr(), 1) != 0 }
+    }
+
+    /// Add every font file in `dir` to the current configuration as this process's
+    /// application fonts. Whether fontconfig could.
     pub fn add_folder(dir: &Path) -> bool {
         let Ok(dir) = CString::new(dir.as_os_str().as_bytes()) else {
             return false;
         };
-        // SAFETY: null for the current configuration and a NUL-terminated path;
-        // fontconfig copies what it keeps.
-        unsafe { FcConfigAppFontAddDir(std::ptr::null_mut(), dir.as_ptr()) != 0 }
+        // SAFETY: a live configuration and a NUL-terminated path; fontconfig copies what
+        // it keeps.
+        unsafe { FcConfigAppFontAddDir(current(), dir.as_ptr()) != 0 }
     }
 
     #[cfg(test)]
@@ -147,10 +159,10 @@ mod mac {
             unsafe {
                 let pattern = FcNameParse(name.as_ptr());
                 assert!(!pattern.is_null());
-                FcConfigSubstitute(std::ptr::null_mut(), pattern, 0);
+                FcConfigSubstitute(current(), pattern, 0);
                 FcDefaultSubstitute(pattern);
                 let mut result = 0;
-                let font = FcFontMatch(std::ptr::null_mut(), pattern, &mut result);
+                let font = FcFontMatch(current(), pattern, &mut result);
                 FcPatternDestroy(pattern);
                 assert!(!font.is_null(), "no match");
                 let mut s: *const c_char = std::ptr::null();
@@ -161,8 +173,10 @@ mod mac {
             }
         }
 
+        // One test: fontconfig's configuration is the process's, and changing it from two
+        // test threads at once isn't safe.
         #[test]
-        fn the_bundled_fonts_stand_in_for_office_fonts() {
+        fn the_bundled_fonts_stand_in_for_office_fonts_and_the_system_font_is_the_macs() {
             // `scripts/fetch_fonts.py` puts them in target/fonts (the macOS CI job does).
             let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/fonts");
             assert!(
@@ -175,6 +189,7 @@ mod mac {
                 "Carlito",
                 "the Mac has no Carlito of its own"
             );
+            assert!(alias_system_font());
             assert!(add_folder(&dir));
             for (asked, drawn) in [
                 ("Calibri", "Carlito"),
@@ -190,19 +205,10 @@ mod mac {
             ] {
                 assert_eq!(matched(asked), drawn, "{asked}");
             }
-        }
-
-        #[test]
-        fn the_system_font_is_the_macs() {
-            let alias = CString::new(SYSTEM_FONT).unwrap();
-            // SAFETY: as in `init`.
-            let loaded =
-                unsafe { FcConfigParseAndLoadFromMemory(std::ptr::null_mut(), alias.as_ptr(), 1) };
-            assert_eq!(loaded, 1);
-            let family = matched(".AppleSystemUIFont");
+            let system = matched(".AppleSystemUIFont");
             assert!(
-                ["System Font", ".SF NS", "SF Pro", "Helvetica Neue"].contains(&family.as_str()),
-                "{family}"
+                ["System Font", ".SF NS", "SF Pro", "Helvetica Neue"].contains(&system.as_str()),
+                "{system}"
             );
         }
     }
