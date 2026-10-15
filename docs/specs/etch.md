@@ -152,9 +152,10 @@ Built (ETCH-15 to ETCH-20):
 
 ## ET3: desktop polish
 
-Built so far (ETCH-21):
+Built so far (ETCH-21 to ETCH-22):
 
 - **Drag and drop.** Image files dropped on any Etch window (from a file manager) open as Open opens them, each in a window of its own: several files open several windows, a file already open brings its window forward instead, and a file that isn't an image Etch can open alerts with its name and the reason, as opening it would.
+- **Recent files.** File → Open Recent lists the last ten images opened or saved (Save and Save As, not Export), newest first, each by its name and its folder (`photo.png  (~/Pictures)`), across runs and across Etch windows and processes: the list is kept in `~/.local/state/etch/recent` (`$XDG_STATE_HOME/etch/recent`), one path a line, written atomically off the UI thread, and read again whenever a window becomes active. An image opened again moves to the top, once. Choosing one opens it as Open does; one that can't be opened any more (deleted, moved, damaged) alerts with the reason and leaves the list. With none, the submenu says "No recent images".
 
 ## Non-goals for V0.1
 

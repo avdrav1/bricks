@@ -7,9 +7,10 @@
 //! opens each PNG, JPEG, or BMP file in a window of its own, read off the UI thread, as do
 //! files dropped on a window.
 //! File → New Image (Ctrl+N) asks for a size and a background (white, transparent, or the
-//! background colour), remembered across runs; File → Open (Ctrl+O) picks a file, and Save
-//! (Ctrl+S), Save As (Ctrl+Shift+S), and Export (Ctrl+Shift+E) write PNG, JPEG, or BMP;
-//! closing or quitting with changes not saved asks first. The canvas zooms and pans, the
+//! background colour), remembered across runs; File → Open (Ctrl+O) picks a file, File →
+//! Open Recent lists the last ten opened or saved, and Save (Ctrl+S), Save As
+//! (Ctrl+Shift+S), and Export (Ctrl+Shift+E) write PNG, JPEG, or BMP; closing or quitting
+//! with changes not saved asks first. The canvas zooms and pans, the
 //! pencil and eraser draw, and every stroke undoes and redoes.
 //! `--bench-stroke` draws a stroke one segment a frame on a 7680×4320 image at 100% for
 //! FRAMES frames and prints how long each took (ETCH-2's acceptance test); `--bench-open`
@@ -18,6 +19,7 @@
 mod canvas;
 mod colours;
 mod image_menu;
+mod recent;
 mod saving;
 mod settings;
 mod text;

@@ -216,6 +216,14 @@
 #      t.png's to come forward (sway marks it urgent); dropping notes.png (text) alerts
 #      "Cannot open “notes.png”" with the reason, and closing the alert leaves the three
 #      windows.
+# ETCH-22 acceptance: recent files.
+#  27. With a state folder of its own (XDG_STATE_HOME), `etch r1.png`, r2, r3, then r1
+#      again, each run quit, list r1 r3 r2; an Untitled image saved as r4.png goes on top.
+#      A new run's File → Open Recent (Alt+F, R) shows r4.png r1.png r3.png r2.png in
+#      that order, each with its folder ("r4.png  (/tmp)", read through AT-SPI: a menu
+#      item's text is in the label it's labelled by), and Enter opens r4.png. After r2.png
+#      is deleted, choosing it alerts "Cannot open “r2.png”" ("The file doesn't exist.")
+#      and it leaves the list and the menu.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -484,6 +492,25 @@ elif cmd == "same":
         rs, n, data = p.get_rowstride(), p.get_width() * p.get_n_channels(), p.get_pixels()
         return p.get_width(), p.get_height(), [bytes(data[y * rs:y * rs + n]) for y in range(p.get_height())]
     print("same" if rows(sys.argv[2]) == rows(sys.argv[3]) else "different")
+elif cmd == "menu":
+    # The items of the menus open, in order: a popover menu item has no name of its own,
+    # but the label it is labelled by holds its text.
+    desktop = Atspi.get_desktop(0)
+    stack = [desktop.get_child_at_index(i) for i in range(desktop.get_child_count())]
+    stack = [a for a in stack if a is not None and a.get_name() == "etch"]
+    while stack:
+        n = stack.pop(0)
+        if n is None:
+            continue
+        n.clear_cache()
+        if n.get_role() == Atspi.Role.MENU_ITEM and not n.get_name():
+            for r in n.get_relation_set():
+                if r.get_relation_type() == Atspi.RelationType.LABELLED_BY:
+                    for i in range(r.get_n_targets()):
+                        t = r.get_target(i).get_text_iface()
+                        if t is not None:
+                            print(Atspi.Text.get_text(t, 0, Atspi.Text.get_character_count(t)))
+        stack[:0] = [n.get_child_at_index(i) for i in range(n.get_child_count())]
 PY
 # Section 21: another GTK 4 app on the clipboard. "read X,Y ...": its window takes the
 # keyboard (Wayland offers the clipboard to the focused window), waits for an image there,
@@ -1288,6 +1315,38 @@ session() {
   python3 /tmp/tree.py | sed "s/^/after alert: /"
   pkill -x etch; sleep 1
   grep -E "^etch: |panicked|CRITICAL" /tmp/drop.log | sed "s/^/log: /"
+
+  echo "== 27 recent"
+  # A state folder of its own: the sections before opened and saved images too.
+  rm -rf /tmp/state27
+  for f in r1 r2 r3; do cp /tmp/t.png /tmp/$f.png; done
+  run() { XDG_STATE_HOME=/tmp/state27 etch "$@" >>/tmp/recent.log 2>&1 & sleep 3; }
+  stored() { sed "s|^/tmp/||" /tmp/state27/etch/recent | tr "\n" " " | sed "s/ $//"; }
+  # File, Open Recent: the submenu open by keyboard, its first item selected.
+  recent_menu() { keys -M alt f -m alt; sleep 1; keys r; sleep 1; }
+  # The image items of the menus open, by name, in order.
+  items() { px menu | grep -E "\.png  \(" | cut -d" " -f1 | tr "\n" " " | sed "s/ $//"; }
+  for f in r1 r2 r3 r1; do run /tmp/$f.png; pkill -x etch; sleep 1; done
+  echo "opened: $(stored)"
+  run; keys -M ctrl s -m ctrl; sleep 1.5
+  keys -M ctrl a -m ctrl; keys /tmp/r4.png; keys -k Return; sleep 3
+  pkill -x etch; sleep 1
+  echo "saved: $(stored)"
+  run
+  recent_menu; shot recent-menu
+  echo "menu: $(items)"
+  px menu | grep -E "^r4\.png" | sed "s/^/menu item: /"
+  keys -k Return; sleep 3
+  python3 /tmp/tree.py | grep windows | sed "s/^/chosen: /"
+  rm /tmp/r2.png
+  recent_menu; keys -k Down -k Down -k Down; keys -k Return; sleep 2
+  shown missing | grep -E "^missing: (Cannot open|The file)"
+  keys -k Return; sleep 1
+  python3 /tmp/tree.py | grep windows | sed "s/^/missing: /"
+  echo "missing: $(stored)"
+  recent_menu; echo "after missing: $(items)"
+  keys -k Escape -k Escape; pkill -x etch; sleep 1
+  grep -E "^etch: |panicked|CRITICAL" /tmp/recent.log | sed "s/^/log: /"
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -1618,6 +1677,18 @@ check "26: ... and why" "26 drop" "^alert: It isn't an image Etch can open: PNG,
 check "26: closing the alert leaves the three windows" "26 drop" "^after alert: windows: one\.png, t\.png, two\.jpg$"
 check "26: ... and the failure is logged with the reason" "26 drop" "^log: etch: cannot open /tmp/notes\.png: It isn't an image"
 absent "26: ... and nothing else goes wrong" "26 drop" "^log: .*(panicked|CRITICAL)"
+check "27: images opened in four runs are listed newest first, once each" "27 recent" "^opened: r1\.png r3\.png r2\.png$"
+check "27: an image saved goes on top" "27 recent" "^saved: r4\.png r1\.png r3\.png r2\.png$"
+check "27: the next run's File → Open Recent lists them in that order" "27 recent" "^menu: r4\.png r1\.png r3\.png r2\.png$"
+check "27: ... each with its folder" "27 recent" "^menu item: r4\.png  \(/tmp\)$"
+check "27: choosing one opens it" "27 recent" "^chosen: windows: Untitled, r4\.png$"
+check "27: choosing a deleted one alerts naming it" "27 recent" "^missing: Cannot open “r2\.png”$"
+check "27: ... and why" "27 recent" "^missing: The file doesn't exist\.$"
+check "27: ... opening no window" "27 recent" "^missing: windows: Untitled, r4\.png$"
+check "27: ... and it leaves the list" "27 recent" "^missing: r4\.png r1\.png r3\.png$"
+check "27: ... and the menu" "27 recent" "^after missing: r4\.png r1\.png r3\.png$"
+check "27: the failure is logged" "27 recent" "^log: etch: cannot open /tmp/r2\.png: The file doesn.t exist\.$"
+absent "27: ... and nothing else goes wrong" "27 recent" "^log: .*(panicked|CRITICAL)"
 absent "the app logs no errors or panics" "app log" "^etch:|panicked|CRITICAL"
 bench=$(section "8 bench" | sed -n "s/^bench: //p")
 if [ -z "$bench" ]; then echo "FAIL 8: --bench-stroke printed nothing"; fail=1; else

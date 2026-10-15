@@ -1,8 +1,9 @@
-//! Recent files (APP-4): the last [`MAX`] files opened or saved, newest first. Kept in
-//! `recent` in the state folder (`~/.local/state/brick/recent`, see [`crate::state`]),
-//! one absolute path per line, so the list survives restarts. Every change reads the file
-//! again first: each launch is its own process, and two windows must not drop each other's
-//! files. Writes go to a temporary file renamed over the old one.
+//! Recent files: the last [`MAX`] files opened or saved, newest first, kept in a file in
+//! the app's state folder (Brick's `~/.local/state/brick/recent`, Etch's
+//! `~/.local/state/etch/recent`), one absolute path per line, so the list survives
+//! restarts. Every change reads the file again first: each launch is its own process, and
+//! two windows must not drop each other's files. Writes go to a temporary file, synced,
+//! renamed over the old one. Brick's (APP-4) and Etch's (ETCH-22).
 
 use std::ffi::OsStr;
 use std::io::Write;
@@ -17,11 +18,6 @@ pub struct Recent {
 }
 
 impl Recent {
-    /// The list in the user's state directory; empty if there is none yet.
-    pub fn load() -> Self {
-        Self::load_from(default_store())
-    }
-
     /// The list kept in `store`; empty if it can't be read.
     pub fn load_from(store: PathBuf) -> Self {
         let files = std::fs::read(&store)
@@ -85,10 +81,6 @@ impl Recent {
         out.sync_all()?;
         std::fs::rename(&tmp, &self.store)
     }
-}
-
-fn default_store() -> PathBuf {
-    crate::state::dir().join("recent")
 }
 
 /// How the menu shows `file`: its name, then its folder with the home folder as `~`.
@@ -171,6 +163,37 @@ mod tests {
         assert_eq!(Recent::load_from(store.clone()).files(), [b]);
         first.clear().unwrap();
         assert!(Recent::load_from(store).files().is_empty());
+    }
+
+    /// ETCH-22: images opened and saved, interleaved, keep one entry each, newest first,
+    /// ten at most; a file deleted since stays listed until opening it fails.
+    #[test]
+    fn opened_and_saved_images_list_once_newest_first_ten_at_most() {
+        let d = dir("etch");
+        let store = d.0.join("state/etch/recent");
+        let image = |i: usize| d.0.join(format!("image {i}.png"));
+        for i in 0..14 {
+            std::fs::write(image(i), "").unwrap();
+        }
+        let mut recent = Recent::load_from(store.clone());
+        // Opened 0 to 11, then 3 saved, then 0 opened again (it fell off the end).
+        for i in (0..12).chain([3, 0]) {
+            recent.add(&image(i)).unwrap();
+        }
+        let want: Vec<PathBuf> = [0, 3, 11, 10, 9, 8, 7, 6, 5, 4]
+            .into_iter()
+            .map(image)
+            .collect();
+        assert_eq!(Recent::load_from(store.clone()).files(), want);
+        // Deleted: still listed (the menu shows it) until it's taken off.
+        std::fs::remove_file(image(3)).unwrap();
+        let mut again = Recent::load_from(store.clone());
+        assert_eq!(again.files()[1], image(3));
+        again.remove(&image(3)).unwrap();
+        let files = Recent::load_from(store).files().to_vec();
+        assert_eq!(files.len(), MAX - 1);
+        assert!(!files.contains(&image(3)));
+        assert_eq!(files[..2], [image(0), image(11)]);
     }
 
     #[test]

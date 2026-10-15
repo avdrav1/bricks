@@ -328,13 +328,15 @@ impl Saver {
         });
     }
 
-    /// The image at `position` is now the file at `dest`, in `format`.
+    /// The image at `position` is now the file at `dest`, in `format`, which goes to the top
+    /// of the recent files.
     fn saved(&self, dest: PathBuf, format: Format, position: Option<u64>) {
         if self.path.borrow().as_deref() != Some(dest.as_path()) {
             if let Some(window) = self.window.upgrade() {
                 crate::window::moved(&window, &dest);
             }
         }
+        crate::recent::add(&dest);
         self.path.replace(Some(dest));
         self.format.set(format);
         self.saved.set(position);

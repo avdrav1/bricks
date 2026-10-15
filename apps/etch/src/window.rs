@@ -6,6 +6,7 @@
 use crate::canvas::Canvas;
 use crate::colours;
 use crate::image_menu;
+use crate::recent;
 use crate::saving::Saver;
 use crate::settings::{self, Background};
 use crate::text;
@@ -56,6 +57,15 @@ pub fn install_app_actions(app: &gtk::Application) {
     let open = gio::ActionEntry::builder("open")
         .activate(|app: &gtk::Application, _, _| choose_and_open(app))
         .build();
+    // File → Open Recent's items: the path to open.
+    let open_recent = gio::ActionEntry::builder("open-recent")
+        .parameter_type(Some(glib::VariantTy::STRING))
+        .activate(|app: &gtk::Application, _, target| {
+            if let Some(path) = target.and_then(|t| t.str()) {
+                crate::window::open(app, Path::new(path), None);
+            }
+        })
+        .build();
     // Quit closes each window, so a window with changes asks first.
     let quit = gio::ActionEntry::builder("quit")
         .activate(|app: &gtk::Application, _, _| {
@@ -64,7 +74,7 @@ pub fn install_app_actions(app: &gtk::Application) {
             }
         })
         .build();
-    app.add_action_entries([new, open, quit]);
+    app.add_action_entries([new, open, open_recent, quit]);
     for (action, keys) in [
         ("app.new", &["<Control>n"][..]),
         ("app.open", &["<Control>o"]),
@@ -94,6 +104,7 @@ pub fn install_app_actions(app: &gtk::Application) {
     let file = gio::Menu::new();
     file.append(Some("_New Image…"), Some("app.new"));
     file.append(Some("_Open…"), Some("app.open"));
+    file.append_submenu(Some("Open _Recent"), &recent::menu());
     file.append(Some("_Save"), Some("win.save"));
     file.append(Some("Save _As…"), Some("win.save-as"));
     file.append(Some("_Export…"), Some("win.export"));
@@ -240,10 +251,13 @@ fn open_file(app: &gtk::Application, file: &gio::File) {
 /// Open the image file at `path` in its own window: its existing one, or a new one titled
 /// with the file's name that says "Opening…" while the file is read and decoded off the UI
 /// thread. A file that can't be opened gives an alert naming it and the reason, and its
-/// window closes. `bench`: `--bench-open`, started at that instant.
+/// window closes. The file goes to the top of the recent files, or, when it can't be
+/// opened, leaves them. `bench`: `--bench-open`, started at that instant (the recent files
+/// left alone).
 pub fn open(app: &gtk::Application, path: &Path, bench: Option<Instant>) {
     if let Some(window) = window_for(path) {
         window.present();
+        recent::add(path);
         return;
     }
     let name = path.file_name().map_or_else(
@@ -276,6 +290,9 @@ pub fn open(app: &gtk::Application, path: &Path, bench: Option<Instant>) {
                 let (w, h) = (image.width(), image.height());
                 tracing::info!("opened {}: {w}×{h} in {read_ms:.0} ms", path.display());
                 let bench = bench.map(|start| Bench::Open { start, read_ms });
+                if bench.is_none() {
+                    recent::add(&path);
+                }
                 show(&app, &window, image, Some((path, format)), bench);
                 return;
             }
@@ -286,6 +303,7 @@ pub fn open(app: &gtk::Application, path: &Path, bench: Option<Instant>) {
         if bench.is_some() {
             std::process::exit(1);
         }
+        recent::remove(&path);
         let _ = gtk::AlertDialog::builder()
             .message(format!("Cannot open “{name}”"))
             .detail(&error)
@@ -331,6 +349,12 @@ fn new_window(app: &gtk::Application, title: &str) -> gtk::ApplicationWindow {
         .default_height(800)
         .show_menubar(true)
         .build();
+    // Another etch may have changed the recent files meanwhile.
+    window.connect_is_active_notify(|window| {
+        if window.is_active() {
+            recent::refresh();
+        }
+    });
     accept_drops(app, &window);
     window
 }

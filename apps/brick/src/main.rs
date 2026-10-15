@@ -27,7 +27,6 @@ mod formula_bar;
 mod grid_view;
 mod looks;
 mod malformed;
-mod recent;
 mod recovery;
 mod sheets;
 mod state;
@@ -49,6 +48,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use suite_core::AppKind;
+use suite_file::recent;
 use xlsx::{ImportError, Imported};
 
 const APP_ID: &str = "dev.cronkite.Brick";
@@ -196,7 +196,7 @@ fn main() -> glib::ExitCode {
             .build();
         let clear_recent = gtk::gio::ActionEntry::builder("clear-recent")
             .activate(|_: &gtk::Application, _, _| {
-                if let Err(e) = recent::Recent::load().clear() {
+                if let Err(e) = state::recent().clear() {
                     eprintln!("brick: cannot clear recent files: {e}");
                 }
             })
@@ -297,7 +297,7 @@ fn follow_import(
                 };
                 let path = session.path.borrow().clone().unwrap_or_default();
                 eprintln!("brick: cannot open {}: {why}", path.display());
-                let _ = recent::Recent::load().remove(&path);
+                let _ = state::recent().remove(&path);
                 let last = app.windows().len() == 1;
                 window.close();
                 let parent = if last {
@@ -387,7 +387,7 @@ fn start_window(app: &gtk::Application) -> gtk::ApplicationWindow {
         page.append(&section);
         restore
     });
-    let files = recent::Recent::load().files().to_vec();
+    let files = state::recent().files().to_vec();
     if !files.is_empty() {
         let title = gtk::Label::new(Some("Recent"));
         title.add_css_class("heading");
@@ -451,7 +451,7 @@ fn recent_menu() -> gtk::MenuButton {
     button.set_create_popup_func(|button| {
         let menu = gtk::gio::Menu::new();
         let files = gtk::gio::Menu::new();
-        for file in recent::Recent::load().files() {
+        for file in state::recent().files() {
             // A path that isn't UTF-8 can't travel in the action's string.
             let Some(path) = file.to_str() else { continue };
             let (name, dir) = recent::label(file);
@@ -473,7 +473,7 @@ fn recent_menu() -> gtk::MenuButton {
 
 /// Put `path` at the top of the recent files; a failure only costs the list.
 fn remember(path: &Path) {
-    if let Err(e) = recent::Recent::load().add(path) {
+    if let Err(e) = state::recent().add(path) {
         eprintln!("brick: cannot update recent files: {e}");
     }
 }
@@ -597,7 +597,7 @@ fn open_window(app: &gtk::Application, path: &Path, parent: Option<&gtk::Window>
             true
         }
         Err(e) => {
-            let _ = recent::Recent::load().remove(path);
+            let _ = state::recent().remove(path);
             alert(
                 parent,
                 &format!("Cannot open {}", path.display()),

@@ -27,6 +27,11 @@ pub fn dir() -> &'static Path {
     &DIR
 }
 
+/// The recent files (APP-4), kept in `recent` in the state folder.
+pub fn recent() -> suite_file::recent::Recent {
+    suite_file::recent::Recent::load_from(dir().join("recent"))
+}
+
 /// `base/brick`, after moving the newest earlier release's folder there if it doesn't
 /// exist yet.
 fn resolve(base: &Path) -> PathBuf {
