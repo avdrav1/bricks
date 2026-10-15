@@ -339,6 +339,23 @@ impl Canvas {
             .is_some_and(Document::can_redo)
     }
 
+    /// Where the image stands in its history ([`Document::position`]).
+    pub fn position(&self) -> Option<u64> {
+        self.imp()
+            .doc
+            .borrow()
+            .as_ref()
+            .and_then(Document::position)
+    }
+
+    /// A copy of the image as it is now, and its position, for saving: editing goes on
+    /// while the copy is written.
+    pub fn copy_image(&self) -> (Image, Option<u64>) {
+        let doc = self.imp().doc.borrow();
+        let doc = doc.as_ref().expect("a canvas has a document");
+        (doc.image().clone(), doc.position())
+    }
+
     pub fn undo(&self) {
         self.imp().drag.set(Drag::None);
         let changed = self.with_doc(Document::undo);

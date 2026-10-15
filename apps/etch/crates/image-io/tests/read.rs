@@ -21,7 +21,8 @@ fn data(name: &str) -> PathBuf {
 /// Reads fixture `name` and checks every pixel against its reference: each channel within
 /// `tolerance` of it, and on average within half a level.
 fn matches_reference(name: &str, size: (u32, u32), tolerance: u8) -> Image {
-    let image = read(&data(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
+    let (image, format) = read(&data(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
+    assert_eq!(Format::for_path(&data(name)), Ok(format), "{name}");
     assert_eq!((image.width(), image.height()), size, "{name}");
     let reference = std::fs::read(data(&format!("{name}.rgba"))).unwrap();
     assert_eq!(reference.len(), image.data().len(), "{name}");

@@ -5,14 +5,17 @@
 //! Each image has its own window (docs/specs/etch.md, ADR 0010) with a menu bar, the
 //! canvas, and a status bar. `etch` opens a blank white 1024×768 image; `etch FILE...`
 //! opens each PNG, JPEG, or BMP file in a window of its own, read off the UI thread.
-//! File → New Image (Ctrl+N) asks for a size, File → Open (Ctrl+O) picks a file. The canvas
-//! zooms and pans, the pencil and eraser draw, and every stroke undoes and redoes.
+//! File → New Image (Ctrl+N) asks for a size, File → Open (Ctrl+O) picks a file, and Save
+//! (Ctrl+S), Save As (Ctrl+Shift+S), and Export (Ctrl+Shift+E) write PNG, JPEG, or BMP;
+//! closing or quitting with changes not saved asks first. The canvas zooms and pans, the
+//! pencil and eraser draw, and every stroke undoes and redoes.
 //! `--bench-stroke` draws a stroke one segment a frame on a 7680×4320 image at 100% for
 //! FRAMES frames and prints how long each took (ETCH-2's acceptance test); `--bench-open`
 //! opens FILE and prints how long it took to show (ETCH-6's).
 
 mod canvas;
 mod colours;
+mod saving;
 mod tools;
 mod view;
 mod window;

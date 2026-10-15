@@ -1,20 +1,37 @@
 //! Etch's image files: reading PNG, JPEG, and BMP into the image model's [`Image`] (RGBA8,
-//! straight alpha). Decoding is the pure-Rust `image` crate's, with only these three
-//! codecs. Toolkit-free: the app calls [`read`] off its UI thread.
+//! straight alpha), and saving it as one. Decoding and encoding are the pure-Rust `image`
+//! crate's, with only these three codecs. Toolkit-free: the app calls [`read`] and
+//! [`save`] off its UI thread.
 //!
 //! A file's format is told by its content, never its name. PNG keeps its alpha; JPEG has
 //! none, and BMP opens opaque whatever its header says (Paint's reading: the fourth byte of
 //! a 32-bit BMP is unused in most files, so honouring it makes ordinary BMPs vanish).
 //! Images over [`MAX_SIDE`] pixels a side are refused before their pixels are decoded.
+//!
+//! Saving picks the format by the file name's extension ([`Format::for_path`]). PNG keeps
+//! every pixel and its alpha exactly; JPEG (at [`JPEG_QUALITY`]) and BMP (24-bit) are
+//! opaque, so their pixels are composited onto white. The file is written atomically
+//! through `suite_file::save_atomic`: a failed save leaves the old file as it was.
 
-use image::codecs::{bmp::BmpDecoder, jpeg::JpegDecoder, png::PngDecoder};
-use image::{DynamicImage, ImageDecoder, ImageError, ImageFormat};
+use image::codecs::{
+    bmp::{BmpDecoder, BmpEncoder},
+    jpeg::{JpegDecoder, JpegEncoder},
+    png::{PngDecoder, PngEncoder},
+};
+use image::{DynamicImage, ExtendedColorType, ImageDecoder, ImageEncoder, ImageError, ImageFormat};
 use image_model::{Image, SizeError, MAX_SIDE};
 use std::fmt;
 use std::io::{self, Cursor};
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
+use suite_file::{SaveError, WriteSeek};
 
-/// The file formats Etch opens.
+/// The quality Etch saves JPEG images at (1 to 100): 90, where JPEG's loss is hard to see
+/// in photos and screenshots and files stay a fraction of PNG's size; the `image` crate's
+/// own default is 75.
+pub const JPEG_QUALITY: u8 = 90;
+
+/// The file formats Etch opens and saves.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
     Png,
@@ -31,7 +48,53 @@ impl Format {
             Format::Bmp => "BMP",
         }
     }
+
+    /// The format's usual extension: "png", "jpg", "bmp".
+    pub fn extension(self) -> &'static str {
+        match self {
+            Format::Png => "png",
+            Format::Jpeg => "jpg",
+            Format::Bmp => "bmp",
+        }
+    }
+
+    /// The format a file at `path` is saved in, by its name's extension, in any case:
+    /// .png; .jpg or .jpeg; .bmp.
+    pub fn for_path(path: &Path) -> Result<Format, UnknownExtension> {
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(str::to_ascii_lowercase);
+        match ext.as_deref() {
+            Some("png") => Ok(Format::Png),
+            Some("jpg" | "jpeg") => Ok(Format::Jpeg),
+            Some("bmp") => Ok(Format::Bmp),
+            _ => Err(UnknownExtension),
+        }
+    }
+
+    /// Whether the format keeps transparency: only PNG. JPEG and BMP images are saved
+    /// composited onto white.
+    pub fn keeps_alpha(self) -> bool {
+        self == Format::Png
+    }
 }
+
+/// A file name whose extension isn't one Etch saves. Its [`Display`](fmt::Display) is the
+/// reason, in words for the alert that names the file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UnknownExtension;
+
+impl fmt::Display for UnknownExtension {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(
+            "Etch saves PNG (.png), JPEG (.jpg or .jpeg), and BMP (.bmp) images: \
+             end the name with one of them.",
+        )
+    }
+}
+
+impl std::error::Error for UnknownExtension {}
 
 /// Why a file can't be opened. Its [`Display`](fmt::Display) is the reason, in words for
 /// the alert that names the file.
@@ -91,10 +154,88 @@ impl std::error::Error for OpenError {
     }
 }
 
-/// Reads and decodes the image file at `path`.
-pub fn read(path: &Path) -> Result<Image, OpenError> {
+/// Reads and decodes the image file at `path`; the format it's in, by its content.
+pub fn read(path: &Path) -> Result<(Image, Format), OpenError> {
     let bytes = std::fs::read(path).map_err(OpenError::Read)?;
-    decode(&bytes)
+    let format = format_of(&bytes)?;
+    Ok((decode(&bytes)?, format))
+}
+
+/// Whether any pixel of `image` isn't fully opaque: saving it as JPEG or BMP changes it.
+pub fn has_transparency(image: &Image) -> bool {
+    image
+        .data()
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .any(|p| p[3] != u8::MAX)
+}
+
+/// The bytes of `image` as a `format` file. JPEG and BMP are composited onto white.
+pub fn encode(image: &Image, format: Format) -> Result<Vec<u8>, ImageError> {
+    let (w, h) = (image.width(), image.height());
+    let mut out = Vec::new();
+    match format {
+        Format::Png => {
+            PngEncoder::new(&mut out).write_image(image.data(), w, h, ExtendedColorType::Rgba8)?
+        }
+        Format::Jpeg => JpegEncoder::new_with_quality(&mut out, JPEG_QUALITY).write_image(
+            &on_white(image),
+            w,
+            h,
+            ExtendedColorType::Rgb8,
+        )?,
+        Format::Bmp => BmpEncoder::new(&mut out).write_image(
+            &on_white(image),
+            w,
+            h,
+            ExtendedColorType::Rgb8,
+        )?,
+    }
+    Ok(out)
+}
+
+/// `image`'s pixels composited onto white, as RGB8 rows: each channel `c` at alpha `a`
+/// becomes `(c·a + 255·(255 − a)) / 255`, rounded.
+pub fn on_white(image: &Image) -> Vec<u8> {
+    let pixels = image.data().as_chunks::<4>().0;
+    let mut rgb = Vec::with_capacity(pixels.len() * 3);
+    for &[r, g, b, a] in pixels {
+        if a == u8::MAX {
+            rgb.extend_from_slice(&[r, g, b]);
+        } else {
+            let (a, under) = (u32::from(a), 255 * (255 - u32::from(a)));
+            let mix = |c: u8| ((u32::from(c) * a + under + 127) / 255) as u8;
+            rgb.extend_from_slice(&[mix(r), mix(g), mix(b)]);
+        }
+    }
+    rgb
+}
+
+/// Saves `image` at `path` as a `format` file, atomically: the bytes go to a temp file
+/// beside it, are synced, read back and compared, and renamed over the old file. On any
+/// error the old file stays as it was.
+pub fn save(path: &Path, image: &Image, format: Format) -> Result<(), SaveError> {
+    let bytes = encode(image, format).map_err(|e| SaveError::Io(io::Error::other(e)))?;
+    write_atomic(path, &bytes, |w| w.write_all(&bytes))
+}
+
+/// Writes `bytes` at `dest` atomically with `write` (which writes them), verifying the
+/// temp file holds exactly `bytes` before it replaces `dest`.
+fn write_atomic<W>(dest: &Path, bytes: &[u8], write: W) -> Result<(), SaveError>
+where
+    W: FnOnce(&mut (dyn WriteSeek + Send)) -> io::Result<()>,
+{
+    let cancel = AtomicBool::new(false);
+    suite_file::save_atomic(dest, &cancel, write, |tmp| match std::fs::read(tmp) {
+        Ok(written) if written == bytes => Ok(()),
+        Ok(written) => Err(format!(
+            "{} bytes written of the image's {}",
+            written.len(),
+            bytes.len()
+        )),
+        Err(e) => Err(e.to_string()),
+    })
 }
 
 /// The format of an image file's `bytes`, from their content.
@@ -209,4 +350,56 @@ fn kind_name(format: ImageFormat) -> Option<&'static str> {
         ImageFormat::Qoi => "QOI",
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    /// A directory holding `old.png` (`old`'s bytes), for one test.
+    fn with_old_file(test: &str, old: &[u8]) -> (PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("etch-io-{}-{test}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("old.png");
+        std::fs::write(&path, old).unwrap();
+        (dir, path)
+    }
+
+    fn left_in(dir: &Path) -> usize {
+        std::fs::read_dir(dir).unwrap().count()
+    }
+
+    #[test]
+    fn a_writer_failing_partway_leaves_the_old_file() {
+        let old = b"the old file's bytes".to_vec();
+        let (dir, path) = with_old_file("writer", &old);
+        let new = vec![7u8; 1 << 21];
+        let result = write_atomic(&path, &new, |w| {
+            w.write_all(&new[..new.len() / 2])?;
+            Err(io::Error::other("the disk filled up"))
+        });
+        assert!(matches!(result, Err(SaveError::Io(_))), "{result:?}");
+        assert_eq!(std::fs::read(&path).unwrap(), old);
+        assert_eq!(left_in(&dir), 1, "the temp file is removed");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_short_write_fails_verifying_and_leaves_the_old_file() {
+        let old = b"the old file's bytes".to_vec();
+        let (dir, path) = with_old_file("short", &old);
+        let new = vec![7u8; 4096];
+        let result = write_atomic(&path, &new, |w| w.write_all(&new[..1000]));
+        match result {
+            Err(SaveError::Verify(why)) => {
+                assert_eq!(why, "1000 bytes written of the image's 4096")
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(std::fs::read(&path).unwrap(), old);
+        assert_eq!(left_in(&dir), 1, "the temp file is removed");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }

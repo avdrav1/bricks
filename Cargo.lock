@@ -319,6 +319,7 @@ dependencies = [
  "image-io",
  "image-model",
  "suite-core",
+ "suite-file",
  "suite-platform",
  "suite-ui",
  "tracing",
@@ -782,6 +783,7 @@ version = "0.1.0"
 dependencies = [
  "image",
  "image-model",
+ "suite-file",
 ]
 
 [[package]]

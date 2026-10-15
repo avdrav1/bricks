@@ -1,12 +1,15 @@
 //! Windows: one per image, with the app's menu bar, the tool column, the canvas, and the
 //! colour row and status bar below; opening files (the command line and File → Open);
-//! the New Image dialog; and the benchmarks (`--bench-stroke`, `--bench-open`).
+//! the New Image dialog; and the benchmarks (`--bench-stroke`, `--bench-open`). Saving is
+//! [`crate::saving`]'s.
 
 use crate::canvas::Canvas;
 use crate::colours;
+use crate::saving::Saver;
 use crate::tools::{self, Settings, Tool};
 use gtk::prelude::*;
 use gtk::{gdk, gio, glib};
+use image_io::Format;
 use image_model::{Color, Image, MAX_SIDE};
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
@@ -45,13 +48,23 @@ pub fn install_app_actions(app: &gtk::Application) {
     let open = gio::ActionEntry::builder("open")
         .activate(|app: &gtk::Application, _, _| choose_and_open(app))
         .build();
+    // Quit closes each window, so a window with changes asks first.
     let quit = gio::ActionEntry::builder("quit")
-        .activate(|app: &gtk::Application, _, _| app.quit())
+        .activate(|app: &gtk::Application, _, _| {
+            for window in app.windows() {
+                window.close();
+            }
+        })
         .build();
     app.add_action_entries([new, open, quit]);
     for (action, keys) in [
         ("app.new", &["<Control>n"][..]),
         ("app.open", &["<Control>o"]),
+        ("win.save", &["<Control>s"]),
+        // Ctrl+Shift+S and Ctrl+Shift+E are the window's key handler's too, as Ctrl+Shift+Z
+        // is (below); these show them in the menu.
+        ("win.save-as", &["<Control><Shift>s"]),
+        ("win.export", &["<Control><Shift>e"]),
         ("app.quit", &["<Control>q"]),
         ("window.close", &["<Control>w"]),
         ("win.undo", &["<Control>z"]),
@@ -73,6 +86,9 @@ pub fn install_app_actions(app: &gtk::Application) {
     let file = gio::Menu::new();
     file.append(Some("_New Image…"), Some("app.new"));
     file.append(Some("_Open…"), Some("app.open"));
+    file.append(Some("_Save"), Some("win.save"));
+    file.append(Some("Save _As…"), Some("win.save-as"));
+    file.append(Some("_Export…"), Some("win.export"));
     file.append(Some("_Close"), Some("window.close"));
     file.append(Some("_Quit"), Some("app.quit"));
     menu.append_submenu(Some("_File"), &file);
@@ -110,7 +126,7 @@ fn open_new(app: &gtk::Application, (w, h): (u32, u32), bench: Option<u32>) {
         match made {
             Ok(Ok(image)) => {
                 let window = new_window(&app, &untitled(&app));
-                show(&app, &window, image, bench.map(Bench::Stroke));
+                show(&app, &window, image, None, bench.map(Bench::Stroke));
             }
             Ok(Err(e)) => alert(&app, "Cannot make the image", &e.to_string()).await,
             Err(_) => {
@@ -209,12 +225,12 @@ pub fn open(app: &gtk::Application, path: &Path, bench: Option<Instant>) {
         })
         .await;
         let error = match read {
-            Ok((Ok(image), took)) => {
+            Ok((Ok((image, format)), took)) => {
                 let read_ms = took.as_secs_f64() * 1e3;
                 let (w, h) = (image.width(), image.height());
                 tracing::info!("opened {}: {w}×{h} in {read_ms:.0} ms", path.display());
                 let bench = bench.map(|start| Bench::Open { start, read_ms });
-                show(&app, &window, image, bench);
+                show(&app, &window, image, Some((path, format)), bench);
                 return;
             }
             Ok((Err(e), _)) => e.to_string(),
@@ -251,6 +267,15 @@ fn canonical(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned())
 }
 
+/// `window` now shows the file at `path` (saved as it): opening that file shows it.
+pub fn moved(window: &gtk::ApplicationWindow, path: &Path) {
+    let path = canonical(path);
+    OPEN.with_borrow_mut(|open| {
+        open.retain(|(_, w)| w.upgrade().is_some_and(|w| w != *window));
+        open.push((path, window.downgrade()));
+    });
+}
+
 /// An empty window titled `title`, with the menu bar.
 fn new_window(app: &gtk::Application, title: &str) -> gtk::ApplicationWindow {
     gtk::ApplicationWindow::builder()
@@ -274,9 +299,15 @@ async fn alert(app: &gtk::Application, message: &str, detail: &str) {
         .await;
 }
 
-/// "Untitled", or "Untitled N" with the first N no other window has.
+/// "Untitled", or "Untitled N" with the first N no other window has (its title marked
+/// "• " or not).
 fn untitled(app: &gtk::Application) -> String {
-    let titles: Vec<_> = app.windows().iter().filter_map(|w| w.title()).collect();
+    let titles: Vec<_> = app
+        .windows()
+        .iter()
+        .filter_map(|w| w.title())
+        .map(|t| t.trim_start_matches("• ").to_owned())
+        .collect();
     (1..)
         .map(|n| match n {
             1 => "Untitled".to_owned(),
@@ -396,12 +427,14 @@ fn colour_row(controls: &Rc<Controls>) -> gtk::Box {
     row
 }
 
-/// Fill `window` with the image's view: the tool column, the canvas showing `image`, the
-/// colour row, and the status bar; then run `bench`, if given.
+/// Fill `window` with the image's view: the tool column, the canvas showing `image` (of
+/// `file`, its path and format; `None` for a new image), the colour row, and the status
+/// bar; then run `bench`, if given.
 fn show(
     app: &gtk::Application,
     window: &gtk::ApplicationWindow,
     image: Image,
+    file: Option<(PathBuf, Format)>,
     bench: Option<Bench>,
 ) {
     let canvas = Canvas::new(image, matches!(bench, Some(Bench::Stroke(_))));
@@ -464,9 +497,10 @@ fn show(
         .build();
     window.add_action_entries([tool]);
 
-    // Space held: dragging pans. Ctrl+Shift+Z redoes (shifted, z may arrive as Z; Edit →
-    // Redo's accelerator is Ctrl+Y). Unmodified, a tool's key picks it and X swaps the
-    // colours. None of them while a text field (the size) has the keys.
+    // Space held: dragging pans. Ctrl+Shift+Z redoes, Ctrl+Shift+S is Save As, and
+    // Ctrl+Shift+E Export (shifted, a letter may arrive upper case, which an accelerator
+    // misses). Unmodified, a tool's key picks it and X swaps the colours. None of them
+    // while a text field (the size) has the keys.
     let keys = gtk::EventControllerKey::new();
     keys.set_propagation_phase(gtk::PropagationPhase::Capture);
     keys.connect_key_pressed({
@@ -488,6 +522,15 @@ fn show(
             }
             if mods == redo && matches!(key, gdk::Key::z | gdk::Key::Z) {
                 canvas.redo();
+                return glib::Propagation::Stop;
+            }
+            let shifted = match key {
+                gdk::Key::s | gdk::Key::S => Some("save-as"),
+                gdk::Key::e | gdk::Key::E => Some("export"),
+                _ => None,
+            };
+            if let (true, Some(action)) = (mods == redo, shifted) {
+                ActionGroupExt::activate_action(&window, action, None);
                 return glib::Propagation::Stop;
             }
             if !mods.is_empty() {
@@ -536,6 +579,7 @@ fn show(
             }
         }
     });
+    Saver::attach(window, &canvas, file);
     window.present();
     canvas.grab_focus();
     match bench {

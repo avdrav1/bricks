@@ -90,10 +90,12 @@ impl Saved {
     }
 }
 
-/// A step of history: the operation, and the pixels it replaced.
+/// A step of history: the operation, the pixels it replaced, and its number (see
+/// [`Document::position`]).
 struct Step {
     op: Operation,
     before: Saved,
+    id: u64,
 }
 
 /// The image being edited, and its history. Every change goes through here, and each
@@ -104,6 +106,8 @@ pub struct Document {
     undone: Vec<Step>,
     /// The stroke being drawn: already on the image, not yet in `done`.
     live: Option<Step>,
+    /// The number the next step gets: steps are numbered from 1 in the order they're made.
+    next_id: u64,
 }
 
 impl Document {
@@ -113,6 +117,19 @@ impl Document {
             done: Vec::new(),
             undone: Vec::new(),
             live: None,
+            next_id: 1,
+        }
+    }
+
+    /// Where the image stands in its history: the last step done's number, 0 before any;
+    /// `None` while a stroke is under way (the image is between positions). Equal positions
+    /// are equal images: undoing back to a position, or redoing to it, gives its pixels
+    /// again, and a step made after undoing gets a new number. A window compares the
+    /// position with the one its file was saved at.
+    pub fn position(&self) -> Option<u64> {
+        match self.live {
+            Some(_) => None,
+            None => Some(self.done.last().map_or(0, |s| s.id)),
         }
     }
 
@@ -131,7 +148,9 @@ impl Document {
                 points: vec![p],
             }),
             before: Saved::default(),
+            id: self.next_id,
         };
+        self.next_id += 1;
         let changed = pencil.bounds(&self.image, p, p);
         if let Some(rect) = changed {
             step.before.cover(&self.image, rect);

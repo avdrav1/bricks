@@ -109,3 +109,39 @@ fn edge_tiles_are_kept_clipped_to_the_image() {
     doc.undo();
     assert_eq!(doc.image(), &blank);
 }
+
+#[test]
+fn positions_tell_whether_the_image_is_back_where_it_was() {
+    // ETCH-7: a window is unsaved while the position differs from the one it saved at.
+    let mut doc = Document::new(Image::new(100, 70, Color::WHITE).unwrap());
+    let start = doc.position();
+    assert_eq!(start, Some(0));
+    stroke(&mut doc, 3, &[(5.0, 5.0), (60.0, 40.0)]);
+    let one = doc.position();
+    assert_ne!(one, start);
+
+    // Mid-stroke the image is between positions.
+    doc.begin_stroke(pencil(1), (10.0, 60.0));
+    assert_eq!(doc.position(), None);
+    doc.extend_stroke((90.0, 60.0));
+    doc.end_stroke();
+    let two = doc.position();
+    assert!(two.is_some() && two != one && two != start);
+
+    // Undoing and redoing come back to the same positions.
+    doc.undo();
+    assert_eq!(doc.position(), one);
+    doc.undo();
+    assert_eq!(doc.position(), start);
+    doc.redo();
+    assert_eq!(doc.position(), one);
+
+    // A different stroke made after undoing is a new position, though as many steps deep.
+    stroke(&mut doc, 1, &[(1.0, 1.0), (2.0, 50.0)]);
+    assert!(doc.position() != two && doc.position() != one);
+
+    // A stroke wholly off the image leaves no step, and the position as it was.
+    let before = doc.position();
+    stroke(&mut doc, 1, &[(-50.0, -50.0), (-40.0, -45.0)]);
+    assert_eq!(doc.position(), before);
+}

@@ -70,7 +70,7 @@ Every change undoes and redoes: strokes, erasing, fills, shapes, text, crop, res
 | Keys | Command |
 | --- | --- |
 | Ctrl+N, Ctrl+O | New, Open |
-| Ctrl+S, Ctrl+Shift+S | Save, Save As |
+| Ctrl+S, Ctrl+Shift+S, Ctrl+Shift+E | Save, Save As, Export |
 | Ctrl+Z; Ctrl+Shift+Z or Ctrl+Y | Undo; Redo |
 | Ctrl+X, Ctrl+C, Ctrl+V | Cut, Copy, Paste |
 | Ctrl+A, Escape, Delete | Select All, Deselect, Delete selection |
@@ -112,13 +112,18 @@ Built (ETCH-2 to ETCH-5):
 
 ## ET1: a Paint replacement
 
-Built so far (ETCH-6):
+Built so far (ETCH-6, ETCH-7):
 
 - **Opening.** `etch FILE...` opens each image in a window of its own, titled with the file's name; File → Open… (Ctrl+O) picks one through the desktop's file dialog, filtered to images (PNG, JPEG, BMP; All files is the other filter). Open always opens a new window, as in Slate and Frame: an Untitled window stays as it is. A file already open brings its window forward. The file is read and decoded off the UI thread while its window says "Opening…", so other windows stay usable; then the image shows at 100%, or fitted when it's larger than the window.
 - **Formats.** PNG, JPEG, and BMP, told by the file's content, not its name: a GIF named `.png` is a GIF. Images decode to the one RGBA8 raster. PNG keeps its alpha, fully transparent pixels included (their colour too). JPEG has none, and every BMP opens opaque: the fourth byte of a 32-bit BMP is unused in most files, so Etch reads it as Paint does. Images over 16384 pixels a side are refused before their pixels are decoded.
 - **When a file can't be opened,** an alert names it and says why, and its window closes: "Cannot open “photo.png”" over "It's a damaged or incomplete PNG image (the file ends too soon).", "It's a GIF image. Etch opens PNG, JPEG, and BMP images.", "It isn't an image Etch can open: PNG, JPEG, or BMP.", "The file is empty.", "The file doesn't exist.", "You don't have permission to read it.", or "It's 20000×100 pixels; Etch opens images up to 16384 pixels a side." A JPEG missing its end (cut short) counts as damaged rather than opening grey at the bottom.
 - **Fast.** An 8K PNG (7680×4320) shows within a second: `etch --bench-open FILE` prints the time from start to the first frame that drew the image.
 - **The default app for images.** The installer makes Etch the default for PNG, JPEG, and BMP in `~/.config/mimeapps.list` (user decision), replacing another app's default for them, so double-clicking an image opens it in Etch; every other type's default stays. Uninstalling drops Etch's defaults (the types go back to whatever the desktop picks).
+- **Saving.** File → Save (Ctrl+S) writes the image over its file, in the format the file was opened in; an image never saved asks where first, as Save As does, offering Untitled.png (Untitled 2.png, and so on) in the Pictures folder. File → Save As… (Ctrl+Shift+S) asks for a file through the desktop's file dialog, filtered to PNG, JPEG, or BMP images (the image's own format first); the name's extension picks the format (.png; .jpg or .jpeg; .bmp, in any case), and the file becomes the window's: its title, what Save writes next, what opening it again brings forward. A name without one of those extensions alerts "Cannot save “drawing.gif”" over "Etch saves PNG (.png), JPEG (.jpg or .jpeg), and BMP (.bmp) images: end the name with one of them."
+- **Export.** File → Export… (Ctrl+Shift+E) writes a copy the same way, in the format its extension picks, but the window keeps its own file, format, and unsaved changes: a JPEG for sharing while the PNG stays the document.
+- **Formats written.** PNG keeps every pixel exactly, alpha included (and the colour of fully transparent pixels). JPEG (quality 90) and BMP (24-bit) can't be transparent, so their pixels are composited onto white; saving or exporting an image with any transparent or see-through pixel as either first asks "Save “photo.jpg” without transparency?" ("JPEG images can't be transparent: the image's transparent and see-through pixels become white in the file."), Cancel or Save. The window keeps its transparency after such a save.
+- **Saving stays out of the way.** The image is copied when the save begins (18 ms for 8K on a Ryzen 9 5900), then encoded and written off the UI thread, so drawing goes on meanwhile; the file holds the image as it was when the save began. A save asked for while another runs waits for it. Writing is atomic through `suite-file`: a temp file beside the file, read back and compared, synced, then renamed over it, so a save that fails (a full disk, a folder without write permission) leaves the old file whole and alerts "Cannot save “photo.png”" with the reason ("You don't have permission to write there.").
+- **Unsaved changes.** The window's title starts with "• " while the image differs from its file (or, never saved, from the blank it started as). It's the history that counts: undoing back to the image saved clears the mark, redoing sets it again. Closing such a window (its close button, File → Close, Ctrl+W) or quitting (Ctrl+Q asks in each window) asks "Save changes to “photo.png” before closing?" with Cancel, Discard, and Save: Cancel keeps the window, Discard closes it leaving the file as it was, Save saves (asking where for a new image) and then closes; a save that fails or is cancelled keeps the window open.
 
 ## Non-goals for V0.1
 

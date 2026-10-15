@@ -50,6 +50,19 @@
 #      the Untitled one. `etch bad.png` (t.png cut short) alerts "Cannot open “bad.png”"
 #      with the reason, and Enter closes the alert and its window (etch exits);
 #      `etch notes.png` (text) alerts that it isn't an image Etch can open.
+# ETCH-7 acceptance: saving.
+#  12. `etch s.png` (400x300, white) is titled s.png; a stroke marks it "• s.png"; Ctrl+S
+#      clears the mark and the file (read back with GdkPixbuf) now has the stroke's black;
+#      another stroke marks it, Ctrl+Z back to the saved image clears it, Ctrl+Y marks it.
+#      Ctrl+W asks "Save changes to “s.png” before closing?" with Cancel, Discard, Save:
+#      Cancel keeps the window (still marked), Discard closes it (etch exits) and leaves
+#      the file byte for byte; reopened and edited, Save in the question saves (more black
+#      in the file) and closes. Ctrl+Shift+S shows Save As, the PNG image filter first;
+#      typing /tmp/s2.jpg writes a JPEG and the window becomes s2.jpg. Erasing the first
+#      line then Ctrl+S asks before saving transparency as JPEG ("... become white"); Save
+#      writes it with the line white (less black). Save As now offers the JPEG image
+#      filter first. Ctrl+S on an Untitled image asks where: Save As, offering
+#      Untitled.png.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -199,8 +212,14 @@ elif cmd == "opened":
     print(f"red {every(red, left)}")
     print(f"checker {every(checker, clear)} light {min(light, 1)} grey {min(grey, 1)} green {green}")
     print(f"blended {every(blended, half)}")
+elif cmd == "file":
+    # An image file as saved: its format (by content), size, and pixels darker than 60.
+    fmt, w, h = GdkPixbuf.Pixbuf.get_file_info(sys.argv[2])
+    at = pixels(sys.argv[2])
+    black = sum(1 for y in range(h) for x in range(w) if max(at(x, y)) < 60)
+    print(f"{fmt.get_name()} {w}x{h} black {black}")
 PY
-# The images section 11 opens.
+# The images sections 11 and 12 open.
 cat > /tmp/mk.py <<"PY"
 import gi
 gi.require_version("GdkPixbuf", "2.0")
@@ -218,6 +237,7 @@ def t(x, y):
     return (0, 255, 0, 0) if y < 150 else (0, 0, 255, 128)
 
 make("/tmp/t.png", 400, 300, t, "png", True)
+make("/tmp/s.png", 400, 300, lambda x, y: (255, 255, 255, 255), "png", True)
 make("/tmp/c.jpg", 320, 200, lambda x, y: (x * 255 // 319, y * 255 // 199, 128), "jpeg", False, ["quality"], ["90"])
 PY
 session() {
@@ -379,6 +399,62 @@ session() {
   shown unsupported | grep -E "Cannot open|image Etch can open"
   pkill -x etch; sleep 1
   grep -E "^etch: cannot open|panicked|CRITICAL" /tmp/open.log | sed "s/^/log: /"
+
+  echo "== 12 save"
+  title() { python3 /tmp/a11y.py text | grep -E "^(• )?(s\.png|s2\.jpg|Untitled)$" | head -1; }
+  img() { px file "$1" | sed "s/^/$2: /"; }
+  black() { px file "$1" | sed "s/.* black //"; }
+  more() { [ "$2" -gt "$1" ] 2>/dev/null && echo yes || echo "no ($1 then $2)"; }
+  stroke() { # DY: a sideways stroke DY px below the image centre
+    read mx my <<<"$(px centre)"
+    python3 /scripts/dnd_helpers.py drag $((mx - 100)) $((my + $1)) $((mx + 100)) $((my + $1)); sleep 0.5
+  }
+  img /tmp/s.png before
+  etch /tmp/s.png >>/tmp/save.log 2>&1 & sleep 3
+  echo "opened: $(title)"
+  stroke -60; echo "stroked: $(title)"
+  keys -M ctrl s -m ctrl; sleep 2
+  echo "saved: $(title)"; img /tmp/s.png saved; b1=$(black /tmp/s.png)
+  stroke 0; echo "again: $(title)"
+  keys -M ctrl z -m ctrl; echo "undone to saved: $(title)"
+  keys -M ctrl y -m ctrl; echo "redone: $(title)"
+  saved=$(md5sum </tmp/s.png)
+  keys -M ctrl w -m ctrl; sleep 1
+  shot asked; shown asked | grep -E "Save changes|Changes not saved|^asked: (Cancel|Discard|Save)$"
+  python3 /tmp/a11y.py press Cancel; sleep 1
+  pgrep -x etch >/dev/null && echo "cancel: running $(title)" || echo "cancel: exited"
+  keys -M ctrl w -m ctrl; sleep 1
+  python3 /tmp/a11y.py press Discard; sleep 1.5
+  pgrep -x etch >/dev/null && echo "discard: running" || echo "discard: exited"
+  [ "$(md5sum </tmp/s.png)" = "$saved" ] && echo "discard: file unchanged" || echo "discard: file changed"
+  etch /tmp/s.png >>/tmp/save.log 2>&1 & sleep 3
+  stroke 60; echo "edited: $(title)"
+  keys -M ctrl w -m ctrl; sleep 1
+  python3 /tmp/a11y.py press Save; sleep 2.5
+  pgrep -x etch >/dev/null && echo "save: running" || echo "save: exited"
+  img /tmp/s.png closed; echo "closed more: $(more "$b1" "$(black /tmp/s.png)")"
+  etch /tmp/s.png >>/tmp/save.log 2>&1 & sleep 3
+  keys -M ctrl -M shift s -m shift -m ctrl; sleep 1.5
+  shown chooser | grep -E "^chooser: (Save As|PNG image|JPEG image|BMP image)$"
+  keys -M ctrl a -m ctrl; keys /tmp/s2.jpg; keys -k Return; sleep 3
+  echo "save as: $(title)"; img /tmp/s2.jpg jpeg; b2=$(black /tmp/s2.jpg)
+  # The eraser takes the line at -60 (the pencil drew it 1 px wide) to transparency.
+  keys e; stroke -60; echo "erased: $(title)"
+  keys -M ctrl s -m ctrl; sleep 1.5
+  shot transparency; shown flatten | grep -E "without transparency|become white"
+  python3 /tmp/a11y.py press Save; sleep 2
+  echo "flattened: $(title)"; img /tmp/s2.jpg flattened
+  echo "flattened less: $(more "$(black /tmp/s2.jpg)" "$b2")"
+  # Save As from the JPEG offers its own format first.
+  keys -M ctrl -M shift s -m shift -m ctrl; sleep 1.5
+  shown jpeg-chooser | grep -E "^jpeg-chooser: (Save As|s2\.jpg|[A-Z]+ image)$"
+  keys -k Escape; sleep 1
+  pkill -x etch; sleep 1
+  etch >>/tmp/save.log 2>&1 & sleep 3
+  stroke 0; keys -M ctrl s -m ctrl; sleep 1.5
+  shown untitled | grep -E "^untitled: (Save As|Untitled\.png)$"
+  pkill -x etch; sleep 1
+  grep -E "saved|cannot save|panicked|CRITICAL" /tmp/save.log | sed "s/^/log: /"
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -462,6 +538,39 @@ check "11: a text file named .png alerts naming it" "11 open" "^unsupported: Can
 check "11: ... and why" "11 open" "^unsupported: It isn't an image Etch can open: PNG, JPEG, or BMP\.$"
 check "11: the failures are logged with the reason" "11 open" "^log: etch: cannot open /tmp/bad\.png: It's a damaged"
 absent "11: opening logs no panics" "11 open" "^log: .*(panicked|CRITICAL)"
+# ETCH-7: saving.
+check "12: the file starts white" "12 save" "^before: png 400x300 black 0$"
+check "12: the opened image's title has no mark" "12 save" "^opened: s\.png$"
+check "12: a stroke marks the title unsaved" "12 save" "^stroked: • s\.png$"
+check "12: Ctrl+S clears the mark" "12 save" "^saved: s\.png$"
+check "12: ... and the file holds the stroke" "12 save" "^saved: png 400x300 black [1-9][0-9]*$"
+check "12: another stroke marks it again" "12 save" "^again: • s\.png$"
+check "12: undoing back to the saved image clears it" "12 save" "^undone to saved: s\.png$"
+check "12: ... and redoing marks it" "12 save" "^redone: • s\.png$"
+check "12: closing with changes asks to save them" "12 save" "^asked: Save changes to “s\.png” before closing\?$"
+check "12: ... with Cancel" "12 save" "^asked: Cancel$"
+check "12: ... Discard" "12 save" "^asked: Discard$"
+check "12: ... and Save" "12 save" "^asked: Save$"
+check "12: Cancel keeps the window, unsaved" "12 save" "^cancel: running • s\.png$"
+check "12: Discard closes it" "12 save" "^discard: exited$"
+check "12: ... leaving the file as it was" "12 save" "^discard: file unchanged$"
+check "12: an edit after reopening marks it" "12 save" "^edited: • s\.png$"
+check "12: Save in the closing question closes the window" "12 save" "^save: exited$"
+check "12: ... after saving the edit: a PNG with more black" "12 save" "^closed more: yes$"
+check "12: Ctrl+Shift+S shows the Save As dialog" "12 save" "^chooser: Save As$"
+check "12: ... the PNG's own format first (the PNG image filter)" "12 save" "^chooser: PNG image$"
+check "12: Save As to s2.jpg makes the window s2.jpg" "12 save" "^save as: s2\.jpg$"
+check "12: ... and writes a JPEG" "12 save" "^jpeg: jpeg 400x300 black [1-9][0-9]*$"
+check "12: saving transparency as JPEG asks first" "12 save" "^flatten: Save “s2\.jpg” without transparency\?$"
+check "12: ... saying it becomes white" "12 save" "^flatten: JPEG images can.t be transparent"
+check "12: ... and saves when told to" "12 save" "^flattened: s2\.jpg$"
+check "12: ... a JPEG still" "12 save" "^flattened: jpeg 400x300 black [0-9]+$"
+check "12: ... with the erased line white: less black" "12 save" "^flattened less: yes$"
+check "12: Save As from the JPEG offers the JPEG image filter first" "12 save" "^jpeg-chooser: JPEG image$"
+check "12: Ctrl+S on an Untitled image asks where" "12 save" "^untitled: Save As$"
+check "12: ... offering Untitled.png" "12 save" "^untitled: Untitled\.png$"
+check "12: saves are logged" "12 save" "^log: .*saved /tmp/s\.png as PNG: copied in"
+absent "12: saving logs no failures or panics" "12 save" "^log: .*(cannot save|panicked|CRITICAL)"
 absent "the app logs no errors or panics" "app log" "^etch:|panicked|CRITICAL"
 bench=$(section "8 bench" | sed -n "s/^bench: //p")
 if [ -z "$bench" ]; then echo "FAIL 8: --bench-stroke printed nothing"; fail=1; else
