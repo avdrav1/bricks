@@ -1,0 +1,12 @@
+2026-10-15T18:30:46.526374Z  INFO etch: application starting
+Etch starting...
+Not using GL: No GL implementation is available
+Not using GL as fallback: No GL implementation is available
+Using renderer 'GskCairoRenderer' for surface 'GdkWin32Toplevel'
+2026-10-15T18:30:46.835832Z  INFO etch::window: opened D:\a\cronkite\cronkite\spikes\dec-11\windows\samples\sample.png: 640×400 in 4 ms
+
+(etch.exe:8888): Gtk-CRITICAL **: 18:30:46.835: gtk_native_get_surface: assertion 'GTK_IS_NATIVE (self)' failed
+
+(etch.exe:8888): Gtk-CRITICAL **: 18:30:46.836: gtk_native_get_surface: assertion 'GTK_IS_NATIVE (self)' failed
+
+(etch.exe:8888): Gtk-WARNING **: 18:30:46.867: Allocating size to GtkBox 0000026161B65CC0 without calling gtk_widget_measure(). How does the code know the size to allocate?

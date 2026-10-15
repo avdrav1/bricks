@@ -1,0 +1,101 @@
+warning: unused import: `std::ffi::OsStr`
+ --> crates\suite-file\src\recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `dir`
+   --> crates\suite-file\src\save.rs:105:9
+    |
+105 |     let dir = dest
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_dir`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 2 warnings (run `cargo fix --lib -p suite-file` to apply 2 suggestions)
+   Compiling file-format v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\file-format)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.10s
+     Running unittests src\lib.rs (target\debug\deps\file_format-013e16f7aa6f9a7f.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\encoding_roundtrip.rs (target\debug\deps\encoding_roundtrip-61d5337dc8c47fa3.exe)
+
+running 3 tests
+test text_the_encoding_cannot_hold_fails_the_save_and_keeps_the_file ... ok
+test every_windows_1252_byte_survives ... ok
+test encoding_and_bom_round_trip_on_save ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+     Running tests\kill_mid_save.rs (target\debug\deps\kill_mid_save-ac76fb7dab97121b.exe)
+
+running 2 tests
+test child_saver ... ignored, child process for kill_9_mid_save_leaves_the_original_intact
+
+running 1 test
+test child_saver ... 
+running 1 test
+test child_saver ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 1.45s
+
+test kill_9_mid_save_leaves_the_original_intact ... ok
+
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 4.03s
+
+     Running tests\save_as.rs (target\debug\deps\save_as-60f56a2001e70de0.exe)
+
+running 1 test
+test save_as_changes_delimiter_and_encoding ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests\save_cancel.rs (target\debug\deps\save_cancel-4fa3f81f51c609ce.exe)
+
+running 2 tests
+test cancel_stops_a_1gb_save_within_200ms ... ignored, needs corpus/ and 1 GB of free space in the temp dir; run with --ignored
+test a_cancelled_save_leaves_the_original_and_no_temp_file ... ok
+
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\save_filtered.rs (target\debug\deps\save_filtered-be578f2c468b4453.exe)
+
+running 2 tests
+test a_filtered_1gb_table_saves_every_row ... ignored, needs corpus/ and 1 GB of free disk; run with --ignored
+test a_filtered_table_saves_every_row ... ok
+
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests\save_perf.rs (target\debug\deps\save_perf-228a6993974e6a7d.exe)
+
+running 1 test
+test save_1gb_with_1000_edits ... ignored, needs corpus/ and 1 GB of free disk; run with --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\type_override.rs (target\debug\deps\type_override-d1e9f6d5b0cc0549.exe)
+
+running 2 tests
+test an_override_outlives_header_flips_and_new_inference ... ok
+test an_override_changes_sort_and_filter_only ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\untouched_rows.rs (target\debug\deps\untouched_rows-117c9e808b0df4d3.exe)
+
+running 1 test
+test unedited_saves_are_byte_identical_and_one_edit_changes_one_line ... ignored, needs corpus/nasty and corpus/realworld; run with --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests file_format
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

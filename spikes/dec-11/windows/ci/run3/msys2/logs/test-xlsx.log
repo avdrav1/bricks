@@ -1,0 +1,111 @@
+   Compiling crc32fast v1.5.2
+   Compiling zlib-rs v0.6.8
+   Compiling serde_core v1.0.229
+   Compiling log v0.4.34
+   Compiling hashbrown v0.17.1
+   Compiling simd-adler32 v0.3.10
+   Compiling bumpalo v3.20.3
+   Compiling equivalent v1.0.2
+   Compiling zopfli v0.8.3
+   Compiling serde v1.0.229
+   Compiling indexmap v2.14.2
+   Compiling typed-path v0.12.3
+   Compiling debug_unsafe v0.1.4
+   Compiling atoi_simd v0.18.1
+   Compiling getrandom v0.4.3
+   Compiling quick-xml v0.41.0
+   Compiling codepage v0.1.3
+   Compiling windows-sys v0.61.2
+   Compiling fast-float2 v0.2.4
+   Compiling flate2 v1.1.10
+   Compiling zip v8.6.0
+   Compiling byteorder v1.5.0
+   Compiling once_cell v1.21.4
+   Compiling fastrand v2.5.0
+warning: unused import: `std::ffi::OsStr`
+ --> crates\suite-file\src\recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `dir`
+   --> crates\suite-file\src\save.rs:105:9
+    |
+105 |     let dir = dest
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_dir`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 2 warnings (run `cargo fix --lib -p suite-file` to apply 2 suggestions)
+   Compiling tempfile v3.27.0
+   Compiling calamine v0.36.1
+   Compiling rust_xlsxwriter v0.99.1
+   Compiling xlsx v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\xlsx)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 16.39s
+     Running unittests src\lib.rs (target\debug\deps\xlsx-c6ff71102cef04d0.exe)
+
+running 8 tests
+test layout::tests::references_read_as_zero_based_positions ... ok
+test save::cells::tests::text_xml_cant_carry_is_escaped_as_excel_does ... ok
+test package::tests::targets_resolve_against_the_source_part ... ok
+test save::cells::tests::values_are_typed_only_when_their_text_is_canonical ... ok
+test save::styles::tests::new_records_go_at_each_lists_end_and_counts_follow ... ok
+test styles::tests::theme_colours_come_from_the_scheme ... ok
+test save::styles::tests::a_whole_part_reads_back_as_the_same_pool ... ok
+test styles::tests::styles_read_with_the_files_indices ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\format.rs (target\debug\deps\format-a7391d89e87ee155.exe)
+
+running 3 tests
+test libreoffice_reads_the_formats ... ignored, needs LibreOffice: LO_PORT=2141 cargo test -p xlsx --test format -- --ignored
+test formats_on_a_csv_save_in_a_new_package_and_read_back ... ok
+test formats_on_the_fixture_save_by_patching_and_read_back ... ok
+
+test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests\import_export.rs (target\debug\deps\import_export-5cf73a13f93324a8.exe)
+
+running 11 tests
+test csv_files_save_as_xlsx_with_every_cell_unchanged ... ok
+test import_1m ... ignored, perf: needs corpus/rows_1m.xlsx (cargo run --release -p xlsx --example gen_corpus_xlsx)
+test libreoffice_reads_save ... ignored, needs LibreOffice
+test limits_name_the_sheet_that_does_not_fit ... ok
+test other_spreadsheet_formats_are_refused ... ok
+test out_of_order_cells_are_read_whole ... ok
+test save_1m ... ignored, perf: needs corpus/rows_1m.xlsx (cargo run --release -p xlsx --example gen_corpus_xlsx)
+test cancel_stops_an_import ... ok
+test typed_values_round_trip_and_near_misses_stay_text ... ok
+test fixture_imports_as_libreoffice_reads_it ... ok
+test edited_fixture_saves_and_reopens_the_same ... ok
+
+test result: ok. 8 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running tests\patch.rs (target\debug\deps\patch-a8bc5d70cc2cc18b.exe)
+
+running 4 tests
+test libreoffice_reads_the_patched_save_as_the_original_plus_the_edits ... ignored, needs LibreOffice: cargo test -p xlsx --test patch -- --ignored --test-threads=1
+test an_unedited_workbook_saves_its_sheets_as_they_were ... ok
+test edits_and_new_sheets_save_and_everything_else_survives ... ok
+test macros_stay_in_an_xlsm_and_leave_with_an_xlsx ... ok
+
+test result: ok. 3 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.20s
+
+     Running tests\styles.rs (target\debug\deps\styles-fbff4e2a1c08b505.exe)
+
+running 3 tests
+test grid_lines_off_and_centre_across_read_per_sheet ... ok
+test merges_widths_heights_and_hidden_match ... ok
+test every_cell_resolves_to_the_style_libreoffice_reads ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+   Doc-tests xlsx
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

@@ -1,0 +1,53 @@
+   Compiling pin-project-lite v0.2.17
+   Compiling parking v2.2.1
+   Compiling concurrent-queue v2.5.0
+   Compiling futures-core v0.3.34
+warning: unused import: `std::ffi::OsStr`
+ --> crates\suite-file\src\recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `dir`
+   --> crates\suite-file\src\save.rs:105:9
+    |
+105 |     let dir = dest
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_dir`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 2 warnings (run `cargo fix --lib -p suite-file` to apply 2 suggestions)
+   Compiling event-listener v5.4.2
+   Compiling event-listener-strategy v0.5.4
+   Compiling async-channel v2.5.0
+   Compiling jobs v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\jobs)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.93s
+     Running unittests src\lib.rs (target\debug\deps\jobs-41ea27f1b7f3a165.exe)
+
+running 3 tests
+test tests::a_running_job_returns_its_own_result_soon_after_cancel ... ok
+test tests::a_panicking_job_reports_it_and_the_pool_keeps_working ... ok
+test tests::a_queued_job_cancelled_behind_a_full_pool_reports_at_once_and_never_runs ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests\cancel_1gb.rs (target\debug\deps\cancel_1gb-0b6f9864c9c68d03.exe)
+
+running 6 tests
+test copying_cancels_within_200ms ... ignored, needs corpus/rows_1024mb.csv; run with --release --ignored
+test filtering_cancels_within_200ms ... ignored, needs corpus/rows_1024mb.csv; run with --release --ignored
+test indexing_cancels_within_200ms ... ignored, needs corpus/rows_1024mb.csv; run with --release --ignored
+test saving_cancels_within_200ms_in_every_phase ... ignored, needs corpus/rows_1024mb.csv and ~1 GB free under target/; run with --release --ignored
+test searching_cancels_within_200ms ... ignored, needs corpus/rows_1024mb.csv; run with --release --ignored
+test sorting_cancels_within_200ms ... ignored, needs corpus/rows_1024mb.csv; run with --release --ignored
+
+test result: ok. 0 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests jobs
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

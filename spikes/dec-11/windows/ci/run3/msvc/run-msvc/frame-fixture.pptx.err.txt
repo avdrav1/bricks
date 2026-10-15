@@ -1,0 +1,5 @@
+2026-10-15T18:27:09.897678Z  INFO frame: application starting
+Frame starting...
+Not using GL: No GL implementation is available
+Not using GL as fallback: No GL implementation is available
+Using renderer 'GskCairoRenderer' for surface 'GdkWin32Toplevel'

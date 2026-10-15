@@ -1,0 +1,31 @@
+check --workspace --all-targets: exit=101 22s
+test suite-core: exit=0 passed=1 failed=0 ignored=0 3s  
+test suite-ui: exit=0 passed=1 failed=0 ignored=0 1s  
+test suite-platform: exit=0 passed=1 failed=0 ignored=0 0s  
+test suite-file: exit=101 passed=5 failed=4 ignored=0 2s not compiling: test "atomic", failing: recent::tests::opened_and_saved_images_list_once_newest_first_ten_at_most recent::tests::relative_paths_are_made_absolute_and_odd_names_kept_raw recent::tests::the_last_ten_files_survive_a_restart recent::tests::two_windows_keep_each_others_files 
+test csv-engine: exit=101 passed=28 failed=2 ignored=1 9s not compiling: test "fetch_perf",test "index_perf", failing: index::tests::row_spans_report_a_file_changed_underneath source::tests::truncation_while_mapped_reports_changed_instead_of_crashing 
+test formula: exit=0 passed=41 failed=0 ignored=0 12s  
+test data-model: exit=0 passed=106 failed=0 ignored=7 18s  
+test grid: exit=0 passed=25 failed=0 ignored=0 2s  
+test commands: exit=0 passed=60 failed=0 ignored=11 22s  
+test file-format: exit=0 passed=10 failed=0 ignored=5 10s  
+test jobs: exit=0 passed=3 failed=0 ignored=6 2s  
+test xlsx: exit=0 passed=24 failed=0 ignored=5 16s  
+test brick: exit=101 passed=25 failed=0 ignored=7 58s not compiling: test "first_rows", 
+test document-model: exit=0 passed=38 failed=0 ignored=0 8s  
+test docx: exit=0 passed=54 failed=0 ignored=7 12s  
+test flow: exit=0 passed=32 failed=0 ignored=0 2s  
+test document-edit: exit=0 passed=58 failed=0 ignored=0 4s  
+test slate: exit=0 passed=20 failed=0 ignored=5 12s  
+test presentation-model: exit=0 passed=1 failed=0 ignored=0 1s  
+test pptx: exit=0 passed=44 failed=0 ignored=5 11s  
+test deck-edit: exit=0 passed=38 failed=0 ignored=0 4s  
+test frame: exit=0 passed=0 failed=0 ignored=1 5s  
+test image-model: exit=0 passed=85 failed=0 ignored=7 6s  
+test image-io: exit=101 passed=13 failed=0 ignored=0 7s not compiling: test "save", 
+test etch: exit=101 passed=0 failed=0 ignored=1 35s not compiling: bin "etch" test, 
+build --release (4 apps): exit=0 130s
+  target/release/brick.exe: 4739072 bytes
+  target/release/slate.exe: 3739648 bytes
+  target/release/frame.exe: 2556928 bytes
+  target/release/etch.exe: 1872896 bytes

@@ -1,0 +1,9 @@
+2026-10-15T18:24:52.702511Z  INFO frame: application starting
+Frame starting...
+Using renderer 'GskGLRenderer' for surface 'GdkWin32Toplevel'
+
+(frame.exe:8508): Gdk-CRITICAL **: 18:24:53.286: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(frame.exe:8508): Gdk-CRITICAL **: 18:24:55.878: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(frame.exe:8508): Gdk-CRITICAL **: 18:24:56.004: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed

@@ -55,12 +55,19 @@ fn main() {
     let map = unsafe { Mmap::map(&File::open(&dest).unwrap()).unwrap() };
     let tmp = fresh(&dir, "mapped.tmp", b"new");
     show("rename over memory-mapped file", fs::rename(&tmp, &dest));
-    show("  set_len(0) on memory-mapped file (another program saving in place)",
-        OpenOptions::new().write(true).open(&dest).and_then(|f| f.set_len(0)));
-    show("  write+truncate open (File::create) on memory-mapped file", File::create(&dest).map(|_| ()));
-    println!("  mapping still reads: {}", map.iter().all(|&b| b == b'x'));
+    println!("  mapping still reads the old bytes: {}", map.iter().all(|&b| b == b'x'));
     drop(map);
-    let _ = fs::remove_file(&tmp);
+
+    // Another program saving in place over a file Brick has mapped (no rename).
+    let shown = fresh(&dir, "shown.csv", &vec![b'z'; 1 << 16]);
+    let map = unsafe { Mmap::map(&File::open(&shown).unwrap()).unwrap() };
+    show("set_len(0) on memory-mapped file",
+        OpenOptions::new().write(true).open(&shown).and_then(|f| f.set_len(0)));
+    show("File::create (truncate) on memory-mapped file", File::create(&shown).map(|_| ()));
+    show("write in place, same length, on memory-mapped file",
+        OpenOptions::new().write(true).open(&shown).and_then(|mut f| f.write_all(&vec![b'w'; 1 << 16])));
+    println!("  mapping sees the in-place write: {}", map.iter().all(|&b| b == b'w'));
+    drop(map);
 
     // Brick's scratch copies: map, then remove the file while the mapping lives.
     let scratch = fresh(&dir, "scratch.csv", &vec![b'y'; 1 << 16]);

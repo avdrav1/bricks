@@ -1,0 +1,60 @@
+   Compiling document-model v0.1.0 (D:\a\cronkite\cronkite\apps\slate\crates\document-model)
+warning: unused import: `std::ffi::OsStr`
+ --> crates\suite-file\src\recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `dir`
+   --> crates\suite-file\src\save.rs:105:9
+    |
+105 |     let dir = dest
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_dir`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 2 warnings (run `cargo fix --lib -p suite-file` to apply 2 suggestions)
+   Compiling flow v0.1.0 (D:\a\cronkite\cronkite\apps\slate\crates\flow)
+   Compiling document-edit v0.1.0 (D:\a\cronkite\cronkite\apps\slate\crates\document-edit)
+   Compiling docx v0.1.0 (D:\a\cronkite\cronkite\apps\slate\crates\docx)
+   Compiling slate v0.3.0 (D:\a\cronkite\cronkite\apps\slate)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.96s
+     Running unittests src\main.rs (target\debug\deps\slate-296c24fd5db88e7f.exe)
+
+running 20 tests
+test fonts::tests::families_compare_ignoring_case_and_blanks ... ok
+test fonts::tests::a_table_without_faces_writes_nothing ... ok
+test fonts::tests::fonts_neither_installed_nor_embedded_fall_back_by_class ... ok
+test open::tests::an_old_binary_word_file_named_docx_is_told_to_save_as_docx ... ok
+test open::tests::unknown_extensions_name_what_slate_opens ... ok
+test open::tests::a_docx_that_is_not_a_package_says_so ... ok
+test open::tests::other_word_formats_are_told_to_save_as_docx ... ok
+test settings::tests::each_width_round_trips ... ok
+test recovery::tests::journals_without_paragraph_looks_read ... ok
+test settings::tests::missing_or_bad_values_mean_page ... ok
+test settings::tests::page_is_a_word_documents_text_width_at_96_dpi ... ok
+test settings::tests::parse_tolerates_spaces_other_keys_and_crlf ... ok
+test settings::tests::widths_are_the_adrs ... ok
+test view::tests::a_narrower_window_narrows_the_column ... ok
+test view::tests::a_wide_window_gets_the_settings_width ... ok
+test view::tests::full_is_the_window_less_a_margin_each_side ... ok
+test view::tests::the_column_never_gets_narrower_than_the_minimum ... ok
+test fonts::tests::faces_are_written_once_by_their_bytes ... ok
+test settings::tests::write_replaces_the_file_and_leaves_no_temporary ... ok
+test recovery::tests::journals_round_trip_and_list_newest_first ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+
+     Running tests\flow_perf.rs (target\debug\deps\flow_perf-9d8875899dcb674f.exe)
+
+running 5 tests
+test finding_in_a_150000_word_document_shows_matches_in_time ... ignored, opens a window; run with --release --ignored
+test the_flow_rewraps_and_scrolls_a_150000_word_document_in_three_fonts_in_time ... ignored, opens a window; run with --release --ignored
+test the_flow_rewraps_and_scrolls_a_150000_word_document_in_time ... ignored, opens a window; run with --release --ignored
+test typing_in_a_150000_word_document_in_three_fonts_shows_each_key_in_time ... ignored, opens a window; run with --release --ignored
+test typing_in_a_150000_word_document_shows_each_key_in_time ... ignored, opens a window; run with --release --ignored
+
+test result: ok. 0 passed; 0 failed; 5 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

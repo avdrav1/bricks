@@ -1,0 +1,35 @@
+    Updating crates.io index
+   Compiling memmap2 v0.9.11
+   Compiling fsprobe v0.0.0 (D:\a\cronkite\cronkite\spikes\dec-11\windows\fsprobe)
+    Finished `release` profile [optimized] target(s) in 5.83s
+     Running `spikes\dec-11\windows\fsprobe\target\release\fsprobe.exe`
+os=windows dir=C:\Users\RUNNER~1\AppData\Local\Temp\fsprobe-5660
+rename over closed file: Ok ()
+open dir and sync_all (save_atomic's last step): Err Access is denied. (os error 5) (raw Some(5))
+rename over file open (std sharing): Ok ()
+  content after: Ok "new"
+rename over memory-mapped file: Ok ()
+  set_len(0) on memory-mapped file (another program saving in place): Ok ()
+  write+truncate open (File::create) on memory-mapped file: Ok ()
+  mapping still reads: true
+remove memory-mapped file: Ok ()
+  exists after: false ; mapping still reads: true
+  exists after unmapping: false
+rename over file open with FILE_SHARE_READ only: Err Access is denied. (os error 5) (raw Some(5))
+lock owner: Ok ()
+try_lock, same process other handle: Err("lock acquisition failed because the operation would block")
+try_lock, other process: Ok("would-block")
+read locked file from other handle: Err The process cannot access the file because another process has locked a portion of the file. (os error 33) (raw Some(33))
+remove locked file: Ok ()
+env HOME=None
+env USERPROFILE=Some("C:\\Users\\runneradmin")
+env APPDATA=Some("C:\\Users\\runneradmin\\AppData\\Roaming")
+env LOCALAPPDATA=Some("C:\\Users\\runneradmin\\AppData\\Local")
+env XDG_STATE_HOME=None
+env XDG_CACHE_HOME=None
+env XDG_CONFIG_HOME=None
+env TEMP=Some("C:\\Users\\RUNNER~1\\AppData\\Local\\Temp")
+std::env::home_dir=Some("C:\\Users\\runneradmin") temp_dir="C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\"
+canonicalize="\\\\?\\C:\\Users\\runneradmin\\AppData\\Local\\Temp\\fsprobe-5660\\recent.csv" starts with '/': false is_absolute: true
+Brick's state dir without XDG_STATE_HOME: ".local/state\\brick" (absolute: false)
+/proc/5660 exists (Slate's liveness test): false

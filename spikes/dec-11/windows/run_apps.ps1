@@ -5,7 +5,7 @@ param(
     [Parameter(Mandatory)][string]$Bin,
     [Parameter(Mandatory)][string]$Out,
     [string]$PathPrefix = "",
-    [int]$Seconds = 15,
+    [int]$Seconds = 45,
     [switch]$Clean
 )
 $ErrorActionPreference = "Continue"
@@ -15,11 +15,38 @@ $Bin = (Resolve-Path $Bin).Path
 $root = (Resolve-Path "$PSScriptRoot\..\..\..").Path
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class Win {
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+    [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
+    [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+}
+"@
+
 function Shot([string]$file) {
     $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
     $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+    $bmp.Save($file, [System.Drawing.Imaging.ImageFormat]::Png)
+    $g.Dispose(); $bmp.Dispose()
+}
+
+# The window alone, drawn by PrintWindow (PW_RENDERFULLCONTENT), even if something covers it.
+function WindowShot([IntPtr]$h, [string]$file) {
+    $r = New-Object Win+RECT
+    if (-not [Win]::GetWindowRect($h, [ref]$r)) { return }
+    $w = $r.Right - $r.Left; $hh = $r.Bottom - $r.Top
+    if ($w -le 0 -or $hh -le 0) { return }
+    $bmp = New-Object System.Drawing.Bitmap $w, $hh
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $dc = $g.GetHdc()
+    [void][Win]::PrintWindow($h, $dc, 2)
+    $g.ReleaseHdc($dc)
     $bmp.Save($file, [System.Drawing.Imaging.ImageFormat]::Png)
     $g.Dispose(); $bmp.Dispose()
 }
@@ -80,19 +107,29 @@ foreach ($r in $runs) {
     $title = ""
     $deadline = $start.AddSeconds($Seconds)
     $shown = $null
-    while ((Get-Date) -lt $deadline -and -not $p.HasExited) {
-        Start-Sleep -Milliseconds 250
+    while ((Get-Date) -lt $deadline -and -not $p.HasExited -and -not $shown) {
+        Start-Sleep -Milliseconds 100
         $p.Refresh()
-        if (-not $shown -and $p.MainWindowHandle -ne 0) { $shown = ((Get-Date) - $start).TotalMilliseconds }
+        if ($p.MainWindowHandle -ne 0) { $shown = [math]::Round(((Get-Date) - $start).TotalMilliseconds) }
     }
+    # Let it lay out and draw the file, then bring it in front of the console windows.
+    if ($shown) { Start-Sleep -Seconds 4 }
     $p.Refresh()
     $state = if ($p.HasExited) { "exited code=$($p.ExitCode)" } else { "running" }
     $title = $p.MainWindowTitle
     $ws = if ($p.HasExited) { "" } else { "ws=$([math]::Round($p.WorkingSet64 / 1MB))MB" }
+    if ($p.MainWindowHandle -ne 0) {
+        [void][Win]::ShowWindow($p.MainWindowHandle, 9)
+        [void][Win]::SetForegroundWindow($p.MainWindowHandle)
+        Start-Sleep -Milliseconds 700
+        WindowShot $p.MainWindowHandle "$Out\$tag.window.png"
+    }
     Shot "$Out\$tag.png"
+    # GDBus autolaunches a session bus (gdbus.exe) when an app asks for one.
+    $gdbus = @(Get-Process gdbus -ErrorAction SilentlyContinue).Count
     if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
     Start-Sleep -Seconds 1
-    "${tag}: $state window_after_ms=$shown title='$title' $ws" | Out-File -Append -Encoding utf8 $summary
+    "${tag}: $state window_after_ms=$shown title='$title' $ws gdbus_processes=$gdbus" | Out-File -Append -Encoding utf8 $summary
 }
 
 # Slate's Original::sweep deletes package copies whose /proc/<pid> is missing: start Slate
