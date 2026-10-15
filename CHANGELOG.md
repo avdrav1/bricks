@@ -2,6 +2,31 @@
 
 Releases are added by the ship-it skill.
 
+## Etch v0.2.0 (2026-10-15)
+
+Etch edits real images now, milestones ET1 to ET3: the V0.1 the spec defines. Open PNG, JPEG, and BMP files (Etch becomes their default app when installed), or drop them on a window, and save them back atomically; closing an edited image asks first. Draw with the brush (hard or soft), fill with a tolerance, pick colours from the image, draw lines, rectangles, and ellipses (outlined, filled, or both, previewed as you drag), and type text in any font through your input method. Select and move pixels, cut, copy, and paste with other apps, crop, resize the image or the canvas, rotate, and flip. Every step undoes. Colours come from a hex field and GTK's colour chooser too, every tool has its Paint key, Open Recent lists the last ten images, and after a crash Etch offers back your unsaved images without touching their files.
+
+- ETCH-6: Open PNG, JPEG, and BMP off the UI thread; Etch the default app for them after install
+- ETCH-7: Save, Save As, and Export PNG, JPEG, and BMP atomically; mark unsaved changes and ask before closing
+- ETCH-8: Add the brush with a size and a hard or soft edge
+- ETCH-9: Add the fill bucket: contiguous region, exact colour
+- ETCH-10: Add the colour picker, alpha included
+- ETCH-11: Add line, rectangle, and ellipse with previews: outline, filled, or both
+- ETCH-12: Add the text tool: font, size, colour, bold, italic, typed through the input method
+- ETCH-13: Add New Image's background choice and remember its size and background across runs
+- ETCH-14: Add the fill's tolerance
+- ETCH-15: Add the rectangular selection: select, move pixels, nudge, Select All, Deselect, Delete
+- ETCH-16: Add cut, copy, and paste through the system clipboard
+- ETCH-17: Add Crop to Selection
+- ETCH-18: Add Resize Image: width, height, keep aspect, nearest or smooth
+- ETCH-19: Add Resize Canvas with a nine-way anchor
+- ETCH-20: Add Rotate 90° either way and 180° and Flip horizontally and vertically
+- ETCH-21: Open files dropped on a window
+- ETCH-22: Add File → Open Recent
+- ETCH-23: Add the hex field and GTK's colour chooser
+- ETCH-24: Bind every tool to its key
+- ETCH-25: Offer back unsaved images after a crash
+
 ## Etch v0.1.0 (2026-10-14)
 
 Etch's first release, milestone ET0: an early preview of a simple, native image editor for Linux, closer to Paint than to Photoshop. Draw on a blank canvas of any size up to 16384 pixels a side with a pencil and an eraser, in any of Paint's 20 colours and any size from 1 to 100 pixels; the eraser erases to transparency. Zoom from 10% to 3200% around the pointer, with pixels kept square from 100%, and pan with the wheel, the middle button, or Space. Every stroke undoes and redoes. A stroke on an 8K image draws in about a millisecond a frame. Opening and saving PNG, JPEG, and BMP come next.
