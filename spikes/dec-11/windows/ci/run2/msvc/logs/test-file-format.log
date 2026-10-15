@@ -1,0 +1,179 @@
+warning: unused import: `std::ffi::OsStr`
+ --> crates\suite-file\src\recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 1 warning (run `cargo fix --lib -p suite-file` to apply 1 suggestion)
+   Compiling file-format v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\file-format)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.38s
+     Running unittests src\lib.rs (target\debug\deps\file_format-013e16f7aa6f9a7f.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\encoding_roundtrip.rs (target\debug\deps\encoding_roundtrip-61d5337dc8c47fa3.exe)
+
+running 3 tests
+test text_the_encoding_cannot_hold_fails_the_save_and_keeps_the_file ... ok
+test encoding_and_bom_round_trip_on_save ... FAILED
+test every_windows_1252_byte_survives ... FAILED
+
+failures:
+
+---- encoding_and_bom_round_trip_on_save stdout ----
+
+thread 'encoding_and_bom_round_trip_on_save' (6660) panicked at apps\brick\crates\file-format\tests\encoding_roundtrip.rs:64:6:
+called `Result::unwrap()` on an `Err` value: Io(Os { code: 5, kind: PermissionDenied, message: "Access is denied." })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- every_windows_1252_byte_survives stdout ----
+
+thread 'every_windows_1252_byte_survives' (8060) panicked at apps\brick\crates\file-format\tests\encoding_roundtrip.rs:64:6:
+called `Result::unwrap()` on an `Err` value: Io(Os { code: 5, kind: PermissionDenied, message: "Access is denied." })
+
+
+failures:
+    encoding_and_bom_round_trip_on_save
+    every_windows_1252_byte_survives
+
+test result: FAILED. 1 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+error: test failed, to rerun pass `-p file-format --test encoding_roundtrip`
+     Running tests\kill_mid_save.rs (target\debug\deps\kill_mid_save-ac76fb7dab97121b.exe)
+
+running 2 tests
+test child_saver ... ignored, child process for kill_9_mid_save_leaves_the_original_intact
+
+running 1 test
+test child_saver ... 
+running 1 test
+test child_saver ... 
+thread 'child_saver' (8732) panicked at apps\brick\crates\file-format\tests\kill_mid_save.rs:70:6:
+called `Result::unwrap()` on an `Err` value: Io(Os { code: 5, kind: PermissionDenied, message: "Access is denied." })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    child_saver
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out; finished in 2.09s
+
+test kill_9_mid_save_leaves_the_original_intact ... FAILED
+
+failures:
+
+---- kill_9_mid_save_leaves_the_original_intact stdout ----
+
+thread 'kill_9_mid_save_leaves_the_original_intact' (7456) panicked at apps\brick\crates\file-format\tests\kill_mid_save.rs:150:5:
+assertion failed: spawn_child(&file).wait().unwrap().success()
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    kill_9_mid_save_leaves_the_original_intact
+
+test result: FAILED. 0 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; finished in 5.74s
+
+error: test failed, to rerun pass `-p file-format --test kill_mid_save`
+     Running tests\save_as.rs (target\debug\deps\save_as-60f56a2001e70de0.exe)
+
+running 1 test
+test save_as_changes_delimiter_and_encoding ... FAILED
+
+failures:
+
+---- save_as_changes_delimiter_and_encoding stdout ----
+
+thread 'save_as_changes_delimiter_and_encoding' (1168) panicked at apps\brick\crates\file-format\tests\save_as.rs:123:10:
+called `Result::unwrap()` on an `Err` value: Io(Os { code: 5, kind: PermissionDenied, message: "Access is denied." })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    save_as_changes_delimiter_and_encoding
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p file-format --test save_as`
+     Running tests\save_cancel.rs (target\debug\deps\save_cancel-4fa3f81f51c609ce.exe)
+
+running 2 tests
+test cancel_stops_a_1gb_save_within_200ms ... ignored, needs corpus/ and 1 GB of free space in the temp dir; run with --ignored
+test a_cancelled_save_leaves_the_original_and_no_temp_file ... ok
+
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\save_filtered.rs (target\debug\deps\save_filtered-be578f2c468b4453.exe)
+
+running 2 tests
+test a_filtered_1gb_table_saves_every_row ... ignored, needs corpus/ and 1 GB of free disk; run with --ignored
+test a_filtered_table_saves_every_row ... FAILED
+
+failures:
+
+---- a_filtered_table_saves_every_row stdout ----
+
+thread 'a_filtered_table_saves_every_row' (4336) panicked at apps\brick\crates\file-format\tests\save_filtered.rs:46:6:
+called `Result::unwrap()` on an `Err` value: Io(Os { code: 5, kind: PermissionDenied, message: "Access is denied." })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    a_filtered_table_saves_every_row
+
+test result: FAILED. 0 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p file-format --test save_filtered`
+     Running tests\save_perf.rs (target\debug\deps\save_perf-228a6993974e6a7d.exe)
+
+running 1 test
+test save_1gb_with_1000_edits ... ignored, needs corpus/ and 1 GB of free disk; run with --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\type_override.rs (target\debug\deps\type_override-d1e9f6d5b0cc0549.exe)
+
+running 2 tests
+test an_override_outlives_header_flips_and_new_inference ... ok
+test an_override_changes_sort_and_filter_only ... FAILED
+
+failures:
+
+---- an_override_changes_sort_and_filter_only stdout ----
+
+thread 'an_override_changes_sort_and_filter_only' (3988) panicked at apps\brick\crates\file-format\tests\type_override.rs:78:6:
+called `Result::unwrap()` on an `Err` value: Io(Os { code: 5, kind: PermissionDenied, message: "Access is denied." })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    an_override_changes_sort_and_filter_only
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+error: test failed, to rerun pass `-p file-format --test type_override`
+     Running tests\untouched_rows.rs (target\debug\deps\untouched_rows-117c9e808b0df4d3.exe)
+
+running 1 test
+test unedited_saves_are_byte_identical_and_one_edit_changes_one_line ... ignored, needs corpus/nasty and corpus/realworld; run with --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests file_format
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: 5 targets failed:
+    `-p file-format --test encoding_roundtrip`
+    `-p file-format --test kill_mid_save`
+    `-p file-format --test save_as`
+    `-p file-format --test save_filtered`
+    `-p file-format --test type_override`

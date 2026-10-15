@@ -1,0 +1,351 @@
+ Downloading crates ...
+  Downloaded cairo-sys-rs v0.22.9
+  Downloaded autocfg v1.5.1
+  Downloaded cfg-expr v0.20.10
+  Downloaded field-offset v0.3.6
+  Downloaded futures-channel v0.3.34
+  Downloaded cairo-rs v0.22.9
+  Downloaded graphene-sys v0.22.9
+  Downloaded proc-macro-crate v3.5.0
+  Downloaded slab v0.4.12
+  Downloaded serde_spanned v1.1.1
+  Downloaded rustc_version v0.4.1
+  Downloaded gobject-sys v0.22.9
+  Downloaded target-lexicon v0.13.5
+  Downloaded lazy_static v1.5.1
+  Downloaded gdk-pixbuf-sys v0.22.9
+  Downloaded futures-macro v0.3.34
+  Downloaded heck v0.5.0
+  Downloaded toml_writer v1.1.2+spec-1.1.0
+  Downloaded futures-task v0.3.34
+  Downloaded version-compare v0.2.1
+  Downloaded thread_local v1.1.10
+  Downloaded futures-io v0.3.34
+  Downloaded quote v1.0.47
+  Downloaded memoffset v0.9.1
+  Downloaded nu-ansi-term v0.50.3
+  Downloaded pkg-config v0.3.34
+  Downloaded toml_datetime v1.1.1+spec-1.1.0
+  Downloaded gdk-pixbuf v0.22.0
+  Downloaded graphene-rs v0.22.8
+  Downloaded pango-sys v0.22.9
+  Downloaded gtk4-macros v0.11.5
+  Downloaded gsk4-sys v0.11.5
+  Downloaded toml_parser v1.1.3+spec-1.1.0
+  Downloaded futures-executor v0.3.34
+  Downloaded gsk4 v0.11.5
+  Downloaded semver v1.0.28
+  Downloaded unicode-ident v1.0.26
+  Downloaded sharded-slab v0.1.7
+  Downloaded system-deps v9.0.0
+  Downloaded proc-macro2 v1.0.107
+  Downloaded glib-macros v0.22.9
+  Downloaded toml v1.1.6+spec-1.1.0
+  Downloaded pango v0.22.9
+  Downloaded toml_edit v0.25.15+spec-1.1.0
+  Downloaded glib-sys v0.22.9
+  Downloaded tracing-core v0.1.36
+  Downloaded gdk4-sys v0.11.5
+  Downloaded gio-sys v0.22.9
+  Downloaded gdk4 v0.11.5
+  Downloaded futures-util v0.3.34
+  Downloaded gtk4-sys v0.11.5
+  Downloaded tracing-subscriber v0.3.23
+  Downloaded winnow v1.0.4
+  Downloaded gio v0.22.10
+  Downloaded glib v0.22.10
+  Downloaded syn v3.0.6
+  Downloaded tracing v0.1.44
+  Downloaded gtk4 v0.11.5
+warning: unused import: `std::ffi::OsStr`
+ --> crates/suite-file/src/recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 1 warning (run `cargo fix --lib -p suite-file` to apply 1 suggestion)
+   Compiling nu-ansi-term v0.50.3
+   Compiling futures-executor v0.3.34
+   Compiling data-model v0.3.0 (/src/apps/brick/crates/data-model)
+   Compiling jobs v0.3.0 (/src/apps/brick/crates/jobs)
+   Compiling gio-sys v0.22.9
+   Compiling tracing-subscriber v0.3.23
+   Compiling glib v0.22.10
+   Compiling gdk-pixbuf-sys v0.22.9
+   Compiling gdk4-sys v0.11.5
+   Compiling gsk4-sys v0.11.5
+   Compiling gtk4-sys v0.11.5
+   Compiling commands v0.3.0 (/src/apps/brick/crates/commands)
+   Compiling grid v0.3.0 (/src/apps/brick/crates/grid)
+   Compiling xlsx v0.3.0 (/src/apps/brick/crates/xlsx)
+   Compiling file-format v0.3.0 (/src/apps/brick/crates/file-format)
+   Compiling gio v0.22.10
+   Compiling cairo-rs v0.22.9
+   Compiling graphene-rs v0.22.8
+   Compiling pango v0.22.9
+   Compiling gdk-pixbuf v0.22.0
+   Compiling gdk4 v0.11.5
+   Compiling gsk4 v0.11.5
+   Compiling gtk4 v0.11.5
+   Compiling brick v0.3.0 (/src/apps/brick)
+error[E0432]: unresolved import `std::os::fd`
+  --> apps/brick/tests/first_rows.rs:11:14
+   |
+11 | use std::os::fd::AsRawFd;
+   |              ^^ could not find `fd` in `os`
+   |
+note: found an item that was configured out
+  --> /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library\std\src\os\mod.rs:70:9
+  ::: /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library\std\src\os\mod.rs:77:1
+   |
+   = note: the item is gated here
+
+error[E0425]: cannot find function `posix_fadvise` in crate `libc`
+  --> apps/brick/tests/first_rows.rs:25:15
+   |
+25 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |               ^^^^^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find value `POSIX_FADV_DONTNEED` in crate `libc`
+  --> apps/brick/tests/first_rows.rs:25:56
+   |
+25 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |                                                        ^^^^^^^^^^^^^^^^^^^ not found in `libc`
+
+error[E0599]: no method named `as_raw_fd` found for struct `File` in the current scope
+  --> apps/brick/tests/first_rows.rs:25:31
+   |
+25 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |                               ^^^^^^^^^
+   |
+help: there is a method `as_raw_handle` with a similar name
+   |
+25 -         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+25 +         libc::posix_fadvise(f.as_raw_handle(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |
+
+Some errors have detailed explanations: E0425, E0432, E0599.
+For more information about an error, try `rustc --explain E0425`.
+error: could not compile `brick` (test "first_rows") due to 4 previous errors
+warning: build failed, waiting for other jobs to finish...
+== fallback: per target
+error: no library targets found in package `brick`
+warning: unused import: `std::ffi::OsStr`
+ --> crates/suite-file/src/recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 1 warning (run `cargo fix --lib -p suite-file` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running unittests src/main.rs (/build/target/x86_64-pc-windows-gnu/debug/deps/brick-818800d02c005c3a.exe)
+
+running 25 tests
+test editor::tests::arrows_leave_a_typed_edit_but_move_the_text_cursor_in_f2 ... ok
+test editor::tests::ctrl_plus_inserts_ctrl_minus_deletes ... ok
+test editor::tests::ctrl_c_copies_ctrl_x_cuts ... ok
+test editor::tests::delete_alone_clears ... ok
+test grid_view::tests::text_in_a_tight_row_stays_inside_it ... ok
+test editor::tests::enter_commits_and_moves_down_esc_cancels ... ok
+test editor::tests::f2_and_printable_keys_start_an_edit ... ok
+test grid_view::tests::a_centred_across_run_is_bounded ... ok
+test grid_view::tests::a_centred_across_run_stops_at_cells_that_do_not_join ... ok
+test grid_view::tests::empty_cells_reach_a_screen_past_the_view_and_the_cursor ... ok
+test grid_view::tests::text_keeps_three_pixels_where_the_row_has_room ... ok
+test grid_view::tests::text_taller_than_its_row_is_cut_on_the_aligned_side ... ok
+test looks::tests::the_default_font_draws_in_the_grid_font ... ok
+test looks::tests::unreadable_text_colours_fall_back_on_dark_themes ... ok
+test status::tests::clipboard_progress_and_result_come_first ... ok
+test status::tests::filtered_rows_read_x_of_y ... ok
+test status::tests::format_names_delimiter_and_encoding ... ok
+test status::tests::rows_show_progress_until_indexing_completes ... ok
+test status::tests::save_state_wording_and_precedence ... ok
+test status::tests::title_marks_unsaved_edits ... ok
+test theme::tests::color_scheme_values ... ok
+test state::tests::an_existing_brick_folder_wins ... ok
+test state::tests::the_newest_old_folder_wins ... ok
+test state::tests::an_old_folder_moves_over_once ... ok
+test recovery::tests::crashed_journals_read_their_headers_newest_first ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+== target find_typing
+warning: unused import: `std::ffi::OsStr`
+ --> crates/suite-file/src/recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 1 warning (run `cargo fix --lib -p suite-file` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running tests/find_typing.rs (/build/target/x86_64-pc-windows-gnu/debug/deps/find_typing-e43d541161bdd27e.exe)
+
+running 1 test
+test a_new_keystroke_cancels_the_running_search ... ignored, opens a window and needs corpus/; run with --release --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== target first_rows
+warning: unused import: `std::ffi::OsStr`
+ --> crates/suite-file/src/recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 1 warning (run `cargo fix --lib -p suite-file` to apply 1 suggestion)
+   Compiling brick v0.3.0 (/src/apps/brick)
+error[E0432]: unresolved import `std::os::fd`
+  --> apps/brick/tests/first_rows.rs:11:14
+   |
+11 | use std::os::fd::AsRawFd;
+   |              ^^ could not find `fd` in `os`
+   |
+note: found an item that was configured out
+  --> /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library\std\src\os\mod.rs:70:9
+  ::: /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library\std\src\os\mod.rs:77:1
+   |
+   = note: the item is gated here
+
+error[E0425]: cannot find function `posix_fadvise` in crate `libc`
+  --> apps/brick/tests/first_rows.rs:25:15
+   |
+25 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |               ^^^^^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find value `POSIX_FADV_DONTNEED` in crate `libc`
+  --> apps/brick/tests/first_rows.rs:25:56
+   |
+25 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |                                                        ^^^^^^^^^^^^^^^^^^^ not found in `libc`
+
+error[E0599]: no method named `as_raw_fd` found for struct `File` in the current scope
+  --> apps/brick/tests/first_rows.rs:25:31
+   |
+25 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |                               ^^^^^^^^^
+   |
+help: there is a method `as_raw_handle` with a similar name
+   |
+25 -         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+25 +         libc::posix_fadvise(f.as_raw_handle(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |
+
+Some errors have detailed explanations: E0425, E0432, E0599.
+For more information about an error, try `rustc --explain E0425`.
+error: could not compile `brick` (test "first_rows") due to 4 previous errors
+== target formula_scroll
+warning: unused import: `std::ffi::OsStr`
+ --> crates/suite-file/src/recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 1 warning (run `cargo fix --lib -p suite-file` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running tests/formula_scroll.rs (/build/target/x86_64-pc-windows-gnu/debug/deps/formula_scroll-c5baacc7f1a3efe1.exe)
+
+running 1 test
+test formula_scroll_frames_stay_under_16_ms ... ignored, opens a window and needs corpus/; run with --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== target jump_perf
+warning: unused import: `std::ffi::OsStr`
+ --> crates/suite-file/src/recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 1 warning (run `cargo fix --lib -p suite-file` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.04s
+     Running tests/jump_perf.rs (/build/target/x86_64-pc-windows-gnu/debug/deps/jump_perf-42131dde4de1311b.exe)
+
+running 1 test
+test jump_to_row_1_9m_renders_under_100ms ... ignored, opens a window and needs corpus/; run with --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== target save_responsive
+warning: unused import: `std::ffi::OsStr`
+ --> crates/suite-file/src/recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 1 warning (run `cargo fix --lib -p suite-file` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running tests/save_responsive.rs (/build/target/x86_64-pc-windows-gnu/debug/deps/save_responsive-ae2cf51c0713c18d.exe)
+
+running 1 test
+test ui_stays_responsive_during_a_1gb_save ... ignored, opens a window, needs corpus/ and 1 GB in the temp dir; run with --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== target scroll_perf
+warning: unused import: `std::ffi::OsStr`
+ --> crates/suite-file/src/recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 1 warning (run `cargo fix --lib -p suite-file` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running tests/scroll_perf.rs (/build/target/x86_64-pc-windows-gnu/debug/deps/scroll_perf-b4150d4942999e27.exe)
+
+running 1 test
+test scrolls_at_display_rate_with_constant_memory ... ignored, opens a window and needs corpus/; run with --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== target status_stream
+warning: unused import: `std::ffi::OsStr`
+ --> crates/suite-file/src/recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 1 warning (run `cargo fix --lib -p suite-file` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running tests/status_stream.rs (/build/target/x86_64-pc-windows-gnu/debug/deps/status_stream-f1a231f2663f6207.exe)
+
+running 1 test
+test row_count_updates_while_indexing_streams ... ignored, opens a window and needs corpus/; run with --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== target styled_scroll
+warning: unused import: `std::ffi::OsStr`
+ --> crates/suite-file/src/recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 1 warning (run `cargo fix --lib -p suite-file` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running tests/styled_scroll.rs (/build/target/x86_64-pc-windows-gnu/debug/deps/styled_scroll-e5796e6f39f04e64.exe)
+
+running 1 test
+test styled_scroll_frames_stay_under_16_ms ... ignored, opens a window and needs corpus/; run with --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

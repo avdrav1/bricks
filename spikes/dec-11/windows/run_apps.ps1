@@ -33,6 +33,13 @@ if ($Clean) {
 if ($PathPrefix) { $env:PATH = "$PathPrefix;$env:PATH" }
 # Ask GSK to log the renderer it picks (to the .err.txt files).
 $env:GSK_DEBUG = "renderer"
+# As started from Explorer or the Start menu: no HOME, no XDG_* (Git Bash and MSYS2 set HOME).
+foreach ($v in "HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR") {
+    Remove-Item "env:$v" -ErrorAction SilentlyContinue
+}
+$work = Join-Path $Out "cwd"
+New-Item -ItemType Directory -Force $work | Out-Null
+Push-Location $work
 
 $summary = "$Out\summary.txt"
 "bin=$Bin clean=$Clean" | Out-File -Encoding utf8 $summary
@@ -86,5 +93,37 @@ foreach ($r in $runs) {
     if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
     Start-Sleep -Seconds 1
     "${tag}: $state window_after_ms=$shown title='$title' $ws" | Out-File -Append -Encoding utf8 $summary
+}
+
+# Slate's Original::sweep deletes package copies whose /proc/<pid> is missing: start Slate
+# on a .docx, then a second Slate, and see whether the first one's copy survives.
+$slate = "$Bin\slate.exe"
+if (Test-Path $slate) {
+    $cache = Join-Path ([IO.Path]::GetTempPath()) "slate"
+    $a = Start-Process -FilePath $slate -ArgumentList "`"$root\apps\slate\crates\docx\tests\data\fixture.docx`"" -PassThru `
+        -RedirectStandardOutput "$Out\sweep-a.out.txt" -RedirectStandardError "$Out\sweep-a.err.txt"
+    Start-Sleep -Seconds 8
+    $before = (Get-ChildItem $cache -ErrorAction SilentlyContinue | ForEach-Object Name) -join ","
+    $b2 = Start-Process -FilePath $slate -ArgumentList "`"$root\README.md`"" -PassThru `
+        -RedirectStandardOutput "$Out\sweep-b.out.txt" -RedirectStandardError "$Out\sweep-b.err.txt"
+    Start-Sleep -Seconds 8
+    $after = (Get-ChildItem $cache -ErrorAction SilentlyContinue | ForEach-Object Name) -join ","
+    "slate sweep: first slate pid=$($a.Id) copies in $cache before second start: [$before] after: [$after]" |
+        Out-File -Append -Encoding utf8 $summary
+    foreach ($p in $a, $b2) { if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force } }
+}
+
+# Where the apps wrote their state (Brick's recent list without HOME lands under the cwd).
+Pop-Location
+"files under the apps' working directory ${work}:" | Out-File -Append -Encoding utf8 $summary
+Get-ChildItem -Recurse -Force $work -ErrorAction SilentlyContinue |
+    ForEach-Object { "  " + $_.FullName.Substring($work.Length) } | Out-File -Append -Encoding utf8 $summary
+foreach ($d in "$env:LOCALAPPDATA\brick", "$env:LOCALAPPDATA\slate", "$env:LOCALAPPDATA\etch", "$env:LOCALAPPDATA\frame",
+    "$env:USERPROFILE\.local", "$env:USERPROFILE\.cache", ([IO.Path]::GetTempPath() + "brick"),
+    ([IO.Path]::GetTempPath() + "frame"), ([IO.Path]::GetTempPath() + "etch"), ([IO.Path]::GetTempPath() + "slate")) {
+    if (Test-Path $d) {
+        "exists: $d -> " + ((Get-ChildItem -Recurse -Force $d | ForEach-Object { $_.FullName.Substring($d.Length) }) -join " ") |
+            Out-File -Append -Encoding utf8 $summary
+    }
 }
 Get-Content $summary

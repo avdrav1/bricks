@@ -1,0 +1,6 @@
+2026-10-15T18:17:11.155372Z  INFO frame: application starting
+Frame starting...
+Not using GL: No GL implementation is available
+Not using GL as fallback: No GL implementation is available
+Using renderer 'GskCairoRenderer' for surface 'GdkWin32Toplevel'
+couldn't load font "Calibri Light, 30.874px", falling back to "Sans 30.874px", expect ugly output.

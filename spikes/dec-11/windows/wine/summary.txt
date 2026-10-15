@@ -1,0 +1,9 @@
+brick --version: brick 0.3.0
+slate --version: slate 0.3.0
+frame --version: frame 0.1.0
+etch --version: etch 0.2.1
+brick-sample.csv: running windows='sample.csv|'
+slate-README.md: running windows='README.md|'
+slate-fixture.docx: running windows='fixture.docx|'
+frame-fixture.pptx: running windows='fixture.pptx|'
+etch-sample.png: running windows='sample.png|'

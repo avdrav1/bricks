@@ -1,0 +1,47 @@
+   Compiling simd-adler32 v0.3.10
+   Compiling adler2 v2.0.1
+   Compiling num-traits v0.2.19
+   Compiling pxfm v0.1.30
+   Compiling zune-core v0.5.3
+   Compiling miniz_oxide v0.9.1
+   Compiling miniz_oxide v0.8.9
+   Compiling flate2 v1.1.10
+   Compiling fdeflate v0.3.7
+   Compiling zune-jpeg v0.5.15
+   Compiling bytemuck v1.25.2
+   Compiling png v0.18.1
+   Compiling byteorder-lite v0.1.0
+warning: unused import: `std::ffi::OsStr`
+ --> crates\suite-file\src\recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 1 warning (run `cargo fix --lib -p suite-file` to apply 1 suggestion)
+   Compiling moxcms v0.8.1
+   Compiling image v0.25.10
+   Compiling image-io v0.1.0 (D:\a\cronkite\cronkite\apps\etch\crates\image-io)
+error[E0433]: cannot find `unix` in `os`
+   --> apps\etch\crates\image-io\tests\save.rs:170:18
+    |
+170 |     use std::os::unix::fs::PermissionsExt;
+    |                  ^^^^ could not find `unix` in `os`
+
+error[E0599]: no associated function or constant named `from_mode` found for struct `Permissions` in the current scope
+   --> apps\etch\crates\image-io\tests\save.rs:175:58
+    |
+175 |     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+    |                                                          ^^^^^^^^^ associated function or constant not found in `Permissions`
+
+error[E0599]: no associated function or constant named `from_mode` found for struct `Permissions` in the current scope
+   --> apps\etch\crates\image-io\tests\save.rs:180:58
+    |
+180 |     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    |                                                          ^^^^^^^^^ associated function or constant not found in `Permissions`
+
+Some errors have detailed explanations: E0433, E0599.
+For more information about an error, try `rustc --explain E0433`.
+error: could not compile `image-io` (test "save") due to 3 previous errors
+warning: build failed, waiting for other jobs to finish...

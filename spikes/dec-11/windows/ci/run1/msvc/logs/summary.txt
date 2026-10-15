@@ -1,0 +1,31 @@
+check --workspace --all-targets: exit=101 79s
+test suite-core: exit=0 passed=1 failed=0 ignored=0 2s 
+test suite-ui: exit=0 passed=1 failed=0 ignored=0 0s 
+test suite-platform: exit=0 passed=1 failed=0 ignored=0 1s 
+test suite-file: exit=101 passed=0 failed=0 ignored=0 0s 
+test csv-engine: exit=101 passed=0 failed=0 ignored=0 3s 
+test formula: exit=0 passed=41 failed=0 ignored=0 12s 
+test data-model: exit=101 passed=0 failed=0 ignored=0 1s 
+test grid: exit=101 passed=0 failed=0 ignored=0 1s 
+test commands: exit=101 passed=0 failed=0 ignored=0 1s 
+test file-format: exit=101 passed=0 failed=0 ignored=0 2s 
+test jobs: exit=101 passed=0 failed=0 ignored=0 1s 
+test xlsx: exit=101 passed=0 failed=0 ignored=0 5s 
+test brick: exit=101 passed=0 failed=0 ignored=0 4s 
+test document-model: exit=0 passed=38 failed=0 ignored=0 14s 
+test docx: exit=101 passed=0 failed=0 ignored=0 2s 
+test flow: exit=0 passed=32 failed=0 ignored=0 2s 
+test document-edit: exit=101 passed=0 failed=0 ignored=0 2s 
+test slate: exit=101 passed=0 failed=0 ignored=0 11s 
+test presentation-model: exit=0 passed=1 failed=0 ignored=0 1s 
+test pptx: exit=101 passed=0 failed=0 ignored=0 2s 
+test deck-edit: exit=101 passed=0 failed=0 ignored=0 0s 
+test frame: exit=101 passed=0 failed=0 ignored=0 15s 
+test image-model: exit=0 passed=85 failed=0 ignored=7 6s 
+test image-io: exit=101 passed=0 failed=0 ignored=0 4s 
+test etch: exit=101 passed=0 failed=0 ignored=0 7s 
+build --release (4 apps): exit=101 121s
+  target/release/brick.exe: missing
+  target/release/slate.exe: missing
+  target/release/frame.exe: missing
+  target/release/etch.exe: missing

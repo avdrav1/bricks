@@ -106,6 +106,8 @@ where
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
+    // DEC-11 SPIKE EXPERIMENT: opening a directory fails on Windows (os error 5)
+    #[cfg(unix)]
     File::open(dir)?.sync_all()?;
     Ok(())
 }

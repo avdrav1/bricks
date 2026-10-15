@@ -1,0 +1,230 @@
+   Compiling data-model v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\data-model)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.51s
+     Running unittests src\lib.rs (target\debug\deps\data_model-cd7851293acac89a.exe)
+
+running 41 tests
+test cleared::tests::rest_covers_every_later_file_column ... ok
+test check::tests::rows_and_their_problems ... ok
+test check::tests::places_count_lines_and_show_the_line ... ok
+test cleared::tests::overlapping_blocks_union_and_come_apart ... ok
+test colmap::tests::width_counts_file_fields_inserted_edits_and_the_tail ... ok
+test copy::tests::html_marks_values_a_spreadsheet_would_change ... ok
+test copy::tests::tsv_quotes_only_what_would_split_a_field ... ok
+test copy::tests::cancel_stops_the_copy ... ok
+test filter::tests::number_tests_take_numbers_only ... ok
+test filter::tests::text_tests_ignore_case ... ok
+test infer::tests::column_types_combine ... ok
+test infer::tests::values_and_their_types ... ok
+test paste::tests::parses_spreadsheet_tsv ... ok
+test colmap::tests::matches_a_flat_list_through_random_inserts_and_removes ... ok
+test copy::tests::copies_what_the_table_shows_as_a_rectangle ... ok
+test rowmap::tests::ranges_come_out_and_go_back_in_both_kinds_of_order ... ok
+test rowmap::tests::removed_rows_put_back_restore_the_order_and_reuse_nodes ... ok
+test search::tests::case_folds_unless_asked_not_to ... ok
+test sort::tests::booleans_false_first ... ok
+test sort::tests::dates_and_times_in_time_order ... ok
+test sort::tests::numbers_misfits_and_blanks ... ok
+test sort::tests::short_text_ignores_case_then_takes_exact_bytes ... ok
+test sort::tests::whole_text_order_ignores_case_then_bytes ... ok
+test style::tests::a_gap_with_another_row_style_splits_runs ... ok
+test style::tests::layers_cell_then_row_then_column ... ok
+test style::tests::theme_colours_swap_the_first_pairs_and_tint ... ok
+test style::tests::runs_join_across_rows_that_show_the_same_style ... ok
+test table::tests::block_holds_ragged_rows_and_bounds_long_cells ... ok
+test table::tests::a_deleted_row_comes_back_with_its_edits ... ok
+test table::tests::cleared_cells_read_and_save_empty_and_undo_exactly ... ok
+test table::tests::column_inserts_and_deletes_reassemble_rows_on_save ... ok
+test table::tests::edit_is_visible_immediately_and_source_file_is_untouched ... ok
+test table::tests::flipping_first_row_is_header ... ok
+test table::tests::inserts_and_deletes_save_in_place_and_undo_to_the_original_bytes ... ok
+test table::tests::override_rereads_the_open_file_with_another_delimiter ... ok
+test table::tests::override_waits_for_unsaved_edits ... ok
+test tests::overlay_groups_edits_by_row_in_column_order ... ok
+test tests::overlay_keeps_raw_text_exactly ... ok
+test table::tests::row_edits_wait_for_the_whole_file_to_be_indexed ... ok
+test rowmap::tests::matches_a_flat_vector_through_random_inserts_and_removes ... ok
+test rowmap::tests::the_tree_stays_shallow_through_many_splits ... ok
+
+test result: ok. 41 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.44s
+
+     Running tests\format.rs (target\debug\deps\format-bf13fe2de8bc3736.exe)
+
+running 9 tests
+test big_ranges_are_refused ... ok
+test layers_stack_as_in_excel ... ok
+test bold_on_a_range_keeps_each_cells_other_formats ... ok
+test the_pool_reuses_records_and_only_grows ... ok
+test number_formats_and_clear ... ok
+test outside_borders_go_on_the_selections_edges_only ... ok
+test whole_columns_restyle_only_cells_with_their_own_style ... ok
+test whole_rows_set_the_row_style_and_keep_styled_columns ... ok
+test every_edit_undoes_exactly_after_sorts_and_inserts ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\formulas.rs (target\debug\deps\formulas-07e439f5b0631916.exe)
+
+running 12 tests
+test errors_and_text_that_isnt_a_formula ... ok
+test cycles_show_circ ... ok
+test edited_formulas_evaluate_and_undo ... ok
+test a_csv_formula_shows_its_result_and_saves_as_written ... ok
+test header_row_doesnt_change_what_a_formula_means ... ok
+test jobs_sort_by_results ... ok
+test find_copy_and_replace_see_results ... ok
+test jobs_see_results_sort_filter_infer ... ok
+test sum_1gb ... ignored, needs corpus/ (python3 scripts/gen_corpus.py); timing asserted in release only
+test scan_finds_exactly_the_formula_cells ... ok
+test over_budget_cells_wait_for_a_job ... ok
+test running_total_of_200k_rows ... ok
+
+test result: ok. 11 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 3.23s
+
+     Running tests\infer_1gb.rs (target\debug\deps\infer_1gb-ee2b0c8c1565c2b8.exe)
+
+running 1 test
+test the_corpus_columns_get_their_types_from_a_sample ... ignored, needs corpus/rows_1024mb.csv; run with --release --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\infer_types.rs (target\debug\deps\infer_types-b9c7209f18dfb736.exe)
+
+running 5 tests
+test a_cancelled_inference_returns_nothing ... ok
+test a_header_flip_forgets_the_types ... ok
+test inference_never_alters_a_value_on_screen_or_on_disk ... ok
+test types_come_from_the_values_and_leading_zeros_mean_text ... ok
+test the_sample_reaches_the_last_row ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests\journal.rs (target\debug\deps\journal-7ad7e2efe68e6970.exe)
+
+running 8 tests
+test a_v2_journal_still_restores ... FAILED
+test a_csv_sheet_deleted_in_the_session_comes_back_deleted ... ok
+test a_v1_journal_still_restores ... FAILED
+test a_workbook_comes_back_from_the_journal ... ok
+test formats_and_merges_come_back_from_the_journal ... ok
+test damaged_journals_of_either_version_are_refused ... ok
+test an_unchanged_workbook_needs_no_steps ... ok
+test journals_that_dont_fit_the_file_are_refused ... ok
+
+failures:
+
+---- a_v2_journal_still_restores stdout ----
+
+thread 'a_v2_journal_still_restores' (6324) panicked at apps\brick\crates\data-model\tests\journal.rs:503:5:
+assertion `left == right` failed
+  left: "id,name,qty\r\n1,green apple,3\r\nnew,,\r\n2,pear,5\r\n"
+ right: "id,name,qty\n1,green apple,3\nnew,,\n2,pear,5\n"
+
+---- a_v1_journal_still_restores stdout ----
+
+thread 'a_v1_journal_still_restores' (8552) panicked at apps\brick\crates\data-model\tests\journal.rs:358:5:
+assertion `left == right` failed
+  left: "id,name,qty\r\n1,green apple,3\r\nnew,,\r\n2,pear,5\r\n"
+ right: "id,name,qty\n1,green apple,3\nnew,,\n2,pear,5\n"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    a_v1_journal_still_restores
+    a_v2_journal_still_restores
+
+test result: FAILED. 6 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p data-model --test journal`
+     Running tests\lookup_speed.rs (target\debug\deps\lookup_speed-41c3427c6a973d73.exe)
+
+running 2 tests
+test lookup_speed ... ignored, timing asserted in release only: cargo test --release -p data-model --test lookup_speed -- --ignored --nocapture
+test exact_lookups_find_the_first_match_and_follow_edits ... ok
+
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\malformed.rs (target\debug\deps\malformed-e414a385407a85fb.exe)
+
+running 6 tests
+test checking_1gb ... ignored, needs corpus/rows_1024mb.csv; run with --release --ignored
+test a_cancelled_check_gives_nothing ... ok
+test an_unclosed_quote_is_placed_after_quoted_newlines ... ok
+test binary_data_is_found_at_the_start_and_further_in ... ok
+test well_formed_files_have_no_problems ... ok
+test text_after_a_quote_counts_every_one_and_keeps_the_first_five ... ok
+
+test result: ok. 5 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.39s
+
+     Running tests\merges.rs (target\debug\deps\merges-e9d0ec1632acbbf3.exe)
+
+running 12 tests
+test a_merges_edit_undoes_and_counts_as_one_change ... ok
+test merge_rows_are_the_table_rows_showing_it ... ok
+test column_inserts_and_deletes_follow_the_same_rules ... ok
+test a_tall_merge_is_found_from_its_last_row ... ok
+test merging_empty_cells_drops_nothing_and_unmerge_removes_what_it_touches ... ok
+test row_deletes_shrink_or_remove_merges ... ok
+test merging_absorbs_merges_and_empties_the_other_cells ... ok
+test row_inserts_move_or_grow_merges ... ok
+test merging_is_refused_out_of_file_order_and_over_the_cap ... ok
+test sorting_is_blocked_by_merges_on_sorted_rows_only ... ok
+test structural_edits_bring_their_merges_edit ... ok
+test the_files_merges_are_the_tables_sorted_and_found_by_cell ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\paste_libreoffice.rs (target\debug\deps\paste_libreoffice-3a4ef717f0f90ad1.exe)
+
+running 2 tests
+test a_copied_formula_pastes_into_libreoffice_as_its_result ... ignored, needs LibreOffice with Python UNO; run with --ignored
+test a_copied_range_pastes_into_libreoffice_cell_for_cell ... ignored, needs LibreOffice with Python UNO; run with --ignored
+
+test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\save_bytes.rs (target\debug\deps\save_bytes-59133ea1b8aa147f.exe)
+
+running 3 tests
+test unedited_save_is_the_source_byte_for_byte ... ok
+test only_edited_cells_change ... ok
+test random_edits_change_only_their_rows_and_read_back ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s
+
+     Running tests\search_1gb.rs (target\debug\deps\search_1gb-c56634437106f8d0.exe)
+
+running 1 test
+test first_match_in_1gb_under_a_second ... ignored, needs corpus/rows_1024mb.csv; run with --release --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\sheets.rs (target\debug\deps\sheets-87630f585da6275d.exe)
+
+running 4 tests
+test a_reference_to_another_sheet_reads_it ... ok
+test deleting_a_sheet_makes_references_ref_errors_and_undo_restores_them ... ok
+test renaming_a_sheet_rewrites_references_and_undo_restores_them ... ok
+test edited_formulas_follow_and_cancel_stops ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\structure.rs (target\debug\deps\structure-62138154934a4136.exe)
+
+running 5 tests
+test a_filtered_delete_of_two_ranges ... ok
+test deleted_rows_make_references_ref_errors_and_shrink_ranges ... ok
+test inserted_and_deleted_columns_mirror_rows ... ok
+test inserted_rows_move_references_past_them ... ok
+test sorted_formulas_keep_reading_their_own_row ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+   Doc-tests data_model
+
+running 2 tests
+test apps\brick\crates\data-model\src\table.rs - table::CsvTable::apply (line 696) - compile fail ... ok
+test apps\brick\crates\data-model\src\table.rs - table::CsvTable::apply (line 687) ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s
+
+error: 1 target failed:
+    `-p data-model --test journal`

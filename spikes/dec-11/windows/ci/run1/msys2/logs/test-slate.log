@@ -1,0 +1,59 @@
+   Compiling gio-sys v0.22.9
+   Compiling futures-executor v0.3.34
+   Compiling serde v1.0.229
+   Compiling toml_edit v0.25.15+spec-1.1.0
+   Compiling once_cell v1.21.4
+   Compiling tracing-core v0.1.36
+   Compiling document-model v0.1.0 (D:\a\cronkite\cronkite\apps\slate\crates\document-model)
+   Compiling glib v0.22.10
+   Compiling gdk-pixbuf-sys v0.22.9
+   Compiling gdk4-sys v0.11.5
+   Compiling gsk4-sys v0.11.5
+   Compiling proc-macro-crate v3.5.0
+   Compiling memoffset v0.9.1
+   Compiling lazy_static v1.5.1
+   Compiling sharded-slab v0.1.7
+   Compiling gtk4-macros v0.11.5
+   Compiling field-offset v0.3.6
+   Compiling gtk4-sys v0.11.5
+   Compiling thread_local v1.1.10
+   Compiling nu-ansi-term v0.50.3
+   Compiling suite-file v0.1.0 (D:\a\cronkite\cronkite\crates\suite-file)
+error[E0433]: cannot find `unix` in `os`
+  --> crates\suite-file\src\recent.rs:10:14
+   |
+10 | use std::os::unix::ffi::OsStrExt;
+   |              ^^^^ could not find `unix` in `os`
+
+error[E0599]: no associated function or constant named `from_bytes` found for struct `OsStr` in the current scope
+  --> crates\suite-file\src\recent.rs:28:51
+   |
+28 |                     .map(|l| PathBuf::from(OsStr::from_bytes(l)))
+   |                                                   ^^^^^^^^^^ associated function or constant not found in `OsStr`
+
+error[E0599]: no method named `as_bytes` found for reference `&OsStr` in the current scope
+  --> crates\suite-file\src\recent.rs:44:52
+   |
+44 |         if !file.is_absolute() || file.as_os_str().as_bytes().contains(&b'\n') {
+   |                                                    ^^^^^^^^
+   |
+help: there is a method `as_encoded_bytes` with a similar name
+   |
+44 |         if !file.is_absolute() || file.as_os_str().as_encoded_bytes().contains(&b'\n') {
+   |                                                       ++++++++
+
+error[E0599]: no method named `as_bytes` found for reference `&OsStr` in the current scope
+  --> crates\suite-file\src\recent.rs:78:41
+   |
+78 |             out.write_all(f.as_os_str().as_bytes())?;
+   |                                         ^^^^^^^^
+   |
+help: there is a method `as_encoded_bytes` with a similar name
+   |
+78 |             out.write_all(f.as_os_str().as_encoded_bytes())?;
+   |                                            ++++++++
+
+Some errors have detailed explanations: E0433, E0599.
+For more information about an error, try `rustc --explain E0433`.
+error: could not compile `suite-file` (lib) due to 4 previous errors
+warning: build failed, waiting for other jobs to finish...

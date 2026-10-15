@@ -15,6 +15,9 @@ jobs:
     env:
       CARGO_HOME: D:\cargo-home
     steps:
+      # The repo has no .gitattributes: Windows runners' autocrlf turns test fixtures into CRLF.
+      - run: git config --global core.autocrlf false
+        shell: pwsh
       - uses: actions/checkout@v4
       - uses: msys2/setup-msys2@v2
         with:
@@ -72,6 +75,7 @@ jobs:
     timeout-minutes: 150
     defaults: { run: { shell: bash } }
     steps:
+      - run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2

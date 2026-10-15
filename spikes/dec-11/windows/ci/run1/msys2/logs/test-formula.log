@@ -1,0 +1,97 @@
+   Compiling formula v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\formula)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.02s
+     Running unittests src\lib.rs (target\debug\deps\formula-1ef1e4c68bd3539b.exe)
+
+running 10 tests
+test functions::criteria::tests::booleans_match_only_booleans ... ok
+test functions::text::tests::char_and_code_use_windows_1252 ... ok
+test functions::dates::tests::date_text_forms ... ok
+test functions::text::tests::clean_drops_c0_and_c1_controls ... ok
+test functions::wildcard::tests::wildcards ... ok
+test functions::dates::tests::weekdays_count_from_any_start ... ok
+test scalar::tests::iso_serials ... ok
+test value::tests::raw_cells_read_as_literals ... ok
+test value::tests::results_show_as_excel_shows_them ... ok
+test scalar::tests::serials_match_spreadsheets ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+
+     Running tests\deep.rs (target\debug\deps\deep-5139d65ae30a8058.exe)
+
+running 2 tests
+test cycles_give_circ ... ok
+test million_row_running_total ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.01s
+
+     Running tests\formats.rs (target\debug\deps\formats-63876b848646d3f3.exe)
+
+running 5 tests
+test only_general_codes_are_general ... ok
+test fill_marks_where_the_char_repeats ... ok
+test values_other_than_numbers_and_text ... ok
+test every_builtin_code_is_a_fixture_case ... ok
+test formats_match_libreoffice ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\grammar.rs (target\debug\deps\grammar-25005ab8f55247b0.exe)
+
+running 10 tests
+test deleted_rows_and_columns_shrink_or_break_references ... ok
+test bad_formulas_report_where_they_fail ... ok
+test inserted_rows_and_columns_move_references ... ok
+test moved_formulas_shift_relative_references ... ok
+test precedence_shapes_the_tree ... ok
+test name_box_references ... ok
+test grammar_cases_round_trip ... ok
+test sheet_renames_and_deletions ... ok
+test xlsx_rendering_prefixes_newer_functions ... ok
+test column_names_round_trip ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\libreoffice.rs (target\debug\deps\libreoffice-300ed68376f2dc06.exe)
+
+running 1 test
+test cases_match_libreoffice ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests\shift.rs (target\debug\deps\shift-c6441f7eb44da689.exe)
+
+running 3 tests
+test text_that_isnt_a_formula_is_none ... ok
+test references_pushed_off_the_sheet_are_ref_errors ... ok
+test pasted_formulas_shift_relative_references ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\volatile.rs (target\debug\deps\volatile-2e391d8214c26842.exe)
+
+running 4 tests
+test randbetween_rejects_bad_arguments ... ok
+test randbetween_rounds_bounds_up_as_libreoffice_does ... ok
+test rand_is_volatile_in_unit_interval_and_varies ... ok
+test randbetween_gives_every_integer_in_its_bounds ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\volatile_dates.rs (target\debug\deps\volatile_dates-f6d408138ceeb831.exe)
+
+running 6 tests
+test only_the_clock_functions_are_volatile ... ok
+test a_date_plus_a_time_shows_as_a_date_time ... ok
+test date_arithmetic_with_today ... ok
+test time_values_show_as_times ... ok
+test today_is_the_date_of_now ... ok
+test now_splits_into_today_and_its_time ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+   Doc-tests formula
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

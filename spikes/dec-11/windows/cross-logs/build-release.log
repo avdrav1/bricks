@@ -1,0 +1,294 @@
+    Updating crates.io index
+ Downloading crates ...
+  Downloaded simdutf8 v0.1.5
+  Downloaded slab v0.4.12
+  Downloaded smallvec v1.16.2
+  Downloaded adler2 v2.0.1
+  Downloaded simd-adler32 v0.3.10
+  Downloaded autocfg v1.5.1
+  Downloaded async-channel v2.5.0
+  Downloaded atoi_simd v0.18.1
+  Downloaded bitflags v2.13.2
+  Downloaded serde_derive v1.0.229
+  Downloaded bumpalo v3.20.3
+  Downloaded version-compare v0.2.1
+  Downloaded windows-link v0.2.1
+  Downloaded concurrent-queue v2.5.0
+  Downloaded equivalent v1.0.2
+  Downloaded thread_local v1.1.10
+  Downloaded zune-core v0.5.3
+  Downloaded debug_unsafe v0.1.4
+  Downloaded futures-io v0.3.34
+  Downloaded field-offset v0.3.6
+  Downloaded cfg-expr v0.20.10
+  Downloaded crc32fast v1.5.2
+  Downloaded fast-float2 v0.2.4
+  Downloaded gobject-sys v0.22.9
+  Downloaded parking_lot_core v0.9.12
+  Downloaded parking_lot v0.12.5
+  Downloaded itoa v1.0.18
+  Downloaded zmij v1.0.23
+  Downloaded target-lexicon v0.13.5
+  Downloaded unicase v2.10.0
+  Downloaded toml_datetime v1.1.1+spec-1.1.0
+  Downloaded toml_parser v1.1.3+spec-1.1.0
+  Downloaded unicode-ident v1.0.26
+  Downloaded system-deps v9.0.0
+  Downloaded tracing-core v0.1.36
+  Downloaded gdk-pixbuf-sys v0.22.9
+  Downloaded zopfli v0.8.3
+  Downloaded toml v1.1.6+spec-1.1.0
+  Downloaded codepage v0.1.3
+  Downloaded parking v2.2.1
+  Downloaded event-listener v5.4.2
+  Downloaded zune-jpeg v0.5.15
+  Downloaded multiversion_no_op v1.0.0
+  Downloaded serde_spanned v1.1.1
+  Downloaded futures-macro v0.3.34
+  Downloaded futures-task v0.3.34
+  Downloaded cfg-if v1.0.5
+  Downloaded lazy_static v1.5.1
+  Downloaded futures-core v0.3.34
+  Downloaded toml_edit v0.25.15+spec-1.1.0
+  Downloaded toml_writer v1.1.2+spec-1.1.0
+  Downloaded event-listener-strategy v0.5.4
+  Downloaded graphene-sys v0.22.9
+  Downloaded heck v0.5.0
+  Downloaded byteorder-lite v0.1.0
+  Downloaded typed-path v0.12.3
+  Downloaded proc-macro-crate v3.5.0
+  Downloaded core_detect v1.0.0
+  Downloaded graphene-rs v0.22.8
+  Downloaded zip v8.6.0
+  Downloaded memoffset v0.9.1
+  Downloaded winnow v1.0.4
+  Downloaded cairo-sys-rs v0.22.9
+  Downloaded syn v3.0.6
+  Downloaded rustc_version v0.4.1
+  Downloaded byteorder v1.5.0
+  Downloaded gsk4-sys v0.11.5
+  Downloaded nu-ansi-term v0.50.3
+  Downloaded zlib-rs v0.6.8
+  Downloaded lock_api v0.4.14
+  Downloaded crossbeam-deque v0.8.8
+  Downloaded fdeflate v0.3.7
+  Downloaded either v1.19.0
+  Downloaded gtk4-macros v0.11.5
+  Downloaded gsk4 v0.11.5
+  Downloaded pin-project-lite v0.2.17
+  Downloaded pkg-config v0.3.34
+  Downloaded gdk-pixbuf v0.22.0
+  Downloaded tracing-subscriber v0.3.23
+  Downloaded futures-channel v0.3.34
+  Downloaded once_cell v1.21.4
+  Downloaded tracing v0.1.44
+  Downloaded quote v1.0.47
+  Downloaded crossbeam-utils v0.8.23
+  Downloaded futures-executor v0.3.34
+  Downloaded rustversion v1.0.23
+  Downloaded scopeguard v1.2.0
+  Downloaded semver v1.0.28
+  Downloaded crossbeam-epoch v0.9.21
+  Downloaded memmap2 v0.9.11
+  Downloaded log v0.4.34
+  Downloaded proc-macro2 v1.0.107
+  Downloaded pango v0.22.9
+  Downloaded pango-sys v0.22.9
+  Downloaded serde_core v1.0.229
+  Downloaded bytemuck v1.25.2
+  Downloaded cairo-rs v0.22.9
+  Downloaded sharded-slab v0.1.7
+  Downloaded image v0.25.10
+  Downloaded miniz_oxide v0.8.9
+  Downloaded gdk4-sys v0.11.5
+  Downloaded num-traits v0.2.19
+  Downloaded flate2 v1.1.10
+  Downloaded serde v1.0.229
+  Downloaded glib-macros v0.22.9
+  Downloaded miniz_oxide v0.9.1
+  Downloaded gio-sys v0.22.9
+  Downloaded glib-sys v0.22.9
+  Downloaded rayon-core v1.13.0
+  Downloaded memchr v2.8.3
+  Downloaded indexmap v2.14.2
+  Downloaded gdk4 v0.11.5
+  Downloaded pulldown-cmark v0.13.4
+  Downloaded gtk4-sys v0.11.5
+  Downloaded png v0.18.1
+  Downloaded futures-util v0.3.34
+  Downloaded hashbrown v0.17.1
+  Downloaded serde_json v1.0.154
+  Downloaded calamine v0.36.1
+  Downloaded rayon v1.12.0
+  Downloaded windows-sys v0.61.2
+  Downloaded moxcms v0.8.1
+  Downloaded gio v0.22.10
+  Downloaded glib v0.22.10
+  Downloaded quick-xml v0.41.0
+  Downloaded encoding_rs v0.8.42
+  Downloaded gtk4 v0.11.5
+  Downloaded pxfm v0.1.30
+  Downloaded libc v0.2.190
+   Compiling winnow v1.0.4
+   Compiling toml_datetime v1.1.1+spec-1.1.0
+   Compiling target-lexicon v0.13.5
+   Compiling smallvec v1.16.2
+   Compiling system-deps v9.0.0
+   Compiling heck v0.5.0
+   Compiling serde_spanned v1.1.1
+   Compiling pkg-config v0.3.34
+   Compiling version-compare v0.2.1
+   Compiling libc v0.2.190
+   Compiling proc-macro2 v1.0.107
+   Compiling cfg-if v1.0.5
+   Compiling unicode-ident v1.0.26
+   Compiling memchr v2.8.3
+   Compiling windows-link v0.2.1
+   Compiling quote v1.0.47
+   Compiling rustversion v1.0.23
+   Compiling bitflags v2.13.2
+   Compiling scopeguard v1.2.0
+   Compiling pin-project-lite v0.2.17
+   Compiling futures-core v0.3.34
+   Compiling core_detect v1.0.0
+   Compiling simdutf8 v0.1.5
+   Compiling multiversion_no_op v1.0.0
+   Compiling windows-sys v0.61.2
+   Compiling simd-adler32 v0.3.10
+   Compiling crc32fast v1.5.2
+   Compiling crossbeam-utils v0.8.23
+   Compiling slab v0.4.12
+   Compiling autocfg v1.5.1
+   Compiling futures-task v0.3.34
+   Compiling adler2 v2.0.1
+   Compiling zlib-rs v0.6.8
+   Compiling crossbeam-epoch v0.9.21
+   Compiling futures-channel v0.3.34
+   Compiling serde_core v1.0.229
+   Compiling crossbeam-deque v0.8.8
+   Compiling miniz_oxide v0.9.1
+   Compiling parking_lot_core v0.9.12
+   Compiling rayon-core v1.13.0
+   Compiling serde v1.0.229
+   Compiling futures-io v0.3.34
+   Compiling hashbrown v0.17.1
+   Compiling equivalent v1.0.2
+   Compiling bumpalo v3.20.3
+   Compiling log v0.4.34
+   Compiling suite-file v0.1.0 (/src/crates/suite-file)
+   Compiling semver v1.0.28
+warning: unused import: `std::ffi::OsStr`
+ --> crates/suite-file/src/recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+   Compiling lock_api v0.4.14
+   Compiling zopfli v0.8.3
+   Compiling either v1.19.0
+   Compiling typed-path v0.12.3
+   Compiling pulldown-cmark v0.13.4
+   Compiling memoffset v0.9.1
+   Compiling once_cell v1.21.4
+   Compiling memmap2 v0.9.11
+   Compiling num-traits v0.2.19
+   Compiling cfg-expr v0.20.10
+   Compiling rustc_version v0.4.1
+   Compiling parking_lot v0.12.5
+   Compiling tracing-core v0.1.36
+   Compiling unicase v2.10.0
+   Compiling formula v0.3.0 (/src/apps/brick/crates/formula)
+   Compiling indexmap v2.14.2
+   Compiling lazy_static v1.5.1
+   Compiling syn v3.0.6
+   Compiling encoding_rs v0.8.42
+   Compiling sharded-slab v0.1.7
+   Compiling thread_local v1.1.10
+   Compiling suite-core v0.1.0 (/src/crates/suite-core)
+   Compiling zmij v1.0.23
+   Compiling parking v2.2.1
+   Compiling field-offset v0.3.6
+   Compiling toml_parser v1.1.3+spec-1.1.0
+   Compiling tracing v0.1.44
+   Compiling event-listener v5.4.2
+   Compiling suite-ui v0.1.0 (/src/crates/suite-ui)
+   Compiling miniz_oxide v0.8.9
+   Compiling fdeflate v0.3.7
+   Compiling serde_json v1.0.154
+   Compiling zune-core v0.5.3
+   Compiling pxfm v0.1.30
+   Compiling debug_unsafe v0.1.4
+   Compiling event-listener-strategy v0.5.4
+   Compiling atoi_simd v0.18.1
+   Compiling concurrent-queue v2.5.0
+warning: `suite-file` (lib) generated 1 warning (run `cargo fix --lib -p suite-file` to apply 1 suggestion)
+   Compiling presentation-model v0.1.0 (/src/apps/frame/crates/presentation-model)
+   Compiling byteorder-lite v0.1.0
+   Compiling byteorder v1.5.0
+   Compiling toml v1.1.6+spec-1.1.0
+   Compiling toml_edit v0.25.15+spec-1.1.0
+   Compiling zune-jpeg v0.5.15
+   Compiling fast-float2 v0.2.4
+   Compiling bytemuck v1.25.2
+   Compiling rayon v1.12.0
+   Compiling suite-platform v0.1.0 (/src/crates/suite-platform)
+   Compiling itoa v1.0.18
+   Compiling async-channel v2.5.0
+   Compiling image-model v0.1.0 (/src/apps/etch/crates/image-model)
+   Compiling deck-edit v0.1.0 (/src/apps/frame/crates/deck-edit)
+   Compiling nu-ansi-term v0.50.3
+   Compiling tracing-subscriber v0.3.23
+   Compiling quick-xml v0.41.0
+   Compiling csv-engine v0.3.0 (/src/apps/brick/crates/csv-engine)
+   Compiling codepage v0.1.3
+   Compiling proc-macro-crate v3.5.0
+   Compiling glib-sys v0.22.9
+   Compiling gobject-sys v0.22.9
+   Compiling gio-sys v0.22.9
+   Compiling cairo-sys-rs v0.22.9
+   Compiling pango-sys v0.22.9
+   Compiling gdk-pixbuf-sys v0.22.9
+   Compiling gdk4-sys v0.11.5
+   Compiling graphene-sys v0.22.9
+   Compiling gsk4-sys v0.11.5
+   Compiling flate2 v1.1.10
+   Compiling gtk4-sys v0.11.5
+   Compiling zip v8.6.0
+   Compiling png v0.18.1
+   Compiling futures-macro v0.3.34
+   Compiling glib-macros v0.22.9
+   Compiling serde_derive v1.0.229
+   Compiling gtk4-macros v0.11.5
+   Compiling moxcms v0.8.1
+   Compiling data-model v0.3.0 (/src/apps/brick/crates/data-model)
+   Compiling jobs v0.3.0 (/src/apps/brick/crates/jobs)
+   Compiling futures-util v0.3.34
+   Compiling pptx v0.1.0 (/src/apps/frame/crates/pptx)
+   Compiling futures-executor v0.3.34
+   Compiling glib v0.22.10
+   Compiling document-model v0.1.0 (/src/apps/slate/crates/document-model)
+   Compiling calamine v0.36.1
+   Compiling grid v0.3.0 (/src/apps/brick/crates/grid)
+   Compiling file-format v0.3.0 (/src/apps/brick/crates/file-format)
+   Compiling commands v0.3.0 (/src/apps/brick/crates/commands)
+   Compiling image v0.25.10
+   Compiling document-edit v0.1.0 (/src/apps/slate/crates/document-edit)
+   Compiling docx v0.1.0 (/src/apps/slate/crates/docx)
+   Compiling flow v0.1.0 (/src/apps/slate/crates/flow)
+   Compiling xlsx v0.3.0 (/src/apps/brick/crates/xlsx)
+   Compiling image-io v0.1.0 (/src/apps/etch/crates/image-io)
+   Compiling gio v0.22.10
+   Compiling cairo-rs v0.22.9
+   Compiling graphene-rs v0.22.8
+   Compiling pango v0.22.9
+   Compiling gdk-pixbuf v0.22.0
+   Compiling gdk4 v0.11.5
+   Compiling gsk4 v0.11.5
+   Compiling gtk4 v0.11.5
+   Compiling etch v0.2.1 (/src/apps/etch)
+   Compiling brick v0.3.0 (/src/apps/brick)
+   Compiling slate v0.3.0 (/src/apps/slate)
+   Compiling frame v0.1.0 (/src/apps/frame)
+    Finished `release` profile [optimized + debuginfo] target(s) in 1m 06s

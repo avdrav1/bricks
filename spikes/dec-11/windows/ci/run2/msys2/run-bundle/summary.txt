@@ -1,0 +1,14 @@
+bin=D:\a\cronkite\cronkite\bundle\cronkite\bin clean=True
+screen=1024x768
+brick --version: exit=0 'brick 0.3.0'
+slate --version: exit=0 'slate 0.3.0'
+frame --version: exit=0 'frame 0.1.0'
+etch --version: exit=0 'etch 0.2.1'
+brick-sample.csv: running window_after_ms=533.3236 title='sample.csv' ws=71MB
+brick-fixture.xlsx: running window_after_ms=516.8658 title='fixture.xlsx' ws=72MB
+slate-README.md: running window_after_ms=522.3651 title='README.md' ws=70MB
+slate-fixture.docx: running window_after_ms=516.0123 title='fixture.docx' ws=72MB
+frame-fixture.pptx: running window_after_ms=503.6415 title='fixture.pptx' ws=73MB
+etch-sample.png: running window_after_ms=5583.5269 title='sample.png' ws=71MB
+brick-nofile: running window_after_ms=506.7314 title='Brick' ws=64MB
+frame-nofile: running window_after_ms=506.9088 title='Untitled' ws=71MB
