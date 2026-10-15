@@ -104,20 +104,9 @@ impl Tool {
         }
     }
 
-    /// The key that picks it (docs/specs/etch.md).
+    /// The key that picks it, from the key table ([`crate::keys::BINDINGS`]).
     pub fn key(self) -> char {
-        match self {
-            Tool::Pencil => 'P',
-            Tool::Brush => 'B',
-            Tool::Eraser => 'E',
-            Tool::Fill => 'F',
-            Tool::Picker => 'I',
-            Tool::Text => 'T',
-            Tool::Line => 'L',
-            Tool::Rectangle => 'R',
-            Tool::Ellipse => 'O',
-            Tool::Selection => 'S',
-        }
+        crate::keys::tool_key(self).expect("every tool has a key (keys::tests)")
     }
 
     /// The icon: an SVG path on a 16-unit square, stroked.

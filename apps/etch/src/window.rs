@@ -6,6 +6,7 @@
 use crate::canvas::Canvas;
 use crate::colours;
 use crate::image_menu;
+use crate::keys::{self, Command, Focus, Mods};
 use crate::recent;
 use crate::saving::Saver;
 use crate::settings::{self, Background};
@@ -75,82 +76,62 @@ pub fn install_app_actions(app: &gtk::Application) {
         })
         .build();
     app.add_action_entries([new, open, open_recent, quit]);
-    for (action, keys) in [
-        ("app.new", &["<Control>n"][..]),
-        ("app.open", &["<Control>o"]),
-        ("win.save", &["<Control>s"]),
-        // Ctrl+Shift+S and Ctrl+Shift+E are the window's key handler's too, as Ctrl+Shift+Z
-        // is (below); these show them in the menu.
-        ("win.save-as", &["<Control><Shift>s"]),
-        ("win.export", &["<Control><Shift>e"]),
-        ("app.quit", &["<Control>q"]),
-        ("window.close", &["<Control>w"]),
-        ("win.undo", &["<Control>z"]),
-        // Ctrl+Shift+Z is the window's key handler's: as an accelerator it misses a z
-        // whose keymap doesn't consume Shift (wtype's, in check_etch.sh).
-        ("win.redo", &["<Control>y"]),
-        (
-            "win.zoom-in",
-            &["<Control>plus", "<Control>equal", "<Control>KP_Add"],
-        ),
-        ("win.zoom-out", &["<Control>minus", "<Control>KP_Subtract"]),
-        ("win.actual-size", &["<Control>0", "<Control>KP_0"]),
-        ("win.fit", &["<Control>9"]),
-    ] {
-        app.set_accels_for_action(action, keys);
+    for (action, accels) in keys::accels() {
+        let accels: Vec<&str> = accels.iter().map(String::as_str).collect();
+        app.set_accels_for_action(action, &accels);
     }
 
-    let menu = gio::Menu::new();
-    let file = gio::Menu::new();
-    file.append(Some("_New Image…"), Some("app.new"));
-    file.append(Some("_Open…"), Some("app.open"));
-    file.append_submenu(Some("Open _Recent"), &recent::menu());
-    file.append(Some("_Save"), Some("win.save"));
-    file.append(Some("Save _As…"), Some("win.save-as"));
-    file.append(Some("_Export…"), Some("win.export"));
-    file.append(Some("_Close"), Some("window.close"));
-    file.append(Some("_Quit"), Some("app.quit"));
-    menu.append_submenu(Some("_File"), &file);
-    let edit = gio::Menu::new();
-    edit.append(Some("_Undo"), Some("win.undo"));
-    edit.append(Some("_Redo"), Some("win.redo"));
-    // The keys show beside each command; the window's key handler takes them, so a field
-    // or the text being typed keeps its own Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A, Escape, and
-    // Delete.
-    let section = |items: &[(&str, &str, &str)]| {
-        let section = gio::Menu::new();
-        for &(label, action, accel) in items {
-            let item = gio::MenuItem::new(Some(label), Some(action));
-            item.set_attribute_value("accel", Some(&accel.to_variant()));
-            section.append_item(&item);
+    // Each item shows its key from the key table (the window's key handler's too).
+    let append = |menu: &gio::Menu, items: &[(&str, &str)]| {
+        for &(label, action) in items {
+            menu.append_item(&keys::menu_item(label, action));
         }
-        section
     };
+    let menu_of = |items: &[(&str, &str)]| {
+        let menu = gio::Menu::new();
+        append(&menu, items);
+        menu
+    };
+    let menu = gio::Menu::new();
+    let file = menu_of(&[("_New Image…", "app.new"), ("_Open…", "app.open")]);
+    file.append_submenu(Some("Open _Recent"), &recent::menu());
+    append(
+        &file,
+        &[
+            ("_Save", "win.save"),
+            ("Save _As…", "win.save-as"),
+            ("_Export…", "win.export"),
+            ("_Close", "window.close"),
+            ("_Quit", "app.quit"),
+        ],
+    );
+    menu.append_submenu(Some(&keys::mnemonic("File")), &file);
+    let edit = menu_of(&[("_Undo", "win.undo"), ("_Redo", "win.redo")]);
     edit.append_section(
         None,
-        &section(&[
-            ("Cu_t", "win.cut", "<Control>x"),
-            ("_Copy", "win.copy", "<Control>c"),
-            ("_Paste", "win.paste", "<Control>v"),
+        &menu_of(&[
+            ("Cu_t", "win.cut"),
+            ("_Copy", "win.copy"),
+            ("_Paste", "win.paste"),
         ]),
     );
     edit.append_section(
         None,
-        &section(&[
-            ("Select _All", "win.select-all", "<Control>a"),
-            ("_Deselect", "win.deselect", "Escape"),
-            ("De_lete", "win.delete", "Delete"),
+        &menu_of(&[
+            ("Select _All", "win.select-all"),
+            ("_Deselect", "win.deselect"),
+            ("De_lete", "win.delete"),
         ]),
     );
-    menu.append_submenu(Some("_Edit"), &edit);
-    let view = gio::Menu::new();
-    view.append(Some("Zoom _In"), Some("win.zoom-in"));
-    view.append(Some("Zoom _Out"), Some("win.zoom-out"));
-    view.append(Some("_Actual Size"), Some("win.actual-size"));
-    view.append(Some("_Fit to Window"), Some("win.fit"));
-    menu.append_submenu(Some("_View"), &view);
-    menu.append_submenu(Some("_Image"), &image_menu::menu());
-    image_menu::set_accels(app);
+    menu.append_submenu(Some(&keys::mnemonic("Edit")), &edit);
+    let view = menu_of(&[
+        ("Zoom _In", "win.zoom-in"),
+        ("Zoom _Out", "win.zoom-out"),
+        ("_Actual Size", "win.actual-size"),
+        ("_Fit to Window", "win.fit"),
+    ]);
+    menu.append_submenu(Some(&keys::mnemonic("View")), &view);
+    menu.append_submenu(Some(&keys::mnemonic("Image")), &image_menu::menu());
     app.set_menubar(Some(&menu));
 }
 
@@ -719,7 +700,7 @@ fn hex_controls(controls: &Rc<Controls>) -> gtk::Box {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     row.set_valign(gtk::Align::Center);
     let hex = &controls.hex;
-    let label = gtk::Label::with_mnemonic("_Hex");
+    let label = gtk::Label::with_mnemonic(&keys::mnemonic("Hex"));
     label.set_mnemonic_widget(Some(hex));
     row.append(&label);
     hex.set_width_chars(9);
@@ -786,7 +767,7 @@ fn colour_row(controls: &Rc<Controls>) -> gtk::Box {
     let palette = colours::palette(pick);
     palette.set_valign(gtk::Align::Center);
     row.append(&palette);
-    let label = gtk::Label::with_mnemonic("_Size");
+    let label = gtk::Label::with_mnemonic(&keys::mnemonic("Size"));
     label.set_mnemonic_widget(Some(&controls.size));
     controls.sizing.append(&label);
     controls.size.set_valign(gtk::Align::Center);
@@ -813,7 +794,7 @@ fn colour_row(controls: &Rc<Controls>) -> gtk::Box {
     controls.sizing.append(&controls.size);
     controls.sizing.append(&gtk::Label::new(Some("px")));
     row.append(&controls.sizing);
-    let label = gtk::Label::with_mnemonic("_Tolerance");
+    let label = gtk::Label::with_mnemonic(&keys::mnemonic("Tolerance"));
     label.set_mnemonic_widget(Some(&controls.tolerance));
     controls.tolerating.append(&label);
     controls.tolerance.set_valign(gtk::Align::Center);
@@ -1046,114 +1027,37 @@ fn show(
         }
     });
 
-    // Space held: dragging pans. Escape drops a shape being dragged, or deselects.
-    // Ctrl+Shift+Z redoes, Ctrl+Shift+S is Save As, Ctrl+Shift+E Export, and Ctrl+Shift+X
-    // and Ctrl+Shift+R crop and resize the canvas (shifted, a letter may arrive upper
-    // case, which an accelerator misses).
-    // Ctrl+X, Ctrl+C, and Ctrl+V cut, copy, and paste, Ctrl+A selects all, Delete deletes
-    // the selection, and the arrows move it a pixel (Shift: ten).
-    // Unmodified, a tool's key picks it and X swaps the colours. None of them while a
-    // text field (the size) has the keys, and only the Ctrl+Shift ones while text is
-    // typed on the canvas: its keys are its letters.
-    let keys = gtk::EventControllerKey::new();
-    keys.set_propagation_phase(gtk::PropagationPhase::Capture);
-    keys.connect_key_pressed({
+    // The window's keys from the key table (keys::BINDINGS): the tool keys, X, Space,
+    // Escape, Delete, the arrows, Ctrl+X, C, V, and A, and the Ctrl+Shift ones (shifted, a
+    // letter may arrive upper case, which an accelerator misses). None of them while a
+    // field has the keys, and only the Ctrl+Shift ones while text is typed on the canvas:
+    // its keys are its letters (keys::takes).
+    let handler = gtk::EventControllerKey::new();
+    handler.set_propagation_phase(gtk::PropagationPhase::Capture);
+    handler.connect_key_pressed({
         let (canvas, window, controls) = (canvas.clone(), window.downgrade(), controls.clone());
         move |_, key, _, state| {
             let Some(window) = window.upgrade() else {
                 return glib::Propagation::Proceed;
             };
-            let field = GtkWindowExt::focus(&window)
-                .is_some_and(|f| f.is::<gtk::Text>() || f.is::<gtk::TextView>());
-            if field {
+            let focus = focus_of(&window, &canvas);
+            if focus == Focus::Field {
                 return glib::Propagation::Proceed;
             }
             // While an Image menu command runs, the image waits for it.
             if canvas.busy() {
                 return glib::Propagation::Stop;
             }
-            let text = canvas.typing();
-            let mods = state & gtk::accelerator_get_default_mod_mask();
-            let redo = gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK;
-            if key == gdk::Key::space && !text {
-                canvas.set_space(true);
-                return glib::Propagation::Stop;
+            let binding = Mods::of(state)
+                .zip(key.to_lower().name())
+                .and_then(|(mods, name)| keys::window_binding(&name, mods, focus));
+            match binding.is_some_and(|b| run(&window, &canvas, &controls, b.command)) {
+                true => glib::Propagation::Stop,
+                false => glib::Propagation::Proceed,
             }
-            if key == gdk::Key::Escape && canvas.cancel_shape() {
-                return glib::Propagation::Stop;
-            }
-            if mods == redo && matches!(key, gdk::Key::z | gdk::Key::Z) {
-                canvas.redo();
-                return glib::Propagation::Stop;
-            }
-            let shifted = match key {
-                gdk::Key::s | gdk::Key::S => Some("save-as"),
-                gdk::Key::e | gdk::Key::E => Some("export"),
-                _ => None,
-            };
-            if let (true, Some(action)) = (mods == redo, shifted) {
-                ActionGroupExt::activate_action(&window, action, None);
-                return glib::Propagation::Stop;
-            }
-            if mods == redo && image_menu::shifted_key(&window, key) {
-                return glib::Propagation::Stop;
-            }
-            if text {
-                return glib::Propagation::Proceed;
-            }
-            if mods == gdk::ModifierType::CONTROL_MASK {
-                match key {
-                    gdk::Key::a | gdk::Key::A => select_all(&window, &canvas),
-                    gdk::Key::x | gdk::Key::X => {
-                        canvas.cut();
-                    }
-                    gdk::Key::c | gdk::Key::C => {
-                        canvas.copy();
-                    }
-                    gdk::Key::v | gdk::Key::V => paste(&window, &canvas),
-                    _ => return glib::Propagation::Proceed,
-                }
-                return glib::Propagation::Stop;
-            }
-            if mods.is_empty() || mods == gdk::ModifierType::SHIFT_MASK {
-                let step = if mods.is_empty() { 1 } else { 10 };
-                let by = match key {
-                    gdk::Key::Left | gdk::Key::KP_Left => Some((-step, 0)),
-                    gdk::Key::Right | gdk::Key::KP_Right => Some((step, 0)),
-                    gdk::Key::Up | gdk::Key::KP_Up => Some((0, -step)),
-                    gdk::Key::Down | gdk::Key::KP_Down => Some((0, step)),
-                    _ => None,
-                };
-                if by.is_some_and(|(dx, dy)| canvas.nudge(dx, dy)) {
-                    return glib::Propagation::Stop;
-                }
-            }
-            if !mods.is_empty() {
-                return glib::Propagation::Proceed;
-            }
-            if key == gdk::Key::Escape && canvas.deselect() {
-                return glib::Propagation::Stop;
-            }
-            if matches!(key, gdk::Key::Delete | gdk::Key::KP_Delete) && canvas.delete_selection() {
-                return glib::Propagation::Stop;
-            }
-            if matches!(key, gdk::Key::x | gdk::Key::X) {
-                controls.update(Settings::swap);
-                return glib::Propagation::Stop;
-            }
-            let picked = key.to_unicode().and_then(|c| {
-                Tool::ALL
-                    .into_iter()
-                    .find(|t| t.key() == c.to_ascii_uppercase())
-            });
-            if let Some(t) = picked {
-                ActionGroupExt::activate_action(&window, "tool", Some(&t.id().to_variant()));
-                return glib::Propagation::Stop;
-            }
-            glib::Propagation::Proceed
         }
     });
-    keys.connect_key_released({
+    handler.connect_key_released({
         let canvas = canvas.clone();
         move |_, key, _, _| {
             if key == gdk::Key::space {
@@ -1161,7 +1065,7 @@ fn show(
             }
         }
     });
-    window.add_controller(keys);
+    window.add_controller(handler);
 
     canvas.connect_changed({
         let window = window.downgrade();
@@ -1234,6 +1138,54 @@ fn paste(window: &gtk::ApplicationWindow, canvas: &Canvas) {
         ActionGroupExt::activate_action(&window, "tool", Some(&selection));
         canvas.paste(pixels, shown);
     });
+}
+
+/// Where `window`'s keys go: a field (a text field: the size, the tolerance, the hex field,
+/// the font list's search), the text typed on `canvas`, or the image.
+fn focus_of(window: &gtk::ApplicationWindow, canvas: &Canvas) -> Focus {
+    let field =
+        GtkWindowExt::focus(window).is_some_and(|f| f.is::<gtk::Text>() || f.is::<gtk::TextView>());
+    match (field, canvas.typing()) {
+        (true, _) => Focus::Field,
+        (false, true) => Focus::Typing,
+        (false, false) => Focus::Image,
+    }
+}
+
+/// Runs a key's `command` in `window`, and says whether it did anything: Escape (as
+/// Deselect) drops a shape being dragged or deselects, Delete deletes the selection, and
+/// the arrows nudge it only when there is one; otherwise the key goes on.
+fn run(
+    window: &gtk::ApplicationWindow,
+    canvas: &Canvas,
+    controls: &Controls,
+    command: Command,
+) -> bool {
+    match command {
+        Command::Tool(t) => {
+            ActionGroupExt::activate_action(window, "tool", Some(&t.id().to_variant()));
+            true
+        }
+        Command::Swap => {
+            controls.update(Settings::swap);
+            true
+        }
+        Command::Pan => {
+            canvas.set_space(true);
+            true
+        }
+        Command::Nudge(dx, dy) => canvas.nudge(dx, dy),
+        Command::DropShape => canvas.cancel_shape(),
+        Command::Action("win.deselect") => canvas.cancel_shape() || canvas.deselect(),
+        Command::Action("win.delete") => canvas.delete_selection(),
+        Command::Action(name) => {
+            if let Err(e) = WidgetExt::activate_action(window, name, None) {
+                tracing::warn!("cannot run {name}: {e}");
+            }
+            true
+        }
+        Command::Label(_) => false,
+    }
 }
 
 /// Edit → Select All: the selection becomes the tool (as in Paint, so the selection can be

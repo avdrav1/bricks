@@ -233,6 +233,14 @@
 #      nothing; its editor (+) with "#20A040" and alpha 0.25 makes the foreground
 #      #20A04040. A right-click on Custom… opens Background Colour: "#FFCC00" makes the
 #      background #FFCC00.
+# ETCH-24 acceptance: every tool on its key.
+#  29. On the canvas P, B, E, F, I, T, R, L, S, and O each pick their tool (the tool column
+#      shows it on), and X swaps the colours (and back). While text is typed every tool key
+#      and X ("pebfilrostx") goes into the text: Text stays the tool and the colours stay.
+#      So in the size field (Alt+S), the tolerance (Alt+T), the hex field (Alt+H), and the
+#      font list's search: the tool stays, and no colour swaps; back on the canvas, B picks
+#      the brush. In an open menu a tool key is the menu's: Alt+V, F fits the image to the
+#      window (the zoom leaves 100%) and the eraser stays the tool.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -1436,6 +1444,40 @@ session() {
   shown right | grep -E "^right: (Foreground Colour|Background Colour)$"
   custom "Background Colour" "#FFCC00" 1; colours background
   pkill -x etch; sleep 1
+
+  echo "== 29 keys"
+  etch >>/tmp/app.log 2>&1 & sleep 3
+  keys -M ctrl 0 -m ctrl
+  colours() { python3 /tmp/a11y.py text | grep "^Foreground" | head -1 | sed "s/^/$1: /"; }
+  desc() { python3 /tmp/a11y.py text | grep -E "^[0-9]+×[0-9]+ image" | head -1; }
+  # The tool on: the first toggle button pressed, in the tool column.
+  tool_on() { px pressed | cut -d, -f1; }
+  read mx my <<<"$(px centre)"
+  # Each tool key on the canvas picks its tool.
+  for k in p b e f i t r l s o; do keys $k; echo "key $k: $(tool_on)"; done
+  colours before; keys x; colours swapped; keys x; colours back
+  # Text being typed takes them all as letters.
+  keys t; python3 /scripts/dnd_helpers.py click $((mx - 200)) $((my - 100)); sleep 0.5
+  keys pebfilrostx; echo "typing: $(tool_on) $(desc)"; colours typing
+  keys -k Escape; sleep 0.5
+  # So do the size field (Alt+S), the tolerance (Alt+T), the hex field (Alt+H), and the
+  # search of the font list.
+  keys p; keys -M alt s -m alt; keys pebfilrostx; echo "size: $(tool_on)"; colours size
+  python3 /scripts/dnd_helpers.py click $mx $my; sleep 0.5; keys -M ctrl z -m ctrl
+  keys b; echo "after size: $(tool_on)"
+  keys f; keys -M alt t -m alt; keys pebfilrostx; echo "tolerance: $(tool_on)"; colours tolerance
+  python3 /scripts/dnd_helpers.py click $((mx + 600)) $my; sleep 0.5
+  keys -M alt h -m alt; keys pebfilrostx; echo "hex: $(tool_on)"; colours hex
+  python3 /scripts/dnd_helpers.py click $((mx + 600)) $my; sleep 0.5
+  keys t; python3 /scripts/dnd_helpers.py click $(px where Font); sleep 0.5
+  keys pebfilrostx; sleep 0.5; shot font-search; echo "font search: $(tool_on)"; colours font
+  # Escape stops the search, a second closes the list; a click off the image (which
+  # starts no text) gives the keys back to the canvas.
+  keys -k Escape -k Escape; sleep 0.5
+  python3 /scripts/dnd_helpers.py click $((mx + 600)) $my; sleep 0.5
+  # In an open menu a letter picks an item: Alt+V, F fits the image to the window.
+  keys e; keys -M alt v -m alt; keys f; sleep 0.5; echo "menu: $(tool_on) $(zoom)"
+  pkill -x etch; sleep 1
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -1794,6 +1836,22 @@ check "28: the chooser's colour, alpha included, sets the foreground" "28 colour
 check "28: ... and the field" "28 colours" "^chosen: #20A04040$"
 check "28: a right-click on Custom… chooses the background" "28 colours" "^right: Background Colour$"
 check "28: ... which takes the colour chosen" "28 colours" "^background: Foreground #20A04040, background #FFCC00$"
+for kt in p:Pencil b:Brush e:Eraser f:Fill i:"Colour Picker" t:Text r:Rectangle l:Line s:Selection o:Ellipse; do
+  check "29: ${kt%%:*} picks the ${kt#*:} tool" "29 keys" "^key ${kt%%:*}: ${kt#*:}$"
+done
+check "29: X swaps the colours" "29 keys" "^swapped: Foreground #FFFFFF, background #000000$"
+check "29: ... and again back" "29 keys" "^back: Foreground #000000, background #FFFFFF$"
+check "29: tool keys and X typed into text are its letters" "29 keys" "^typing: Text .*typing “pebfilrostx”$"
+check "29: ... swapping no colours" "29 keys" "^typing: Foreground #000000, background #FFFFFF$"
+check "29: ... nor in the size field" "29 keys" "^size: Pencil$"
+check "29: ... swapping no colours there" "29 keys" "^size: Foreground #000000, background #FFFFFF$"
+check "29: back on the canvas, B picks the brush again" "29 keys" "^after size: Brush$"
+check "29: ... nor in the tolerance" "29 keys" "^tolerance: Fill$"
+check "29: ... nor in the hex field" "29 keys" "^hex: Fill$"
+check "29: ... nor in the font list search" "29 keys" "^font search: Text$"
+absent "29: ... swapping no colours in any of them" "29 keys" "^(tolerance|hex|font): Foreground #FFFFFF"
+check "29: in an open menu a tool key is the item's (Alt+V, F fits)" "29 keys" "^menu: Eraser [0-9.]+%$"
+absent "29: ... the zoom no longer 100%" "29 keys" "^menu: .* 100%$"
 absent "the app logs no errors or panics" "app log" "^etch:|panicked|CRITICAL"
 bench=$(section "8 bench" | sed -n "s/^bench: //p")
 if [ -z "$bench" ]; then echo "FAIL 8: --bench-stroke printed nothing"; fail=1; else

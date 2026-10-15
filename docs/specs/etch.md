@@ -84,7 +84,7 @@ Every change undoes and redoes: strokes, erasing, fills, shapes, text, crop, res
 | P, B, E, F, I, T, R, L, S | Pencil, Brush, Eraser, Fill, Colour picker, Text, Rectangle, Line, Selection (Ellipse: O) |
 | X | Swap the foreground and background colours |
 
-Tool keys and X work only while no text is being typed (the size field included).
+Tool keys and X work only while no text is being typed (the size field included). No key is bound twice.
 
 ## Status bar
 
@@ -152,11 +152,12 @@ Built (ETCH-15 to ETCH-20):
 
 ## ET3: desktop polish
 
-Built so far (ETCH-21 to ETCH-23):
+Built so far (ETCH-21 to ETCH-24):
 
 - **Drag and drop.** Image files dropped on any Etch window (from a file manager) open as Open opens them, each in a window of its own: several files open several windows, a file already open brings its window forward instead, and a file that isn't an image Etch can open alerts with its name and the reason, as opening it would.
 - **Recent files.** File → Open Recent lists the last ten images opened or saved (Save and Save As, not Export), newest first, each by its name and its folder (`photo.png  (~/Pictures)`), across runs and across Etch windows and processes: the list is kept in `~/.local/state/etch/recent` (`$XDG_STATE_HOME/etch/recent`), one path a line, written atomically off the UI thread, and read again whenever a window becomes active. An image opened again moves to the top, once. Choosing one opens it as Open does; one that can't be opened any more (deleted, moved, damaged) alerts with the reason and leaves the list. With none, the submenu says "No recent images".
 - **Hex entry and the colour chooser.** Beside the colours, the Hex field (Alt+H) shows the foreground colour as `#RRGGBB` (`#RRGGBBAA` when see-through); typing `#RGB`, `#RRGGBB`, or `#RRGGBBAA` (any case, the `#` optional) and Enter sets the foreground and gives the keys back to the image. Anything else is refused: the field turns red and is marked invalid for screen readers, and the colour stays; leaving the field shows the colour again (switching to another window keeps what's typed). While the field has the keys, tool keys and X are its letters. **Custom…** opens GTK's colour chooser with alpha for the foreground, a right-click on it for the background, as the palette's clicks do; its colour, alpha included, becomes the one chosen, and Cancel changes nothing.
+- **Every tool on its key.** On the image each tool's key picks it: P the pencil, B the brush, E the eraser, F the fill, I the colour picker, T text, R the rectangle, L the line, S the selection, O the ellipse; X swaps the colours. While text is typed on the canvas, or a field has the keys (the size, the tolerance, the hex field, the font list's search), they are letters, and in an open menu a letter picks the menu's item (View's F fits the image to the window). Every key Etch binds is in one table: the tool keys, the menus' shortcuts (shown beside their commands), the selection's keys, Space, and the Alt mnemonics of the menu bar (Alt+F, E, V, I) and the colour row (Alt+H the hex field, Alt+S the size, Alt+T the tolerance); no combination is bound twice, a modifier making a different one (X swaps, Ctrl+X cuts, Ctrl+Shift+X crops). With a field holding the keys, Ctrl+Shift+X and Ctrl+Shift+R crop and resize the canvas as Ctrl+Shift+S and Ctrl+Shift+E save as and export; Shift+Escape drops a shape being dragged with Shift held.
 
 ## Non-goals for V0.1
 

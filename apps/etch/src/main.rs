@@ -19,6 +19,7 @@
 mod canvas;
 mod colours;
 mod image_menu;
+mod keys;
 mod recent;
 mod saving;
 mod settings;
