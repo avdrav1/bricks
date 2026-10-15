@@ -31,3 +31,4 @@ __pycache__/
 
 # The voiceover, made by voice.mjs
 /video/.voice
+/video/.music

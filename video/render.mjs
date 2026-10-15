@@ -14,7 +14,7 @@
 //   node render.mjs --voice-only          just make the voiceover in .voice/ (for the preview)
 //   node render.mjs --no-voice            no voiceover: captions only, timed by word count
 //   node render.mjs --audio vo.wav        a voiceover recorded elsewhere instead, against the captions; the music ducks under it
-//   node render.mjs --no-music            leave out the soundtrack (soundtrack.js)
+//   node render.mjs --no-music            leave out the song (soundtrack.js; it's fetched into .music/, not kept in the repo)
 //   node render.mjs --serve               the preview player at http://127.0.0.1:8123
 //
 // Writes the captions as WebVTT beside the MP4 too.
@@ -126,6 +126,11 @@ async function render() {
       return;
     }
 
+    // The song isn't in the repo; say how to fetch it before rendering frames.
+    const music = !args.includes("--no-music");
+    const song = await first.page.evaluate(() => V.song);
+    if (music && !existsSync(join(here, song.file))) throw new Error(`No song at video/${song.file}. Fetch it with:\n  yt-dlp -x --audio-format opus -o video/${song.file} '${song.url}'\nor render with --no-music.`);
+
     let from = Number(opt("from", 0)), to = Number(opt("to", duration));
     const sceneId = opt("scene");
     if (sceneId) {
@@ -144,7 +149,6 @@ async function render() {
 
     // The soundtrack renders in its own page while the frames do, and comes
     // back as a WAV in base64 slices (one string of it would be ~80 MB).
-    const music = !args.includes("--no-music");
     const soundtrack = !music && !speak
       ? Promise.resolve(null)
       : (async () => {

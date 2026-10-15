@@ -350,6 +350,7 @@ const V = (() => {
   }
 
   // cutName: play that cut instead of the whole edit.
+  let current = null;
   function init(cutName) {
     stage = document.getElementById("stage");
     if (edit) {
@@ -365,6 +366,7 @@ const V = (() => {
       s.root = html(`<section class="scene" data-scene="${s.id}"></section>`);
       stage.appendChild(s.root);
     }
+    current = cuts[cutName] ? cutName : null;
     layout(cutName);
     for (const s of scenes) s.update = s.build(s.root, s) || (() => {});
     captionEl = stage.appendChild(html(`<div id="caption"></div>`));
@@ -389,5 +391,5 @@ const V = (() => {
 
   const list = () => shots.map((s) => ({ id: s.id, start: s.start, end: s.end }));
 
-  return { W, H, FPS, clamp, lerp, ease, p, tw, track, typed, typedEnd, hash, blink, fmt, html, css, text, markup, cls, show, scene, order, cut, tr, defer, settled, setVoice, voiceLines, voiceTrack, init, seek, keys, pointer, vtt, list, get duration() { return total; } };
+  return { W, H, FPS, clamp, lerp, ease, p, tw, track, typed, typedEnd, hash, blink, fmt, html, css, text, markup, cls, show, scene, order, cut, tr, defer, settled, setVoice, voiceLines, voiceTrack, init, seek, keys, pointer, vtt, list, get duration() { return total; }, get cutName() { return current; } };
 })();
