@@ -36,7 +36,7 @@ One RGBA8 raster per document (straight alpha), whatever the file format: JPEG's
 
 ## Canvas
 
-Zoom in, zoom out, fit to window, actual size, pan, the image centred when smaller than the window, a visible image boundary, and a checkerboard behind transparency. Zoom runs from 10% to 3200% and keeps the point under the pointer (or the window's centre, from the keyboard) fixed. At 100% and above pixels show as sharp squares (nearest neighbour); below, the image is smoothed.
+Zoom in, zoom out, fit to window, actual size, pan, the image centred when smaller than the window, a visible image boundary, and a checkerboard behind transparency. Zoom runs from 10% to 3200% and keeps the point under the pointer (or the window's centre, from the keyboard) fixed. At 100% and above pixels show as sharp squares (nearest neighbour); below, the image is smoothed. The image is drawn in the screen's own pixels, at any display scale and with any of GTK's renderers (GL, Vulkan, or the software one): every edge of the image, of its 256-pixel tiles, and of the checkerboard's squares falls on a screen pixel's edge, so the tiles meet without a seam, a one-colour image shows that colour and nothing else at every zoom, and the checkerboard's squares are crisp up to the image's edge.
 
 ## Tools
 

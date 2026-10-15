@@ -257,6 +257,18 @@
 #      Keep for Later shows the file and keeps the journal. An Untitled image drawn on
 #      and killed: `etch` alone opens an Untitled 1024×768 image and asks (an untitled
 #      image); Restore shows as much ink as was drawn, "• Untitled", and Ctrl+Z none.
+# ETCH-26 acceptance: tiles meet without seams; the checkerboard snaps to pixels.
+#  31. At output scale 1, then 2 (2560x1440), then 1.5 (1920x1080, fractional: the canvas
+#      starts between device pixels), each with the default renderer (GL here, on
+#      llvmpipe; the renderer logged by GSK_DEBUG=renderer) and with GSK_RENDERER=cairo:
+#      `etch seam-1024x768.png` (opaque #3366CC, 4x3 tiles of 256 px) at 100%, Fit, 50%,
+#      and 200%, and a 600x450 one at Fit (above 100%), show only that colour inside the
+#      box its exact pixels span (2 px in, within 1 a channel): no line along a tile edge.
+#      Transparent 400x300 and 401x301 images at 100% (one of them half a pixel off the
+#      pixel grid each way) and 1501x1001 at Fit show the checkerboard crisp to their
+#      edges: only its light and grey, over the image's whole rectangle (400x300 device
+#      pixels at scale 1, 800x600 at 2, 600x450 at 1.5), the line around the image right
+#      outside it.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -436,6 +448,74 @@ elif cmd == "count":
     box = [at(x, y) for y in range(y0, y1) for x in range(x0, x1)]
     n = sum(1 for p in box if all(abs(a - b) <= 8 for a, b in zip(p, want)))
     print("all" if n == len(box) else f"{n}/{len(box)}")
+elif cmd == "solid":
+    # Section 31: the opaque image of colour HEX on screen: the box its exact pixels span
+    # (from runs of 8), and the pixels inside it, 2 px in, more than 1 a channel off it.
+    p = GdkPixbuf.Pixbuf.new_from_file(sys.argv[2])
+    w, h, rs, nc, px = p.get_width(), p.get_height(), p.get_rowstride(), p.get_n_channels(), p.get_pixels()
+    want = bytes.fromhex(sys.argv[3])
+    unit = want + (b"\xff" if nc == 4 else b"")
+    rows = []
+    for y in range(h):
+        row = px[y * rs:y * rs + w * nc]
+        i = row.find(unit * 8)
+        while i >= 0 and i % nc:
+            i = row.find(unit * 8, i + 1)
+        j = row.rfind(unit * 8)
+        while j >= 0 and j % nc:
+            j = row.rfind(unit * 8, 0, j + 8 * nc - 1)
+        if i >= 0:
+            rows.append((y, i // nc, j // nc + 8))
+    if not rows:
+        sys.exit("no pixel of " + sys.argv[3])
+    t, b = rows[0][0], rows[-1][0] + 1
+    l, r = min(a for _, a, _ in rows), max(z for _, _, z in rows)
+    off = 0
+    for y in range(t + 2, b - 2):
+        row = px[y * rs:y * rs + w * nc]
+        if row[(l + 2) * nc:(r - 2) * nc] == unit * (r - l - 4):
+            continue
+        off += sum(1 for x in range(l + 2, r - 2) if max(abs(row[x * nc + k] - want[k]) for k in range(3)) > 1)
+    print(f"{r - l}x{b - t} off {off}")
+elif cmd == "crisp":
+    # Section 31: the checkerboard of a transparent image: the box its squares span (its
+    # grey runs, grown over whole rows and columns of its two colours), its pixels neither
+    # the light (255) nor the grey (204), within 1 a channel, and whether the ring just
+    # outside the box is the line around the image (darker than 180): squares end on pixel
+    # edges, none blended with what is beside them.
+    p = GdkPixbuf.Pixbuf.new_from_file(sys.argv[2])
+    w, h, rs, nc, px = p.get_width(), p.get_height(), p.get_rowstride(), p.get_n_channels(), p.get_pixels()
+    at = lambda x, y: px[y * rs + x * nc:y * rs + x * nc + 3]
+    ok = lambda p: max(p) - min(p) <= 1 and (min(p) >= 254 or 203 <= min(p) <= 205)
+    grey = bytes([204, 204, 204] + [255] * (nc - 3)) * 6
+    rows = []
+    for y in range(h):
+        row = px[y * rs:y * rs + w * nc]
+        i = row.find(grey)
+        while i >= 0 and i % nc:
+            i = row.find(grey, i + 1)
+        j = row.rfind(grey)
+        while j >= 0 and j % nc:
+            j = row.rfind(grey, 0, j + len(grey) - 1)
+        if i >= 0:
+            rows.append((y, i // nc, j // nc + 6))
+    if not rows:
+        sys.exit("no checkerboard")
+    t, b = rows[0][0], rows[-1][0] + 1
+    l, r = min(a for _, a, _ in rows), max(z for _, _, z in rows)
+    while l > 0 and all(ok(at(l - 1, y)) for y in range(t, b)):
+        l -= 1
+    while r < w and all(ok(at(r, y)) for y in range(t, b)):
+        r += 1
+    while t > 0 and all(ok(at(x, t - 1)) for x in range(l, r)):
+        t -= 1
+    while b < h and all(ok(at(x, b)) for x in range(l, r)):
+        b += 1
+    off = sum(1 for y in range(t, b) for x in range(l, r) if not ok(at(x, y)))
+    ring = [at(x, y) for x in range(l - 1, r + 1) for y in (t - 1, b)]
+    ring += [at(x, y) for y in range(t, b) for x in (l - 1, r)]
+    framed = "framed" if all(max(p) < 180 for p in ring) else "not framed"
+    print(f"{r - l}x{b - t} off {off} {framed}")
 elif cmd == "dark":
     # In the screen rectangle X0 Y0 X1 Y1: black pixels (darker than 60 in every channel),
     # and the width the pixels darker than 100 span (the ink of text, not the grey frame).
@@ -652,7 +732,7 @@ def activate(app):
 app.connect("activate", activate)
 app.run([])
 PY
-# The images sections 11, 12, and 19 open.
+# The images sections 11, 12, 19, and 31 open.
 cat > /tmp/mk.py <<"PY"
 import gi
 gi.require_version("GdkPixbuf", "2.0")
@@ -673,6 +753,11 @@ make("/tmp/t.png", 400, 300, t, "png", True)
 make("/tmp/s.png", 400, 300, lambda x, y: (255, 255, 255, 255), "png", True)
 make("/tmp/c.jpg", 320, 200, lambda x, y: (x * 255 // 319, y * 255 // 199, 128), "jpeg", False, ["quality"], ["90"])
 make("/tmp/n.png", 400, 300, lambda x, y: (255,) * 3 if x < 200 else (249,) * 3, "png", False)
+opaque = lambda x, y: (0x33, 0x66, 0xCC, 255)
+make("/tmp/seam-1024x768.png", 1024, 768, opaque, "png", True)
+make("/tmp/seam-600x450.png", 600, 450, opaque, "png", True)
+for w, h in ((400, 300), (401, 301), (1501, 1001)):
+    make(f"/tmp/seam-{w}x{h}.png", w, h, lambda x, y: (0, 0, 0, 0), "png", True)
 PY
 # Section 26: the titles of the etch windows (sorted), which has the focus, and which
 # asked to come forward (xdg-activation: sway marks such a window urgent).
@@ -1563,6 +1648,35 @@ session() {
   echo "untitled undone: $(title) ink $(px ink /tmp/shot.png)"
   quit
   grep -E "journaled|restored| (WARN|ERROR) |panicked|CRITICAL" /tmp/recovery.log | sed -E "s/^.* INFO etch::[a-z_]+: //; s/^/log: /"
+
+  echo "== 31 seams"
+  # Each way a new etch, its renderer logged: the default one, then cairo (the software
+  # renderer of GTK); at output scale 1, then 2, then 1.5.
+  seams() { # SCALE RENDERER
+    local tag="s$1 $2" log=/tmp/seams-$1-$2.log env=()
+    [ "$2" = cairo ] && env=(env GSK_RENDERER=cairo)
+    launch() { GSK_DEBUG=renderer "${env[@]}" etch "$@" >>"$log" 2>&1 & sleep 3; }
+    solid() { shot "seams-$1-$2"; echo "$tag $2 $(zoom): $(px solid /tmp/shot.png 3366CC)"; }
+    launch /tmp/seam-1024x768.png
+    keys -M ctrl 0 -m ctrl; solid "$1" 100
+    keys -M ctrl 9 -m ctrl; solid "$1" fit
+    keys -M ctrl 0 -m ctrl; keys -M ctrl -k minus -k minus -m ctrl; solid "$1" out
+    keys -M ctrl 0 -m ctrl; keys -M ctrl -k equal -k equal -m ctrl; solid "$1" in
+    quit
+    launch /tmp/seam-600x450.png; keys -M ctrl 9 -m ctrl; solid "$1" small; quit
+    for f in 400x300 401x301 1501x1001; do
+      launch /tmp/seam-$f.png
+      shot "seams-$1-$2-$f"; echo "$tag $f $(zoom): $(px crisp /tmp/shot.png)"
+      quit
+    done
+    echo "$tag renderer: $(sed -n "s/^Using renderer .\(Gsk[A-Za-z]*\). .*/\1/p" "$log" | sort -u | paste -sd,)"
+  }
+  seams 1 default; seams 1 cairo
+  swaymsg output HEADLESS-1 resolution 2560x1440 scale 2 >/dev/null; sleep 1
+  seams 2 default; seams 2 cairo
+  swaymsg output HEADLESS-1 resolution 1920x1080 scale 1.5 >/dev/null; sleep 1
+  seams 1.5 default; seams 1.5 cairo
+  swaymsg output HEADLESS-1 resolution 1280x720 scale 1 >/dev/null
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -1967,6 +2081,26 @@ check "30: Restore shows as much ink as was drawn, marked" "30 recovery" "^untit
 check "30: one Ctrl+Z takes it all back" "30 recovery" "^untitled undone: Untitled ink 0$"
 check "30: journals are written off the UI thread, logged" "30 recovery" "^log: journaled .* bytes written in [0-9]+ ms$"
 absent "30: no warnings, errors, or panics" "30 recovery" "^log: .*(WARN|ERROR|panicked|CRITICAL)"
+for s in 1 2 1.5; do
+  # The transparent images at 100%: their rectangles in device pixels (401 x 1.5 rounds).
+  case $s in
+    1) small=400x300 odd=401x301 ;;
+    2) small=800x600 odd=802x602 ;;
+    1.5) small=600x450 odd="60[12]x45[12]" ;;
+  esac
+  for r in default cairo; do
+    w="31: scale $s, $r renderer:"
+    check "$w the renderer is $r" "31 seams" "^s$s $r renderer: $([ $r = cairo ] && echo GskCairoRenderer || echo "Gsk(GL|Vulkan)Renderer")$"
+    check "$w an opaque image over 12 tiles shows only its colour at 100%" "31 seams" "^s$s $r 100 100%: [0-9]+x[0-9]+ off 0$"
+    check "$w ... at Fit" "31 seams" "^s$s $r fit [0-9.]+%: [0-9]+x[0-9]+ off 0$"
+    check "$w ... at 50%" "31 seams" "^s$s $r out 50%: [0-9]+x[0-9]+ off 0$"
+    check "$w ... at 200%" "31 seams" "^s$s $r in 200%: [0-9]+x[0-9]+ off 0$"
+    check "$w ... and a smaller one at Fit, above 100%" "31 seams" "^s$s $r small 1[0-9]{2}(\.[0-9]+)?%: [0-9]+x[0-9]+ off 0$"
+    check "$w the checkerboard of 400x300 at 100% is crisp to its edges" "31 seams" "^s$s $r 400x300 100%: $small off 0 framed$"
+    check "$w ... and of 401x301 (the other half-pixel offset)" "31 seams" "^s$s $r 401x301 100%: $odd off 0 framed$"
+    check "$w ... and of 1501x1001 fitted" "31 seams" "^s$s $r 1501x1001 [0-9.]+%: [0-9]+x[0-9]+ off 0 framed$"
+  done
+done
 absent "the app logs no errors or panics" "app log" "^etch:|panicked|CRITICAL"
 bench=$(section "8 bench" | sed -n "s/^bench: //p")
 if [ -z "$bench" ]; then echo "FAIL 8: --bench-stroke printed nothing"; fail=1; else

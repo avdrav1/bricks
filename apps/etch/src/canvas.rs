@@ -4,7 +4,9 @@
 //! visible and dropped when an operation changes its pixels, so a stroke rebuilds a tile
 //! or two a frame however large the image. Tiles scale by nearest neighbour at 100% and
 //! above, so pixels show as squares, and trilinearly below. Behind them, a checkerboard
-//! shows through transparency; around them, a one-pixel line marks the image's edge.
+//! shows through transparency; around them, a one-pixel line marks the image's edge. All
+//! three are drawn in device pixels, their edges rounded to them ([`Device`]), so tiles
+//! meet without seams and the checkerboard's squares are crisp whatever the renderer.
 //!
 //! Input: a primary-button drag draws with the tool's tip (with the fill, a click fills
 //! with the foreground and a right-click with the background; with the colour picker, a
@@ -33,8 +35,8 @@ use std::time::Instant;
 
 /// The side of a tile texture, in image pixels.
 pub const TILE_PX: u32 = 256;
-/// The checkerboard's squares, in widget pixels.
-const CHECK: f32 = 8.0;
+/// The checkerboard's squares, in widget pixels (rounded to whole device pixels).
+const CHECK: f64 = 8.0;
 const CHECK_LIGHT: gdk::RGBA = gdk::RGBA::new(1.0, 1.0, 1.0, 1.0);
 const CHECK_DARK: gdk::RGBA = gdk::RGBA::new(0.8, 0.8, 0.8, 1.0);
 /// The line around the image.
@@ -193,32 +195,39 @@ mod imp {
                 return;
             };
             let obj = self.obj();
+            let dev = obj.device();
+            let s = dev.scale as f32;
             let (w, h) = (obj.width() as f32, obj.height() as f32);
-            let (ox, oy) = (view.origin.0 as f32, view.origin.1 as f32);
-            let (sw, sh) = (view.shown().0 as f32, view.shown().1 as f32);
             snapshot.push_clip(&graphene::Rect::new(0.0, 0.0, w, h));
+            // The image, the line around it, and what shows through it are drawn in device
+            // pixels, every edge rounded to one: tiles meet exactly, the checkerboard's
+            // squares cover whole pixels, and no renderer resamples them. (At any other
+            // scale GTK draws a scaled texture through an offscreen at widget resolution,
+            // and an edge between widget pixels comes out half covered: a seam.)
+            snapshot.save();
+            snapshot.scale(1.0 / s, 1.0 / s);
+            let shown = shown_rect(&view, dev, (0, 0), obj.image_size(), true);
+            let line = dev.scale.round().max(1.0) as f32;
             snapshot.append_color(
                 &BOUNDARY,
-                &graphene::Rect::new(ox - 1.0, oy - 1.0, sw + 2.0, sh + 2.0),
+                &graphene::Rect::new(
+                    shown.x() - line,
+                    shown.y() - line,
+                    shown.width() + 2.0 * line,
+                    shown.height() + 2.0 * line,
+                ),
             );
-            let visible = graphene::Rect::new(0.0, 0.0, w, h)
-                .intersection(&graphene::Rect::new(ox, oy, sw, sh));
+            let visible = graphene::Rect::new(0.0, 0.0, w * s, h * s).intersection(&shown);
             if let Some(visible) = visible {
-                // The checkerboard's squares start on a device pixel, so their edges cover
-                // whole pixels: drawn in the hole floating pixels leave, none of what's
-                // under it shows through between squares.
-                let scale = obj.surface_scale();
-                let check = (
-                    device_edge(view.origin.0, scale),
-                    device_edge(view.origin.1, scale),
-                );
-                self.checkerboard(snapshot, &visible, check);
-                self.draw_tiles(snapshot, &view, &visible);
-                self.draw_floating(snapshot, &view, &visible, check);
-                self.draw_preview(snapshot, &view);
+                let check = (shown.x(), shown.y());
+                self.checkerboard(snapshot, dev, &visible, check);
+                self.draw_tiles(snapshot, &view, dev, &visible);
+                self.draw_floating(snapshot, &view, dev, &visible, check);
+                self.draw_preview(snapshot, &view, dev);
             }
-            self.draw_selection(snapshot, &view);
-            self.draw_text(snapshot, &view);
+            snapshot.restore();
+            self.draw_selection(snapshot, &view, dev);
+            self.draw_text(snapshot, &view, dev);
             self.draw_tip_outline(snapshot, &view);
             snapshot.pop();
             self.last_ms.set(t0.elapsed().as_secs_f64() * 1e3);
@@ -239,28 +248,15 @@ mod imp {
             }
         }
 
-        /// The widget rectangle the `w` × `h` image pixels from `(x, y)` show in, edges
-        /// rounded to device pixels as the tiles' are.
-        fn widget_rect(
-            &self,
-            view: &View,
-            (x, y): (i64, i64),
-            (w, h): (u32, u32),
-        ) -> graphene::Rect {
-            let scale = self.obj().surface_scale();
-            let edge = |origin: f64, px: i64| device_edge(origin + px as f64 * view.zoom, scale);
-            let (x0, x1) = (edge(view.origin.0, x), edge(view.origin.0, x + w as i64));
-            let (y0, y1) = (edge(view.origin.1, y), edge(view.origin.1, y + h as i64));
-            graphene::Rect::new(x0, y0, x1 - x0, y1 - y0)
-        }
-
         /// The floating pixels, over the image as they'll land: the place they were lifted
         /// from transparent (the checkerboard), and where they are, on the image, their
-        /// pixels over the checkerboard, as they'll replace what's there.
+        /// pixels over the checkerboard, as they'll replace what's there. In device pixels,
+        /// as the tiles are.
         fn draw_floating(
             &self,
             snapshot: &gtk::Snapshot,
             view: &View,
+            dev: Device,
             visible: &graphene::Rect,
             origin: (f32, f32),
         ) {
@@ -271,20 +267,20 @@ mod imp {
             };
             if let Some(r) = f.source() {
                 let at = (r.x as i64, r.y as i64);
-                snapshot.push_clip(&self.widget_rect(view, at, (r.width, r.height)));
-                self.checkerboard(snapshot, visible, origin);
+                snapshot.push_clip(&shown_rect(view, dev, at, (r.width, r.height), true));
+                self.checkerboard(snapshot, dev, visible, origin);
                 snapshot.pop();
             }
             let (w, h) = self.obj().image_size();
             if let Some(d) = f.bounds(Rect::new(0, 0, w, h)) {
                 let at = (d.x as i64, d.y as i64);
-                snapshot.push_clip(&self.widget_rect(view, at, (d.width, d.height)));
-                self.checkerboard(snapshot, visible, origin);
+                snapshot.push_clip(&shown_rect(view, dev, at, (d.width, d.height), true));
+                self.checkerboard(snapshot, dev, visible, origin);
                 let filter = match view.zoom >= 1.0 {
                     true => gsk::ScalingFilter::Nearest,
                     false => gsk::ScalingFilter::Trilinear,
                 };
-                let shown = self.widget_rect(view, f.at(), f.size());
+                let shown = shown_rect(view, dev, f.at(), f.size(), true);
                 snapshot.append_scaled_texture(texture, filter, &shown);
                 snapshot.pop();
             }
@@ -292,11 +288,11 @@ mod imp {
 
         /// The selection's outline, just outside its pixels: dark dashes on a light line,
         /// seen on any colour.
-        fn draw_selection(&self, snapshot: &gtk::Snapshot, view: &View) {
+        fn draw_selection(&self, snapshot: &gtk::Snapshot, view: &View, dev: Device) {
             let Some((at, size)) = self.obj().selection_box() else {
                 return;
             };
-            let r = self.widget_rect(view, at, size);
+            let r = dev.to_widget(&shown_rect(view, dev, at, size, true));
             let builder = gsk::PathBuilder::new();
             builder.add_rect(&graphene::Rect::new(
                 r.x() - 0.5,
@@ -314,40 +310,31 @@ mod imp {
             snapshot.append_stroke(&outline, &dashed, &SELECTION_DARK);
         }
 
-        /// The text being typed, over the image as it will land (its pixels, scaled as the
-        /// tiles are), in a dashed frame, with the caret: a dark line on a light one, seen
-        /// on any colour.
-        fn draw_text(&self, snapshot: &gtk::Snapshot, view: &View) {
+        /// The text being typed, over the image as it will land (its pixels, drawn in device
+        /// pixels and scaled as the tiles are), in a dashed frame, with the caret: a dark
+        /// line on a light one, seen on any colour.
+        fn draw_text(&self, snapshot: &gtk::Snapshot, view: &View, dev: Device) {
             let text = self.text.borrow();
             let Some(text) = text.as_ref() else {
                 return;
             };
-            let scale = self.obj().surface_scale();
             if let Some(r) = text.raster() {
-                let edge = |origin: f64, px: u32| {
-                    let at = origin + px as f64 * view.zoom;
-                    match view.zoom >= 1.0 {
-                        true => device_edge(at, scale),
-                        false => at as f32,
-                    }
-                };
-                let (x0, x1) = (
-                    edge(view.origin.0, r.rect.x),
-                    edge(view.origin.0, r.rect.right()),
-                );
-                let (y0, y1) = (
-                    edge(view.origin.1, r.rect.y),
-                    edge(view.origin.1, r.rect.bottom()),
+                let at = (r.rect.x as i64, r.rect.y as i64);
+                let shown = shown_rect(
+                    view,
+                    dev,
+                    at,
+                    (r.rect.width, r.rect.height),
+                    view.zoom >= 1.0,
                 );
                 let filter = match view.zoom >= 1.0 {
                     true => gsk::ScalingFilter::Nearest,
                     false => gsk::ScalingFilter::Trilinear,
                 };
-                snapshot.append_scaled_texture(
-                    &r.texture,
-                    filter,
-                    &graphene::Rect::new(x0, y0, x1 - x0, y1 - y0),
-                );
+                snapshot.save();
+                snapshot.scale(1.0 / dev.scale as f32, 1.0 / dev.scale as f32);
+                snapshot.append_scaled_texture(&r.texture, filter, &shown);
+                snapshot.restore();
             }
             let (x, y, w, h) = text_area(text, view);
             let builder = gsk::PathBuilder::new();
@@ -364,7 +351,7 @@ mod imp {
             snapshot.append_stroke(&frame, &dashed, &FRAME_DARK);
             let (cx, cy, ch) = text.caret();
             let (cx, cy) = view.to_widget((cx, cy));
-            let cx = device_edge(cx, scale);
+            let cx = (dev.x(cx) as f64 / dev.scale) as f32;
             let ch = (ch * view.zoom) as f32;
             snapshot.append_color(
                 &CARET_LIGHT,
@@ -374,27 +361,15 @@ mod imp {
         }
 
         /// The shape being dragged, over the image: its rectangles where the image's pixels
-        /// they cover are on screen (edges rounded to device pixels from 100% up, as the
-        /// tiles' are).
-        fn draw_preview(&self, snapshot: &gtk::Snapshot, view: &View) {
+        /// they cover are on screen, in device pixels (edges rounded to them from 100% up,
+        /// as the tiles' are).
+        fn draw_preview(&self, snapshot: &gtk::Snapshot, view: &View, dev: Device) {
             let preview = self.preview.borrow();
-            if preview.is_empty() {
-                return;
-            }
-            let scale = self.obj().surface_scale();
-            let edge = |origin: f64, px: u32| {
-                let at = origin + px as f64 * view.zoom;
-                match view.zoom >= 1.0 {
-                    true => device_edge(at, scale),
-                    false => at as f32,
-                }
-            };
             for (r, c) in preview.iter() {
-                let (x0, x1) = (edge(view.origin.0, r.x), edge(view.origin.0, r.right()));
-                let (y0, y1) = (edge(view.origin.1, r.y), edge(view.origin.1, r.bottom()));
+                let at = (r.x as i64, r.y as i64);
                 snapshot.append_color(
                     &colours::rgba(*c),
-                    &graphene::Rect::new(x0, y0, x1 - x0, y1 - y0),
+                    &shown_rect(view, dev, at, (r.width, r.height), view.zoom >= 1.0),
                 );
             }
         }
@@ -428,34 +403,45 @@ mod imp {
             snapshot.append_stroke(&path, &gsk::Stroke::new(1.0), &dark);
         }
 
+        /// The checkerboard over `visible` (device pixels), its squares from `(ox, oy)`, each
+        /// [`CHECK`] widget pixels rounded to whole device pixels.
         fn checkerboard(
             &self,
             snapshot: &gtk::Snapshot,
+            dev: Device,
             visible: &graphene::Rect,
             (ox, oy): (f32, f32),
         ) {
-            let cell = graphene::Rect::new(ox, oy, 2.0 * CHECK, 2.0 * CHECK);
+            let check = (CHECK * dev.scale).round().max(1.0) as f32;
+            let cell = graphene::Rect::new(ox, oy, 2.0 * check, 2.0 * check);
             snapshot.push_repeat(visible, Some(&cell));
             snapshot.append_color(&CHECK_LIGHT, &cell);
-            snapshot.append_color(&CHECK_DARK, &graphene::Rect::new(ox, oy, CHECK, CHECK));
+            snapshot.append_color(&CHECK_DARK, &graphene::Rect::new(ox, oy, check, check));
             snapshot.append_color(
                 &CHECK_DARK,
-                &graphene::Rect::new(ox + CHECK, oy + CHECK, CHECK, CHECK),
+                &graphene::Rect::new(ox + check, oy + check, check, check),
             );
             snapshot.pop();
         }
 
-        /// The tiles `visible` (widget coordinates) shows, built where they aren't yet.
-        fn draw_tiles(&self, snapshot: &gtk::Snapshot, view: &View, visible: &graphene::Rect) {
+        /// The tiles `visible` (device pixels) shows, built where they aren't yet.
+        fn draw_tiles(
+            &self,
+            snapshot: &gtk::Snapshot,
+            view: &View,
+            dev: Device,
+            visible: &graphene::Rect,
+        ) {
             let doc = self.doc.borrow();
             let Some(doc) = doc.as_ref() else { return };
             let image = doc.image();
             let (iw, ih) = (image.width(), image.height());
             let (cols, rows) = (iw.div_ceil(TILE_PX), ih.div_ceil(TILE_PX));
-            let a = view.to_image((visible.x() as f64, visible.y() as f64));
+            let widget = |px: f32| px as f64 / dev.scale;
+            let a = view.to_image((widget(visible.x()), widget(visible.y())));
             let b = view.to_image((
-                (visible.x() + visible.width()) as f64,
-                (visible.y() + visible.height()) as f64,
+                widget(visible.x() + visible.width()),
+                widget(visible.y() + visible.height()),
             ));
             let range = |lo: f64, hi: f64, n: u32, len: u32| {
                 let first = (lo.floor().max(0.0) as u32).min(len - 1) / TILE_PX;
@@ -464,11 +450,8 @@ mod imp {
             };
             // Tile edges come from one formula, rounded to device pixels, so neighbours
             // meet exactly: no seam and no overlap, whatever the renderer. Rounding moves
-            // a tile at most half a screen pixel from where the view puts it.
-            let scale = self.obj().surface_scale();
-            let edge = |origin: f64, px: u32, len: u32| {
-                device_edge(origin + px.min(len) as f64 * view.zoom, scale)
-            };
+            // a tile at most half a device pixel from where the view puts it.
+            let at = |origin: f64, px: u32, len: u32| origin + px.min(len) as f64 * view.zoom;
             let filter = if view.zoom >= 1.0 {
                 gsk::ScalingFilter::Nearest
             } else {
@@ -478,13 +461,13 @@ mod imp {
             tiles.resize((cols * rows) as usize, None);
             for row in range(a.1, b.1, rows, ih) {
                 let (y0, y1) = (
-                    edge(view.origin.1, row * TILE_PX, ih),
-                    edge(view.origin.1, (row + 1) * TILE_PX, ih),
+                    dev.y(at(view.origin.1, row * TILE_PX, ih)),
+                    dev.y(at(view.origin.1, (row + 1) * TILE_PX, ih)),
                 );
                 for col in range(a.0, b.0, cols, iw) {
                     let (x0, x1) = (
-                        edge(view.origin.0, col * TILE_PX, iw),
-                        edge(view.origin.0, (col + 1) * TILE_PX, iw),
+                        dev.x(at(view.origin.0, col * TILE_PX, iw)),
+                        dev.x(at(view.origin.0, (col + 1) * TILE_PX, iw)),
                     );
                     let texture = tiles[(row * cols + col) as usize]
                         .get_or_insert_with(|| tile_texture(image, col, row));
@@ -540,9 +523,57 @@ fn tile_rect(image: &Image, col: u32, row: u32) -> Rect {
     )
 }
 
-/// Screen coordinate `at` rounded to the device pixels of a surface at `scale`.
-fn device_edge(at: f64, scale: f64) -> f32 {
-    ((at * scale).round() / scale) as f32
+/// Where the canvas lands on the device pixels of the surface it shows on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Device {
+    /// Device pixels a widget pixel.
+    scale: f64,
+    /// How far into a device pixel the widget's top-left corner falls, across and down:
+    /// 0 unless a fractional scale puts it between pixels.
+    offset: (f64, f64),
+}
+
+impl Device {
+    /// Widget x coordinate `at` rounded to the nearest device pixel edge, in device pixels
+    /// from the widget's left edge.
+    fn x(self, at: f64) -> f32 {
+        ((at * self.scale + self.offset.0).round() - self.offset.0) as f32
+    }
+
+    /// Widget y coordinate `at` rounded to the nearest device pixel edge, in device pixels
+    /// from the widget's top edge.
+    fn y(self, at: f64) -> f32 {
+        ((at * self.scale + self.offset.1).round() - self.offset.1) as f32
+    }
+
+    /// A rectangle in device pixels as widget coordinates.
+    fn to_widget(self, r: &graphene::Rect) -> graphene::Rect {
+        let s = self.scale as f32;
+        graphene::Rect::new(r.x() / s, r.y() / s, r.width() / s, r.height() / s)
+    }
+}
+
+/// The device rectangle the `w` × `h` image pixels from `(x, y)` show in, from the
+/// widget's top-left corner: with `snap`, edges rounded to device pixels, from the same
+/// formula as the tiles', so what's drawn there lines up with them pixel for pixel.
+fn shown_rect(
+    view: &View,
+    dev: Device,
+    (x, y): (i64, i64),
+    (w, h): (u32, u32),
+    snap: bool,
+) -> graphene::Rect {
+    let at = |origin: f64, px: i64| origin + px as f64 * view.zoom;
+    let (ax0, ax1) = (at(view.origin.0, x), at(view.origin.0, x + w as i64));
+    let (ay0, ay1) = (at(view.origin.1, y), at(view.origin.1, y + h as i64));
+    let (x0, x1, y0, y1) = match snap {
+        true => (dev.x(ax0), dev.x(ax1), dev.y(ay0), dev.y(ay1)),
+        false => {
+            let s = |at: f64| (at * dev.scale) as f32;
+            (s(ax0), s(ax1), s(ay0), s(ay1))
+        }
+    };
+    graphene::Rect::new(x0, y0, x1 - x0, y1 - y0)
 }
 
 /// Where the text's frame goes, in widget coordinates `(x, y, width, height)`: around the
@@ -1226,11 +1257,10 @@ impl Canvas {
     /// edge on screen is on its edge in the image, and a drag across 200 screen pixels at
     /// 100% selects 200.
     fn to_shown(&self, view: &View, (x, y): (f64, f64)) -> (f64, f64) {
-        let scale = self.surface_scale();
-        let origin = |o: f64| device_edge(o, scale) as f64;
+        let dev = self.device();
         (
-            (x - origin(view.origin.0)) / view.zoom,
-            (y - origin(view.origin.1)) / view.zoom,
+            (x - dev.x(view.origin.0) as f64 / dev.scale) / view.zoom,
+            (y - dev.y(view.origin.1) as f64 / dev.scale) / view.zoom,
         )
     }
 
@@ -1465,11 +1495,25 @@ impl Canvas {
         }
     }
 
-    /// The scale of the surface the canvas shows on: device pixels a widget pixel.
-    fn surface_scale(&self) -> f64 {
-        self.native()
-            .and_then(|n| n.surface())
-            .map_or(1.0, |s| s.scale())
+    /// Where the canvas lands on the device pixels of the surface it shows on: their scale,
+    /// and how far into one its top-left corner falls.
+    fn device(&self) -> Device {
+        let Some(native) = self.native() else {
+            return Device {
+                scale: 1.0,
+                offset: (0.0, 0.0),
+            };
+        };
+        let scale = native.surface().map_or(1.0, |s| s.scale());
+        let corner = self
+            .compute_point(&native, &graphene::Point::zero())
+            .unwrap_or_else(graphene::Point::zero);
+        let (sx, sy) = native.surface_transform();
+        let into = |at: f64| (at * scale).rem_euclid(1.0);
+        Device {
+            scale,
+            offset: (into(corner.x() as f64 + sx), into(corner.y() as f64 + sy)),
+        }
     }
 
     fn with_doc<T>(&self, f: impl FnOnce(&mut Document) -> T) -> T {
@@ -1712,5 +1756,66 @@ impl Canvas {
             n += 1.0;
         }
         imp.notches.set(n);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn view(zoom: f64, origin: (f64, f64)) -> View {
+        View {
+            zoom,
+            origin,
+            size: (1280.0, 720.0),
+            image: (1024.0, 768.0),
+        }
+    }
+
+    #[test]
+    fn tiles_meet_on_device_pixel_edges() {
+        let scales = [(1.0, (0.0, 0.0)), (2.0, (0.0, 0.0)), (1.25, (0.25, 0.75))];
+        let views = [
+            view(1.0, (128.5, 41.5)),
+            view(0.791_341_1, (61.37, 16.0)),
+            view(1.037_7, (100.25, 3.6)),
+            view(0.5, (200.5, 100.5)),
+        ];
+        for (scale, offset) in scales {
+            let dev = Device { scale, offset };
+            for v in &views {
+                let mut right = None;
+                for col in 0..4 {
+                    let r = shown_rect(v, dev, (col * 256, 0), (256, 256), true);
+                    // Each edge is a whole device pixel of the surface, and each tile starts
+                    // where the one before it ends.
+                    for edge in [
+                        r.x() as f64 + offset.0,
+                        (r.x() + r.width()) as f64 + offset.0,
+                    ] {
+                        assert!((edge - edge.round()).abs() < 1e-3, "{edge} at {scale}");
+                    }
+                    if let Some(x) = right {
+                        assert_eq!(r.x(), x);
+                    }
+                    right = Some(r.x() + r.width());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn at_100_percent_an_image_spans_its_pixels_times_the_scale() {
+        for scale in [1.0, 2.0, 3.0] {
+            let dev = Device {
+                scale,
+                offset: (0.0, 0.0),
+            };
+            let r = shown_rect(&view(1.0, (128.5, 41.5)), dev, (0, 0), (401, 301), true);
+            assert_eq!(
+                (r.width(), r.height()),
+                (401.0 * scale as f32, 301.0 * scale as f32)
+            );
+        }
     }
 }
