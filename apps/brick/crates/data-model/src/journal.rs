@@ -29,7 +29,6 @@ use csv_engine::{Charset, Encoding, RowIndex};
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::ops::Range;
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -374,7 +373,7 @@ fn write_header<W: Write>(w: &mut Writer<W>, h: &JournalHeader) -> io::Result<()
     w.blob(
         h.path
             .as_ref()
-            .map_or(&[][..], |p| p.as_os_str().as_bytes()),
+            .map_or(&[][..], |p| p.as_os_str().as_encoded_bytes()),
     )?;
     w.u8(u8::from(h.path.is_some()))?;
     w.u8(match h.kind {
@@ -415,7 +414,8 @@ fn read_header_from<R: Read>(r: &mut Reader<R>) -> Result<(JournalHeader, u8), J
         }
     };
     let header = JournalHeader {
-        path: titled.then(|| PathBuf::from(std::ffi::OsString::from_vec(path))),
+        // DEC-11 SPIKE EXPERIMENT: was OsStringExt::from_vec (unix-only)
+        path: titled.then(|| PathBuf::from(String::from_utf8_lossy(&path).into_owned())),
         kind,
         file_size: r.u64()?,
         file_mtime_ns: r.u64()?,

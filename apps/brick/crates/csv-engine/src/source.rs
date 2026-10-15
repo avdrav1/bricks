@@ -70,6 +70,7 @@ impl Drop for Source {
     }
 }
 
+#[cfg(unix)]
 #[allow(unsafe_code)] // signal handling has no safe interface; kept to this module
 mod guard {
     use std::cell::UnsafeCell;
@@ -178,6 +179,18 @@ mod guard {
 
     pub fn faulted(i: usize) -> bool {
         SLOTS[i].faulted.load(Ordering::Acquire)
+    }
+}
+
+// DEC-11 SPIKE EXPERIMENT: no truncation guard off unix (Windows can't truncate a mapped file).
+#[cfg(not(unix))]
+mod guard {
+    pub fn register(_start: usize, _len: usize) -> Option<usize> {
+        Some(0)
+    }
+    pub fn unregister(_i: usize) {}
+    pub fn faulted(_i: usize) -> bool {
+        false
     }
 }
 

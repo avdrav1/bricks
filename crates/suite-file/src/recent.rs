@@ -7,7 +7,6 @@
 
 use std::ffi::OsStr;
 use std::io::Write;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 pub const MAX: usize = 10;
@@ -25,7 +24,8 @@ impl Recent {
                 bytes
                     .split(|&b| b == b'\n')
                     .filter(|l| l.first() == Some(&b'/'))
-                    .map(|l| PathBuf::from(OsStr::from_bytes(l)))
+                    // DEC-11 SPIKE EXPERIMENT: was OsStrExt::from_bytes (unix-only)
+                    .map(|l| PathBuf::from(String::from_utf8_lossy(l).into_owned()))
                     .take(MAX)
                     .collect()
             })
@@ -41,7 +41,7 @@ impl Recent {
     /// `file` (made absolute) goes to the top, once; the oldest past [`MAX`] go.
     pub fn add(&mut self, file: &Path) -> std::io::Result<()> {
         let file = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_owned());
-        if !file.is_absolute() || file.as_os_str().as_bytes().contains(&b'\n') {
+        if !file.is_absolute() || file.as_os_str().as_encoded_bytes().contains(&b'\n') {
             return Ok(()); // can't be kept one per line
         }
         self.reload();
@@ -75,7 +75,7 @@ impl Recent {
             .with_extension(format!("tmp-{}", std::process::id()));
         let mut out = std::fs::File::create(&tmp)?;
         for f in &self.files {
-            out.write_all(f.as_os_str().as_bytes())?;
+            out.write_all(f.as_os_str().as_encoded_bytes())?;
             out.write_all(b"\n")?;
         }
         out.sync_all()?;

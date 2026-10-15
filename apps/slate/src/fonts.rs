@@ -25,7 +25,7 @@ use gtk::prelude::*;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
-use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+// DEC-11 SPIKE EXPERIMENT: was use std::os::unix::fs::{DirBuilderExt, PermissionsExt} (unix-only)
 use std::path::{Path, PathBuf};
 
 /// An embedded face written to the private font directory.
@@ -84,11 +84,8 @@ fn private_dir() -> std::io::Result<PathBuf> {
         .filter(|p| p.is_absolute() && p.is_dir())
         .unwrap_or_else(glib::user_cache_dir);
     let dir = base.join("slate").join("fonts");
-    std::fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(&dir)?;
-    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+    // DEC-11 SPIKE EXPERIMENT: mode 0700 (DirBuilderExt, PermissionsExt) dropped
+    std::fs::DirBuilder::new().recursive(true).create(&dir)?;
     Ok(dir)
 }
 
@@ -225,7 +222,7 @@ mod fc {
     use gtk::glib::translate::{from_glib, ToGlibPtr};
     use gtk::prelude::*;
     use std::ffi::{c_char, c_int, c_void, CStr, CString};
-    use std::os::unix::ffi::OsStrExt;
+    // DEC-11 SPIKE EXPERIMENT: was use std::os::unix::ffi::OsStrExt (unix-only)
     use std::path::Path;
 
     #[repr(C)]
@@ -277,7 +274,7 @@ mod fc {
         /// Add the font file at `path` to the configuration's application fonts; the
         /// families fontconfig reads from it, or `None` if it can't.
         pub fn add(&self, path: &Path) -> Option<Vec<String>> {
-            let file = CString::new(path.as_os_str().as_bytes()).ok()?;
+            let file = CString::new(path.as_os_str().as_encoded_bytes()).ok()?;
             let config = self.config();
             // SAFETY: a valid configuration (or null for the current one) and a
             // NUL-terminated path; fontconfig copies what it keeps.

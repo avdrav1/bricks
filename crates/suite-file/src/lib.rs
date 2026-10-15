@@ -28,6 +28,7 @@ pub fn document_name(path: &Path) -> Cow<'_, str> {
 mod tests {
     use super::*;
     use std::ffi::OsStr;
+    #[cfg(unix)]
     use std::os::unix::ffi::OsStrExt;
 
     #[test]
@@ -42,6 +43,7 @@ mod tests {
         assert_eq!(document_name(Path::new("a/..")), "a/..");
     }
 
+    #[cfg(unix)]
     #[test]
     fn document_name_replaces_invalid_utf8() {
         let path = Path::new(OsStr::from_bytes(b"/tmp/bad\xff.csv"));

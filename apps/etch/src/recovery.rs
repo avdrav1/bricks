@@ -21,7 +21,7 @@ use gtk::glib;
 use image_io::Format;
 use image_model::Image;
 use std::io::{self, BufReader, Read, Write};
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
+// DEC-11 SPIKE EXPERIMENT: was use std::os::unix::ffi::{OsStrExt, OsStringExt} (unix-only)
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 pub use suite_file::recovery::{identity, now_ms, Store};
@@ -92,7 +92,7 @@ fn write_header(w: &mut impl Write, h: &Header) -> io::Result<()> {
     }
     match &h.path {
         Some(p) => {
-            let bytes = p.as_os_str().as_bytes();
+            let bytes = p.as_os_str().as_encoded_bytes();
             let len = u32::try_from(bytes.len())
                 .ok()
                 .filter(|&n| n <= MAX_PATH)
@@ -146,7 +146,7 @@ fn read_header_from(r: &mut impl Read) -> io::Result<Header> {
             }
             let mut bytes = vec![0; len as usize];
             r.read_exact(&mut bytes)?;
-            Some(PathBuf::from(std::ffi::OsString::from_vec(bytes)))
+            Some(PathBuf::from(String::from_utf8_lossy(&bytes).into_owned()))
         }
         false => None,
     };

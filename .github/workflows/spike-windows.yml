@@ -88,6 +88,14 @@ jobs:
           "PKG_CONFIG_PATH=C:\gtk\lib\pkgconfig" >> $env:GITHUB_ENV
       - name: Toolchain
         run: cargo --version && rustc -vV && pkg-config --modversion gtk4
+      - name: File semantics probe (no HOME, as from Explorer)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force probe | Out-Null
+          Remove-Item env:HOME -ErrorAction SilentlyContinue
+          cargo run --release --manifest-path spikes/dec-11/windows/fsprobe/Cargo.toml *> probe\fsprobe.txt
+          Get-Content probe\fsprobe.txt
       - name: Check, test, build
         run: spikes/dec-11/windows/ci_build.sh logs
       - name: Run apps (gvsbuild PATH)
@@ -101,3 +109,4 @@ jobs:
           path: |
             logs
             run-msvc
+            probe

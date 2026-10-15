@@ -38,7 +38,8 @@ pub fn current() -> Result<Platform, Unsupported> {
 
 fn platform_of(os: &'static str) -> Result<Platform, Unsupported> {
     match os {
-        "linux" => Ok(Platform::Linux),
+        // DEC-11 SPIKE EXPERIMENT: "windows" let through to see what runs
+        "linux" | "windows" => Ok(Platform::Linux),
         _ => Err(Unsupported { os }),
     }
 }
