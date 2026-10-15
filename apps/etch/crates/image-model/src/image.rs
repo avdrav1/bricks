@@ -153,6 +153,11 @@ impl Image {
         self.data[i..i + 4].copy_from_slice(&color.to_bytes());
     }
 
+    /// Every pixel's bytes, row after row, a pixel an item.
+    pub(crate) fn pixels(&self) -> &[[u8; 4]] {
+        self.data.as_chunks::<4>().0
+    }
+
     fn offset(&self, x: u32, y: u32) -> usize {
         (y as usize * self.width as usize + x as usize) * 4
     }

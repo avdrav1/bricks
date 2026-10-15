@@ -2,7 +2,7 @@
 
 use crate::brush::Coverage;
 use crate::geom::join;
-use crate::{Brush, Image, Pencil, Rect, TILE};
+use crate::{Brush, Color, Fill, Image, Pencil, Rect, TILE};
 use std::collections::BTreeMap;
 
 /// Pointer positions beyond this many pixels off the image clamp to it, so far-off points
@@ -99,6 +99,7 @@ impl Stroke {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
     Stroke(Stroke),
+    Fill(Fill),
 }
 
 impl Operation {
@@ -107,6 +108,7 @@ impl Operation {
     fn apply(&self, image: &mut Image) -> Option<Rect> {
         match self {
             Operation::Stroke(s) => s.apply(image),
+            Operation::Fill(f) => f.apply(image, |_, _, _, _| {}),
         }
     }
 }
@@ -235,7 +237,9 @@ impl Document {
     /// Continues the stroke under way to `to`; does nothing without one.
     pub fn extend_stroke(&mut self, to: (f64, f64)) -> Option<Rect> {
         let step = self.live.as_mut()?;
-        let Operation::Stroke(stroke) = &mut step.op;
+        let Operation::Stroke(stroke) = &mut step.op else {
+            return None;
+        };
         let p = pixel(to);
         let last = *stroke.points.last().expect("a stroke starts with a point");
         if p == last {
@@ -256,6 +260,48 @@ impl Document {
                 self.undone.clear();
             }
         }
+    }
+
+    /// Fills the 4-connected region of the pixel at `at` (in image pixels; fractions floor)
+    /// with `color`: every pixel reached through neighbours whose channels are each within
+    /// `tolerance` of the clicked pixel's (0: its exact colour; fully transparent pixels
+    /// match each other whatever colour they carry). One undo step, keeping only the tiles
+    /// the fill wrote to. Nothing happens off the image or when an exact fill would put
+    /// down the colour already there. Ends any stroke under way.
+    pub fn fill(&mut self, at: (f64, f64), color: Color, tolerance: u8) -> Option<Rect> {
+        self.end_stroke();
+        let (x, y) = pixel(at);
+        let (w, h) = (self.image.width(), self.image.height());
+        if x < 0 || y < 0 || x >= w as i64 || y >= h as i64 {
+            return None;
+        }
+        let fill = Fill {
+            at: (x as u32, y as u32),
+            color,
+            tolerance,
+        };
+        let mut before = Saved::default();
+        // Which tiles are saved: the fill writes a row span at a time, many to a tile.
+        let cols = w.div_ceil(TILE);
+        let mut saved = vec![false; (cols * h.div_ceil(TILE)) as usize];
+        let changed = fill.apply(&mut self.image, |image, y, x0, x1| {
+            let row = y / TILE;
+            for col in x0 / TILE..x1.div_ceil(TILE) {
+                let k = (row * cols + col) as usize;
+                if !saved[k] {
+                    saved[k] = true;
+                    before.cover(image, Saved::tile_rect(image, (col, row)));
+                }
+            }
+        })?;
+        self.done.push(Step {
+            op: Operation::Fill(fill),
+            before,
+            id: self.next_id,
+        });
+        self.next_id += 1;
+        self.undone.clear();
+        Some(changed)
     }
 
     pub fn can_undo(&self) -> bool {

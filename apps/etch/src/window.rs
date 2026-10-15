@@ -362,11 +362,13 @@ impl Status {
 }
 
 /// What the tool column, the colour row, the size, and the keys set, and the widgets that
-/// show it: the canvas draws with its tip.
+/// show it: the canvas acts with the current tool.
 struct Controls {
     settings: Cell<Settings>,
     canvas: Canvas,
     indicator: colours::Indicator,
+    /// The size's label, field, and unit, shown while the tool has a size.
+    sizing: gtk::Box,
     size: gtk::SpinButton,
     /// The brush's Hard and Soft buttons, shown while the brush is the tool.
     edge: gtk::Box,
@@ -384,10 +386,11 @@ impl Controls {
 
     fn show(&self) {
         let s = self.settings.get();
-        self.canvas.set_tip(s.tip());
+        self.canvas.set_action(s.action());
         self.indicator.set(s.foreground, s.background);
-        if self.size.value() as u32 != s.width() {
-            self.size.set_value(s.width() as f64);
+        self.sizing.set_visible(s.width().is_some());
+        if let Some(w) = s.width().filter(|&w| self.size.value() as u32 != w) {
+            self.size.set_value(w as f64);
         }
         self.edge.set_visible(s.tool == Tool::Brush);
         let edge = if s.soft { &self.soft } else { &self.hard };
@@ -436,7 +439,7 @@ fn colour_row(controls: &Rc<Controls>) -> gtk::Box {
     row.append(&palette);
     let label = gtk::Label::with_mnemonic("_Size");
     label.set_mnemonic_widget(Some(&controls.size));
-    row.append(&label);
+    controls.sizing.append(&label);
     controls.size.set_valign(gtk::Align::Center);
     controls
         .size
@@ -449,8 +452,9 @@ fn colour_row(controls: &Rc<Controls>) -> gtk::Box {
             }
         }
     });
-    row.append(&controls.size);
-    row.append(&gtk::Label::new(Some("px")));
+    controls.sizing.append(&controls.size);
+    controls.sizing.append(&gtk::Label::new(Some("px")));
+    row.append(&controls.sizing);
     controls.soft.connect_toggled({
         let controls = Rc::downgrade(controls);
         move |soft| {
@@ -481,6 +485,7 @@ fn show(
         settings: Cell::new(Settings::default()),
         canvas: canvas.clone(),
         indicator: colours::Indicator::new(),
+        sizing: gtk::Box::new(gtk::Orientation::Horizontal, 12),
         size: gtk::SpinButton::with_range(
             *tools::SIZES.start() as f64,
             *tools::SIZES.end() as f64,

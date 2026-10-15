@@ -16,10 +16,24 @@ pub enum Tool {
     Pencil,
     Brush,
     Eraser,
+    Fill,
+}
+
+/// What the canvas does with the pointer's buttons under the current tool.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Action {
+    /// A primary-button drag draws with the tip.
+    Draw(Tip),
+    /// A click fills the region under it with the foreground, a right-click with the
+    /// background.
+    Fill {
+        foreground: Color,
+        background: Color,
+    },
 }
 
 impl Tool {
-    pub const ALL: [Tool; 3] = [Tool::Pencil, Tool::Brush, Tool::Eraser];
+    pub const ALL: [Tool; 4] = [Tool::Pencil, Tool::Brush, Tool::Eraser, Tool::Fill];
 
     /// The `tool` action's target for it.
     pub fn id(self) -> &'static str {
@@ -27,6 +41,7 @@ impl Tool {
             Tool::Pencil => "pencil",
             Tool::Brush => "brush",
             Tool::Eraser => "eraser",
+            Tool::Fill => "fill",
         }
     }
 
@@ -39,6 +54,7 @@ impl Tool {
             Tool::Pencil => "Pencil",
             Tool::Brush => "Brush",
             Tool::Eraser => "Eraser",
+            Tool::Fill => "Fill",
         }
     }
 
@@ -48,6 +64,7 @@ impl Tool {
             Tool::Pencil => 'P',
             Tool::Brush => 'B',
             Tool::Eraser => 'E',
+            Tool::Fill => 'F',
         }
     }
 
@@ -63,6 +80,10 @@ impl Tool {
             // A tilted block, its band, and the line it rubs along.
             Tool::Eraser => {
                 "M 2 9.5 L 8 3.5 L 13 8.5 L 8 13.5 L 6 13.5 Z M 5 6.5 L 10 11.5 M 8 13.5 L 14.5 13.5"
+            }
+            // A paint bucket tipped right: its body, rim, and handle, and a drop falling.
+            Tool::Fill => {
+                "M 2.5 8 L 7.5 3 L 12.5 8 L 8 12.5 L 7 12.5 Z M 2.5 8 L 12.5 8 M 7.5 3 L 5.5 1 M 13.5 10 C 12.5 11.5 12.3 13.5 13.5 13.5 C 14.7 13.5 14.5 11.5 13.5 10 Z"
             }
         }
     }
@@ -97,22 +118,24 @@ impl Default for Settings {
 }
 
 impl Settings {
-    /// The current tool's size.
-    pub fn width(&self) -> u32 {
+    /// The current tool's size; the fill has none.
+    pub fn width(&self) -> Option<u32> {
         match self.tool {
-            Tool::Pencil => self.pencil_width,
-            Tool::Brush => self.brush_width,
-            Tool::Eraser => self.eraser_width,
+            Tool::Pencil => Some(self.pencil_width),
+            Tool::Brush => Some(self.brush_width),
+            Tool::Eraser => Some(self.eraser_width),
+            Tool::Fill => None,
         }
     }
 
-    /// Sets the current tool's size, kept within [`SIZES`].
+    /// Sets the current tool's size, kept within [`SIZES`]; nothing for a tool without one.
     pub fn set_width(&mut self, width: u32) {
         let w = width.clamp(*SIZES.start(), *SIZES.end());
         match self.tool {
             Tool::Pencil => self.pencil_width = w,
             Tool::Brush => self.brush_width = w,
             Tool::Eraser => self.eraser_width = w,
+            Tool::Fill => {}
         }
     }
 
@@ -121,20 +144,24 @@ impl Settings {
         std::mem::swap(&mut self.foreground, &mut self.background);
     }
 
-    /// What a drag with the current tool draws with: the pencil and the brush in the
-    /// foreground, the eraser to transparency, each at its size.
-    pub fn tip(&self) -> Tip {
+    /// What the canvas does with the current tool: the pencil and the brush draw in the
+    /// foreground, the eraser to transparency, each at its size; the fill fills.
+    pub fn action(&self) -> Action {
         match self.tool {
-            Tool::Pencil => Tip::Pencil(Pencil {
+            Tool::Pencil => Action::Draw(Tip::Pencil(Pencil {
                 color: self.foreground,
                 width: self.pencil_width,
-            }),
-            Tool::Brush => Tip::Brush(Brush {
+            })),
+            Tool::Brush => Action::Draw(Tip::Brush(Brush {
                 color: self.foreground,
                 width: self.brush_width,
                 soft: self.soft,
-            }),
-            Tool::Eraser => Tip::Pencil(Pencil::eraser(self.eraser_width)),
+            })),
+            Tool::Eraser => Action::Draw(Tip::Pencil(Pencil::eraser(self.eraser_width))),
+            Tool::Fill => Action::Fill {
+                foreground: self.foreground,
+                background: self.background,
+            },
         }
     }
 }
@@ -237,44 +264,55 @@ mod tests {
     #[test]
     fn each_tool_keeps_its_own_size() {
         let mut s = Settings::default();
-        assert_eq!(s.width(), 1);
+        assert_eq!(s.width(), Some(1));
         s.set_width(7);
         s.tool = Tool::Eraser;
-        assert_eq!(s.width(), 9);
+        assert_eq!(s.width(), Some(9));
         s.set_width(500);
-        assert_eq!(s.width(), 100);
+        assert_eq!(s.width(), Some(100));
         s.set_width(0);
-        assert_eq!(s.width(), 1);
+        assert_eq!(s.width(), Some(1));
         s.tool = Tool::Brush;
-        assert_eq!(s.width(), 8);
+        assert_eq!(s.width(), Some(8));
+        s.tool = Tool::Fill;
+        assert_eq!(s.width(), None);
+        s.set_width(30);
         s.tool = Tool::Pencil;
-        assert_eq!(s.tip().width(), 7);
+        assert_eq!(s.width(), Some(7));
     }
 
     #[test]
-    fn the_pencil_and_brush_draw_in_the_foreground_and_the_eraser_ignores_both() {
+    fn each_tool_acts_with_the_colours() {
         let red = Color::rgb(237, 28, 36);
         let mut s = Settings {
             foreground: red,
             ..Settings::default()
         };
-        let pencil = |c| Tip::Pencil(Pencil { color: c, width: 1 });
-        assert_eq!(s.tip(), pencil(red));
+        let pencil = |c| Action::Draw(Tip::Pencil(Pencil { color: c, width: 1 }));
+        assert_eq!(s.action(), pencil(red));
         s.swap();
         assert_eq!((s.foreground, s.background), (Color::WHITE, red));
-        assert_eq!(s.tip(), pencil(Color::WHITE));
+        assert_eq!(s.action(), pencil(Color::WHITE));
         s.tool = Tool::Brush;
         let brush = |soft| {
-            Tip::Brush(Brush {
+            Action::Draw(Tip::Brush(Brush {
                 color: Color::WHITE,
                 width: 8,
                 soft,
-            })
+            }))
         };
-        assert_eq!(s.tip(), brush(true));
+        assert_eq!(s.action(), brush(true));
         s.soft = false;
-        assert_eq!(s.tip(), brush(false));
+        assert_eq!(s.action(), brush(false));
         s.tool = Tool::Eraser;
-        assert_eq!(s.tip(), Tip::Pencil(Pencil::eraser(9)));
+        assert_eq!(s.action(), Action::Draw(Tip::Pencil(Pencil::eraser(9))));
+        s.tool = Tool::Fill;
+        assert_eq!(
+            s.action(),
+            Action::Fill {
+                foreground: Color::WHITE,
+                background: red
+            }
+        );
     }
 }

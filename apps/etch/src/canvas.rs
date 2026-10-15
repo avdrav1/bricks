@@ -6,16 +6,18 @@
 //! above, so pixels show as squares, and trilinearly below. Behind them, a checkerboard
 //! shows through transparency; around them, a one-pixel line marks the image's edge.
 //!
-//! Input: a primary-button drag draws with the pencil, a middle-button drag or a drag with
-//! Space held pans, the wheel pans (Shift+wheel sideways), and Ctrl+wheel zooms around the
-//! pointer. The widget emits `changed` whenever what the status bar or the Edit menu shows
-//! may have changed: the view, the history, or the pixel under the pointer.
+//! Input: a primary-button drag draws with the tool's tip (with the fill, a click fills
+//! with the foreground and a right-click with the background), a middle-button drag or a
+//! drag with Space held pans, the wheel pans (Shift+wheel sideways), and Ctrl+wheel zooms
+//! around the pointer. The widget emits `changed` whenever what the status bar or the Edit
+//! menu shows may have changed: the view, the history, or the pixel under the pointer.
 
+use crate::tools::Action;
 use crate::view::View;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{gdk, glib, graphene, gsk};
-use image_model::{Document, Image, Rect, Tip};
+use image_model::{Color, Document, Image, Rect, Tip};
 use std::time::Instant;
 
 /// The side of a tile texture, in image pixels.
@@ -68,8 +70,8 @@ mod imp {
         pub drawn: Cell<u64>,
         /// Whether the next allocation should show the image at 100% rather than fitted.
         pub actual_size: Cell<bool>,
-        /// What a primary-button drag draws with.
-        pub tip: Cell<Option<Tip>>,
+        /// What the pointer's buttons do: draw with a tip, or fill.
+        pub action: Cell<Option<Action>>,
     }
 
     #[glib::object_subclass]
@@ -155,11 +157,19 @@ mod imp {
     }
 
     impl Canvas {
+        /// What a primary-button drag draws with, if it draws.
+        pub(super) fn tip(&self) -> Option<Tip> {
+            match self.action.get()? {
+                Action::Draw(tip) => Some(tip),
+                Action::Fill { .. } => None,
+            }
+        }
+
         /// The tip's size around the pointer, where a drag would draw, once it's larger
         /// than a few screen pixels: a dark ring on a light one, seen on any colour. Not
         /// while panning.
         fn draw_tip_outline(&self, snapshot: &gtk::Snapshot, view: &View) {
-            let (Some(tip), Some(p)) = (self.tip.get(), self.pointer.get()) else {
+            let (Some(tip), Some(p)) = (self.tip(), self.pointer.get()) else {
                 return;
             };
             let w = tip.width().max(1) as f64;
@@ -384,9 +394,9 @@ impl Canvas {
         self.change_view(View::fit);
     }
 
-    /// What a primary-button drag draws with.
-    pub fn set_tip(&self, tip: Tip) {
-        self.imp().tip.set(Some(tip));
+    /// What the pointer's buttons do.
+    pub fn set_action(&self, action: Action) {
+        self.imp().action.set(Some(action));
         self.queue_draw();
     }
 
@@ -415,14 +425,22 @@ impl Canvas {
         })
     }
 
-    /// Starts a pencil stroke at widget point `at`.
+    /// Starts a stroke at widget point `at`, when the tool draws.
     pub fn draw_begin(&self, at: (f64, f64)) {
         let Some(view) = self.view() else { return };
-        let Some(tip) = self.imp().tip.get() else {
+        let Some(tip) = self.imp().tip() else {
             return;
         };
         let changed = self.with_doc(|d| d.begin_stroke(tip, view.to_image(at)));
         self.imp().drag.set(Drag::Draw);
+        self.invalidate(changed);
+    }
+
+    /// Fills the region under widget point `at` with `color` (exact colour), one undo
+    /// step. Synchronous: an 8K fill takes under 200 ms (ETCH-9).
+    pub fn fill(&self, at: (f64, f64), color: Color) {
+        let Some(view) = self.view() else { return };
+        let changed = self.with_doc(|d| d.fill(view.to_image(at), color, 0));
         self.invalidate(changed);
     }
 
@@ -492,9 +510,18 @@ impl Canvas {
                 };
                 canvas.grab_focus();
                 let imp = canvas.imp();
-                match g.current_button() {
-                    1 if !imp.space.get() => canvas.draw_begin((x, y)),
-                    1 | 2 => {
+                let fill = match imp.action.get() {
+                    Some(Action::Fill {
+                        foreground,
+                        background,
+                    }) => Some((foreground, background)),
+                    _ => None,
+                };
+                match (g.current_button(), fill) {
+                    (1, Some((fg, _))) if !imp.space.get() => canvas.fill((x, y), fg),
+                    (3, Some((_, bg))) if !imp.space.get() => canvas.fill((x, y), bg),
+                    (1, None) if !imp.space.get() => canvas.draw_begin((x, y)),
+                    (1 | 2, _) => {
                         imp.drag.set(Drag::Pan { last: (0.0, 0.0) });
                         canvas.set_cursor_from_name(Some("grabbing"));
                     }
@@ -597,7 +624,7 @@ impl Canvas {
 
     /// Redraws when the pointer moved and the tip's outline follows it.
     fn redraw_outline(&self) {
-        let (tip, view) = (self.imp().tip.get(), self.view());
+        let (tip, view) = (self.imp().tip(), self.view());
         if let (Some(tip), Some(view)) = (tip, view) {
             if tip.width() as f64 * view.zoom >= OUTLINE_MIN_PX {
                 self.queue_draw();

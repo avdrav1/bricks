@@ -70,6 +70,12 @@
 #      core and grey pixels fading to white on each side; Hard and another drag draw a
 #      line 15 px black with no grey; Ctrl+Z takes back the hard line and leaves the soft
 #      one, another Ctrl+Z the soft one, and Ctrl+Y gives it back the same.
+# ETCH-9 acceptance: the fill bucket.
+#  14. a box drawn with the pencil (size 3), Red the foreground and Indigo the background:
+#      F picks the fill (the tool column shows it on) and hides the size; a click inside
+#      the box fills it red to its edges, the white outside untouched; a right-click
+#      outside fills the outside indigo, the inside staying red. Ctrl+Z takes back the
+#      outside, another Ctrl+Z the inside, and Ctrl+Y fills the inside again.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -234,6 +240,14 @@ elif cmd == "profile":
     black = sum(1 for p in col if max(p) < 60)
     grey = sum(1 for p in col if max(p) >= 60 and min(p) < 245 and max(p) - min(p) <= 3)
     print(f"black {black} soft {grey}")
+elif cmd == "count":
+    # Pixels of colour HEX (within 8 a channel) in the screen rectangle X0 Y0 X1 Y1.
+    at = pixels(sys.argv[2])
+    x0, y0, x1, y1 = map(int, sys.argv[3:7])
+    want = tuple(int(sys.argv[7][i:i + 2], 16) for i in (0, 2, 4))
+    box = [at(x, y) for y in range(y0, y1) for x in range(x0, x1)]
+    n = sum(1 for p in box if all(abs(a - b) <= 8 for a, b in zip(p, want)))
+    print("all" if n == len(box) else f"{n}/{len(box)}")
 PY
 # The images sections 11 and 12 open.
 cat > /tmp/mk.py <<"PY"
@@ -499,6 +513,31 @@ session() {
   echo "redone soft: $(same "$soft" "$(px profile /tmp/shot.png $mx $((my - 80)) $((my - 40)))")"
   keys p; echo "key p: edge $(tool Hard) $(tool Soft)"
   pkill -x etch; sleep 1
+
+  echo "== 14 fill"
+  etch >>/tmp/app.log 2>&1 & sleep 3
+  keys -M ctrl 0 -m ctrl
+  read mx my <<<"$(px centre)"
+  l=$((mx - 100)); r=$((mx + 100)); t=$((my - 60)); b=$((my + 60))
+  keys -M alt s -m alt; keys -M ctrl a -m ctrl; keys 3; keys -k Return
+  for seg in "$l $t $r $t" "$r $t $r $b" "$r $b $l $b" "$l $b $l $t"; do
+    python3 /scripts/dnd_helpers.py drag $seg; sleep 0.3
+  done
+  python3 /tmp/a11y.py press Red; sleep 0.5
+  read x y <<<"$(px where Indigo)"; python3 /scripts/dnd_helpers.py click $x $y 1 right; sleep 0.5
+  keys f; echo "key f: fill $(tool Fill) pencil $(tool Pencil)"
+  echo "sizes shown: $(python3 /tmp/a11y.py text | grep -c "^Size$")"
+  inside() { px count /tmp/shot.png $((l + 4)) $((t + 4)) $((r - 3)) $((b - 3)) $1; }
+  outside() { px count /tmp/shot.png $((l - 60)) $t $((l - 20)) $b $1; }
+  python3 /scripts/dnd_helpers.py click $mx $my; sleep 0.5
+  shot filled; echo "filled: inside red $(inside ED1C24) outside white $(outside FFFFFF)"
+  python3 /scripts/dnd_helpers.py click $((l - 40)) $my 1 right; sleep 0.5
+  shot outside; echo "right: inside red $(inside ED1C24) outside indigo $(outside 3F48CC)"
+  keys -M ctrl z -m ctrl; shot fill-undone
+  echo "undone outside: inside red $(inside ED1C24) outside white $(outside FFFFFF)"
+  keys -M ctrl z -m ctrl; shot fill-undone2; echo "undone inside: inside white $(inside FFFFFF)"
+  keys -M ctrl y -m ctrl; shot fill-redone; echo "redone: inside red $(inside ED1C24)"
+  pkill -x etch; sleep 1
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -629,6 +668,14 @@ check "13: ... leaving the soft one" "13 brush" "^soft kept: yes$"
 check "13: another Ctrl+Z takes back the soft line" "13 brush" "^undone soft: black 0 soft 0$"
 check "13: Ctrl+Y gives it back the same" "13 brush" "^redone soft: yes$"
 check "13: the edge hides again with the pencil" "13 brush" "^key p: edge hidden hidden$"
+# ETCH-9: the fill bucket.
+check "14: F picks the fill" "14 fill" "^key f: fill on pencil off$"
+check "14: ... which has no size" "14 fill" "^sizes shown: 0$"
+check "14: a click fills the box red to its edges, the outside untouched" "14 fill" "^filled: inside red all outside white all$"
+check "14: a right-click fills the outside with the background" "14 fill" "^right: inside red all outside indigo all$"
+check "14: Ctrl+Z takes back the outside's fill" "14 fill" "^undone outside: inside red all outside white all$"
+check "14: another Ctrl+Z the inside's" "14 fill" "^undone inside: inside white all$"
+check "14: Ctrl+Y fills it again" "14 fill" "^redone: inside red all$"
 absent "the app logs no errors or panics" "app log" "^etch:|panicked|CRITICAL"
 bench=$(section "8 bench" | sed -n "s/^bench: //p")
 if [ -z "$bench" ]; then echo "FAIL 8: --bench-stroke printed nothing"; fail=1; else

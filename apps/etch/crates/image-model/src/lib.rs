@@ -10,6 +10,7 @@
 mod brush;
 mod color;
 mod document;
+mod fill;
 mod geom;
 mod image;
 mod pencil;
@@ -17,6 +18,7 @@ mod pencil;
 pub use brush::Brush;
 pub use color::Color;
 pub use document::{Document, Operation, Stroke, Tip};
+pub use fill::Fill;
 pub use geom::Rect;
 pub use image::{Image, SizeError, MAX_SIDE};
 pub use pencil::Pencil;
