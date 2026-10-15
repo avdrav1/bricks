@@ -1,0 +1,121 @@
+brew install: 9 s
+windows helper built
+desktop screenshot ok
+build-brick: exit 0 in 40 s (cargo build --release -p brick)
+build-slate: exit 0 in 21 s (cargo build --release -p slate)
+build-frame: exit 0 in 15 s (cargo build --release -p frame)
+build-etch: exit 0 in 10 s (cargo build --release -p etch)
+brick binary: 5195016 bytes; arm64
+brick --version: brick 0.3.0
+slate binary: 696552 bytes; arm64
+slate --version: slate 0.3.0
+frame binary: 697704 bytes; arm64
+frame --version: frame 0.1.0
+etch binary: 698040 bytes; arm64
+etch --version: etch 0.2.1
+run-brick: still running after 10 s (pid 3200)
+run-brick-cairo: still running after 10 s (pid 3387)
+run-brick-xlsx: still running after 10 s (pid 3638)
+run-brick-xlsx-cairo: still running after 10 s (pid 3857)
+run-slate: exited with 1 within 10 s
+run-frame: exited with 1 within 10 s
+run-etch: exited with 1 within 10 s
+allow-macos.patch applied
+build-patched-slate: exit 0 in 21 s (cargo build --release -p slate)
+build-patched-frame: exit 0 in 13 s (cargo build --release -p frame)
+build-patched-etch: exit 0 in 10 s (cargo build --release -p etch)
+run-p-slate: still running after 10 s (pid 5756)
+run-p-slate-cairo: still running after 10 s (pid 5979)
+run-p-slate-docx: still running after 10 s (pid 6205)
+run-p-slate-docx-cairo: still running after 10 s (pid 6487)
+run-p-slate-start: still running after 8 s (pid 6797)
+run-p-slate-start-cairo: still running after 8 s (pid 6954)
+run-p-frame: still running after 10 s (pid 7273)
+run-p-frame-cairo: still running after 10 s (pid 7517)
+run-p-frame-blank: still running after 8 s (pid 7790)
+run-p-frame-blank-cairo: still running after 8 s (pid 8017)
+run-p-etch: still running after 10 s (pid 8231)
+run-p-etch-cairo: still running after 10 s (pid 8478)
+run-p-etch-shot: still running after 10 s (pid 8778)
+run-p-etch-shot-cairo: still running after 10 s (pid 9030)
+run-p-frame-gsk-gl: still running after 8 s (pid 9293)
+run-p-frame-gsk-ngl: still running after 8 s (pid 9545)
+run-p-frame-gsk-vulkan: still running after 8 s (pid 9801)
+bench-brick-scroll: exit 0 in 53 s (/Users/runner/work/cronkite/cronkite/target/release/brick /Users/runner/work/cronkite/cronkite/out/samples/people.csv --bench-scroll 120)
+bench-slate-flow: exit 0 in 60 s (/Users/runner/work/cronkite/cronkite/target/release/slate /Users/runner/work/cronkite/cronkite/out/samples/fixture.docx --bench-flow)
+bench-frame-draw: exit 0 in 37 s (/Users/runner/work/cronkite/cronkite/target/release/frame /Users/runner/work/cronkite/cronkite/out/samples/fixture.pptx --bench-draw 60)
+bench-etch-stroke: exit 0 in 34 s (/Users/runner/work/cronkite/cronkite/target/release/etch --bench-stroke 120)
+lsregister Slate.app ok
+open -a Slate.app readme.md: exit 0
+open -a Slate.app fixture.docx (second, app running): exit 0
+open -n -a Slate.app --args readme.md: exit 0
+pgrep slate after: 
+dylibbundler: exit 0 in 15 s (dylibbundler -of -b -x /Users/runner/work/cronkite/cronkite/out/app/Brick.app/Contents/MacOS/brick -d /Users/runner/work/cronkite/cronkite/out/app/Brick.app/Contents/Frameworks -p @executable_path/../Frameworks/)
+Brick.app:  31M,       41 dylibs
+codesign-verify: exit 0 in 0 s (codesign --verify --deep --strict -v /Users/runner/work/cronkite/cronkite/out/app/Brick.app)
+run-app-brick-bundled: still running after 10 s (pid 16406)
+codesign-adhoc: exit 0 in 0 s (codesign --force --deep -s - /Users/runner/work/cronkite/cronkite/out/app/Brick.app)
+run-app-brick-bundled-signed: still running after 10 s (pid 17077)
+dmg: exit 0 in 16 s (hdiutil create -volname Brick -srcfolder /Users/runner/work/cronkite/cronkite/out/app/Brick.app -format UDZO -ov /Users/runner/work/cronkite/cronkite/out/app/Brick.dmg)
+Brick.dmg: 12527887 bytes
+spctl: exit 3 in 2 s (spctl --assess --type execute -vv /Users/runner/work/cronkite/cronkite/out/app/Brick.app)
+Homebrew hidden
+run-reloc-brick: still running after 10 s (pid 17928)
+reloc: libraries loaded from the bundle: 41, from /opt/homebrew: 0
+2026-10-15T18:50:28.691093Z  INFO brick: application starting
+Brick starting...
+Homebrew back
+bundle data:  22M	/opt/homebrew/share/icons/Adwaita 160K	/opt/homebrew/share/icons/hicolor  36K	/opt/homebrew/share/glib-2.0/schemas 1.4M	/opt/homebrew/lib/gdk-pixbuf-2.0 
+slate patched binary: 4127832 bytes
+frame patched binary: 2717048 bytes
+etch patched binary: 2294552 bytes
+run-f-brick-fc: still running after 10 s (pid 18270)
+run-f-slate-docx-fc: still running after 10 s (pid 18562)
+run-f-frame-scale2: still running after 10 s (pid 19064)
+run-f-brick-gldebug: still running after 10 s (pid 19537)
+run-f-help: still running after 4 s (pid 19823)
+osascript exit 0: tell application "TextEdit" to activate
+osascript exit 0: tell application "System Events" to keystroke "hello world"
+osascript exit 0: tell application "TextEdit" to quit saving no
+run-u-slate-fast-0: still running after 8 s (pid 20334)
+osascript exit 0: tell application "System Events" to set frontmost of (first process whose unix id is 20334) to true
+osascript exit 0: tell application "System Events" to keystroke "hello world"
+run-u-slate-slow-0: still running after 8 s (pid 20745)
+osascript exit 0: tell application "System Events" to set frontmost of (first process whose unix id is 20745) to true
+osascript exit 0: tell application "System Events"
+repeat with c in characters of "hello world"
+keystroke c
+delay 0.3
+end repeat
+end tell
+osascript exit 0: tell application "System Events" to keystroke "s" using control down
+slow.txt after Ctrl+S: Typed on macOS: 
+osascript exit 0: tell application "System Events" to keystroke "s" using command down
+osascript exit 0: tell application "System Events" to tell (first process whose unix id is 20745) to get name of every menu bar item of menu bar 1 -> Apple, slate, Edit, Window 
+osascript exit 0: tell application "System Events" to tell (first process whose unix id is 20745) to get name of every menu item of menu 1 of menu bar item 2 of menu bar 1 -> About slate, missing value, Settings…, missing value, Services, missing value, Hide slate, Hide Others, Show All, missing value, Quit slate 
+osascript exit 0: tell application "System Events" to tell (first process whose unix id is 20745) to click menu bar item 2 of menu bar 1
+osascript exit 0: tell application "System Events" to key code 53
+run-u-clip-0: still running after 8 s (pid 21779)
+osascript exit 0: tell application "System Events" to set frontmost of (first process whose unix id is 21779) to true
+osascript exit 0: tell application "System Events" to keystroke "a" using control down
+osascript exit 0: tell application "System Events" to keystroke "c" using control down
+pbpaste after Slate Ctrl+A Ctrl+C: Clipboard on macOS
+osascript exit 0: tell application "System Events" to keystroke "v" using control down
+run-u-brick-0: still running after 10 s (pid 22101)
+osascript exit 0: tell application "System Events" to set frontmost of (first process whose unix id is 22101) to true
+osascript exit 0: tell application "System Events" to keystroke "hello world"
+osascript exit 0: tell application "System Events" to key code 36
+osascript exit 0: tell application "System Events" to key code 125
+osascript exit 0: tell application "System Events" to keystroke "c" using control down
+pbpaste after Brick Ctrl+C: 2
+run-u-etch-0: still running after 8 s (pid 22686)
+osascript exit 0: tell application "System Events" to set frontmost of (first process whose unix id is 22686) to true
+osascript exit 0: tell application "System Events" to tell (first process whose unix id is 22686) to get name of every menu bar item of menu bar 1 -> Apple, etch, File, Edit, View, Image 
+osascript exit 0: tell application "System Events" to tell (first process whose unix id is 22686) to get name of every menu item of menu 1 of menu bar item 2 of menu bar 1 -> About etch, missing value, Settings…, missing value, Services, missing value, Hide etch, Hide Others, Show All, missing value, Quit etch 
+osascript exit 0: tell application "System Events" to tell (first process whose unix id is 22686) to click menu bar item 2 of menu bar 1
+osascript exit 0: tell application "System Events" to key code 53
+osascript exit 0: tell application "System Events" to tell appearance preferences to set dark mode to true
+run-u-dark-brick: still running after 10 s (pid 23269)
+run-u-dark-slate: still running after 10 s (pid 23639)
+run-u-dark-etch: still running after 10 s (pid 24215)
+osascript exit 0: tell application "System Events" to tell appearance preferences to set dark mode to false

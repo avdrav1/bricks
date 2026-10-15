@@ -1,0 +1,5 @@
+2026-10-15T18:27:59.805544Z  INFO slate: application starting
+Slate starting...
+
+(<unknown>:36686): Gdk-WARNING **: 18:28:19.366: gdk_frame_timings_presented() called on skipped frame.
+{"words":143,"window":[1024,677],"page":[1024,565],"columns":[480,976],"open_ms":19197.3,"switches":10,"unfinished":0,"first_frame":{"frames_max":1,"cpu_ms":{"p50":149.475,"p99":1254.318,"max":1254.318}},"whole_ms":{"p50":150.192,"p99":1254.694,"max":1254.694},"scroll":{"frames":901,"frame_cpu_ms":{"p50":20.939,"p99":70.170,"max":428.004}}}

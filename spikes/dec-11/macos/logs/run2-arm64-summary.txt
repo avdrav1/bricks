@@ -1,0 +1,92 @@
+brew install: 35 s
+windows helper built
+desktop screenshot ok
+check: exit 0 in 70 s (cargo check --workspace)
+check-all-targets: exit 101 in 58 s (cargo check --workspace --all-targets --keep-going)
+clippy: exit 101 in 24 s (cargo clippy --workspace --all-targets --all-features --keep-going -- -D warnings)
+test targets:      170, non-zero exit: 4
+brick test first_rows: exit 101; COMPILE ERROR:  
+csv-engine test fetch_perf: exit 101; COMPILE ERROR:  
+csv-engine test index_perf: exit 101; COMPILE ERROR:  
+suite-file lib suite_file: exit 101; test result: FAILED. 7 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; ; failed: recent::tests::two_windows_keep_each_others_files recent::tests::the_last_ten_files_survive_a_restart recent::tests::opened_and_saved_images_list_once_newest_first_ten_at_most 
+build-brick: exit 0 in 141 s (cargo build --release -p brick)
+build-slate: exit 0 in 34 s (cargo build --release -p slate)
+build-frame: exit 0 in 19 s (cargo build --release -p frame)
+build-etch: exit 0 in 28 s (cargo build --release -p etch)
+brick binary: 5195016 bytes; arm64
+brick --version: brick 0.3.0
+slate binary: 696552 bytes; arm64
+slate --version: slate 0.3.0
+frame binary: 697704 bytes; arm64
+frame --version: frame 0.1.0
+etch binary: 698040 bytes; arm64
+etch --version: etch 0.2.1
+run-brick: still running after 10 s (pid 24333)
+run-brick-cairo: still running after 10 s (pid 24656)
+run-brick-xlsx: still running after 10 s (pid 24934)
+run-brick-xlsx-cairo: still running after 10 s (pid 25210)
+run-slate: exited with 1 within 10 s
+run-frame: exited with 1 within 10 s
+run-etch: exited with 1 within 10 s
+allow-macos.patch applied
+build-patched-slate: exit 0 in 35 s (cargo build --release -p slate)
+build-patched-frame: exit 0 in 22 s (cargo build --release -p frame)
+build-patched-etch: exit 0 in 15 s (cargo build --release -p etch)
+run-p-slate: still running after 10 s (pid 29055)
+run-p-slate-cairo: still running after 10 s (pid 29382)
+run-p-slate-docx: still running after 10 s (pid 29702)
+run-p-slate-docx-cairo: still running after 10 s (pid 30022)
+run-p-slate-start: still running after 8 s (pid 30334)
+run-p-slate-start-cairo: still running after 8 s (pid 30958)
+run-p-frame: still running after 10 s (pid 31044)
+run-p-frame-cairo: still running after 10 s (pid 31358)
+run-p-frame-blank: still running after 8 s (pid 31658)
+run-p-frame-blank-cairo: still running after 8 s (pid 31959)
+run-p-etch: still running after 10 s (pid 32253)
+run-p-etch-cairo: still running after 10 s (pid 32599)
+run-p-etch-shot: still running after 10 s (pid 33253)
+run-p-etch-shot-cairo: still running after 10 s (pid 33560)
+run-p-frame-gsk-gl: still running after 8 s (pid 33867)
+run-p-frame-gsk-ngl: still running after 8 s (pid 34167)
+run-p-frame-gsk-vulkan: still running after 8 s (pid 34460)
+bench-brick-scroll: exit 0 in 57 s (/Users/runner/work/cronkite/cronkite/target/release/brick /Users/runner/work/cronkite/cronkite/out/samples/people.csv --bench-scroll 120)
+bench-slate-flow: exit 0 in 66 s (/Users/runner/work/cronkite/cronkite/target/release/slate /Users/runner/work/cronkite/cronkite/out/samples/fixture.docx --bench-flow)
+bench-frame-draw: exit 0 in 37 s (/Users/runner/work/cronkite/cronkite/target/release/frame /Users/runner/work/cronkite/cronkite/out/samples/fixture.pptx --bench-draw 60)
+bench-etch-stroke: exit 0 in 23 s (/Users/runner/work/cronkite/cronkite/target/release/etch --bench-stroke 120)
+run-k-slate-0: still running after 10 s (pid 40855)
+osascript exit 0: tell application "System Events" to set frontmost of (first process whose unix id is 40855) to true
+osascript exit 0: tell application "System Events" to keystroke "hello world"
+osascript exit 0: tell application "System Events" to keystroke "z" using command down
+osascript exit 0: tell application "System Events" to keystroke "z" using control down
+osascript exit 0: tell application "System Events" to keystroke "o" using command down
+osascript exit 0: tell application "System Events" to key code 53
+osascript exit 0: tell application "System Events" to keystroke "o" using control down
+osascript exit 0: tell application "System Events" to key code 53
+dark mode set
+run-d-brick: still running after 10 s (pid 41602)
+run-d-slate: still running after 10 s (pid 42167)
+run-sw-a: still running after 10 s (pid 42660)
+sweep: slate A pid 42660 running; cache: original-42660-0.docx 
+run-sw-b: still running after 10 s (pid 42993)
+sweep: slate B pid 42993 started; A alive: yes; cache now: 
+sigbus: exit 0 in 0 s (cargo test -p csv-engine --lib truncat -- --nocapture)
+test detect::tests::a_truncated_last_row_is_ignored ... ok
+test source::tests::truncation_while_mapped_reports_changed_instead_of_crashing ... ok
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 27 filtered out; finished in 0.07s
+lsregister Slate.app ok
+open -a Slate.app readme.md: exit 0
+open -a Slate.app fixture.docx (second, app running): exit 0
+open -n -a Slate.app --args readme.md: exit 0
+pgrep slate after: 
+dylibbundler: exit 0 in 16 s (dylibbundler -of -b -x /Users/runner/work/cronkite/cronkite/out/app/Brick.app/Contents/MacOS/brick -d /Users/runner/work/cronkite/cronkite/out/app/Brick.app/Contents/Frameworks -p @executable_path/../Frameworks/)
+Brick.app:  32M,       43 dylibs
+codesign-verify: exit 0 in 0 s (codesign --verify --deep --strict -v /Users/runner/work/cronkite/cronkite/out/app/Brick.app)
+run-app-brick-bundled: still running after 10 s (pid 46266)
+codesign-adhoc: exit 0 in 0 s (codesign --force --deep -s - /Users/runner/work/cronkite/cronkite/out/app/Brick.app)
+run-app-brick-bundled-signed: still running after 10 s (pid 46586)
+dmg: exit 0 in 15 s (hdiutil create -volname Brick -srcfolder /Users/runner/work/cronkite/cronkite/out/app/Brick.app -format UDZO -ov /Users/runner/work/cronkite/cronkite/out/app/Brick.dmg)
+Brick.dmg: 12801642 bytes
+spctl: exit 3 in 2 s (spctl --assess --type execute -vv /Users/runner/work/cronkite/cronkite/out/app/Brick.app)
+minos: /Users/runner/work/cronkite/cronkite/target/release/brick: 11.0 /opt/homebrew/opt/gtk4/lib/libgtk-4.1.dylib: 26.0 /opt/homebrew/opt/glib/lib/libglib-2.0.0.dylib: 26.0 /opt/homebrew/opt/pango/lib/libpango-1.0.0.dylib: 26.0 
+etch closure: dylibs: 41, 27.4 MB
+bundle data:   0B	/opt/homebrew/share/icons/Adwaita 4.0K	/opt/homebrew/share/icons/hicolor 4.0K	/opt/homebrew/share/glib-2.0/schemas 4.0K	/opt/homebrew/lib/gdk-pixbuf-2.0   0B	/opt/homebrew/share/locale 

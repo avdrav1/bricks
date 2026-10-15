@@ -1,0 +1,28 @@
+2026-10-15T18:51:14.912839Z  INFO brick: application starting
+Brick starting...
+Creating CGLContextObj (version 3.3)
+Created CGLContextObj@0x758c1c000 using Generic Float
+Using OpenGL backend Apple CGL
+OpenGL version: 4.1 (core)
+GLSL version: 4.10
+Max texture size: 16384
+Enabled features (use GDK_GL_DISABLE env var to disable):
+    debug: ✗
+    base-instance: ✗
+    buffer-storage: ✗
+    external-objects: ✗
+    external-objects-win32: ✗
+    blend-func-extended: ✓
+Creating CGLContextObj (version 3.3)
+Created CGLContextObj@0x758c20000 using Generic Float
+OpenGL version: 4.1 (core)
+GLSL version: 4.10
+Max texture size: 16384
+Enabled features (use GDK_GL_DISABLE env var to disable):
+    debug: ✗
+    base-instance: ✗
+    buffer-storage: ✗
+    external-objects: ✗
+    external-objects-win32: ✗
+    blend-func-extended: ✓
+Using renderer 'GskGLRenderer' for surface 'GdkMacosToplevelSurface'

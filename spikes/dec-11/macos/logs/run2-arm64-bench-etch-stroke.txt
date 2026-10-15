@@ -1,0 +1,5 @@
+2026-10-15T18:29:42.190615Z  INFO etch: application starting
+Etch starting...
+
+(<unknown>:40075): Gdk-WARNING **: 18:29:58.413: gdk_frame_timings_presented() called on skipped frame.
+{"image":[7680,4320],"canvas":[971,591],"zoom":"100%","frames":121,"frame_cpu_ms":{"p50":19.717,"p99":168.486,"max":394.164},"segment_ms":{"p50":0.070,"p99":0.334,"max":0.443},"snapshot_ms":{"p50":0.085,"p99":1.268,"max":1.314}}
