@@ -291,6 +291,8 @@ app)
     cp "$rel/slate" "$app/Contents/MacOS/slate"
     cp "$here/Slate.Info.plist" "$app/Contents/Info.plist"
     $lsregister -f "$app" && note "lsregister Slate.app ok"
+    # Apps LaunchServices starts get launchd's environment, not this shell's.
+    [[ -n ${GSK_RENDERER:-} ]] && launchctl setenv GSK_RENDERER "$GSK_RENDERER"
     open --stdout "$logs/app-slate.out" --stderr "$logs/app-slate.err" -a "$app" "$s/readme.md"
     note "open -a Slate.app readme.md: exit $?"
     sleep 10
