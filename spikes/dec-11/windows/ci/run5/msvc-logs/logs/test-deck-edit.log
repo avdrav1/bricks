@@ -1,0 +1,111 @@
+warning: unused import: `std::ffi::OsStr`
+ --> crates\suite-file\src\recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `dir`
+   --> crates\suite-file\src\save.rs:105:9
+    |
+105 |     let dir = dest
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_dir`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 2 warnings (run `cargo fix --lib -p suite-file` to apply 2 suggestions)
+   Compiling deck-edit v0.1.0 (D:\a\cronkite\cronkite\apps\frame\crates\deck-edit)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.62s
+     Running unittests src\lib.rs (target\debug\deps\deck_edit-b876d945d50781ea.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\canvas.rs (target\debug\deps\canvas-76ec69890a34b803.exe)
+
+running 5 tests
+test ctrl_enter_skips_footers_and_shapes_without_text ... ok
+test tab_does_nothing_inside_a_paragraph_or_past_the_limits ... ok
+test tab_at_a_paragraphs_start_moves_it_a_level_with_its_looks ... ok
+test ctrl_enter_goes_through_the_text_placeholders_in_order ... ok
+test tab_over_paragraphs_moves_them_all_as_one_step ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running tests\frames.rs (target\debug\deps\frames-f3246812e76092ce.exe)
+
+running 6 tests
+test boxes_snap_to_the_slides_edges_and_centre ... ok
+test boxes_snap_to_the_layouts_placeholders ... ok
+test boxes_snap_to_other_shapes_edges_and_centres ... ok
+test moves_and_resizes_undo_and_redo ... ok
+test a_box_snaps_to_equal_spacing_in_a_row ... ok
+test resizing_snaps_only_the_edges_held ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests\insert.rs (target\debug\deps\insert-a4289ce1b9a40646.exe)
+
+running 7 tests
+test a_shape_deletes_and_comes_back ... ok
+test a_picture_fills_the_selected_placeholder ... ok
+test a_shrink_to_fit_undoes_with_the_typing_that_caused_it ... ok
+test a_picture_fills_the_first_empty_content_placeholder ... ok
+test text_boxes_shapes_and_tables_come_in_centred_and_undo ... ok
+test without_a_placeholder_a_big_picture_scales_to_fit_the_slide ... ok
+test the_reader_gives_a_text_box_look_and_free_ids ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running tests\outline.rs (target\debug\deps\outline-dcbabdf3893fe287.exe)
+
+running 6 tests
+test other_text_is_never_touched ... ok
+test ctrl_enter_starts_an_empty_slide_after_the_carets ... ok
+test backspace_joins_bullets_and_drops_empty_slides ... ok
+test typing_an_outline_makes_its_slides ... ok
+test shift_tab_on_a_bullet_takes_the_bullets_after_it_along ... ok
+test the_outline_is_titles_bullets_and_counts ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+     Running tests\slides.rs (target\debug\deps\slides-eed973ff8a09da55.exe)
+
+running 3 tests
+test undoing_shows_the_slide_it_changes_back ... ok
+test slide_steps_undo_and_redo ... ok
+test ctrl_m_takes_the_slides_layout_or_title_and_content_after_a_title_slide ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s
+
+     Running tests\style.rs (target\debug\deps\style-f01a8b8dab207381.exe)
+
+running 7 tests
+test a_slide_takes_a_background_of_its_own ... ok
+test a_layout_change_drops_empty_placeholders_and_adds_the_new_ones ... ok
+test a_layout_change_moves_text_into_the_new_placeholders ... ok
+test a_text_look_covers_the_range_and_undoes ... ok
+test shapes_take_a_fill_and_an_outline ... ok
+test the_reader_says_where_paragraph_shape_and_background_looks_are_set ... ok
+test paragraph_looks_cover_the_paragraphs_touched ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+     Running tests\text.rs (target\debug\deps\text-da61a99f6eb99744.exe)
+
+running 4 tests
+test typing_in_a_text_box_takes_the_look_before_the_caret ... ok
+test undo_and_redo_restore_each_step ... ok
+test new_paragraphs_take_their_numbers ... ok
+test typing_in_a_placeholder_keeps_its_layouts_style ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+   Doc-tests deck_edit
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

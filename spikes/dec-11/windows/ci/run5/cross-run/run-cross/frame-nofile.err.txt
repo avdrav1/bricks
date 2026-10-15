@@ -1,0 +1,7 @@
+2026-10-15T18:46:08.539562Z  INFO frame: application starting
+Frame starting...
+Using renderer 'GskGLRenderer' for surface 'GdkWin32Toplevel'
+couldn't load font "Calibri Light, 30.874px", falling back to "Sans 30.874px", expect ugly output.
+(frame.exe:9120): Gdk-CRITICAL **: 18:46:08.815: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(frame.exe:9120): Gdk-CRITICAL **: 18:46:10.371: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed

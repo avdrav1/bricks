@@ -1,0 +1,15 @@
+   Compiling suite-ui v0.1.0 (D:\a\cronkite\cronkite\crates\suite-ui)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.29s
+     Running unittests src\lib.rs (target\debug\deps\suite_ui-d685e1ee3d24da1d.exe)
+
+running 1 test
+test tests::startup_message_names_the_app ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests suite_ui
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

@@ -1,0 +1,7 @@
+2026-10-15T18:50:49.585645Z  INFO slate: application starting
+Slate starting...
+Not using Vulkan: GdkWin32Display prefers OpenGL
+Not using GL: libEGL not available
+Not using Vulkan as fallback: Could not create a Vulkan instance: The requested version of Vulkan is not supported by the driver or is otherwise incompatible for implementation-specific reasons. (VK_ERROR_INCOMPATIBLE_DRIVER)
+Not using GL as fallback: libEGL not available
+Using renderer 'GskCairoRenderer' for surface 'GdkWin32Toplevel'

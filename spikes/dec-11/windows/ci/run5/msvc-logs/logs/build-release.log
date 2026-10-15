@@ -1,0 +1,43 @@
+   Compiling suite-file v0.1.0 (D:\a\cronkite\cronkite\crates\suite-file)
+   Compiling csv-engine v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\csv-engine)
+   Compiling formula v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\formula)
+   Compiling suite-core v0.1.0 (D:\a\cronkite\cronkite\crates\suite-core)
+warning: unused import: `std::ffi::OsStr`
+ --> crates\suite-file\src\recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `dir`
+   --> crates\suite-file\src\save.rs:105:9
+    |
+105 |     let dir = dest
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_dir`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+   Compiling suite-ui v0.1.0 (D:\a\cronkite\cronkite\crates\suite-ui)
+   Compiling document-model v0.1.0 (D:\a\cronkite\cronkite\apps\slate\crates\document-model)
+   Compiling suite-platform v0.1.0 (D:\a\cronkite\cronkite\crates\suite-platform)
+   Compiling presentation-model v0.1.0 (D:\a\cronkite\cronkite\apps\frame\crates\presentation-model)
+warning: `suite-file` (lib) generated 2 warnings (run `cargo fix --lib -p suite-file` to apply 2 suggestions)
+   Compiling data-model v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\data-model)
+   Compiling image-model v0.1.0 (D:\a\cronkite\cronkite\apps\etch\crates\image-model)
+   Compiling file-format v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\file-format)
+   Compiling xlsx v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\xlsx)
+   Compiling commands v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\commands)
+   Compiling grid v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\grid)
+   Compiling image-io v0.1.0 (D:\a\cronkite\cronkite\apps\etch\crates\image-io)
+   Compiling docx v0.1.0 (D:\a\cronkite\cronkite\apps\slate\crates\docx)
+   Compiling flow v0.1.0 (D:\a\cronkite\cronkite\apps\slate\crates\flow)
+   Compiling document-edit v0.1.0 (D:\a\cronkite\cronkite\apps\slate\crates\document-edit)
+   Compiling jobs v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\jobs)
+   Compiling pptx v0.1.0 (D:\a\cronkite\cronkite\apps\frame\crates\pptx)
+   Compiling deck-edit v0.1.0 (D:\a\cronkite\cronkite\apps\frame\crates\deck-edit)
+   Compiling slate v0.3.0 (D:\a\cronkite\cronkite\apps\slate)
+   Compiling brick v0.3.0 (D:\a\cronkite\cronkite\apps\brick)
+   Compiling etch v0.2.1 (D:\a\cronkite\cronkite\apps\etch)
+   Compiling frame v0.1.0 (D:\a\cronkite\cronkite\apps\frame)
+    Finished `release` profile [optimized + debuginfo] target(s) in 2m 09s

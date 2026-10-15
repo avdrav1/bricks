@@ -4,9 +4,11 @@ open dir and sync_all (save_atomic's last step): Err Access denied. (os error 5)
 rename over file open (std sharing): Err Access denied. (os error 5) (raw Some(5))
   content after: Ok "old"
 rename over memory-mapped file: Err Access denied. (os error 5) (raw Some(5))
-  set_len(0) on memory-mapped file (another program saving in place): Err File has a user-mapped section. (os error 1224) (raw Some(1224))
-  write+truncate open (File::create) on memory-mapped file: Err File has a user-mapped section. (os error 1224) (raw Some(1224))
-  mapping still reads: true
+  mapping still reads the old bytes: true
+set_len(0) on memory-mapped file: Err File has a user-mapped section. (os error 1224) (raw Some(1224))
+File::create (truncate) on memory-mapped file: Err File has a user-mapped section. (os error 1224) (raw Some(1224))
+write in place, same length, on memory-mapped file: Ok ()
+  mapping sees the in-place write: true
 remove memory-mapped file: Ok ()
   exists after: true ; mapping still reads: true
   exists after unmapping: false
@@ -27,4 +29,4 @@ env TEMP=Some("C:\\users\\root\\AppData\\Local\\Temp")
 std::env::home_dir=Some("C:\\users\\root") temp_dir="C:\\users\\root\\AppData\\Local\\Temp\\"
 canonicalize="\\\\?\\C:\\users\\root\\AppData\\Local\\Temp\\fsprobe-32\\recent.csv" starts with '/': false is_absolute: true
 Brick's state dir without XDG_STATE_HOME: ".local/state\\brick" (absolute: false)
-/proc/32 exists (Slate's liveness test): false
+/proc/32 exists (Slate's liveness test): true

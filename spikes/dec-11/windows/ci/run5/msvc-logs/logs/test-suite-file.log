@@ -1,0 +1,169 @@
+   Compiling suite-file v0.1.0 (D:\a\cronkite\cronkite\crates\suite-file)
+warning: unused import: `std::ffi::OsStr`
+ --> crates\suite-file\src\recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `std::ffi::OsStr`
+  --> crates\suite-file\src\lib.rs:30:9
+   |
+30 |     use std::ffi::OsStr;
+   |         ^^^^^^^^^^^^^^^
+
+warning: unused variable: `dir`
+   --> crates\suite-file\src\save.rs:105:9
+    |
+105 |     let dir = dest
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_dir`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 2 warnings (run `cargo fix --lib -p suite-file` to apply 2 suggestions)
+error[E0433]: cannot find `unix` in `os`
+ --> crates\suite-file\tests\atomic.rs:4:14
+  |
+4 | use std::os::unix::fs::PermissionsExt;
+  |              ^^^^ could not find `unix` in `os`
+
+error[E0599]: no associated function or constant named `from_mode` found for struct `Permissions` in the current scope
+  --> crates\suite-file\tests\atomic.rs:29:56
+   |
+29 |     std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o640)).unwrap();
+   |                                                        ^^^^^^^^^ associated function or constant not found in `Permissions`
+
+error[E0599]: no method named `mode` found for struct `Permissions` in the current scope
+  --> crates\suite-file\tests\atomic.rs:46:54
+   |
+46 |         std::fs::metadata(&f).unwrap().permissions().mode() & 0o777,
+   |                                                      ^^^^ method not found in `Permissions`
+
+warning: `suite-file` (lib test) generated 3 warnings (2 duplicates) (run `cargo fix --lib -p suite-file --tests` to apply 1 suggestion)
+Some errors have detailed explanations: E0433, E0599.
+For more information about an error, try `rustc --explain E0433`.
+error: could not compile `suite-file` (test "atomic") due to 3 previous errors
+== fallback: per target
+warning: unused import: `std::ffi::OsStr`
+ --> crates\suite-file\src\recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `std::ffi::OsStr`
+  --> crates\suite-file\src\lib.rs:30:9
+   |
+30 |     use std::ffi::OsStr;
+   |         ^^^^^^^^^^^^^^^
+
+warning: unused variable: `dir`
+   --> crates\suite-file\src\save.rs:105:9
+    |
+105 |     let dir = dest
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_dir`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib test) generated 3 warnings (run `cargo fix --lib -p suite-file --tests` to apply 3 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running unittests src\lib.rs (target\debug\deps\suite_file-d9a63ae5f514c8ca.exe)
+
+running 9 tests
+test recent::tests::labels_show_the_folder_from_home ... ok
+test recent::tests::relative_paths_are_made_absolute_and_odd_names_kept_raw ... FAILED
+test recent::tests::two_windows_keep_each_others_files ... FAILED
+test recovery::tests::a_write_replaces_the_journal_whole ... ok
+test tests::document_name_is_the_file_name ... ok
+test tests::document_name_without_a_file_name_is_the_path ... ok
+test recovery::tests::only_journals_of_gone_processes_count_as_crashed ... ok
+test recent::tests::opened_and_saved_images_list_once_newest_first_ten_at_most ... FAILED
+test recent::tests::the_last_ten_files_survive_a_restart ... FAILED
+
+failures:
+
+---- recent::tests::relative_paths_are_made_absolute_and_odd_names_kept_raw stdout ----
+
+thread 'recent::tests::relative_paths_are_made_absolute_and_odd_names_kept_raw' (8664) panicked at crates\suite-file\src\recent.rs:209:9:
+assertion `left == right` failed: a path that can't be made absolute is skipped
+  left: 0
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- recent::tests::two_windows_keep_each_others_files stdout ----
+
+thread 'recent::tests::two_windows_keep_each_others_files' (9528) panicked at crates\suite-file\src\recent.rs:158:9:
+assertion `left == right` failed
+  left: []
+ right: ["C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\app4-5580-two\\b.csv", "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\app4-5580-two\\a.csv"]
+
+---- recent::tests::opened_and_saved_images_list_once_newest_first_ten_at_most stdout ----
+
+thread 'recent::tests::opened_and_saved_images_list_once_newest_first_ten_at_most' (9452) panicked at crates\suite-file\src\recent.rs:187:9:
+assertion `left == right` failed
+  left: []
+ right: ["C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\app4-5580-etch\\image 0.png", "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\app4-5580-etch\\image 3.png", "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\app4-5580-etch\\image 11.png", "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\app4-5580-etch\\image 10.png", "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\app4-5580-etch\\image 9.png", "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\app4-5580-etch\\image 8.png", "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\app4-5580-etch\\image 7.png", "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\app4-5580-etch\\image 6.png", "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\app4-5580-etch\\image 5.png", "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\app4-5580-etch\\image 4.png"]
+
+---- recent::tests::the_last_ten_files_survive_a_restart stdout ----
+
+thread 'recent::tests::the_last_ten_files_survive_a_restart' (1800) panicked at crates\suite-file\src\recent.rs:136:9:
+assertion `left == right` failed
+  left: []
+ right: ["C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\app4-5580-ten\\f11.csv", "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\app4-5580-ten\\f10.csv", "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\app4-5580-ten\\f9.csv", "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\app4-5580-ten\\f8.csv", "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\app4-5580-ten\\f7.csv", "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\app4-5580-ten\\f6.csv", "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\app4-5580-ten\\f5.csv", "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\app4-5580-ten\\f4.csv", "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\app4-5580-ten\\f3.csv", "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\app4-5580-ten\\f2.csv"]
+
+
+failures:
+    recent::tests::opened_and_saved_images_list_once_newest_first_ten_at_most
+    recent::tests::relative_paths_are_made_absolute_and_odd_names_kept_raw
+    recent::tests::the_last_ten_files_survive_a_restart
+    recent::tests::two_windows_keep_each_others_files
+
+test result: FAILED. 5 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+
+error: test failed, to rerun pass `-p suite-file --lib`
+error: 1 target failed:
+    `-p suite-file --lib`
+warning: target filter `bins` specified, but no targets matched; this is a no-op
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
+== target atomic
+warning: unused import: `std::ffi::OsStr`
+ --> crates\suite-file\src\recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `dir`
+   --> crates\suite-file\src\save.rs:105:9
+    |
+105 |     let dir = dest
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_dir`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 2 warnings (run `cargo fix --lib -p suite-file` to apply 2 suggestions)
+   Compiling suite-file v0.1.0 (D:\a\cronkite\cronkite\crates\suite-file)
+error[E0433]: cannot find `unix` in `os`
+ --> crates\suite-file\tests\atomic.rs:4:14
+  |
+4 | use std::os::unix::fs::PermissionsExt;
+  |              ^^^^ could not find `unix` in `os`
+
+error[E0599]: no associated function or constant named `from_mode` found for struct `Permissions` in the current scope
+  --> crates\suite-file\tests\atomic.rs:29:56
+   |
+29 |     std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o640)).unwrap();
+   |                                                        ^^^^^^^^^ associated function or constant not found in `Permissions`
+
+error[E0599]: no method named `mode` found for struct `Permissions` in the current scope
+  --> crates\suite-file\tests\atomic.rs:46:54
+   |
+46 |         std::fs::metadata(&f).unwrap().permissions().mode() & 0o777,
+   |                                                      ^^^^ method not found in `Permissions`
+
+Some errors have detailed explanations: E0433, E0599.
+For more information about an error, try `rustc --explain E0433`.
+error: could not compile `suite-file` (test "atomic") due to 3 previous errors

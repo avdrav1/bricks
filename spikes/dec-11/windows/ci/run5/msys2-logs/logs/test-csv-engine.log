@@ -1,0 +1,213 @@
+   Compiling csv-engine v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\csv-engine)
+error[E0432]: unresolved import `std::os::fd`
+  --> apps\brick\crates\csv-engine\tests\index_perf.rs:10:14
+   |
+10 | use std::os::fd::AsRawFd;
+   |              ^^ could not find `fd` in `os`
+   |
+note: found an item that was configured out
+  --> library\std\src\os\mod.rs:70:9
+  ::: library\std\src\os\mod.rs:77:1
+   |
+   = note: the item is gated here
+
+error[E0425]: cannot find function `posix_fadvise` in crate `libc`
+  --> apps\brick\crates\csv-engine\tests\index_perf.rs:39:15
+   |
+39 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |               ^^^^^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find value `POSIX_FADV_DONTNEED` in crate `libc`
+  --> apps\brick\crates\csv-engine\tests\index_perf.rs:39:56
+   |
+39 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |                                                        ^^^^^^^^^^^^^^^^^^^ not found in `libc`
+
+error[E0599]: no method named `as_raw_fd` found for struct `File` in the current scope
+  --> apps\brick\crates\csv-engine\tests\index_perf.rs:39:31
+   |
+39 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |                               ^^^^^^^^^
+   |
+help: there is a method `as_raw_handle` with a similar name
+   |
+39 -         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+39 +         libc::posix_fadvise(f.as_raw_handle(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |
+
+Some errors have detailed explanations: E0425, E0432, E0599.
+For more information about an error, try `rustc --explain E0425`.
+error: could not compile `csv-engine` (test "index_perf") due to 4 previous errors
+warning: build failed, waiting for other jobs to finish...
+== fallback: per target
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running unittests src\lib.rs (target\debug\deps\csv_engine-ee69ee07a2d719c7.exe)
+
+running 29 tests
+test detect::tests::comment_lines_are_skipped_while_scoring ... ok
+test detect::tests::a_truncated_last_row_is_ignored ... ok
+test detect::tests::a_steady_second_candidate_loses_to_the_wider_split ... ok
+test detect::tests::a_first_row_shaped_like_the_rest_is_data ... ok
+test detect::tests::delimiters_inside_quotes_do_not_count ... ok
+test detect::tests::falls_back_to_comma_and_detects_line_endings ... ok
+test detect::tests::free_text_ties_go_to_header ... ok
+test detect::tests::names_above_numbers_dates_and_codes_are_a_header ... ok
+test detect::tests::nasty_corpus_files ... ok
+test detect::tests::no_second_row_or_a_comment_first_means_no_header ... ok
+test detect::tests::picks_the_consistent_delimiter ... ok
+test encoding::tests::detects_boms_utf16_utf8_and_windows_1252 ... ok
+test fields::tests::encoded_fields_split_back_to_the_same_value ... ok
+test encoding::tests::unmappable_text_is_an_error_naming_the_character ... ok
+test encoding::tests::encodes_utf8_split_mid_character ... ok
+test fields::tests::other_delimiters ... ok
+test fields::tests::raw_spans_cover_the_row_exactly ... ok
+test fields::tests::splits_and_unescapes_rfc_4180_fields ... ok
+test index::tests::delimiter_sets_where_quotes_open ... ok
+test index::tests::index_is_one_u64_per_stride_rows ... ok
+test index::tests::row_boundaries_follow_rfc_4180 ... ok
+test index::tests::cancel_stops_before_the_end_and_keeps_rows_readable ... ok
+test index::tests::row_spans_report_a_file_changed_underneath ... FAILED
+test index::tests::row_spans_match_single_row_lookups_for_any_range ... ok
+test source::tests::empty_file_has_no_bytes ... ok
+test source::tests::truncation_while_mapped_reports_changed_instead_of_crashing ... FAILED
+test index::tests::matches_rfc_4180_oracle_on_random_input ... ok
+test fields::tests::index_plus_split_matches_whole_file_oracle ... ok
+test index::tests::rows_are_readable_while_indexing_streams ... ok
+
+failures:
+
+---- index::tests::row_spans_report_a_file_changed_underneath stdout ----
+
+thread 'index::tests::row_spans_report_a_file_changed_underneath' (6900) panicked at apps\brick\crates\csv-engine\src\index.rs:539:14:
+called `Result::unwrap()` on an `Err` value: Os { code: 1224, kind: Uncategorized, message: "The requested operation cannot be performed on a file with a user-mapped section open." }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- source::tests::truncation_while_mapped_reports_changed_instead_of_crashing stdout ----
+
+thread 'source::tests::truncation_while_mapped_reports_changed_instead_of_crashing' (8864) panicked at apps\brick\crates\csv-engine\src\source.rs:219:14:
+called `Result::unwrap()` on an `Err` value: Os { code: 1224, kind: Uncategorized, message: "The requested operation cannot be performed on a file with a user-mapped section open." }
+
+
+failures:
+    index::tests::row_spans_report_a_file_changed_underneath
+    source::tests::truncation_while_mapped_reports_changed_instead_of_crashing
+
+test result: FAILED. 27 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.91s
+
+error: test failed, to rerun pass `-p csv-engine --lib`
+error: 1 target failed:
+    `-p csv-engine --lib`
+warning: target filter `bins` specified, but no targets matched; this is a no-op
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.06s
+== target delimiter_realworld
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running tests\delimiter_realworld.rs (target\debug\deps\delimiter_realworld-e983a68c7829e97e.exe)
+
+running 1 test
+test detects_95_percent_of_the_real_world_sample ... ignored, needs the downloaded sample; run with --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== target fetch_perf
+   Compiling csv-engine v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\csv-engine)
+error[E0432]: unresolved import `std::os::fd`
+ --> apps\brick\crates\csv-engine\tests\fetch_perf.rs:8:14
+  |
+8 | use std::os::fd::AsRawFd;
+  |              ^^ could not find `fd` in `os`
+  |
+note: found an item that was configured out
+ --> library\std\src\os\mod.rs:70:9
+ ::: library\std\src\os\mod.rs:77:1
+  |
+  = note: the item is gated here
+
+error[E0425]: cannot find function `madvise` in crate `libc`
+  --> apps\brick\crates\csv-engine\tests\fetch_perf.rs:32:15
+   |
+32 |         libc::madvise(
+   |               ^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find value `MADV_DONTNEED` in crate `libc`
+  --> apps\brick\crates\csv-engine\tests\fetch_perf.rs:35:19
+   |
+35 |             libc::MADV_DONTNEED,
+   |                   ^^^^^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find function `posix_fadvise` in crate `libc`
+  --> apps\brick\crates\csv-engine\tests\fetch_perf.rs:37:15
+   |
+37 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |               ^^^^^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find value `POSIX_FADV_DONTNEED` in crate `libc`
+  --> apps\brick\crates\csv-engine\tests\fetch_perf.rs:37:56
+   |
+37 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |                                                        ^^^^^^^^^^^^^^^^^^^ not found in `libc`
+
+error[E0599]: no method named `as_raw_fd` found for struct `File` in the current scope
+  --> apps\brick\crates\csv-engine\tests\fetch_perf.rs:37:31
+   |
+37 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |                               ^^^^^^^^^
+   |
+help: there is a method `as_raw_handle` with a similar name
+   |
+37 -         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+37 +         libc::posix_fadvise(f.as_raw_handle(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |
+
+Some errors have detailed explanations: E0425, E0432, E0599.
+For more information about an error, try `rustc --explain E0425`.
+error: could not compile `csv-engine` (test "fetch_perf") due to 6 previous errors
+== target index_perf
+   Compiling csv-engine v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\csv-engine)
+error[E0432]: unresolved import `std::os::fd`
+  --> apps\brick\crates\csv-engine\tests\index_perf.rs:10:14
+   |
+10 | use std::os::fd::AsRawFd;
+   |              ^^ could not find `fd` in `os`
+   |
+note: found an item that was configured out
+  --> library\std\src\os\mod.rs:70:9
+  ::: library\std\src\os\mod.rs:77:1
+   |
+   = note: the item is gated here
+
+error[E0425]: cannot find function `posix_fadvise` in crate `libc`
+  --> apps\brick\crates\csv-engine\tests\index_perf.rs:39:15
+   |
+39 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |               ^^^^^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find value `POSIX_FADV_DONTNEED` in crate `libc`
+  --> apps\brick\crates\csv-engine\tests\index_perf.rs:39:56
+   |
+39 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |                                                        ^^^^^^^^^^^^^^^^^^^ not found in `libc`
+
+error[E0599]: no method named `as_raw_fd` found for struct `File` in the current scope
+  --> apps\brick\crates\csv-engine\tests\index_perf.rs:39:31
+   |
+39 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |                               ^^^^^^^^^
+   |
+help: there is a method `as_raw_handle` with a similar name
+   |
+39 -         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+39 +         libc::posix_fadvise(f.as_raw_handle(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |
+
+Some errors have detailed explanations: E0425, E0432, E0599.
+For more information about an error, try `rustc --explain E0425`.
+error: could not compile `csv-engine` (test "index_perf") due to 4 previous errors
+== target nasty_corpus
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running tests\nasty_corpus.rs (target\debug\deps\nasty_corpus-0033f46debdc9c14.exe)
+
+running 1 test
+test nasty_corpus_parses_with_no_row_misalignment ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+

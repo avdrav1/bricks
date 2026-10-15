@@ -1,0 +1,9 @@
+2026-10-15T18:50:23.218073Z  INFO slate: application starting
+Slate starting...
+Not using GL: No GL implementation is available
+Not using GL as fallback: No GL implementation is available
+Using renderer 'GskCairoRenderer' for surface 'GdkWin32Toplevel'
+
+(slate.exe:3084): Gtk-CRITICAL **: 18:50:23.687: gtk_native_get_surface: assertion 'GTK_IS_NATIVE (self)' failed
+
+(slate.exe:3084): Gtk-CRITICAL **: 18:50:23.687: gtk_native_get_surface: assertion 'GTK_IS_NATIVE (self)' failed

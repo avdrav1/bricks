@@ -4,11 +4,14 @@ name: spike-windows
 on:
   push: { branches: [spike/dec-11-windows] }
   workflow_dispatch:
+    inputs:
+      only_cross: { type: boolean, default: false, description: "Run only the cross-build jobs" }
 env:
   CARGO_INCREMENTAL: "0"
   CARGO_TERM_COLOR: never
 jobs:
   msys2-ucrt64:
+    if: ${{ !inputs.only_cross }}
     runs-on: windows-latest
     timeout-minutes: 150
     defaults: { run: { shell: "msys2 {0}" } }
@@ -71,6 +74,7 @@ jobs:
           retention-days: 5
 
   msvc-gvsbuild:
+    if: ${{ !inputs.only_cross }}
     runs-on: windows-latest
     timeout-minutes: 150
     defaults: { run: { shell: bash } }
@@ -168,10 +172,17 @@ jobs:
         continue-on-error: true
         shell: pwsh
         run: spikes/dec-11/windows/run_apps.ps1 -Bin xbundle\cronkite\bin -Out run-cross -Clean
+      - name: Run apps (cross-built bundle, clean PATH, cairo renderer)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $env:GSK_RENDERER = "cairo"
+          spikes/dec-11/windows/run_apps.ps1 -Bin xbundle\cronkite\bin -Out run-cross-cairo -Clean
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: cross-run
           path: |
             run-cross
+            run-cross-cairo
             xbundle/size.txt
