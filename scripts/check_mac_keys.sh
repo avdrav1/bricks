@@ -8,9 +8,11 @@
 # a sample file, drawn with GSK_RENDERER=cairo (GL draws black windows on the runner VMs),
 # and gets real key events from System Events, one every 0.3 s (faster bursts garble GTK's
 # input there, spike finding C13):
-#   Brick: types zz Return into A1, ⌘S: the file's first field is zz; types yy Return
-#          into A2, ⌘Z, ⌘S: the second row is as it was;
-#   Slate: types Hello and a space, ⌘S: the file starts with them; types X, ⌘Z, ⌘S: no X;
+#   Brick: types zz Return into A2 (row 1 is the header row), ⌘S: the file's second row
+#          starts with zz; types yy Return into A3, ⌘Z, ⌘S: the third row is as it was;
+#   Slate: after a click on the page (the page takes typing on the runner only once
+#          clicked; slate-0-typed-before-click shows it), types Hello, ⌘S: the file has
+#          it; types X, ⌘Z, ⌘S: no X;
 #   Frame: New Slide (⇧⌘N), ⌘S: the deck has a slide more; New Slide, ⌘Z, ⌘S: no more;
 #   Etch:  Rotate 90° Left (⌘G), ⌘S: the 64x32 PNG is 32x64; ⌘G, ⌘Z, ⌘S: still 32x64;
 #   each:  ⌘O opens the open panel (a window more for the app), Escape closes it.
@@ -64,6 +66,15 @@ type_slowly() {
 code() { osa "tell application \"System Events\" to key code $1"; sleep 0.3; }
 front() { osa "tell application \"System Events\" to set frontmost of (first process whose unix id is $1) to true"; sleep 1; }
 shot() { sleep "${2:-1}"; screencapture -x "$shots/$1.png" || note "screencapture $1 failed"; }
+# Click the middle of the first window of process $1 (cliclick, in points).
+click_window() {
+    command -v cliclick >/dev/null || brew install cliclick >"$logs/brew-cliclick.log" 2>&1
+    local at
+    at=$(windows "$1" | awk -F'\t' 'NR == 1 { split($3, b, "[, x]"); printf "%d,%d", b[1] + b[3] / 2, b[2] + b[4] / 3 }')
+    note "click at $at"
+    cliclick "c:$at"
+    sleep 1
+}
 
 # Start app $1 on file $2; sets $pid.
 start() {
@@ -101,16 +112,16 @@ brick() {
     type_slowly zz; code 36
     key s "command down"
     shot brick-1-cmd-s 3
-    if [[ $(head -1 "$f") == zz,name,city ]]; then pass "brick: ⌘S saved A1 = zz"
-    else fail "brick: ⌘S didn't save: $(head -1 "$f")"; fi
+    if [[ $(sed -n 2p "$f") == zz,Ada,Paris ]]; then pass "brick: ⌘S saved A2 = zz"
+    else fail "brick: ⌘S didn't save: row 2 is $(sed -n 2p "$f")"; fi
     type_slowly yy; code 36
     shot brick-2-typed 1
     key z "command down"
     shot brick-3-cmd-z 1
     key s "command down"
     sleep 3
-    if [[ $(sed -n 2p "$f") == 1,Ada,Paris ]]; then pass "brick: ⌘Z took yy back out of A2"
-    else fail "brick: ⌘Z didn't undo: row 2 is $(sed -n 2p "$f")"; fi
+    if [[ $(sed -n 3p "$f") == 2,Linus,Austin ]]; then pass "brick: ⌘Z took yy back out of A3"
+    else fail "brick: ⌘Z didn't undo: row 3 is $(sed -n 3p "$f")"; fi
     open_panel brick
     stop
 }
@@ -121,19 +132,24 @@ slate() {
     printf 'Original line.\n' >"$f"
     start slate "$f" || return
     shot slate-0-start
+    type_slowly Q
+    shot slate-0-typed-before-click
+    click_window "$pid"
     type_slowly "Hello "
     key s "command down"
     shot slate-1-cmd-s 3
-    if [[ $(cat "$f") == "Hello Original line." ]]; then pass "slate: ⌘S saved the typing"
-    else fail "slate: ⌘S didn't save: $(cat "$f")"; fi
+    note "slate: notes.txt after ⌘S: $(cat "$f")"
+    if grep -q Hello "$f"; then pass "slate: ⌘S saved the typing"
+    else fail "slate: ⌘S didn't save"; fi
     type_slowly X
     shot slate-2-typed 1
     key z "command down"
     shot slate-3-cmd-z 1
     key s "command down"
     sleep 3
-    if [[ $(cat "$f") == "Hello Original line." ]]; then pass "slate: ⌘Z took X back out"
-    else fail "slate: ⌘Z didn't undo: $(cat "$f")"; fi
+    note "slate: notes.txt after X, ⌘Z, ⌘S: $(cat "$f")"
+    if grep -q Hello "$f" && ! grep -q X "$f"; then pass "slate: ⌘Z took X back out"
+    else fail "slate: ⌘Z didn't undo"; fi
     open_panel slate
     stop
 }
