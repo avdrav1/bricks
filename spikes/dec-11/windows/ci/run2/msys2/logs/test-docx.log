@@ -1,0 +1,316 @@
+warning: unused import: `std::ffi::OsStr`
+ --> crates\suite-file\src\recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 1 warning (run `cargo fix --lib -p suite-file` to apply 1 suggestion)
+   Compiling document-edit v0.1.0 (D:\a\cronkite\cronkite\apps\slate\crates\document-edit)
+   Compiling docx v0.1.0 (D:\a\cronkite\cronkite\apps\slate\crates\docx)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.93s
+     Running unittests src\lib.rs (target\debug\deps\docx-b107ad92036903b6.exe)
+
+running 13 tests
+test fonts::tests::a_guids_bytes_are_read_in_writing_order ... ok
+test fonts::tests::a_reference_vector_de_obfuscates ... ok
+test fonts::tests::obfuscating_and_de_obfuscating_give_the_font_back ... ok
+test fonts::tests::a_plain_font_with_a_zero_key_stays_as_it_is ... ok
+test fonts::tests::subsetted_reads_as_on_off ... ok
+test fonts::tests::the_table_reads_names_classes_pitches_and_embeds ... ok
+test styles::tests::a_runs_overrides_are_its_character_style_and_its_own_formatting ... ok
+test styles::tests::styles_resolve_through_based_on_the_defaults_and_the_theme ... ok
+test styles::tests::borders_and_shading_come_from_the_defaults_styles_and_the_paragraph ... ok
+test tests::targets_resolve_against_the_source_part ... ok
+test tests::a_document_without_a_section_is_letter_with_inch_margins ... ok
+test tests::the_last_section_gives_the_width ... ok
+test tests::the_text_width_is_the_page_less_its_margins_and_gutter ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\blank.rs (target\debug\deps\blank-196d09a5216dcdf4.exe)
+
+running 3 tests
+test libreoffice_reads_a_saved_new_document ... ignored, needs LibreOffice: cargo test -p docx --test blank -- --ignored
+test the_blank_document_is_one_empty_normal_paragraph ... ok
+test typing_into_it_saves_a_word_document ... FAILED
+
+failures:
+
+---- typing_into_it_saves_a_word_document stdout ----
+
+thread 'typing_into_it_saves_a_word_document' (8736) panicked at apps\slate\crates\docx\tests\blank.rs:77:6:
+called `Result::unwrap()` on an `Err` value: Io(Os { code: 5, kind: PermissionDenied, message: "Access is denied." })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    typing_into_it_saves_a_word_document
+
+test result: FAILED. 1 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p docx --test blank`
+     Running tests\borders.rs (target\debug\deps\borders-360cfabcfbe50d86.exe)
+
+running 4 tests
+test libreoffice_reads_every_edited_paragraphs_borders_and_shading_as_before ... ignored, needs LibreOffice: cargo test -p docx --test borders -- --ignored
+test borders_and_shading_go_over_the_style ... ok
+test a_paragraph_whose_own_borders_differ_from_its_templates_writes_them ... FAILED
+test an_edited_paragraph_keeps_its_own_borders_and_shading ... FAILED
+
+failures:
+
+---- a_paragraph_whose_own_borders_differ_from_its_templates_writes_them stdout ----
+
+thread 'a_paragraph_whose_own_borders_differ_from_its_templates_writes_them' (5180) panicked at apps\slate\crates\docx\tests\borders.rs:197:75:
+called `Result::unwrap()` on an `Err` value: Io(Os { code: 5, kind: PermissionDenied, message: "Access is denied." })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- an_edited_paragraph_keeps_its_own_borders_and_shading stdout ----
+
+thread 'an_edited_paragraph_keeps_its_own_borders_and_shading' (4708) panicked at apps\slate\crates\docx\tests\borders.rs:197:75:
+called `Result::unwrap()` on an `Err` value: Io(Os { code: 5, kind: PermissionDenied, message: "Access is denied." })
+
+
+failures:
+    a_paragraph_whose_own_borders_differ_from_its_templates_writes_them
+    an_edited_paragraph_keeps_its_own_borders_and_shading
+
+test result: FAILED. 1 passed; 2 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p docx --test borders`
+     Running tests\fonts.rs (target\debug\deps\fonts-3f026ea706b65581.exe)
+
+running 3 tests
+test a_package_without_a_font_table_has_an_empty_one ... ok
+test the_font_table_reads_classes_and_embedded_faces ... ok
+test saving_keeps_the_font_parts_byte_for_byte ... FAILED
+
+failures:
+
+---- saving_keeps_the_font_parts_byte_for_byte stdout ----
+
+thread 'saving_keeps_the_font_parts_byte_for_byte' (2736) panicked at apps\slate\crates\docx\tests\fonts.rs:206:77:
+called `Result::unwrap()` on an `Err` value: Io(Os { code: 5, kind: PermissionDenied, message: "Access is denied." })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    saving_keeps_the_font_parts_byte_for_byte
+
+test result: FAILED. 2 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+error: test failed, to rerun pass `-p docx --test fonts`
+     Running tests\libreoffice.rs (target\debug\deps\libreoffice-098448861b35452e.exe)
+
+running 5 tests
+test the_borders_document_matches_libreoffice ... ok
+test the_spacing_document_matches_libreoffice ... ok
+test the_lists_document_matches_libreoffice ... ok
+test the_fixture_matches_libreoffice ... ok
+test word_authored_samples_match_libreoffice ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests\lists.rs (target\debug\deps\lists-81af2c32b28120e4.exe)
+
+running 5 tests
+test items_without_a_fitting_level_take_slates ... ok
+test indents_go_style_then_level_then_own ... ok
+test a_markers_look_is_its_levels_over_its_paragraph_marks ... ok
+test levels_give_markers_alignments_suffixes_and_indents ... ok
+test an_edited_item_keeps_its_numbering ... FAILED
+
+failures:
+
+---- an_edited_item_keeps_its_numbering stdout ----
+
+thread 'an_edited_item_keeps_its_numbering' (2908) panicked at apps\slate\crates\docx\tests\lists.rs:206:77:
+called `Result::unwrap()` on an `Err` value: Io(Os { code: 5, kind: PermissionDenied, message: "Access is denied." })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    an_edited_item_keeps_its_numbering
+
+test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+error: test failed, to rerun pass `-p docx --test lists`
+     Running tests\model.rs (target\debug\deps\model-e1e0a60a6d4b90b7.exe)
+
+running 4 tests
+test files_that_are_not_word_documents_are_refused ... ok
+test a_word_gif_is_a_picture ... ok
+test fixture_picture_page_break_and_merged_cell ... ok
+test fixture_runs_carry_size_colour_and_links ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\save.rs (target\debug\deps\save-975f262d1c860bd2.exe)
+
+running 12 tests
+test a_list_in_a_document_without_numbering_gets_numbering ... FAILED
+test a_colour_cleared_in_a_coloured_style_is_the_styles ... FAILED
+test a_section_break_stays_with_the_paragraph_that_ends_it ... FAILED
+test a_second_save_patches_the_first ... FAILED
+test libreoffice_reads_the_edits_and_everything_else_as_before ... ignored, needs LibreOffice: cargo test -p docx --test save -- --ignored
+test libreoffice_reads_the_format_bars_looks ... ignored, needs LibreOffice: cargo test -p docx --test save -- --ignored
+test libreoffice_shows_a_colour_cleared_in_a_coloured_style_as_the_styles ... ignored, needs LibreOffice: cargo test -p docx --test save -- --ignored
+test an_unedited_document_saves_as_the_package_it_was ... FAILED
+test edits_change_only_their_paragraphs ... FAILED
+test new_links_and_pictures_get_relationships_and_parts ... FAILED
+test every_paragraph_of_the_corpus_takes_an_edit ... FAILED
+test the_format_bars_looks_save_and_read_back ... FAILED
+
+failures:
+
+---- a_list_in_a_document_without_numbering_gets_numbering stdout ----
+
+thread 'a_list_in_a_document_without_numbering_gets_numbering' (6680) panicked at apps\slate\crates\docx\tests\save.rs:57:78:
+called `Result::unwrap()` on an `Err` value: Io(Os { code: 5, kind: PermissionDenied, message: "Access is denied." })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- a_colour_cleared_in_a_coloured_style_is_the_styles stdout ----
+
+thread 'a_colour_cleared_in_a_coloured_style_is_the_styles' (9188) panicked at apps\slate\crates\docx\tests\save.rs:57:78:
+called `Result::unwrap()` on an `Err` value: Io(Os { code: 5, kind: PermissionDenied, message: "Access is denied." })
+
+---- a_section_break_stays_with_the_paragraph_that_ends_it stdout ----
+
+thread 'a_section_break_stays_with_the_paragraph_that_ends_it' (9968) panicked at apps\slate\crates\docx\tests\save.rs:57:78:
+called `Result::unwrap()` on an `Err` value: Io(Os { code: 5, kind: PermissionDenied, message: "Access is denied." })
+
+---- a_second_save_patches_the_first stdout ----
+
+thread 'a_second_save_patches_the_first' (10004) panicked at apps\slate\crates\docx\tests\save.rs:57:78:
+called `Result::unwrap()` on an `Err` value: Io(Os { code: 5, kind: PermissionDenied, message: "Access is denied." })
+
+---- an_unedited_document_saves_as_the_package_it_was stdout ----
+
+thread 'an_unedited_document_saves_as_the_package_it_was' (7552) panicked at apps\slate\crates\docx\tests\save.rs:57:78:
+called `Result::unwrap()` on an `Err` value: Io(Os { code: 5, kind: PermissionDenied, message: "Access is denied." })
+
+---- edits_change_only_their_paragraphs stdout ----
+
+thread 'edits_change_only_their_paragraphs' (7256) panicked at apps\slate\crates\docx\tests\save.rs:57:78:
+called `Result::unwrap()` on an `Err` value: Io(Os { code: 5, kind: PermissionDenied, message: "Access is denied." })
+
+---- new_links_and_pictures_get_relationships_and_parts stdout ----
+
+thread 'new_links_and_pictures_get_relationships_and_parts' (3556) panicked at apps\slate\crates\docx\tests\save.rs:57:78:
+called `Result::unwrap()` on an `Err` value: Io(Os { code: 5, kind: PermissionDenied, message: "Access is denied." })
+
+---- every_paragraph_of_the_corpus_takes_an_edit stdout ----
+
+thread 'every_paragraph_of_the_corpus_takes_an_edit' (9068) panicked at apps\slate\crates\docx\tests\save.rs:57:78:
+called `Result::unwrap()` on an `Err` value: Io(Os { code: 5, kind: PermissionDenied, message: "Access is denied." })
+
+---- the_format_bars_looks_save_and_read_back stdout ----
+
+thread 'the_format_bars_looks_save_and_read_back' (8368) panicked at apps\slate\crates\docx\tests\save.rs:57:78:
+called `Result::unwrap()` on an `Err` value: Io(Os { code: 5, kind: PermissionDenied, message: "Access is denied." })
+
+
+failures:
+    a_colour_cleared_in_a_coloured_style_is_the_styles
+    a_list_in_a_document_without_numbering_gets_numbering
+    a_second_save_patches_the_first
+    a_section_break_stays_with_the_paragraph_that_ends_it
+    an_unedited_document_saves_as_the_package_it_was
+    edits_change_only_their_paragraphs
+    every_paragraph_of_the_corpus_takes_an_edit
+    new_links_and_pictures_get_relationships_and_parts
+    the_format_bars_looks_save_and_read_back
+
+test result: FAILED. 0 passed; 9 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+error: test failed, to rerun pass `-p docx --test save`
+     Running tests\spacing.rs (target\debug\deps\spacing-e4d88972b7e9590f.exe)
+
+running 5 tests
+test libreoffice_reads_every_edited_paragraphs_own_looks_as_before ... ignored, needs LibreOffice: cargo test -p docx --test spacing -- --ignored
+test own_spacing_and_indents_go_over_the_style ... ok
+test a_paragraph_whose_own_looks_differ_from_its_templates_writes_them ... FAILED
+test an_edited_paragraph_keeps_its_own_spacing_and_indents ... FAILED
+test a_paragraph_joining_a_list_leaves_its_own_indents_to_the_level ... FAILED
+
+failures:
+
+---- a_paragraph_whose_own_looks_differ_from_its_templates_writes_them stdout ----
+
+thread 'a_paragraph_whose_own_looks_differ_from_its_templates_writes_them' (2356) panicked at apps\slate\crates\docx\tests\spacing.rs:173:75:
+called `Result::unwrap()` on an `Err` value: Io(Os { code: 5, kind: PermissionDenied, message: "Access is denied." })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- an_edited_paragraph_keeps_its_own_spacing_and_indents stdout ----
+
+thread 'an_edited_paragraph_keeps_its_own_spacing_and_indents' (5060) panicked at apps\slate\crates\docx\tests\spacing.rs:173:75:
+called `Result::unwrap()` on an `Err` value: Io(Os { code: 5, kind: PermissionDenied, message: "Access is denied." })
+
+---- a_paragraph_joining_a_list_leaves_its_own_indents_to_the_level stdout ----
+
+thread 'a_paragraph_joining_a_list_leaves_its_own_indents_to_the_level' (1800) panicked at apps\slate\crates\docx\tests\spacing.rs:173:75:
+called `Result::unwrap()` on an `Err` value: Io(Os { code: 5, kind: PermissionDenied, message: "Access is denied." })
+
+
+failures:
+    a_paragraph_joining_a_list_leaves_its_own_indents_to_the_level
+    a_paragraph_whose_own_looks_differ_from_its_templates_writes_them
+    an_edited_paragraph_keeps_its_own_spacing_and_indents
+
+test result: FAILED. 1 passed; 3 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p docx --test spacing`
+     Running tests\speed.rs (target\debug\deps\speed-a30ec74e95245983.exe)
+
+running 1 test
+test a_500_page_document_reads_in_under_a_second ... ignored, perf: run in release with --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\tabs.rs (target\debug\deps\tabs-9da3e02ff57d0abe.exe)
+
+running 6 tests
+test a_style_clears_a_stop_the_document_defaults_set ... ok
+test a_paragraphs_own_stops_read_with_their_alignments_and_leaders ... ok
+test styles_stops_merge_through_based_on_and_clear_removes_one ... ok
+test a_paragraph_whose_stops_differ_from_its_templates_writes_its_own ... FAILED
+test an_edited_paragraph_keeps_its_own_stops_and_the_settings ... FAILED
+test the_default_stop_is_the_settings_or_half_an_inch ... ok
+
+failures:
+
+---- a_paragraph_whose_stops_differ_from_its_templates_writes_its_own stdout ----
+
+thread 'a_paragraph_whose_stops_differ_from_its_templates_writes_its_own' (7380) panicked at apps\slate\crates\docx\tests\tabs.rs:264:74:
+called `Result::unwrap()` on an `Err` value: Io(Os { code: 5, kind: PermissionDenied, message: "Access is denied." })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- an_edited_paragraph_keeps_its_own_stops_and_the_settings stdout ----
+
+thread 'an_edited_paragraph_keeps_its_own_stops_and_the_settings' (7332) panicked at apps\slate\crates\docx\tests\tabs.rs:264:74:
+called `Result::unwrap()` on an `Err` value: Io(Os { code: 5, kind: PermissionDenied, message: "Access is denied." })
+
+
+failures:
+    a_paragraph_whose_stops_differ_from_its_templates_writes_its_own
+    an_edited_paragraph_keeps_its_own_stops_and_the_settings
+
+test result: FAILED. 4 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+error: test failed, to rerun pass `-p docx --test tabs`
+   Doc-tests docx
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: 7 targets failed:
+    `-p docx --test blank`
+    `-p docx --test borders`
+    `-p docx --test fonts`
+    `-p docx --test lists`
+    `-p docx --test save`
+    `-p docx --test spacing`
+    `-p docx --test tabs`

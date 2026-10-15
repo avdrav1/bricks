@@ -1,0 +1,6 @@
+bin=D:\a\cronkite\cronkite\bundle\cronkite\bin clean=True
+screen=1024x768
+brick: no exe
+slate: no exe
+frame: no exe
+etch: no exe

@@ -1,0 +1,8 @@
+2026-10-15T18:35:49.582359Z  INFO slate: application starting
+Slate starting...
+Not using Vulkan: GdkWin32Display prefers OpenGL
+Not using GL: libEGL not available
+Not using Vulkan as fallback: Could not create a Vulkan instance: The requested version of Vulkan is not supported by the driver or is otherwise incompatible for implementation-specific reasons. (VK_ERROR_INCOMPATIBLE_DRIVER)
+Not using GL as fallback: libEGL not available
+Using renderer 'GskCairoRenderer' for surface 'GdkWin32Toplevel'
+couldn't load font "Liberation Sans 11", falling back to "Sans 11", expect ugly output.couldn't load font "Liberation Sans Not-Rotated 11", falling back to "Sans Not-Rotated 11", expect ugly output.couldn't load font "Liberation Sans Bold 22", falling back to "Sans Bold 22", expect ugly output.couldn't load font "Liberation Sans Bold Not-Rotated 22", falling back to "Sans Bold Not-Rotated 22", expect ugly output.couldn't load font "Liberation Sans Bold 17.5", falling back to "Sans Bold 17.5", expect ugly output.couldn't load font "Liberation Sans Bold Not-Rotated 17.5", falling back to "Sans Bold Not-Rotated 17.5", expect ugly output.couldn't load font "Liberation Sans Bold 15", falling back to "Sans Bold 15", expect ugly output.couldn't load font "Liberation Sans Bold Not-Rotated 15", falling back to "Sans Bold Not-Rotated 15", expect ugly output.

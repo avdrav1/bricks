@@ -1,0 +1,11 @@
+2026-10-15T18:24:36.458934Z  INFO slate: application starting
+Slate starting...
+Using renderer 'GskGLRenderer' for surface 'GdkWin32Toplevel'
+
+(slate.exe:3636): Gdk-CRITICAL **: 18:24:36.714: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+
+(slate.exe:3636): Gtk-CRITICAL **: 18:24:38.608: gtk_native_get_surface: assertion 'GTK_IS_NATIVE (self)' failed
+
+(slate.exe:3636): Gtk-CRITICAL **: 18:24:38.609: gtk_native_get_surface: assertion 'GTK_IS_NATIVE (self)' failed
+
+(slate.exe:3636): Gdk-CRITICAL **: 18:24:38.786: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed

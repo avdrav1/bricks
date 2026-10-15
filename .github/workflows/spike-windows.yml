@@ -1,0 +1,188 @@
+# DEC-11 spike (throwaway): what breaks building, testing, and running each app on Windows.
+# Scripts: spikes/dec-11/windows/. Never gates anything: every step continues on error.
+name: spike-windows
+on:
+  push: { branches: [spike/dec-11-windows] }
+  workflow_dispatch:
+    inputs:
+      only_cross: { type: boolean, default: false, description: "Run only the cross-build jobs" }
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: never
+jobs:
+  msys2-ucrt64:
+    if: ${{ !inputs.only_cross }}
+    runs-on: windows-latest
+    timeout-minutes: 150
+    defaults: { run: { shell: "msys2 {0}" } }
+    env:
+      CARGO_HOME: D:\cargo-home
+    steps:
+      # The repo has no .gitattributes: Windows runners' autocrlf turns test fixtures into CRLF.
+      - run: git config --global core.autocrlf false
+        shell: pwsh
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-rust
+            zip
+      - uses: actions/cache@v4
+        with:
+          path: |
+            D:\cargo-home\registry
+            target
+          key: msys2-${{ hashFiles('Cargo.lock') }}-${{ github.run_id }}
+          restore-keys: msys2-${{ hashFiles('Cargo.lock') }}-
+      - name: Toolchain
+        run: |
+          cargo --version; rustc -vV; pkg-config --modversion gtk4
+          echo "UCRT_BIN=$(cygpath -w /ucrt64/bin)" >> "$GITHUB_ENV"
+      - name: Check, test, build
+        run: spikes/dec-11/windows/ci_build.sh logs
+      - name: Self-contained folder
+        continue-on-error: true
+        run: spikes/dec-11/windows/bundle.sh bundle
+      - name: Run apps (MSYS2 PATH)
+        continue-on-error: true
+        shell: pwsh
+        run: spikes/dec-11/windows/run_apps.ps1 -Bin target\release -Out run-msys2 -PathPrefix $env:UCRT_BIN
+      - name: Run apps (bundle, clean PATH)
+        continue-on-error: true
+        shell: pwsh
+        run: spikes/dec-11/windows/run_apps.ps1 -Bin bundle\cronkite\bin -Out run-bundle -Clean
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: msys2-logs
+          path: |
+            logs
+            run-msys2
+            run-bundle
+            bundle/size.txt
+            bundle/dlls.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: msys2-bundle
+          path: bundle/cronkite.zip
+          retention-days: 5
+
+  msvc-gvsbuild:
+    if: ${{ !inputs.only_cross }}
+    runs-on: windows-latest
+    timeout-minutes: 150
+    defaults: { run: { shell: bash } }
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: GTK 4 from gvsbuild's release
+        shell: pwsh
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          $t = Measure-Command {
+            gh release download 2026.8.0 -R wingtk/gvsbuild -p 'GTK4_Gvsbuild_*_x64.zip' -D $env:RUNNER_TEMP
+            7z x -y -oC:\gtk "$env:RUNNER_TEMP\GTK4_Gvsbuild_2026.8.0_x64.zip" | Out-Null
+          }
+          "gvsbuild download+unpack: $($t.TotalSeconds) s"
+          "C:\gtk\bin" >> $env:GITHUB_PATH
+          "PKG_CONFIG_PATH=C:\gtk\lib\pkgconfig" >> $env:GITHUB_ENV
+      - name: Toolchain
+        run: cargo --version && rustc -vV && pkg-config --modversion gtk4
+      - name: File semantics probe (no HOME, as from Explorer)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force probe | Out-Null
+          Remove-Item env:HOME -ErrorAction SilentlyContinue
+          cargo run --release --manifest-path spikes/dec-11/windows/fsprobe/Cargo.toml *> probe\fsprobe.txt
+          Get-Content probe\fsprobe.txt
+      - name: Check, test, build
+        run: spikes/dec-11/windows/ci_build.sh logs
+      - name: Run apps (gvsbuild PATH)
+        continue-on-error: true
+        shell: pwsh
+        run: spikes/dec-11/windows/run_apps.ps1 -Bin target\release -Out run-msvc -PathPrefix C:\gtk\bin
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: msvc-logs
+          path: |
+            logs
+            run-msvc
+            probe
+
+  # Linux → Windows: Fedora's MinGW GTK 4, the release build and its bundle made on Linux,
+  # then run on a Windows runner.
+  cross-fedora:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    container: fedora:latest
+    env:
+      CARGO_BUILD_TARGET: x86_64-pc-windows-gnu
+      CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: x86_64-w64-mingw32-gcc
+      PKG_CONFIG_ALLOW_CROSS: "1"
+      PKG_CONFIG: x86_64-w64-mingw32-pkg-config
+    steps:
+      - name: MinGW GTK 4
+        run: |
+          dnf -y install --setopt=install_weak_deps=False mingw64-gtk4 mingw64-gcc mingw64-pkg-config \
+            mingw64-adwaita-icon-theme mingw64-gdk-pixbuf gcc git zip glib2 findutils
+          x86_64-w64-mingw32-pkg-config --modversion gtk4
+      - uses: actions/checkout@v4
+      - name: Rust
+        run: |
+          curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --target x86_64-pc-windows-gnu
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Release build
+        run: |
+          rustup target add x86_64-pc-windows-gnu
+          SECONDS=0
+          cargo build --release -p brick -p slate -p frame -p etch
+          echo "cross release build: ${SECONDS}s"
+      - name: Bundle
+        run: |
+          mkdir -p xbundle
+          spikes/dec-11/windows/cross_bundle.sh target/x86_64-pc-windows-gnu/release xbundle xbundle/size.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cross-bundle
+          path: |
+            xbundle/cronkite
+            xbundle/size.txt
+          retention-days: 5
+
+  cross-run:
+    needs: cross-fedora
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: cross-bundle, path: xbundle }
+      - name: Run apps (cross-built bundle, clean PATH)
+        continue-on-error: true
+        shell: pwsh
+        run: spikes/dec-11/windows/run_apps.ps1 -Bin xbundle\cronkite\bin -Out run-cross -Clean
+      - name: Run apps (cross-built bundle, clean PATH, cairo renderer)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $env:GSK_RENDERER = "cairo"
+          spikes/dec-11/windows/run_apps.ps1 -Bin xbundle\cronkite\bin -Out run-cross-cairo -Clean
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cross-run
+          path: |
+            run-cross
+            run-cross-cairo
+            xbundle/size.txt

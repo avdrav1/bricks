@@ -1,0 +1,70 @@
+   Compiling document-model v0.1.0 (D:\a\cronkite\cronkite\apps\slate\crates\document-model)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.25s
+     Running unittests src\lib.rs (target\debug\deps\document_model-a1c6e4651a84a403.exe)
+
+running 12 tests
+test fonts::tests::classes_map_to_generic_families ... ok
+test fonts::tests::fonts_are_found_by_name_ignoring_case ... ok
+test numbering::tests::slates_levels ... ok
+test numbering::tests::symbol_fonts_map_to_unicode ... ok
+test numbering::tests::symbols_high_table_lines_up ... ok
+test styles::tests::a_paragraphs_own_border_sides_and_shading_go_over_its_styles ... ok
+test styles::tests::a_paragraphs_own_spacing_goes_over_its_styles ... ok
+test styles::tests::a_sheet_without_a_heading_draws_the_builtin_one ... ok
+test styles::tests::overrides_go_over_the_style ... ok
+test tabs::tests::a_clear_kept_in_a_layer_removes_the_stop_of_a_layer_below_it ... ok
+test tabs::tests::a_layer_adds_replaces_and_clears_stops_in_position_order ... ok
+test write::inline::tests::base64_pads_to_four ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\markdown.rs (target\debug\deps\markdown-c234d9ad10aba506.exe)
+
+running 4 tests
+test nested_list_paragraphs_and_code_keep_their_level ... ok
+test local_pictures_load_from_the_files_directory ... ok
+test raw_blocks_hold_their_source_exactly ... ok
+test every_construct_maps_to_its_block_or_run ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\text.rs (target\debug\deps\text-0032a4610dba71bc.exe)
+
+running 5 tests
+test bytes_that_are_not_utf8_read_as_windows_1252 ... ok
+test a_file_without_line_breaks_is_one_paragraph ... ok
+test crlf_cr_and_lf_each_end_a_line ... ok
+test word_count_counts_across_paragraphs ... ok
+test every_encoding_reads_to_the_same_paragraphs ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\write.rs (target\debug\deps\write-bf000d91f030d582.exe)
+
+running 17 tests
+test a_deleted_paragraph_between_numbered_lists_keeps_their_numbers ... ok
+test a_crlf_file_gets_crlf_in_fresh_blocks ... ok
+test a_picture_inside_a_paragraph_is_copied_with_it_or_rewritten_with_it ... ok
+test a_moved_picture_keeps_its_url ... ok
+test a_new_list_item_between_items_keeps_the_list_tight ... ok
+test a_deleted_block_takes_only_its_lines ... ok
+test constructs_written_fresh_read_back_the_same ... ok
+test every_text_fixture_writes_back_byte_for_byte ... ok
+test every_markdown_fixture_writes_back_unchanged ... ok
+test an_edited_paragraph_changes_only_its_lines ... ok
+test inline_looks_read_back_as_written ... ok
+test every_markdown_fixture_written_fresh_reads_back_the_same ... ok
+test text_an_encoding_cant_hold_is_an_error_and_utf16_has_its_mark ... ok
+test whitespace_at_a_looks_edge_reads_back_outside_it ... ok
+test text_of_other_blocks_is_the_clipboards ... ok
+test inserted_paragraphs_read_back_and_leave_the_rest_alone ... ok
+test random_edits_read_back_wherever_fresh_writing_does ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.55s
+
+   Doc-tests document_model
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

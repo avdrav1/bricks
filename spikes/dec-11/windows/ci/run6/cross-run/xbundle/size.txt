@@ -1,0 +1,14 @@
+dlls: 50
+total: 178 MB (bin 171 MB, icons 8 MB)
+34528	xbundle/cronkite/bin/brick.exe
+13060	xbundle/cronkite/bin/etch.exe
+16492	xbundle/cronkite/bin/frame.exe
+64	xbundle/cronkite/bin/gdbus.exe
+23412	xbundle/cronkite/bin/slate.exe
+total (exes stripped): 104 MB
+4100	xbundle/cronkite/bin/brick.exe
+1768	xbundle/cronkite/bin/etch.exe
+2308	xbundle/cronkite/bin/frame.exe
+52	xbundle/cronkite/bin/gdbus.exe
+3364	xbundle/cronkite/bin/slate.exe
+zip -9: 37 MB

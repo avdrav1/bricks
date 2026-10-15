@@ -1,0 +1,11 @@
+[package]
+name = "fsprobe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Not part of the Cronkite workspace: a throwaway DEC-11 probe.
+[workspace]
+
+[dependencies]
+memmap2 = "0.9.11"

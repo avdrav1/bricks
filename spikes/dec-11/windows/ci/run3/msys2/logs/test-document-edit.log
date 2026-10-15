@@ -1,0 +1,119 @@
+warning: unused import: `std::ffi::OsStr`
+ --> crates\suite-file\src\recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `dir`
+   --> crates\suite-file\src\save.rs:105:9
+    |
+105 |     let dir = dest
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_dir`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 2 warnings (run `cargo fix --lib -p suite-file` to apply 2 suggestions)
+   Compiling document-edit v0.1.0 (D:\a\cronkite\cronkite\apps\slate\crates\document-edit)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.22s
+     Running unittests src\lib.rs (target\debug\deps\document_edit-60a245997256aad0.exe)
+
+running 5 tests
+test find::tests::case_folding_keeps_byte_offsets_of_the_text ... ok
+test find::tests::matches_come_in_document_order_through_cells_and_code ... ok
+test find::tests::replace_all_is_one_step_and_keeps_looks ... ok
+test find::tests::replace_all_with_longer_and_empty_text ... ok
+test find::tests::replace_one_keeps_the_look_of_its_first_character ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\clipboard.rs (target\debug\deps\clipboard-78ceb233973f90bc.exe)
+
+running 18 tests
+test copy_between_two_cells_takes_the_table ... ok
+test a_paste_maps_styles_by_name_else_the_default ... ok
+test copy_across_paragraphs_and_list_items ... ok
+test copy_from_a_cell_out_of_the_table_takes_the_table_whole ... ok
+test copy_within_a_cell_stays_in_it ... ok
+test copy_into_a_cell_from_before_the_table ... ok
+test copy_through_a_table_takes_it_whole ... ok
+test copy_within_a_paragraph_keeps_runs_and_looks ... ok
+test cut_then_paste_moves_the_text ... ok
+test json_keeps_pictures_and_raw_source ... ok
+test paste_at_top_puts_a_table_in ... ok
+test paste_into_a_code_block_is_plain_text ... ok
+test paste_into_a_cell_flattens_a_table ... ok
+test paste_into_a_paragraphs_middle_keeps_its_looks_and_joins_the_tail ... ok
+test pasted_numbered_items_renumber ... ok
+test plain_text_pastes_a_paragraph_per_line ... ok
+test paste_replaces_a_selection ... ok
+test replacing_the_document_is_one_step ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\edit.rs (target\debug\deps\edit-38968c1dd88e2ff4.exe)
+
+running 23 tests
+test a_cell_is_a_container ... ok
+test bold_toggles_over_what_the_text_shows ... ok
+test backspace_at_a_blocks_start ... ok
+test bold_and_italic_set_and_clear ... ok
+test edits_dont_cross_out_of_a_cell ... ok
+test delete_at_a_blocks_end_joins_the_next ... ok
+test enter_after_a_heading_gives_a_normal_paragraph ... ok
+test enter_in_a_cell_adds_a_paragraph_in_the_cell ... ok
+test enter_after_a_heading_gives_its_next_style ... ok
+test enter_on_an_empty_item_leaves_the_list ... ok
+test every_undo_and_redo_gives_back_a_document_with_a_table_exactly ... ok
+test enter_in_a_numbered_list_renumbers_the_items_after ... ok
+test indenting_list_items ... ok
+test own_paragraph_looks_follow_enter_and_lists_take_their_indents ... ok
+test lists_on_and_off ... ok
+test paragraph_styles ... ok
+test places_order_as_in_the_document ... ok
+test replacing_across_paragraphs_keeps_the_first_blocks_looks ... ok
+test every_undo_and_redo_gives_back_the_fixture_exactly ... ok
+test typing_and_backspace_in_a_cell_edit_only_that_cell ... ok
+test typing_takes_the_look_of_the_character_before ... ok
+test typing_joins_a_word_at_a_time ... ok
+test editing_the_docx_fixtures_table ... ok
+
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests\format.rs (target\debug\deps\format-8345209f5014c404.exe)
+
+running 8 tests
+test a_patch_with_no_selection_sets_the_look_typed_next ... ok
+test alignment_covers_the_paragraphs_touched ... ok
+test a_patch_sets_looks_on_the_selected_text_only ... ok
+test markdown_keeps_headings_quotes_and_emphasis_and_drops_the_rest ... ok
+test size_steps_each_runs_size_and_clamps ... ok
+test the_bar_shows_mixed_looks_as_none ... ok
+test the_bar_shows_the_caret_looks ... ok
+test underline_and_strikethrough_toggle ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\position.rs (target\debug\deps\position-640dd36cc742be2f.exe)
+
+running 3 tests
+test undo_and_redo_come_back_to_the_same_positions ... ok
+test typing_joined_to_a_step_is_a_new_position ... ok
+test undoing_everything_past_the_history_limit_is_not_the_opened_document ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\span.rs (target\debug\deps\span-d61e584257fcde7b.exe)
+
+running 1 test
+test spans_match_the_changes_of_a_mixed_session ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests document_edit
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

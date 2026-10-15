@@ -1,0 +1,38 @@
+brew install: 30 s
+windows helper built
+desktop screenshot ok
+allow-macos.patch applied
+build patched: exit 0
+run-v-codes-0: still running after 8 s (pid 4495)
+osascript exit 0: tell application "System Events" to set frontmost of (first process whose unix id is 4495) to true
+osascript exit 0: tell application "System Events"
+repeat with k in {4, 14, 37, 37, 31, 49, 13, 31, 15, 37, 2}
+key code k
+delay 0.2
+end repeat
+end tell
+osascript exit 0: tell application "System Events" to keystroke "s" using control down
+codes.txt after Ctrl+S: Typed on macOS: hello world
+run-v-chars-0: still running after 8 s (pid 5006)
+osascript exit 0: tell application "System Events" to set frontmost of (first process whose unix id is 5006) to true
+osascript exit 0: tell application "System Events"
+repeat with c in characters of "hello world"
+keystroke c
+delay 0.2
+end repeat
+end tell
+osascript exit 0: tell application "System Events" to keystroke "s" using control down
+chars.txt after Ctrl+S: Typed on macOS: hello world via cliclick
+run-v-paste-0: still running after 8 s (pid 5930)
+osascript exit 0: tell application "System Events" to set frontmost of (first process whose unix id is 5930) to true
+osascript exit 0: tell application "System Events" to keystroke "v" using control down
+osascript exit 0: tell application "System Events" to keystroke "a" using control down
+osascript exit 0: tell application "System Events" to keystroke "c" using control down
+osascript exit 0: tell application "Finder" to activate
+osascript exit 0: tell application "System Events" to set frontmost of (first process whose unix id is 5930) to true
+osascript exit 0: tell application "System Events" to keystroke "v" using control down
+run-v-etch-0: still running after 8 s (pid 6554)
+osascript exit 0: tell application "System Events" to set frontmost of (first process whose unix id is 6554) to true
+osascript exit 0: tell application "System Events" to tell (first process whose unix id is 6554) to get name of every menu item of menu 1 of menu bar item 3 of menu bar 1 -> New Image…, Open…, Open Recent, Save, Save As…, Export…, Close, Quit 
+osascript exit 0: tell application "System Events" to tell (first process whose unix id is 6554) to click menu bar item 3 of menu bar 1
+osascript exit 0: tell application "System Events" to key code 53

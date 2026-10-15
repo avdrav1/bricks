@@ -1,0 +1,6 @@
+bin=D:\a\cronkite\cronkite\target\release clean=False
+screen=1024x768
+brick: no exe
+slate: no exe
+frame: no exe
+etch: no exe

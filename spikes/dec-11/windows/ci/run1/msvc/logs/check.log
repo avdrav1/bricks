@@ -1,0 +1,471 @@
+    Updating crates.io index
+ Downloading crates ...
+  Downloaded event-listener-strategy v0.5.4
+  Downloaded adler2 v2.0.1
+  Downloaded futures-macro v0.3.34
+  Downloaded equivalent v1.0.2
+  Downloaded parking v2.2.1
+  Downloaded event-listener v5.4.2
+  Downloaded bitflags v2.13.2
+  Downloaded target-lexicon v0.13.5
+  Downloaded debug_unsafe v0.1.4
+  Downloaded async-channel v2.5.0
+  Downloaded atoi_simd v0.18.1
+  Downloaded heck v0.5.0
+  Downloaded quote v1.0.47
+  Downloaded gdk-pixbuf-sys v0.22.9
+  Downloaded proc-macro-crate v3.5.0
+  Downloaded byteorder-lite v0.1.0
+  Downloaded serde_spanned v1.1.1
+  Downloaded autocfg v1.5.1
+  Downloaded cfg-if v1.0.5
+  Downloaded codepage v0.1.3
+  Downloaded miniz_oxide v0.8.9
+  Downloaded multiversion_no_op v1.0.0
+  Downloaded lock_api v0.4.14
+  Downloaded memoffset v0.9.1
+  Downloaded cairo-sys-rs v0.22.9
+  Downloaded concurrent-queue v2.5.0
+  Downloaded rustc_version v0.4.1
+  Downloaded crc32fast v1.5.2
+  Downloaded crossbeam-utils v0.8.23
+  Downloaded either v1.19.0
+  Downloaded pkg-config v0.3.34
+  Downloaded futures-core v0.3.34
+  Downloaded futures-task v0.3.34
+  Downloaded thread_local v1.1.10
+  Downloaded byteorder v1.5.0
+  Downloaded field-offset v0.3.6
+  Downloaded futures-io v0.3.34
+  Downloaded graphene-sys v0.22.9
+  Downloaded itoa v1.0.18
+  Downloaded lazy_static v1.5.1
+  Downloaded scopeguard v1.2.0
+  Downloaded gsk4-sys v0.11.5
+  Downloaded gtk4-macros v0.11.5
+  Downloaded nu-ansi-term v0.50.3
+  Downloaded pango-sys v0.22.9
+  Downloaded pin-project-lite v0.2.17
+  Downloaded bytemuck v1.25.2
+  Downloaded core_detect v1.0.0
+  Downloaded crossbeam-deque v0.8.8
+  Downloaded crossbeam-epoch v0.9.21
+  Downloaded fastrand v2.5.0
+  Downloaded fdeflate v0.3.7
+  Downloaded futures-executor v0.3.34
+  Downloaded gdk-pixbuf v0.22.0
+  Downloaded gobject-sys v0.22.9
+  Downloaded graphene-rs v0.22.8
+  Downloaded parking_lot v0.12.5
+  Downloaded parking_lot_core v0.9.12
+  Downloaded version-compare v0.2.1
+  Downloaded windows-link v0.2.1
+  Downloaded futures-channel v0.3.34
+  Downloaded memmap2 v0.9.11
+  Downloaded miniz_oxide v0.9.1
+  Downloaded once_cell v1.21.4
+  Downloaded proc-macro2 v1.0.107
+  Downloaded rustversion v1.0.23
+  Downloaded semver v1.0.28
+  Downloaded simdutf8 v0.1.5
+  Downloaded toml_datetime v1.1.1+spec-1.1.0
+  Downloaded unicase v2.10.0
+  Downloaded cairo-rs v0.22.9
+  Downloaded zune-core v0.5.3
+  Downloaded simd-adler32 v0.3.10
+  Downloaded fast-float2 v0.2.4
+  Downloaded slab v0.4.12
+  Downloaded gsk4 v0.11.5
+  Downloaded num-traits v0.2.19
+  Downloaded zmij v1.0.23
+  Downloaded bumpalo v3.20.3
+  Downloaded cfg-expr v0.20.10
+  Downloaded glib-sys v0.22.9
+  Downloaded pango v0.22.9
+  Downloaded serde_core v1.0.229
+  Downloaded serde_derive v1.0.229
+  Downloaded flate2 v1.1.10
+  Downloaded gdk4-sys v0.11.5
+  Downloaded glib-macros v0.22.9
+  Downloaded rayon-core v1.13.0
+  Downloaded log v0.4.34
+  Downloaded memchr v2.8.3
+  Downloaded getrandom v0.4.3
+  Downloaded gio-sys v0.22.9
+  Downloaded serde v1.0.229
+  Downloaded tempfile v3.27.0
+  Downloaded indexmap v2.14.2
+  Downloaded png v0.18.1
+  Downloaded toml_writer v1.1.2+spec-1.1.0
+  Downloaded futures-util v0.3.34
+  Downloaded gdk4 v0.11.5
+  Downloaded smallvec v1.16.2
+  Downloaded toml_parser v1.1.3+spec-1.1.0
+  Downloaded unicode-ident v1.0.26
+  Downloaded hashbrown v0.17.1
+  Downloaded moxcms v0.8.1
+  Downloaded pulldown-cmark v0.13.4
+  Downloaded sharded-slab v0.1.7
+  Downloaded calamine v0.36.1
+  Downloaded gtk4-sys v0.11.5
+  Downloaded rayon v1.12.0
+  Downloaded tracing-core v0.1.36
+  Downloaded zopfli v0.8.3
+  Downloaded system-deps v9.0.0
+  Downloaded toml v1.1.6+spec-1.1.0
+  Downloaded toml_edit v0.25.15+spec-1.1.0
+  Downloaded zune-jpeg v0.5.15
+  Downloaded typed-path v0.12.3
+  Downloaded gio v0.22.10
+  Downloaded quick-xml v0.41.0
+  Downloaded glib v0.22.10
+  Downloaded image v0.25.10
+  Downloaded gtk4 v0.11.5
+  Downloaded encoding_rs v0.8.42
+  Downloaded serde_json v1.0.154
+  Downloaded zip v8.6.0
+  Downloaded libc v0.2.190
+  Downloaded pxfm v0.1.30
+  Downloaded winnow v1.0.4
+  Downloaded rust_xlsxwriter v0.99.1
+  Downloaded tracing-subscriber v0.3.23
+  Downloaded zlib-rs v0.6.8
+  Downloaded syn v3.0.6
+  Downloaded tracing v0.1.44
+  Downloaded windows-sys v0.61.2
+    Checking cfg-if v1.0.5
+    Checking memchr v2.8.3
+   Compiling rustversion v1.0.23
+    Checking scopeguard v1.2.0
+    Checking core_detect v1.0.0
+    Checking simdutf8 v0.1.5
+   Compiling multiversion_no_op v1.0.0
+    Checking windows-link v0.2.1
+   Compiling libc v0.2.190
+    Checking smallvec v1.16.2
+    Checking suite-file v0.1.0 (D:\a\cronkite\cronkite\crates\suite-file)
+error[E0433]: cannot find `unix` in `os`
+  --> crates\suite-file\src\recent.rs:10:14
+   |
+10 | use std::os::unix::ffi::OsStrExt;
+   |              ^^^^ could not find `unix` in `os`
+
+error[E0599]: no associated function or constant named `from_bytes` found for struct `OsStr` in the current scope
+  --> crates\suite-file\src\recent.rs:28:51
+   |
+28 |                     .map(|l| PathBuf::from(OsStr::from_bytes(l)))
+   |                                                   ^^^^^^^^^^ associated function or constant not found in `OsStr`
+
+error[E0599]: no method named `as_bytes` found for reference `&OsStr` in the current scope
+  --> crates\suite-file\src\recent.rs:44:52
+   |
+44 |         if !file.is_absolute() || file.as_os_str().as_bytes().contains(&b'\n') {
+   |                                                    ^^^^^^^^
+   |
+help: there is a method `as_encoded_bytes` with a similar name
+   |
+44 |         if !file.is_absolute() || file.as_os_str().as_encoded_bytes().contains(&b'\n') {
+   |                                                       ++++++++
+
+error[E0599]: no method named `as_bytes` found for reference `&OsStr` in the current scope
+  --> crates\suite-file\src\recent.rs:78:41
+   |
+78 |             out.write_all(f.as_os_str().as_bytes())?;
+   |                                         ^^^^^^^^
+   |
+help: there is a method `as_encoded_bytes` with a similar name
+   |
+78 |             out.write_all(f.as_os_str().as_encoded_bytes())?;
+   |                                            ++++++++
+
+Some errors have detailed explanations: E0433, E0599.
+For more information about an error, try `rustc --explain E0433`.
+error: could not compile `suite-file` (lib) due to 4 previous errors
+warning: build failed, waiting for other jobs to finish...
+   Compiling parking_lot_core v0.9.12
+   Compiling crossbeam-utils v0.8.23
+    Checking lock_api v0.4.14
+    Checking formula v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\formula)
+    Checking parking_lot v0.12.5
+   Compiling crossbeam-epoch v0.9.21
+   Compiling encoding_rs v0.8.42
+    Checking memmap2 v0.9.11
+    Checking simd-adler32 v0.3.10
+   Compiling proc-macro2 v1.0.107
+   Compiling crc32fast v1.5.2
+   Compiling crossbeam-deque v0.8.8
+    Checking adler2 v2.0.1
+   Compiling quote v1.0.47
+   Compiling rayon-core v1.13.0
+   Compiling unicode-ident v1.0.26
+    Checking miniz_oxide v0.9.1
+    Checking csv-engine v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\csv-engine)
+    Checking either v1.19.0
+    Checking zlib-rs v0.6.8
+error[E0425]: cannot find type `sigaction` in crate `libc`
+  --> apps\brick\crates\csv-engine\src\source.rs:99:46
+   |
+99 |     struct Prev(UnsafeCell<MaybeUninit<libc::sigaction>>);
+   |                                              ^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find type `siginfo_t` in crate `libc`
+   --> apps\brick\crates\csv-engine\src\source.rs:106:26
+    |
+106 |         info: *mut libc::siginfo_t,
+    |                          ^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find function `mmap` in crate `libc`
+   --> apps\brick\crates\csv-engine\src\source.rs:118:27
+    |
+118 |                     libc::mmap(
+    |                           ^^^^ not found in `libc`
+
+error[E0425]: cannot find value `PROT_READ` in crate `libc`
+   --> apps\brick\crates\csv-engine\src\source.rs:121:31
+    |
+121 |                         libc::PROT_READ,
+    |                               ^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find value `MAP_PRIVATE` in crate `libc`
+   --> apps\brick\crates\csv-engine\src\source.rs:122:31
+    |
+122 |                         libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_FIXED,
+    |                               ^^^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find value `MAP_ANONYMOUS` in crate `libc`
+   --> apps\brick\crates\csv-engine\src\source.rs:122:51
+    |
+122 |                         libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_FIXED,
+    |                                                   ^^^^^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find value `MAP_FIXED` in crate `libc`
+   --> apps\brick\crates\csv-engine\src\source.rs:122:73
+    |
+122 |                         libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_FIXED,
+    |                                                                         ^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find value `MAP_FAILED` in crate `libc`
+   --> apps\brick\crates\csv-engine\src\source.rs:127:31
+    |
+127 |                 if r != libc::MAP_FAILED {
+    |                               ^^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find function `sigaction` in crate `libc`
+   --> apps\brick\crates\csv-engine\src\source.rs:135:24
+    |
+135 |         unsafe { libc::sigaction(libc::SIGBUS, (*PREV.0.get()).as_ptr(), std::ptr::null_mut()) };
+    |                        ^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find value `SIGBUS` in crate `libc`
+   --> apps\brick\crates\csv-engine\src\source.rs:135:40
+    |
+135 |         unsafe { libc::sigaction(libc::SIGBUS, (*PREV.0.get()).as_ptr(), std::ptr::null_mut()) };
+    |                                        ^^^^^^ not found in `libc`
+
+error[E0425]: cannot find function `sysconf` in crate `libc`
+   --> apps\brick\crates\csv-engine\src\source.rs:143:27
+    |
+143 |                     libc::sysconf(libc::_SC_PAGESIZE) as usize,
+    |                           ^^^^^^^
+    |
+   ::: C:\Users\runneradmin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\libc-0.2.190\src\windows\mod.rs:288:13
+    |
+288 |             pub fn sscanf(buffer: *const c_char, format: *const c_char, ...) -> c_int;
+    |             -------------------------------------------------------------------------- similarly named function `sscanf` defined here
+    |
+help: a function with a similar name exists
+    |
+143 -                     libc::sysconf(libc::_SC_PAGESIZE) as usize,
+143 +                     libc::sscanf(libc::_SC_PAGESIZE) as usize,
+    |
+
+error[E0425]: cannot find value `_SC_PAGESIZE` in crate `libc`
+   --> apps\brick\crates\csv-engine\src\source.rs:143:41
+    |
+143 |                     libc::sysconf(libc::_SC_PAGESIZE) as usize,
+    |                                         ^^^^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find function `sigaction` in crate `libc`
+   --> apps\brick\crates\csv-engine\src\source.rs:146:23
+    |
+146 |                 libc::sigaction(libc::SIGBUS, std::ptr::null(), (*PREV.0.get()).as_mut_ptr());
+    |                       ^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find value `SIGBUS` in crate `libc`
+   --> apps\brick\crates\csv-engine\src\source.rs:146:39
+    |
+146 |                 libc::sigaction(libc::SIGBUS, std::ptr::null(), (*PREV.0.get()).as_mut_ptr());
+    |                                       ^^^^^^ not found in `libc`
+
+error[E0425]: cannot find type `sigaction` in crate `libc`
+   --> apps\brick\crates\csv-engine\src\source.rs:147:39
+    |
+147 |                 let mut action: libc::sigaction = std::mem::zeroed();
+    |                                       ^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find type `siginfo_t` in crate `libc`
+   --> apps\brick\crates\csv-engine\src\source.rs:148:68
+    |
+148 |                 let handler: extern "C" fn(libc::c_int, *mut libc::siginfo_t, *mut libc::c_void) =
+    |                                                                    ^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find value `SA_SIGINFO` in crate `libc`
+   --> apps\brick\crates\csv-engine\src\source.rs:151:41
+    |
+151 |                 action.sa_flags = libc::SA_SIGINFO | libc::SA_ONSTACK;
+    |                                         ^^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find value `SA_ONSTACK` in crate `libc`
+   --> apps\brick\crates\csv-engine\src\source.rs:151:60
+    |
+151 |                 action.sa_flags = libc::SA_SIGINFO | libc::SA_ONSTACK;
+    |                                                            ^^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find function `sigemptyset` in crate `libc`
+   --> apps\brick\crates\csv-engine\src\source.rs:152:23
+    |
+152 |                 libc::sigemptyset(&mut action.sa_mask);
+    |                       ^^^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find function `sigaction` in crate `libc`
+   --> apps\brick\crates\csv-engine\src\source.rs:153:23
+    |
+153 |                 libc::sigaction(libc::SIGBUS, &action, std::ptr::null_mut());
+    |                       ^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find value `SIGBUS` in crate `libc`
+   --> apps\brick\crates\csv-engine\src\source.rs:153:39
+    |
+153 |                 libc::sigaction(libc::SIGBUS, &action, std::ptr::null_mut());
+    |                                       ^^^^^^ not found in `libc`
+
+    Checking rayon v1.12.0
+   Compiling syn v3.0.6
+For more information about this error, try `rustc --explain E0425`.
+error: could not compile `csv-engine` (lib) due to 21 previous errors
+   Compiling winnow v1.0.4
+    Checking flate2 v1.1.10
+   Compiling toml_parser v1.1.3+spec-1.1.0
+   Compiling toml_datetime v1.1.1+spec-1.1.0
+    Checking log v0.4.34
+   Compiling target-lexicon v0.13.5
+    Checking hashbrown v0.17.1
+    Checking equivalent v1.0.2
+    Checking bumpalo v3.20.3
+    Checking bitflags v2.13.2
+    Checking zopfli v0.8.3
+    Checking typed-path v0.12.3
+    Checking indexmap v2.14.2
+   Compiling system-deps v9.0.0
+   Compiling serde_spanned v1.1.1
+   Compiling heck v0.5.0
+   Compiling toml v1.1.6+spec-1.1.0
+    Checking zip v8.6.0
+   Compiling cfg-expr v0.20.10
+    Checking quick-xml v0.41.0
+   Compiling pkg-config v0.3.34
+   Compiling version-compare v0.2.1
+   Compiling serde_core v1.0.229
+   Compiling serde v1.0.229
+   Compiling serde_derive v1.0.229
+    Checking windows-sys v0.61.2
+   Compiling glib-sys v0.22.9
+    Checking pin-project-lite v0.2.17
+   Compiling gobject-sys v0.22.9
+    Checking futures-core v0.3.34
+   Compiling gio-sys v0.22.9
+   Compiling autocfg v1.5.1
+   Compiling pulldown-cmark v0.13.4
+   Compiling futures-macro v0.3.34
+    Checking unicase v2.10.0
+    Checking once_cell v1.21.4
+    Checking futures-task v0.3.34
+    Checking slab v0.4.12
+    Checking futures-channel v0.3.34
+   Compiling pango-sys v0.22.9
+    Checking futures-util v0.3.34
+   Compiling cairo-sys-rs v0.22.9
+   Compiling gdk-pixbuf-sys v0.22.9
+   Compiling glib-macros v0.22.9
+    Checking document-model v0.1.0 (D:\a\cronkite\cronkite\apps\slate\crates\document-model)
+   Compiling gdk4-sys v0.11.5
+   Compiling graphene-sys v0.22.9
+    Checking image-model v0.1.0 (D:\a\cronkite\cronkite\apps\etch\crates\image-model)
+    Checking futures-executor v0.3.34
+    Checking futures-io v0.3.34
+   Compiling gsk4-sys v0.11.5
+   Compiling semver v1.0.28
+   Compiling memoffset v0.9.1
+   Compiling rustc_version v0.4.1
+   Compiling zmij v1.0.23
+   Compiling field-offset v0.3.6
+   Compiling gtk4-sys v0.11.5
+   Compiling serde_json v1.0.154
+   Compiling toml_edit v0.25.15+spec-1.1.0
+   Compiling proc-macro-crate v3.5.0
+    Checking glib v0.22.10
+    Checking tracing-core v0.1.36
+    Checking lazy_static v1.5.1
+    Checking suite-core v0.1.0 (D:\a\cronkite\cronkite\crates\suite-core)
+    Checking itoa v1.0.18
+   Compiling gtk4-macros v0.11.5
+    Checking sharded-slab v0.1.7
+    Checking nu-ansi-term v0.50.3
+    Checking thread_local v1.1.10
+    Checking presentation-model v0.1.0 (D:\a\cronkite\cronkite\apps\frame\crates\presentation-model)
+    Checking tracing-subscriber v0.3.23
+    Checking tracing v0.1.44
+    Checking suite-ui v0.1.0 (D:\a\cronkite\cronkite\crates\suite-ui)
+    Checking debug_unsafe v0.1.4
+    Checking atoi_simd v0.18.1
+    Checking document-edit v0.1.0 (D:\a\cronkite\cronkite\apps\slate\crates\document-edit)
+    Checking codepage v0.1.3
+    Checking fast-float2 v0.2.4
+    Checking byteorder v1.5.0
+    Checking deck-edit v0.1.0 (D:\a\cronkite\cronkite\apps\frame\crates\deck-edit)
+    Checking parking v2.2.1
+    Checking event-listener v5.4.2
+    Checking calamine v0.36.1
+    Checking event-listener-strategy v0.5.4
+    Checking concurrent-queue v2.5.0
+   Compiling num-traits v0.2.19
+    Checking async-channel v2.5.0
+    Checking jobs v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\jobs)
+   Compiling getrandom v0.4.3
+    Checking miniz_oxide v0.8.9
+    Checking fdeflate v0.3.7
+    Checking pxfm v0.1.30
+    Checking suite-platform v0.1.0 (D:\a\cronkite\cronkite\crates\suite-platform)
+    Checking zune-core v0.5.3
+    Checking png v0.18.1
+    Checking zune-jpeg v0.5.15
+    Checking byteorder-lite v0.1.0
+    Checking bytemuck v1.25.2
+    Checking fastrand v2.5.0
+    Checking flow v0.1.0 (D:\a\cronkite\cronkite\apps\slate\crates\flow)
+    Checking tempfile v3.27.0
+    Checking rust_xlsxwriter v0.99.1
+    Checking moxcms v0.8.1
+    Checking gio v0.22.10
+    Checking cairo-rs v0.22.9
+    Checking graphene-rs v0.22.8
+error: could not compile `csv-engine` (lib test) due to 21 previous errors
+    Checking image v0.25.10
+error[E0433]: cannot find `unix` in `os`
+  --> crates\suite-file\src\lib.rs:31:18
+   |
+31 |     use std::os::unix::ffi::OsStrExt;
+   |                  ^^^^ could not find `unix` in `os`
+
+error[E0599]: no associated function or constant named `from_bytes` found for struct `OsStr` in the current scope
+  --> crates\suite-file\src\lib.rs:47:37
+   |
+47 |         let path = Path::new(OsStr::from_bytes(b"/tmp/bad\xff.csv"));
+   |                                     ^^^^^^^^^^ associated function or constant not found in `OsStr`
+
+error: could not compile `suite-file` (lib test) due to 6 previous errors
+    Checking gdk-pixbuf v0.22.0
+    Checking pango v0.22.9
+    Checking gdk4 v0.11.5
+    Checking gsk4 v0.11.5
+    Checking gtk4 v0.11.5

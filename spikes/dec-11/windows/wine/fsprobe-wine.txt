@@ -1,0 +1,32 @@
+os=windows dir=C:\users\root\AppData\Local\Temp\fsprobe-32
+rename over closed file: Ok ()
+open dir and sync_all (save_atomic's last step): Err Access denied. (os error 5) (raw Some(5))
+rename over file open (std sharing): Err Access denied. (os error 5) (raw Some(5))
+  content after: Ok "old"
+rename over memory-mapped file: Err Access denied. (os error 5) (raw Some(5))
+  mapping still reads the old bytes: true
+set_len(0) on memory-mapped file: Err File has a user-mapped section. (os error 1224) (raw Some(1224))
+File::create (truncate) on memory-mapped file: Err File has a user-mapped section. (os error 1224) (raw Some(1224))
+write in place, same length, on memory-mapped file: Ok ()
+  mapping sees the in-place write: true
+remove memory-mapped file: Ok ()
+  exists after: true ; mapping still reads: true
+  exists after unmapping: false
+rename over file open with FILE_SHARE_READ only: Err Access denied. (os error 5) (raw Some(5))
+lock owner: Ok ()
+try_lock, same process other handle: Err("lock acquisition failed because the operation would block")
+try_lock, other process: Ok("would-block")
+read locked file from other handle: Ok 0
+remove locked file: Ok ()
+env HOME=None
+env USERPROFILE=Some("C:\\users\\root")
+env APPDATA=Some("C:\\users\\root\\AppData\\Roaming")
+env LOCALAPPDATA=Some("C:\\users\\root\\AppData\\Local")
+env XDG_STATE_HOME=None
+env XDG_CACHE_HOME=None
+env XDG_CONFIG_HOME=None
+env TEMP=Some("C:\\users\\root\\AppData\\Local\\Temp")
+std::env::home_dir=Some("C:\\users\\root") temp_dir="C:\\users\\root\\AppData\\Local\\Temp\\"
+canonicalize="\\\\?\\C:\\users\\root\\AppData\\Local\\Temp\\fsprobe-32\\recent.csv" starts with '/': false is_absolute: true
+Brick's state dir without XDG_STATE_HOME: ".local/state\\brick" (absolute: false)
+/proc/32 exists (Slate's liveness test): true

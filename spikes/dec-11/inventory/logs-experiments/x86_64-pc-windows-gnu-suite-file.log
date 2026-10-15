@@ -1,0 +1,38 @@
+    Checking suite-file v0.1.0 (/home/av/Projects/cronkite-xp-inventory/crates/suite-file)
+warning: unused import: `std::ffi::OsStr`
+ --> crates/suite-file/src/recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `std::ffi::OsStr`
+  --> crates/suite-file/src/lib.rs:30:9
+   |
+30 |     use std::ffi::OsStr;
+   |         ^^^^^^^^^^^^^^^
+
+warning: `suite-file` (lib) generated 1 warning (run `cargo fix --lib -p suite-file` to apply 1 suggestion)
+error[E0433]: cannot find `unix` in `os`
+ --> crates/suite-file/tests/atomic.rs:4:14
+  |
+4 | use std::os::unix::fs::PermissionsExt;
+  |              ^^^^ could not find `unix` in `os`
+
+warning: `suite-file` (lib test) generated 2 warnings (1 duplicate) (run `cargo fix --lib -p suite-file --tests` to apply 1 suggestion)
+error[E0599]: no associated function or constant named `from_mode` found for struct `Permissions` in the current scope
+  --> crates/suite-file/tests/atomic.rs:29:56
+   |
+29 |     std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o640)).unwrap();
+   |                                                        ^^^^^^^^^ associated function or constant not found in `Permissions`
+
+error[E0599]: no method named `mode` found for struct `Permissions` in the current scope
+  --> crates/suite-file/tests/atomic.rs:46:54
+   |
+46 |         std::fs::metadata(&f).unwrap().permissions().mode() & 0o777,
+   |                                                      ^^^^ method not found in `Permissions`
+
+Some errors have detailed explanations: E0433, E0599.
+For more information about an error, try `rustc --explain E0433`.
+error: could not compile `suite-file` (test "atomic") due to 3 previous errors

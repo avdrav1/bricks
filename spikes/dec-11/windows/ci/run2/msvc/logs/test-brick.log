@@ -1,0 +1,102 @@
+   Compiling smallvec v1.16.2
+   Compiling glib-sys v0.22.9
+   Compiling windows-sys v0.61.2
+   Compiling futures-core v0.3.34
+   Compiling futures-task v0.3.34
+   Compiling slab v0.4.12
+   Compiling futures-channel v0.3.34
+   Compiling gobject-sys v0.22.9
+   Compiling futures-util v0.3.34
+   Compiling bitflags v2.13.2
+   Compiling cairo-sys-rs v0.22.9
+   Compiling pango-sys v0.22.9
+   Compiling parking_lot_core v0.9.12
+   Compiling parking_lot v0.12.5
+   Compiling futures-io v0.3.34
+   Compiling csv-engine v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\csv-engine)
+   Compiling graphene-sys v0.22.9
+   Compiling gio-sys v0.22.9
+   Compiling data-model v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\data-model)
+   Compiling toml_edit v0.25.15+spec-1.1.0
+   Compiling futures-executor v0.3.34
+   Compiling glib v0.22.10
+   Compiling gdk-pixbuf-sys v0.22.9
+   Compiling gdk4-sys v0.11.5
+   Compiling gsk4-sys v0.11.5
+   Compiling once_cell v1.21.4
+   Compiling tracing-core v0.1.36
+   Compiling proc-macro-crate v3.5.0
+   Compiling memoffset v0.9.1
+warning: unused import: `std::ffi::OsStr`
+ --> crates\suite-file\src\recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 1 warning (run `cargo fix --lib -p suite-file` to apply 1 suggestion)
+   Compiling lazy_static v1.5.1
+   Compiling sharded-slab v0.1.7
+   Compiling async-channel v2.5.0
+   Compiling field-offset v0.3.6
+   Compiling gtk4-macros v0.11.5
+   Compiling gtk4-sys v0.11.5
+   Compiling nu-ansi-term v0.50.3
+   Compiling thread_local v1.1.10
+   Compiling tracing-subscriber v0.3.23
+   Compiling jobs v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\jobs)
+   Compiling xlsx v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\xlsx)
+   Compiling file-format v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\file-format)
+   Compiling tracing v0.1.44
+   Compiling commands v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\commands)
+   Compiling grid v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\grid)
+   Compiling gio v0.22.10
+   Compiling cairo-rs v0.22.9
+   Compiling graphene-rs v0.22.8
+   Compiling gdk-pixbuf v0.22.0
+   Compiling pango v0.22.9
+   Compiling gdk4 v0.11.5
+   Compiling gsk4 v0.11.5
+   Compiling gtk4 v0.11.5
+   Compiling brick v0.3.0 (D:\a\cronkite\cronkite\apps\brick)
+error[E0432]: unresolved import `std::os::fd`
+  --> apps\brick\tests\first_rows.rs:11:14
+   |
+11 | use std::os::fd::AsRawFd;
+   |              ^^ could not find `fd` in `os`
+   |
+note: found an item that was configured out
+  --> /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library\std\src\os\mod.rs:70:9
+  ::: /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library\std\src\os\mod.rs:77:1
+   |
+   = note: the item is gated here
+
+error[E0425]: cannot find function `posix_fadvise` in crate `libc`
+  --> apps\brick\tests\first_rows.rs:25:15
+   |
+25 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |               ^^^^^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find value `POSIX_FADV_DONTNEED` in crate `libc`
+  --> apps\brick\tests\first_rows.rs:25:56
+   |
+25 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |                                                        ^^^^^^^^^^^^^^^^^^^ not found in `libc`
+
+error[E0599]: no method named `as_raw_fd` found for struct `File` in the current scope
+  --> apps\brick\tests\first_rows.rs:25:31
+   |
+25 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |                               ^^^^^^^^^
+   |
+help: there is a method `as_raw_handle` with a similar name
+   |
+25 -         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+25 +         libc::posix_fadvise(f.as_raw_handle(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |
+
+Some errors have detailed explanations: E0425, E0432, E0599.
+For more information about an error, try `rustc --explain E0425`.
+error: could not compile `brick` (test "first_rows") due to 4 previous errors
+warning: build failed, waiting for other jobs to finish...

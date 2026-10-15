@@ -1,0 +1,23 @@
+dlls: 43
+total (unstripped): 44 MB
+  bin: 33 MB, of which exes:
+  share/icons: 7 MB
+  lib: 5 MB
+largest DLLs (KB):
+11496	bundle/cronkite/bin/librsvg-2-2.dll
+2600	bundle/cronkite/bin/libstdc++-6.dll
+1876	bundle/cronkite/bin/libgio-2.0-0.dll
+1576	bundle/cronkite/bin/libharfbuzz-0.dll
+1532	bundle/cronkite/bin/libglib-2.0-0.dll
+1220	bundle/cronkite/bin/libxml2-16.dll
+1216	bundle/cronkite/bin/libcairo-2.dll
+1192	bundle/cronkite/bin/libzstd.dll
+1116	bundle/cronkite/bin/libiconv-2.dll
+948	bundle/cronkite/bin/libjpeg-8.dll
+792	bundle/cronkite/bin/libfreetype-6.dll
+788	bundle/cronkite/bin/libLerc.dll
+732	bundle/cronkite/bin/libwebp-7.dll
+724	bundle/cronkite/bin/libpixman-1-0.dll
+692	bundle/cronkite/bin/libpcre2-8-0.dll
+total (exes stripped): 44 MB
+zip -9: 18 MB

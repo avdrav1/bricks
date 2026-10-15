@@ -1,0 +1,90 @@
+    Checking csv-engine v0.3.0 (/home/av/Projects/cronkite-xp-inventory/apps/brick/crates/csv-engine)
+error[E0432]: unresolved import `std::os::fd`
+ --> apps/brick/crates/csv-engine/tests/fetch_perf.rs:8:14
+  |
+8 | use std::os::fd::AsRawFd;
+  |              ^^ could not find `fd` in `os`
+  |
+note: found an item that was configured out
+ --> /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library\std\src\os\mod.rs:70:9
+ ::: /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library\std\src\os\mod.rs:77:1
+  |
+  = note: the item is gated here
+
+error[E0432]: unresolved import `std::os::fd`
+  --> apps/brick/crates/csv-engine/tests/index_perf.rs:10:14
+   |
+10 | use std::os::fd::AsRawFd;
+   |              ^^ could not find `fd` in `os`
+   |
+note: found an item that was configured out
+  --> /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library\std\src\os\mod.rs:70:9
+  ::: /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library\std\src\os\mod.rs:77:1
+   |
+   = note: the item is gated here
+
+error[E0425]: cannot find function `posix_fadvise` in crate `libc`
+  --> apps/brick/crates/csv-engine/tests/index_perf.rs:39:15
+   |
+39 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |               ^^^^^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find value `POSIX_FADV_DONTNEED` in crate `libc`
+  --> apps/brick/crates/csv-engine/tests/index_perf.rs:39:56
+   |
+39 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |                                                        ^^^^^^^^^^^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find function `madvise` in crate `libc`
+  --> apps/brick/crates/csv-engine/tests/fetch_perf.rs:32:15
+   |
+32 |         libc::madvise(
+   |               ^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find value `MADV_DONTNEED` in crate `libc`
+  --> apps/brick/crates/csv-engine/tests/fetch_perf.rs:35:19
+   |
+35 |             libc::MADV_DONTNEED,
+   |                   ^^^^^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find function `posix_fadvise` in crate `libc`
+  --> apps/brick/crates/csv-engine/tests/fetch_perf.rs:37:15
+   |
+37 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |               ^^^^^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find value `POSIX_FADV_DONTNEED` in crate `libc`
+  --> apps/brick/crates/csv-engine/tests/fetch_perf.rs:37:56
+   |
+37 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |                                                        ^^^^^^^^^^^^^^^^^^^ not found in `libc`
+
+error[E0599]: no method named `as_raw_fd` found for struct `File` in the current scope
+  --> apps/brick/crates/csv-engine/tests/index_perf.rs:39:31
+   |
+39 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |                               ^^^^^^^^^
+   |
+help: there is a method `as_raw_handle` with a similar name
+   |
+39 -         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+39 +         libc::posix_fadvise(f.as_raw_handle(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |
+
+error[E0599]: no method named `as_raw_fd` found for struct `File` in the current scope
+  --> apps/brick/crates/csv-engine/tests/fetch_perf.rs:37:31
+   |
+37 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |                               ^^^^^^^^^
+   |
+help: there is a method `as_raw_handle` with a similar name
+   |
+37 -         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+37 +         libc::posix_fadvise(f.as_raw_handle(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |
+
+Some errors have detailed explanations: E0425, E0432, E0599.
+For more information about an error, try `rustc --explain E0425`.
+error: could not compile `csv-engine` (test "index_perf") due to 4 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `csv-engine` (test "fetch_perf") due to 6 previous errors

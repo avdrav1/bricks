@@ -1,0 +1,14 @@
+2026-10-15T18:45:55.918804Z  INFO etch: application starting
+Etch starting...
+Using renderer 'GskGLRenderer' for surface 'GdkWin32Toplevel'
+
+(etch.exe:8640): Gdk-CRITICAL **: 18:45:56.251: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
+2026-10-15T18:45:57.843846Z  INFO etch::window: opened D:\a\cronkite\cronkite\spikes\dec-11\windows\samples\sample.png: 640×400 in 5 ms
+
+(etch.exe:8640): Gtk-CRITICAL **: 18:45:57.843: gtk_native_get_surface: assertion 'GTK_IS_NATIVE (self)' failed
+
+(etch.exe:8640): Gtk-CRITICAL **: 18:45:57.844: gtk_native_get_surface: assertion 'GTK_IS_NATIVE (self)' failed
+
+(etch.exe:8640): Gtk-WARNING **: 18:45:57.861: Allocating size to GtkBox 000001fefeb3f640 without calling gtk_widget_measure(). How does the code know the size to allocate?
+
+(etch.exe:8640): Gdk-CRITICAL **: 18:45:57.863: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed

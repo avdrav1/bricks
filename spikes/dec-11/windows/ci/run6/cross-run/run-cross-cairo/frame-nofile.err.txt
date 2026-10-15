@@ -1,0 +1,5 @@
+2026-10-15T19:00:27.966796Z  INFO frame: application starting
+Frame starting...
+Environment variable GSK_RENDERER=cairo set, trying GskCairoRenderer
+Using renderer 'GskCairoRenderer' for surface 'GdkWin32Toplevel'
+couldn't load font "Calibri Light, 30.874px", falling back to "Sans 30.874px", expect ugly output.

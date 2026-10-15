@@ -1,0 +1,25 @@
+bin=D:\a\cronkite\cronkite\xbundle\cronkite\bin clean=True
+screen=1024x768
+brick --version: exit=0 'brick 0.3.0'
+slate --version: exit=0 'slate 0.3.0'
+frame --version: exit=0 'frame 0.1.0'
+etch --version: exit=0 'etch 0.2.1'
+brick-sample.csv: running window_after_ms=4410 title='sample.csv' ws=89MB gdbus_processes=1
+brick-fixture.xlsx: running window_after_ms=1000 title='fixture.xlsx' ws=97MB gdbus_processes=1
+slate-README.md: running window_after_ms=552 title='README.md' ws=86MB gdbus_processes=1
+slate-fixture.docx: running window_after_ms=430 title='fixture.docx' ws=89MB gdbus_processes=1
+frame-fixture.pptx: running window_after_ms=545 title='fixture.pptx' ws=102MB gdbus_processes=1
+etch-sample.png: running window_after_ms=563 title='sample.png' ws=86MB gdbus_processes=1
+brick-nofile: running window_after_ms=428 title='Brick' ws=73MB gdbus_processes=1
+frame-nofile: running window_after_ms=435 title='Untitled' ws=84MB gdbus_processes=1
+slate sweep: first slate pid=904 copies in C:\Users\runneradmin\AppData\Local\Temp\slate before second start: [original-904-0.docx] after: []
+files under the apps' working directory D:\a\cronkite\cronkite\run-cross\cwd:
+  \.local
+  \.local\state
+  \.local\state\brick
+  \.local\state\brick\recent
+exists: C:\Users\runneradmin\AppData\Local\slate -> 
+exists: C:\Users\runneradmin\.local -> \state \state\etch \state\etch\recent
+exists: C:\Users\runneradmin\AppData\Local\Temp\brick -> \copy-2092-0
+exists: C:\Users\runneradmin\AppData\Local\Temp\frame -> \original-3912-0.pptx \original-6956-0.pptx
+exists: C:\Users\runneradmin\AppData\Local\Temp\slate -> 

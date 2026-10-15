@@ -1,0 +1,24 @@
+2026-10-15T18:09:31.614981Z  INFO slate: application starting
+Slate starting...
+
+(slate.exe:32): Gdk-WARNING **: 18:09:31.815: Failed to get device node property {A45C254E-DF1C-4EFD-8020-67D146A850E0},13 size: Element not found.
+
+(slate.exe:32): Gdk-WARNING **: 18:09:31.815: Failed to get device node property {B725F130-47EF-101A-A5F1-02608C9EEBAC},10 size: Element not found.
+MESA-EGL: warning: DRI3 error: Could not get DRI3 device
+MESA-EGL: warning: Ensure your X server supports DRI3 to get accelerated rendering
+
+(slate.exe:32): Gdk-CRITICAL **: 18:09:31.921: file ../gdk/win32/gdkdisplay-win32.c: line 525 (gdk_win32_display_init_dcomp): DCompositionCreateDevice (dxgi_device, &my_IID_IDCompositionDevice, (void **) &self->dcomp_device) returned -2147467263 (Not implemented.)
+
+(slate.exe:32): Gdk-WARNING **: 18:09:31.924: Could not query registry key 'SYSTEM\CurrentControlSet\Control\Keyboard Layouts\00000409\Layout File'. Error code: 2
+
+(slate.exe:32): Gdk-WARNING **: 18:09:31.924: Could not open registry key 'Keyboard Layout\Substitutes'. Error code: 2
+
+(slate.exe:32): Gdk-WARNING **: 18:09:31.924: Failed to load keyboard layout DLL for layout 00000409: (NULL)
+
+(slate.exe:32): Gdk-WARNING **: 18:09:32.097: ../gdk/win32/gdksurface-win32.c:240: DwmEnableBlurBehindWindow (000000000001007c) failed: 80004001
+Environment variable GSK_RENDERER=cairo set, trying GskCairoRenderer
+Using renderer 'GskCairoRenderer' for surface 'GdkWin32Toplevel'
+
+(slate.exe:32): Gtk-CRITICAL **: 18:09:32.115: gtk_native_get_surface: assertion 'GTK_IS_NATIVE (self)' failed
+
+(slate.exe:32): Gtk-CRITICAL **: 18:09:32.115: gtk_native_get_surface: assertion 'GTK_IS_NATIVE (self)' failed

@@ -1,0 +1,368 @@
+   Compiling csv-engine v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\csv-engine)
+   Compiling gdk4 v0.11.5
+warning: unused import: `std::ffi::OsStr`
+ --> crates\suite-file\src\recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `dir`
+   --> crates\suite-file\src\save.rs:105:9
+    |
+105 |     let dir = dest
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_dir`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 2 warnings (run `cargo fix --lib -p suite-file` to apply 2 suggestions)
+   Compiling async-channel v2.5.0
+   Compiling tracing-subscriber v0.3.23
+   Compiling jobs v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\jobs)
+   Compiling data-model v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\data-model)
+   Compiling tracing v0.1.44
+   Compiling file-format v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\file-format)
+   Compiling xlsx v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\xlsx)
+   Compiling commands v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\commands)
+   Compiling grid v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\grid)
+   Compiling gsk4 v0.11.5
+   Compiling gtk4 v0.11.5
+   Compiling brick v0.3.0 (D:\a\cronkite\cronkite\apps\brick)
+error[E0432]: unresolved import `std::os::fd`
+  --> apps\brick\tests\first_rows.rs:11:14
+   |
+11 | use std::os::fd::AsRawFd;
+   |              ^^ could not find `fd` in `os`
+   |
+note: found an item that was configured out
+  --> /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library\std\src\os\mod.rs:70:9
+  ::: /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library\std\src\os\mod.rs:77:1
+   |
+   = note: the item is gated here
+
+error[E0425]: cannot find function `posix_fadvise` in crate `libc`
+  --> apps\brick\tests\first_rows.rs:25:15
+   |
+25 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |               ^^^^^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find value `POSIX_FADV_DONTNEED` in crate `libc`
+  --> apps\brick\tests\first_rows.rs:25:56
+   |
+25 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |                                                        ^^^^^^^^^^^^^^^^^^^ not found in `libc`
+
+error[E0599]: no method named `as_raw_fd` found for struct `File` in the current scope
+  --> apps\brick\tests\first_rows.rs:25:31
+   |
+25 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |                               ^^^^^^^^^
+   |
+help: there is a method `as_raw_handle` with a similar name
+   |
+25 -         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+25 +         libc::posix_fadvise(f.as_raw_handle(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |
+
+Some errors have detailed explanations: E0425, E0432, E0599.
+For more information about an error, try `rustc --explain E0425`.
+error: could not compile `brick` (test "first_rows") due to 4 previous errors
+warning: build failed, waiting for other jobs to finish...
+== fallback: per target
+error: no library targets found in package `brick`
+warning: unused import: `std::ffi::OsStr`
+ --> crates\suite-file\src\recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `dir`
+   --> crates\suite-file\src\save.rs:105:9
+    |
+105 |     let dir = dest
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_dir`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 2 warnings (run `cargo fix --lib -p suite-file` to apply 2 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.17s
+     Running unittests src\main.rs (target\debug\deps\brick-98e8ec23d6032078.exe)
+
+running 25 tests
+test editor::tests::arrows_leave_a_typed_edit_but_move_the_text_cursor_in_f2 ... ok
+test editor::tests::ctrl_plus_inserts_ctrl_minus_deletes ... ok
+test editor::tests::ctrl_c_copies_ctrl_x_cuts ... ok
+test editor::tests::delete_alone_clears ... ok
+test editor::tests::enter_commits_and_moves_down_esc_cancels ... ok
+test editor::tests::f2_and_printable_keys_start_an_edit ... ok
+test grid_view::tests::a_centred_across_run_is_bounded ... ok
+test grid_view::tests::a_centred_across_run_stops_at_cells_that_do_not_join ... ok
+test grid_view::tests::empty_cells_reach_a_screen_past_the_view_and_the_cursor ... ok
+test grid_view::tests::text_in_a_tight_row_stays_inside_it ... ok
+test grid_view::tests::text_keeps_three_pixels_where_the_row_has_room ... ok
+test grid_view::tests::text_taller_than_its_row_is_cut_on_the_aligned_side ... ok
+test looks::tests::the_default_font_draws_in_the_grid_font ... ok
+test looks::tests::unreadable_text_colours_fall_back_on_dark_themes ... ok
+test state::tests::an_existing_brick_folder_wins ... ok
+test status::tests::clipboard_progress_and_result_come_first ... ok
+test status::tests::filtered_rows_read_x_of_y ... ok
+test status::tests::format_names_delimiter_and_encoding ... ok
+test status::tests::rows_show_progress_until_indexing_completes ... ok
+test status::tests::save_state_wording_and_precedence ... ok
+test status::tests::title_marks_unsaved_edits ... ok
+test theme::tests::color_scheme_values ... ok
+test state::tests::the_newest_old_folder_wins ... ok
+test state::tests::an_old_folder_moves_over_once ... ok
+test recovery::tests::crashed_journals_read_their_headers_newest_first ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+== target find_typing
+warning: unused import: `std::ffi::OsStr`
+ --> crates\suite-file\src\recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `dir`
+   --> crates\suite-file\src\save.rs:105:9
+    |
+105 |     let dir = dest
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_dir`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 2 warnings (run `cargo fix --lib -p suite-file` to apply 2 suggestions)
+   Compiling brick v0.3.0 (D:\a\cronkite\cronkite\apps\brick)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.11s
+     Running tests\find_typing.rs (target\debug\deps\find_typing-e42a2ee6ae5e049d.exe)
+
+running 1 test
+test a_new_keystroke_cancels_the_running_search ... ignored, opens a window and needs corpus/; run with --release --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== target first_rows
+warning: unused import: `std::ffi::OsStr`
+ --> crates\suite-file\src\recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `dir`
+   --> crates\suite-file\src\save.rs:105:9
+    |
+105 |     let dir = dest
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_dir`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 2 warnings (run `cargo fix --lib -p suite-file` to apply 2 suggestions)
+   Compiling brick v0.3.0 (D:\a\cronkite\cronkite\apps\brick)
+error[E0432]: unresolved import `std::os::fd`
+  --> apps\brick\tests\first_rows.rs:11:14
+   |
+11 | use std::os::fd::AsRawFd;
+   |              ^^ could not find `fd` in `os`
+   |
+note: found an item that was configured out
+  --> /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library\std\src\os\mod.rs:70:9
+  ::: /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library\std\src\os\mod.rs:77:1
+   |
+   = note: the item is gated here
+
+error[E0425]: cannot find function `posix_fadvise` in crate `libc`
+  --> apps\brick\tests\first_rows.rs:25:15
+   |
+25 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |               ^^^^^^^^^^^^^ not found in `libc`
+
+error[E0425]: cannot find value `POSIX_FADV_DONTNEED` in crate `libc`
+  --> apps\brick\tests\first_rows.rs:25:56
+   |
+25 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |                                                        ^^^^^^^^^^^^^^^^^^^ not found in `libc`
+
+error[E0599]: no method named `as_raw_fd` found for struct `File` in the current scope
+  --> apps\brick\tests\first_rows.rs:25:31
+   |
+25 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |                               ^^^^^^^^^
+   |
+help: there is a method `as_raw_handle` with a similar name
+   |
+25 -         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+25 +         libc::posix_fadvise(f.as_raw_handle(), 0, 0, libc::POSIX_FADV_DONTNEED);
+   |
+
+Some errors have detailed explanations: E0425, E0432, E0599.
+For more information about an error, try `rustc --explain E0425`.
+error: could not compile `brick` (test "first_rows") due to 4 previous errors
+== target formula_scroll
+warning: unused import: `std::ffi::OsStr`
+ --> crates\suite-file\src\recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `dir`
+   --> crates\suite-file\src\save.rs:105:9
+    |
+105 |     let dir = dest
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_dir`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 2 warnings (run `cargo fix --lib -p suite-file` to apply 2 suggestions)
+   Compiling brick v0.3.0 (D:\a\cronkite\cronkite\apps\brick)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.53s
+     Running tests\formula_scroll.rs (target\debug\deps\formula_scroll-ea4c5796dc44f5a6.exe)
+
+running 1 test
+test formula_scroll_frames_stay_under_16_ms ... ignored, opens a window and needs corpus/; run with --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== target jump_perf
+warning: unused import: `std::ffi::OsStr`
+ --> crates\suite-file\src\recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `dir`
+   --> crates\suite-file\src\save.rs:105:9
+    |
+105 |     let dir = dest
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_dir`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 2 warnings (run `cargo fix --lib -p suite-file` to apply 2 suggestions)
+   Compiling brick v0.3.0 (D:\a\cronkite\cronkite\apps\brick)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.52s
+     Running tests\jump_perf.rs (target\debug\deps\jump_perf-6cc1a6742889357b.exe)
+
+running 1 test
+test jump_to_row_1_9m_renders_under_100ms ... ignored, opens a window and needs corpus/; run with --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== target save_responsive
+warning: unused import: `std::ffi::OsStr`
+ --> crates\suite-file\src\recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `dir`
+   --> crates\suite-file\src\save.rs:105:9
+    |
+105 |     let dir = dest
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_dir`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 2 warnings (run `cargo fix --lib -p suite-file` to apply 2 suggestions)
+   Compiling brick v0.3.0 (D:\a\cronkite\cronkite\apps\brick)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.52s
+     Running tests\save_responsive.rs (target\debug\deps\save_responsive-01cf9cc66dcb5117.exe)
+
+running 1 test
+test ui_stays_responsive_during_a_1gb_save ... ignored, opens a window, needs corpus/ and 1 GB in the temp dir; run with --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== target scroll_perf
+warning: unused import: `std::ffi::OsStr`
+ --> crates\suite-file\src\recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `dir`
+   --> crates\suite-file\src\save.rs:105:9
+    |
+105 |     let dir = dest
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_dir`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 2 warnings (run `cargo fix --lib -p suite-file` to apply 2 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.17s
+     Running tests\scroll_perf.rs (target\debug\deps\scroll_perf-4a6eaf15982e94ea.exe)
+
+running 1 test
+test scrolls_at_display_rate_with_constant_memory ... ignored, opens a window and needs corpus/; run with --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== target status_stream
+warning: unused import: `std::ffi::OsStr`
+ --> crates\suite-file\src\recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `dir`
+   --> crates\suite-file\src\save.rs:105:9
+    |
+105 |     let dir = dest
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_dir`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 2 warnings (run `cargo fix --lib -p suite-file` to apply 2 suggestions)
+   Compiling brick v0.3.0 (D:\a\cronkite\cronkite\apps\brick)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.52s
+     Running tests\status_stream.rs (target\debug\deps\status_stream-6371583e94d0a209.exe)
+
+running 1 test
+test row_count_updates_while_indexing_streams ... ignored, opens a window and needs corpus/; run with --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== target styled_scroll
+warning: unused import: `std::ffi::OsStr`
+ --> crates\suite-file\src\recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `dir`
+   --> crates\suite-file\src\save.rs:105:9
+    |
+105 |     let dir = dest
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_dir`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 2 warnings (run `cargo fix --lib -p suite-file` to apply 2 suggestions)
+   Compiling brick v0.3.0 (D:\a\cronkite\cronkite\apps\brick)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.49s
+     Running tests\styled_scroll.rs (target\debug\deps\styled_scroll-7df35ca6c07921a3.exe)
+
+running 1 test
+test styled_scroll_frames_stay_under_16_ms ... ignored, opens a window and needs corpus/; run with --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

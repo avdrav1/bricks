@@ -1,0 +1,8 @@
+2026-10-15T19:00:34.186162Z  INFO slate: application starting
+Slate starting...
+Environment variable GSK_RENDERER=cairo set, trying GskCairoRenderer
+Using renderer 'GskCairoRenderer' for surface 'GdkWin32Toplevel'
+
+(slate.exe:496): Gtk-CRITICAL **: 19:00:34.550: gtk_native_get_surface: assertion 'GTK_IS_NATIVE (self)' failed
+
+(slate.exe:496): Gtk-CRITICAL **: 19:00:34.550: gtk_native_get_surface: assertion 'GTK_IS_NATIVE (self)' failed

@@ -1,0 +1,220 @@
+   Compiling image-model v0.1.0 (D:\a\cronkite\cronkite\apps\etch\crates\image-model)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.94s
+     Running unittests src\lib.rs (target\debug\deps\image_model-e5f4c1d0057d21d3.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\blend.rs (target\debug\deps\blend-d0e2f3b26a1d94c3.exe)
+
+running 3 tests
+test pixels_blend_source_over_byte_for_byte ... ok
+test pixels_off_the_image_are_clipped ... ok
+test a_blend_undoes_and_redoes_exactly_keeping_only_its_tiles ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\brush.rs (target\debug\deps\brush-8aada745b743c610.exe)
+
+running 8 tests
+test a_second_stroke_blends_over_the_first ... ok
+test a_hard_stroke_is_solid_along_its_path ... ok
+test a_soft_brush_blends_over_whats_there ... ok
+test a_brush_stroke_keeps_only_the_tiles_it_touched ... ok
+test a_soft_brush_falls_off_to_transparent_at_its_edge ... ok
+test a_hard_brush_fills_its_disc ... ok
+test a_slow_stroke_does_not_build_up_within_itself ... ok
+test each_brush_stroke_undoes_and_redoes_exactly ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests\canvas_size.rs (target\debug\deps\canvas_size-889b95597a6eb934.exe)
+
+running 3 tests
+test wider_and_shorter_at_once_and_the_same_size_makes_no_step ... ok
+test shrinking_crops_per_the_anchor ... ok
+test each_anchor_places_the_old_pixels_where_it_says_when_enlarging ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\copy.rs (target\debug\deps\copy-db0748815025aff9.exe)
+
+running 1 test
+test copying_an_8k_image_is_quick ... ignored, perf: run in release with --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\crop.rs (target\debug\deps\crop-cacf2964282fa120.exe)
+
+running 4 tests
+test a_one_pixel_crop_keeps_that_pixel ... ok
+test a_crop_partly_off_the_image_crops_to_the_part_on_it_and_a_whole_or_empty_one_makes_no_step ... ok
+test cropping_makes_the_image_the_selections_bounds_and_pixels_and_undo_restores_it ... ok
+test a_crop_keeps_the_image_before_it_once_and_steps_before_and_after_it_undo_exactly ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\eraser.rs (target\debug\deps\eraser-5fbfccc08ca5288e.exe)
+
+running 2 tests
+test erasing_undoes_and_redoes ... ok
+test erasing_makes_exactly_the_strokes_pixels_transparent ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\fill.rs (target\debug\deps\fill-f7d0becbec38d3d1.exe)
+
+running 7 tests
+test a_fill_fills_transparent_regions ... ok
+test a_fill_goes_only_through_edges_not_corners ... ok
+test a_fill_stops_at_any_other_colour ... ok
+test a_tolerance_fills_near_colours_and_zero_is_exact ... ok
+test filling_with_the_colour_there_changes_nothing ... ok
+test a_fill_reaches_around_corners_and_into_pockets ... ok
+test a_fill_undoes_keeping_only_the_tiles_it_touched ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests\fill_8k.rs (target\debug\deps\fill_8k-72b3b229d680cf19.exe)
+
+running 1 test
+test filling_an_8k_image_is_quick ... ignored, perf: run in release with --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\history.rs (target\debug\deps\history-e109e69c706d30a2.exe)
+
+running 7 tests
+test edge_tiles_are_kept_clipped_to_the_image ... ok
+test a_new_stroke_drops_what_was_undone ... ok
+test positions_tell_whether_the_image_is_back_where_it_was ... ok
+test undo_during_a_stroke_takes_back_that_stroke ... ok
+test undo_takes_back_only_the_last_stroke ... ok
+test undo_restores_bytes_and_redo_gives_back_the_stroke ... ok
+test a_stroke_keeps_only_the_tiles_it_touched ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\paste.rs (target\debug\deps\paste-49d709bec458b51d.exe)
+
+running 3 tests
+test padded_rows_become_the_image_exactly ... ok
+test a_paste_larger_than_the_image_floats_whole_and_lands_clipped_as_one_step ... ok
+test rows_past_the_largest_side_keep_the_top_left ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\pencil.rs (target\debug\deps\pencil-8f690a675bb6cc45.exe)
+
+running 11 tests
+test a_one_pixel_line_sets_exactly_bresenhams_pixels ... ok
+test a_click_draws_one_pixel_and_reports_it ... ok
+test a_stroke_joins_every_point_without_gaps ... ok
+test a_new_image_holds_its_fill_at_every_pixel ... ok
+test a_stroke_off_the_image_changes_nothing_and_leaves_no_step ... ok
+test a_wide_line_is_its_discs_along_the_line ... ok
+test an_image_from_rgba_holds_those_pixels ... ok
+test a_wide_pencil_stamps_a_disc ... ok
+test an_image_needs_a_pixel_and_at_most_max_side_on_each_side ... ok
+test the_changed_rect_holds_every_changed_pixel ... ok
+test strokes_clip_at_the_edges ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+     Running tests\replace.rs (target\debug\deps\replace-9def748827e202d7.exe)
+
+running 3 tests
+test replacing_with_the_same_pixels_is_still_a_step_and_drops_the_redo ... ok
+test a_replacement_of_another_size_undoes_to_the_old_size ... ok
+test replacing_the_image_is_one_step_that_undoes_and_redoes_exactly ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\resize.rs (target\debug\deps\resize-0b069e556b0e4471.exe)
+
+running 6 tests
+test a_size_past_the_limits_is_refused ... ok
+test nearest_doubles_each_pixel_exactly ... ok
+test smooth_never_bleeds_a_transparent_pixels_hidden_colour ... ok
+test resizing_is_one_step_and_undo_restores_the_size_and_every_pixel ... ok
+test smooth_matches_imagemagicks_triangle_filter_within_1_per_channel ... ok
+test smooth_keeps_a_single_colour_exactly_and_resizing_to_the_same_size_changes_nothing ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests\rotate.rs (target\debug\deps\rotate-9a4894a47ab12e8a.exe)
+
+running 3 tests
+test each_undoes_exactly_by_its_inverse_and_redoes_keeping_no_image ... ok
+test four_quarter_turns_two_half_turns_and_two_flips_each_give_back_the_original_bytes ... ok
+test each_moves_every_pixel_where_it_says_and_a_quarter_turn_swaps_width_and_height ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.43s
+
+     Running tests\selection.rs (target\debug\deps\selection-c6919c622c1d01d5.exe)
+
+running 7 tests
+test a_drag_spans_the_pixels_between_its_points ... ok
+test landing_where_they_were_lifted_from_makes_no_step ... ok
+test lifting_leaves_the_image_and_landing_leaves_transparency_and_places_the_bytes_exactly ... ok
+test pasted_pixels_land_replacing_what_is_there ... ok
+test moving_partly_off_the_image_clips ... ok
+test delete_clears_to_transparency_and_undoes ... ok
+test the_whole_move_undoes_in_one_step_and_redoes_exactly ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests\selection_8k.rs (target\debug\deps\selection_8k-f6994f8a396e47a8.exe)
+
+running 1 test
+test a_whole_8k_selection_moves_and_deletes_quickly ... ignored, perf: run in release with --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\shapes.rs (target\debug\deps\shapes-3d65bdc6877e72a9.exe)
+
+running 13 tests
+test a_line_one_pixel_wide_is_bresenhams ... ok
+test a_line_five_pixels_wide_is_the_pencils_discs_along_it ... ok
+test a_filled_ellipse_is_the_one_pixel_outline_and_all_inside_it ... ok
+test a_rectangle_outline_five_pixels_wide_lies_inside_the_box ... ok
+test a_rectangle_outline_one_pixel_wide_runs_round_the_box ... ok
+test a_see_through_colour_lays_one_coat_over_whats_there ... ok
+test an_ellipse_outline_five_pixels_wide_lies_inside_the_box ... ok
+test an_ellipse_outline_one_pixel_wide_touches_the_box_sides ... ok
+test a_shape_is_a_few_rectangles_that_paint_what_lands ... ok
+test shift_keeps_lines_to_45_degrees_and_boxes_square ... ok
+test each_shape_undoes_and_redoes_byte_for_byte ... ok
+test a_shape_keeps_only_the_tiles_it_touched ... ok
+test shapes_clip_at_the_image_edges ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests\tolerance.rs (target\debug\deps\tolerance-55dc7e85ab089bd6.exe)
+
+running 5 tests
+test a_tolerance_fill_undoes_and_redoes_exactly ... ok
+test tolerance_255_fills_everything_connected ... ok
+test tolerance_0_is_an_exact_match ... ok
+test a_colour_at_the_tolerance_fills_and_one_level_beyond_does_not ... ok
+test with_a_fully_transparent_pixel_only_alpha_counts ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\transform_8k.rs (target\debug\deps\transform_8k-895be043f2852533.exe)
+
+running 4 tests
+test cropping_8k ... ignored, perf: run in release with --ignored
+test resizing_8k ... ignored, perf: run in release with --ignored
+test resizing_the_canvas_8k ... ignored, perf: run in release with --ignored
+test rotating_and_flipping_8k ... ignored, perf: run in release with --ignored
+
+test result: ok. 0 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests image_model
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

@@ -1,0 +1,25 @@
+test suite-core: exit=0 passed=1 failed=0 ignored=0 1s  
+test suite-ui: exit=0 passed=1 failed=0 ignored=0 0s  
+test suite-platform: exit=0 passed=1 failed=0 ignored=0 0s  
+test suite-file: exit=101 passed=4 failed=5 ignored=0 1s not compiling: test "atomic", failing: recent::tests::labels_show_the_folder_from_home recent::tests::opened_and_saved_images_list_once_newest_first_ten_at_most recent::tests::relative_paths_are_made_absolute_and_odd_names_kept_raw recent::tests::the_last_ten_files_survive_a_restart recent::tests::two_windows_keep_each_others_files 
+test csv-engine: exit=101 passed=27 failed=3 ignored=1 3s not compiling: test "fetch_perf",test "index_perf", failing: index::tests::row_spans_report_a_file_changed_underneath nasty_corpus_parses_with_no_row_misalignment source::tests::truncation_while_mapped_reports_changed_instead_of_crashing 
+test formula: exit=0 passed=41 failed=0 ignored=0 6s  
+test data-model: exit=101 passed=105 failed=1 ignored=7 9s  failing: well_formed_files_have_no_problems 
+test grid: exit=0 passed=25 failed=0 ignored=0 0s  
+test commands: exit=0 passed=60 failed=0 ignored=11 13s  
+test file-format: exit=101 passed=3 failed=7 ignored=5 4s  failing: a_filtered_table_saves_every_row an_override_changes_sort_and_filter_only encoding_and_bom_round_trip_on_save every_windows_1252_byte_survives kill_9_mid_save_leaves_the_original_intact save_as_changes_delimiter_and_encoding 
+test jobs: exit=0 passed=3 failed=0 ignored=6 1s  
+test xlsx: exit=101 passed=17 failed=7 ignored=5 8s  failing: an_unedited_workbook_saves_its_sheets_as_they_were edited_fixture_saves_and_reopens_the_same edits_and_new_sheets_save_and_everything_else_survives formats_on_a_csv_save_in_a_new_package_and_read_back formats_on_the_fixture_save_by_patching_and_read_back macros_stay_in_an_xlsm_and_leave_with_an_xlsx typed_values_round_trip_and_near_misses_stay_text 
+test brick: exit=101 passed=25 failed=0 ignored=7 35s not compiling: test "first_rows", 
+test document-model: exit=0 passed=38 failed=0 ignored=0 9s  
+test docx: exit=101 passed=35 failed=19 ignored=7 4s  failing: a_colour_cleared_in_a_coloured_style_is_the_styles a_list_in_a_document_without_numbering_gets_numbering a_paragraph_joining_a_list_leaves_its_own_indents_to_the_level a_paragraph_whose_own_borders_differ_from_its_templates_writes_them a_paragraph_whose_own_looks_differ_from_its_templates_writes_them a_paragraph_whose_stops_differ_from_its_templates_writes_its_own a_second_save_patches_the_first a_section_break_stays_with_the_paragraph_that_ends_it an_edited_item_keeps_its_numbering an_edited_paragraph_keeps_its_own_borders_and_shading an_edited_paragraph_keeps_its_own_spacing_and_indents an_edited_paragraph_keeps_its_own_stops_and_the_settings an_unedited_document_saves_as_the_package_it_was edits_change_only_their_paragraphs every_paragraph_of_the_corpus_takes_an_edit new_links_and_pictures_get_relationships_and_parts saving_keeps_the_font_parts_byte_for_byte the_format_bars_looks_save_and_read_back typing_into_it_saves_a_word_document 
+test flow: exit=0 passed=32 failed=0 ignored=0 1s  
+test document-edit: exit=0 passed=58 failed=0 ignored=0 1s  
+test slate: exit=0 passed=20 failed=0 ignored=5 7s  
+test presentation-model: exit=0 passed=1 failed=0 ignored=0 1s  
+test pptx: exit=101 passed=36 failed=8 ignored=5 4s  failing: a_title_typed_into_the_blank_deck_saves an_unedited_deck_saves_as_it_was edits_save_and_everything_else_is_copied formatting_and_layout_changes_save_and_read_back inserts_save_and_read_back outline_edits_save_and_read_back sections_keep_their_slides shape_looks_and_backgrounds_save_and_read_back 
+test deck-edit: exit=0 passed=38 failed=0 ignored=0 2s  
+test frame: exit=0 passed=0 failed=0 ignored=1 4s  
+test image-model: exit=0 passed=85 failed=0 ignored=7 2s  
+test image-io: exit=101 passed=13 failed=0 ignored=0 5s not compiling: test "save", 
+test etch: exit=101 passed=0 failed=0 ignored=1 5s not compiling: bin "etch" test, 

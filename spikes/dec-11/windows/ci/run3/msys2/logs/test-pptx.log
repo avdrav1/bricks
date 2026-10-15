@@ -1,0 +1,123 @@
+warning: unused import: `std::ffi::OsStr`
+ --> crates\suite-file\src\recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `dir`
+   --> crates\suite-file\src\save.rs:105:9
+    |
+105 |     let dir = dest
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_dir`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+   Compiling deck-edit v0.1.0 (D:\a\cronkite\cronkite\apps\frame\crates\deck-edit)
+warning: `suite-file` (lib) generated 2 warnings (run `cargo fix --lib -p suite-file` to apply 2 suggestions)
+   Compiling pptx v0.1.0 (D:\a\cronkite\cronkite\apps\frame\crates\pptx)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.49s
+     Running unittests src\lib.rs (target\debug\deps\pptx-7e87469984fc576c.exe)
+
+running 21 tests
+test color::tests::scheme_names_go_through_the_colour_map ... ok
+test color::tests::alpha_is_kept ... ok
+test package::tests::targets_resolve_against_the_part_directory ... ok
+test read::tests::a_flipped_group_mirrors_its_children ... ok
+test color::tests::transforms_match_libreoffice ... ok
+test read::tests::a_group_scales_and_moves_its_children ... ok
+test color::tests::other_colour_kinds ... ok
+test read::tests::a_rotated_group_turns_children_about_its_centre ... ok
+test save::tests::relative_targets ... ok
+test save::tests::rebuilt_elements_keep_their_schema_order ... ok
+test save::tests::run_properties_take_the_name_they_are_written_with ... ok
+test save::tests::the_longest_run_of_slides_in_section_order_keeps_its_sections ... ok
+test text::tests::runs_breaks_and_fields ... ok
+test text::tests::bullets_take_size_colour_and_symbol_fonts ... ok
+test text::tests::numbering_counts_per_level_and_restarts ... ok
+test text::tests::runs_that_look_and_are_written_the_same_merge ... ok
+test xml::tests::prefixed_attributes_stay_apart ... ok
+test text::tests::sources_say_where_each_look_is_set ... ok
+test xml::tests::spans_cover_each_element_as_written ... ok
+test xml::tests::text_keeps_entities_and_spaces ... ok
+test detect::tests::formats_frame_refuses_say_so ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\blank.rs (target\debug\deps\blank-7e081389c8294dc4.exe)
+
+running 3 tests
+test libreoffice_reads_the_title_and_the_five_layouts ... ignored, needs LibreOffice: cargo test -p pptx --test blank -- --ignored
+test the_blank_deck_is_a_title_slide_on_five_layouts ... ok
+test a_title_typed_into_the_blank_deck_saves ... ok
+
+test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests\content.rs (target\debug\deps\content-67deef25e9617348.exe)
+
+running 6 tests
+test smart_art_draws_from_its_saved_drawing ... ok
+test pictures_carry_their_bytes ... ok
+test backgrounds_match_libreoffice ... ok
+test unsupported_content_is_a_labelled_shape ... ok
+test fills_and_outlines_match_libreoffice ... ok
+test table_cells_carry_text_fills_and_borders ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.93s
+
+     Running tests\frames.rs (target\debug\deps\frames-96ec76fc584ecaa1.exe)
+
+running 4 tests
+test group_children_take_the_group_transform ... ok
+test placeholders_without_a_frame_take_their_layouts_or_masters ... ok
+test notes_match_libreoffice ... ok
+test slides_and_frames_match_libreoffice ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.57s
+
+     Running tests\layouts.rs (target\debug\deps\layouts-bf11e1128c8b0445.exe)
+
+running 2 tests
+test a_new_slide_has_its_layouts_placeholders_empty ... ok
+test layouts_are_listed_master_by_master_with_their_names_and_types ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+
+     Running tests\save.rs (target\debug\deps\save-61b1bbb3f3797abd.exe)
+
+running 11 tests
+test an_unedited_deck_saves_as_it_was ... ok
+test libreoffice_reads_the_formatting_and_layout_changes ... ignored, needs LibreOffice: cargo test -p pptx --test save -- --ignored
+test libreoffice_reads_the_inserts ... ignored, needs LibreOffice: cargo test -p pptx --test save -- --ignored
+test libreoffice_reads_the_outline_edits ... ignored, needs LibreOffice: cargo test -p pptx --test save -- --ignored
+test libreoffice_reads_the_saved_deck_as_the_original_plus_the_edits ... ignored, needs LibreOffice: cargo test -p pptx --test save -- --ignored
+test formatting_and_layout_changes_save_and_read_back ... ok
+test sections_keep_their_slides ... ok
+test edits_save_and_everything_else_is_copied ... ok
+test outline_edits_save_and_read_back ... ok
+test inserts_save_and_read_back ... ok
+test shape_looks_and_backgrounds_save_and_read_back ... ok
+
+test result: ok. 7 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.43s
+
+     Running tests\text.rs (target\debug\deps\text-0e41cef17da0ca92.exe)
+
+running 1 test
+test text_matches_libreoffice ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.52s
+
+     Running tests\unsupported.rs (target\debug\deps\unsupported-987af2b5d2256ea5.exe)
+
+running 1 test
+test unsupported_content_is_labelled_with_its_preview ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+   Doc-tests pptx
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

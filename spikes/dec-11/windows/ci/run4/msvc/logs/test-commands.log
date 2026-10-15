@@ -1,0 +1,205 @@
+   Compiling commands v0.3.0 (D:\a\cronkite\cronkite\apps\brick\crates\commands)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.79s
+     Running unittests src\lib.rs (target\debug\deps\commands-d7efcd16a21f6536.exe)
+
+running 8 tests
+test batch::tests::paste_expands_the_table_and_undoes_in_one_step ... ok
+test clear::tests::delete_clears_the_selection_and_undoes_in_one_step ... ok
+test tests::step_limit_still_applies ... ok
+test tests::the_last_step_stays_undoable_even_when_it_alone_is_over_budget ... ok
+test tests::undo_redo_round_trip ... ok
+test tests::history_stays_under_its_byte_budget ... ok
+test edit::tests::every_edit_reverts_exactly ... ok
+test batch::tests::a_paste_past_the_end_waits_for_indexing_and_size_is_bounded ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s
+
+     Running tests\clear_1gb.rs (target\debug\deps\clear_1gb-dee80417bcb8ac44.exe)
+
+running 1 test
+test clear_a_whole_column_of_1gb_in_one_step ... ignored, needs corpus/rows_1024mb.csv and ~1 GB of temp space; run with --release --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\columns_1gb.rs (target\debug\deps\columns_1gb-41e458969b7c68a7.exe)
+
+running 1 test
+test insert_and_delete_columns_on_1gb_without_rewriting_until_save ... ignored, needs corpus/rows_1024mb.csv and ~1 GB of temp space; run with --release --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\filter.rs (target\debug\deps\filter-a85d45a1b328332f.exe)
+
+running 8 tests
+test a_cancelled_filter_returns_nothing ... ok
+test an_edited_row_stays_until_the_filter_is_applied_again ... ok
+test edits_clears_copies_and_pastes_reach_the_rows_shown ... ok
+test each_condition_shows_the_rows_that_pass ... ok
+test filters_on_several_columns_combine ... ok
+test the_header_row_is_never_filtered_out_but_counts_once_it_is_data ... ok
+test sorting_a_filtered_table_sorts_every_row_and_keeps_the_filter ... ok
+test filters_combine_in_any_order_down_to_no_rows ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\filter_1gb.rs (target\debug\deps\filter_1gb-133457fd04901af7.exe)
+
+running 2 tests
+test deleting_the_rows_shown_on_1gb ... ignored, needs corpus/rows_1024mb.csv; run with --release --ignored
+test two_column_filter_on_1gb ... ignored, needs corpus/rows_1024mb.csv; run with --release --ignored
+
+test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\filter_edits.rs (target\debug\deps\filter_edits-97cf683146c8f169.exe)
+
+running 5 tests
+test inserting_rows_puts_them_next_to_the_row_shown ... ok
+test a_paste_past_the_last_row_shown_adds_rows_that_stay_shown ... ok
+test deleting_shown_rows_of_a_sorted_table ... ok
+test deleting_rows_takes_out_only_the_rows_shown ... ok
+test paste_into_a_filtered_range_touches_visible_rows_only ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\format.rs (target\debug\deps\format-389e713dd0885d7a.exe)
+
+running 2 tests
+test a_run_of_format_actions_undoes_back_to_the_file ... ok
+test every_format_action_applies_undoes_and_redoes_exactly ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests\history_1gb.rs (target\debug\deps\history_1gb-48ad017463ef8cb9.exe)
+
+running 1 test
+test thousand_step_history_on_1gb_stays_under_50mb ... ignored, needs corpus/rows_1024mb.csv; run with --release --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\insert_1gb.rs (target\debug\deps\insert_1gb-d219820a330b04e8.exe)
+
+running 1 test
+test insert_at_row_1m_in_under_50ms ... ignored, needs corpus/rows_1024mb.csv; run with --release --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\journal.rs (target\debug\deps\journal-66002a473144f65d.exe)
+
+running 5 tests
+test a_sorted_1gb_table_journals_and_restores ... ignored, needs corpus/rows_1024mb.csv; run with --release --ignored
+test an_untitled_table_comes_back_too ... ok
+test journals_are_deterministic_and_unsorted_orders_round_trip ... ok
+test every_kind_of_edit_comes_back_from_the_journal ... ok
+test damaged_or_foreign_journals_are_refused ... ok
+
+test result: ok. 4 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\merges.rs (target\debug\deps\merges-694be6b494532efe.exe)
+
+running 2 tests
+test inserting_a_row_moves_the_merge_in_the_same_step ... ok
+test merge_and_unmerge_undo_and_redo_exactly ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\past_data.rs (target\debug\deps\past_data-b37d731c762d321d.exe)
+
+running 2 tests
+test a_blank_sheet_grows_to_a_cell_typed_anywhere ... ok
+test a_cell_far_past_the_last_row_adds_the_rows_up_to_it ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\paste_from_libreoffice.rs (target\debug\deps\paste_from_libreoffice-efb27a1b4b52cbe6.exe)
+
+running 1 test
+test ten_thousand_rows_from_libreoffice_paste_in_under_a_second ... ignored, needs LibreOffice with Python UNO and corpus/rows_10mb.csv; run with --release --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\paste_styles.rs (target\debug\deps\paste_styles-ad904cd181f6229b.exe)
+
+running 3 tests
+test the_html_for_other_applications_carries_the_look ... ok
+test a_pasted_cell_takes_its_style_and_undo_takes_both_back ... ok
+test a_plain_copy_clears_the_formats_it_lands_on_and_new_rows_get_styles ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\replace.rs (target\debug\deps\replace-40b581274e691441.exe)
+
+running 5 tests
+test edits_count_and_hidden_or_deleted_rows_are_left_alone ... ok
+test one_column_raw_text_and_empty_replacements ... ok
+test every_match_in_a_cell_case_as_searched ... ok
+test stale_matches_and_single_cells ... ok
+test replace_all_on_100k_hits_undoes_as_one_step ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.61s
+
+     Running tests\replace_1gb.rs (target\debug\deps\replace_1gb-b8b0a7ee29b39950.exe)
+
+running 1 test
+test replace_all_in_1gb_is_one_step ... ignored, needs corpus/rows_1024mb.csv; run with --release --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\search.rs (target\debug\deps\search-e0ada575c187542e.exe)
+
+running 9 tests
+test deleted_rows_are_not_counted ... ok
+test match_case_and_one_column ... ok
+test finds_row_by_row_from_the_cursor_and_wraps ... ok
+test matches_go_stale_when_the_table_changes ... ok
+test previous_goes_back_and_wraps_to_the_last ... ok
+test the_count_streams_and_a_cancelled_search_returns_nothing ... ok
+test only_the_rows_shown_in_their_order ... ok
+test typing_keeps_a_match_under_the_cursor ... ok
+test values_are_as_shown ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\sheets.rs (target\debug\deps\sheets-9e4f0fbf0f8d890c.exe)
+
+running 3 tests
+test a_sheet_step_names_the_sheet_to_show ... ok
+test sheet_names_follow_excels_rules ... ok
+test every_sheet_step_undoes_and_redoes_exactly ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\sort.rs (target\debug\deps\sort-13223dd03db92bee.exe)
+
+running 6 tests
+test a_cancelled_sort_returns_nothing ... ok
+test sorting_rows_already_in_order_changes_nothing ... ok
+test numbers_sort_by_value_with_misfits_then_blanks_and_ties_in_place ... ok
+test a_sorted_table_saves_whole_rows_in_the_new_order ... ok
+test text_ignores_case_compares_long_values_whole_and_sorts_stably ... ok
+test undo_puts_the_rows_back_and_redo_sorts_again ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\sort_1gb.rs (target\debug\deps\sort_1gb-acd1dc62e2785c42.exe)
+
+running 2 tests
+test the_whole_file_sorts_and_saves_in_its_new_order ... ignored, needs corpus/rows_1024mb.csv and ~1 GB of temp space; run with --release --ignored
+test two_million_row_numeric_sort_is_fast_stable_and_undoable ... ignored, needs corpus/rows_1024mb.csv; run with --release --ignored
+
+test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\sort_header.rs (target\debug\deps\sort_header-67c73686d4884743.exe)
+
+running 3 tests
+test without_a_header_the_first_row_is_data_and_sorts_with_the_rest ... ok
+test every_part_of_a_row_moves_with_it ... ok
+test the_header_row_never_moves ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+   Doc-tests commands
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

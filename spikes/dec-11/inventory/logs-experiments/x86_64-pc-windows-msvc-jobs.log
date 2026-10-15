@@ -1,0 +1,11 @@
+warning: unused import: `std::ffi::OsStr`
+ --> crates/suite-file/src/recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 1 warning (run `cargo fix --lib -p suite-file` to apply 1 suggestion)
+    Checking jobs v0.3.0 (/home/av/Projects/cronkite-xp-inventory/apps/brick/crates/jobs)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s

@@ -1,0 +1,14 @@
+windows helper built
+desktop screenshot ok
+check: exit 0 in 21 s (cargo check --workspace)
+check-all-targets: exit 101 in 31 s (cargo check --workspace --all-targets --keep-going)
+clippy: exit 101 in 29 s (cargo clippy --workspace --all-targets --all-features --keep-going -- -D warnings)
+build-brick: exit 0
+brick 0.3.0
+run-brick: still running after 10 s (pid 17430)
+run-brick-cairo: still running after 10 s (pid 17644)
+run-brick-xlsx: still running after 10 s (pid 17856)
+run-brick-xlsx-cairo: still running after 10 s (pid 18076)
+run-slate: no binary /Users/runner/work/cronkite/cronkite/target/release/slate
+run-frame: no binary /Users/runner/work/cronkite/cronkite/target/release/frame
+run-etch: no binary /Users/runner/work/cronkite/cronkite/target/release/etch

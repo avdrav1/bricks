@@ -1,0 +1,31 @@
+dlls: 61
+total (unstripped): 138 MB
+  bin: 127 MB, of which exes:
+    brick.exe 30552 KB
+    slate.exe 19820 KB
+    frame.exe 13448 KB
+    etch.exe 10028 KB
+  share/icons: 7 MB
+  lib: 5 MB
+largest DLLs (KB):
+12308	bundle/cronkite/bin/libgtk-4-1.dll
+11496	bundle/cronkite/bin/librsvg-2-2.dll
+2600	bundle/cronkite/bin/libstdc++-6.dll
+2024	bundle/cronkite/bin/libharfbuzz-subset-0.dll
+1876	bundle/cronkite/bin/libgio-2.0-0.dll
+1732	bundle/cronkite/bin/libepoxy-0.dll
+1576	bundle/cronkite/bin/libharfbuzz-0.dll
+1532	bundle/cronkite/bin/libglib-2.0-0.dll
+1444	bundle/cronkite/bin/libgstreamer-1.0-0.dll
+1220	bundle/cronkite/bin/libxml2-16.dll
+1216	bundle/cronkite/bin/libcairo-2.dll
+1192	bundle/cronkite/bin/libzstd.dll
+1116	bundle/cronkite/bin/libiconv-2.dll
+948	bundle/cronkite/bin/libjpeg-8.dll
+904	bundle/cronkite/bin/libgstvideo-1.0-0.dll
+total (exes stripped): 77 MB
+    brick.exe stripped 4032 KB
+    slate.exe stripped 3312 KB
+    frame.exe stripped 2260 KB
+    etch.exe stripped 1724 KB
+zip -9: 32 MB

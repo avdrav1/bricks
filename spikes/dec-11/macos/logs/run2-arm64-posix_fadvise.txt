@@ -1,0 +1,33 @@
+[1m[91merror[E0425][0m[1m: cannot find function `posix_fadvise` in crate `libc`[0m
+   [1m[94m--> [0mapps/brick/crates/csv-engine/tests/index_perf.rs:39:15
+    [1m[94m|[0m
+[1m[94m 39[0m [1m[94m|[0m         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+    [1m[94m|[0m               [1m[91m^^^^^^^^^^^^^[0m
+    [1m[94m|[0m
+   [1m[94m::: [0m/Users/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libc-0.2.190/src/unix/bsd/mod.rs:651:5
+    [1m[94m|[0m
+[1m[94m651[0m [1m[94m|[0m     pub fn posix_madvise(addr: *mut c_void, len: size_t, advice: c_int) -> c_int;
+    [1m[94m|[0m     [1m[94m-----------------------------------------------------------------------------[0m [1m[94msimilarly named function `posix_madvise` defined here[0m
+    [1m[94m|[0m
+[1m[96mhelp[0m: a function with a similar name exists
+    [1m[94m|[0m
+[1m[94m 39[0m [91m- [0m        libc::[91mposix_fadvise[0m(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+[1m[94m 39[0m [92m+ [0m        libc::[92mposix_madvise[0m(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+    [1m[94m|[0m
+
+[1m[91merror[E0425][0m[1m: cannot find value `POSIX_FADV_DONTNEED` in crate `libc`[0m
+    [1m[94m--> [0mapps/brick/crates/csv-engine/tests/index_perf.rs:39:56
+     [1m[94m|[0m
+[1m[94m  39[0m [1m[94m|[0m         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+     [1m[94m|[0m                                                        [1m[91m^^^^^^^^^^^^^^^^^^^[0m
+     [1m[94m|[0m
+    [1m[94m::: [0m/Users/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libc-0.2.190/src/unix/bsd/apple/mod.rs:2725:1
+     [1m[94m|[0m
+[1m[94m2725[0m [1m[94m|[0m pub const POSIX_MADV_DONTNEED: c_int = 4;
+     [1m[94m|[0m [1m[94m------------------------------------[0m [1m[94msimilarly named constant `POSIX_MADV_DONTNEED` defined here[0m
+     [1m[94m|[0m
+[1m[96mhelp[0m: a constant with a similar name exists
+     [1m[94m|[0m
+[1m[94m  39[0m [91m- [0m        libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::[91mPOSIX_FADV_DONTNEED[0m);
+[1m[94m  39[0m [92m+ [0m        libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::[92mPOSIX_MADV_DONTNEED[0m);
+     [1m[94m|[0m

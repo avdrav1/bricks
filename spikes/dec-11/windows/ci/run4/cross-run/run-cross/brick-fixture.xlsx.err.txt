@@ -1,0 +1,5 @@
+2026-10-15T18:24:03.967534Z  INFO brick: application starting
+Brick starting...
+Using renderer 'GskGLRenderer' for surface 'GdkWin32Toplevel'
+
+(brick.exe:4012): Gdk-CRITICAL **: 18:24:09.273: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed

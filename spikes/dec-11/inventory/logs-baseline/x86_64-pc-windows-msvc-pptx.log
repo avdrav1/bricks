@@ -1,0 +1,38 @@
+    Checking suite-file v0.1.0 (/home/av/Projects/cronkite-xp-inventory/crates/suite-file)
+error[E0433]: cannot find `unix` in `os`
+  --> crates/suite-file/src/recent.rs:10:14
+   |
+10 | use std::os::unix::ffi::OsStrExt;
+   |              ^^^^ could not find `unix` in `os`
+
+error[E0599]: no associated function or constant named `from_bytes` found for struct `OsStr` in the current scope
+  --> crates/suite-file/src/recent.rs:28:51
+   |
+28 |                     .map(|l| PathBuf::from(OsStr::from_bytes(l)))
+   |                                                   ^^^^^^^^^^ associated function or constant not found in `OsStr`
+
+error[E0599]: no method named `as_bytes` found for reference `&OsStr` in the current scope
+  --> crates/suite-file/src/recent.rs:44:52
+   |
+44 |         if !file.is_absolute() || file.as_os_str().as_bytes().contains(&b'\n') {
+   |                                                    ^^^^^^^^
+   |
+help: there is a method `as_encoded_bytes` with a similar name
+   |
+44 |         if !file.is_absolute() || file.as_os_str().as_encoded_bytes().contains(&b'\n') {
+   |                                                       ++++++++
+
+error[E0599]: no method named `as_bytes` found for reference `&OsStr` in the current scope
+  --> crates/suite-file/src/recent.rs:78:41
+   |
+78 |             out.write_all(f.as_os_str().as_bytes())?;
+   |                                         ^^^^^^^^
+   |
+help: there is a method `as_encoded_bytes` with a similar name
+   |
+78 |             out.write_all(f.as_os_str().as_encoded_bytes())?;
+   |                                            ++++++++
+
+Some errors have detailed explanations: E0433, E0599.
+For more information about an error, try `rustc --explain E0433`.
+error: could not compile `suite-file` (lib) due to 4 previous errors

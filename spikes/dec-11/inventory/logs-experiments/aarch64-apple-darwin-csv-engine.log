@@ -1,0 +1,73 @@
+    Checking csv-engine v0.3.0 (/home/av/Projects/cronkite-xp-inventory/apps/brick/crates/csv-engine)
+error[E0425]: cannot find function `posix_fadvise` in crate `libc`
+   --> apps/brick/crates/csv-engine/tests/fetch_perf.rs:37:15
+    |
+ 37 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+    |               ^^^^^^^^^^^^^
+    |
+   ::: /tmp/dec11-cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libc-0.2.190/src/unix/bsd/mod.rs:651:5
+    |
+651 |     pub fn posix_madvise(addr: *mut c_void, len: size_t, advice: c_int) -> c_int;
+    |     ----------------------------------------------------------------------------- similarly named function `posix_madvise` defined here
+    |
+help: a function with a similar name exists
+    |
+ 37 -         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+ 37 +         libc::posix_madvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+    |
+
+error[E0425]: cannot find value `POSIX_FADV_DONTNEED` in crate `libc`
+    --> apps/brick/crates/csv-engine/tests/fetch_perf.rs:37:56
+     |
+  37 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+     |                                                        ^^^^^^^^^^^^^^^^^^^
+     |
+    ::: /tmp/dec11-cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libc-0.2.190/src/unix/bsd/apple/mod.rs:2725:1
+     |
+2725 | pub const POSIX_MADV_DONTNEED: c_int = 4;
+     | ------------------------------------ similarly named constant `POSIX_MADV_DONTNEED` defined here
+     |
+help: a constant with a similar name exists
+     |
+  37 -         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+  37 +         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_MADV_DONTNEED);
+     |
+
+error[E0425]: cannot find function `posix_fadvise` in crate `libc`
+   --> apps/brick/crates/csv-engine/tests/index_perf.rs:39:15
+    |
+ 39 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+    |               ^^^^^^^^^^^^^
+    |
+   ::: /tmp/dec11-cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libc-0.2.190/src/unix/bsd/mod.rs:651:5
+    |
+651 |     pub fn posix_madvise(addr: *mut c_void, len: size_t, advice: c_int) -> c_int;
+    |     ----------------------------------------------------------------------------- similarly named function `posix_madvise` defined here
+    |
+help: a function with a similar name exists
+    |
+ 39 -         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+ 39 +         libc::posix_madvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+    |
+
+error[E0425]: cannot find value `POSIX_FADV_DONTNEED` in crate `libc`
+    --> apps/brick/crates/csv-engine/tests/index_perf.rs:39:56
+     |
+  39 |         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+     |                                                        ^^^^^^^^^^^^^^^^^^^
+     |
+    ::: /tmp/dec11-cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libc-0.2.190/src/unix/bsd/apple/mod.rs:2725:1
+     |
+2725 | pub const POSIX_MADV_DONTNEED: c_int = 4;
+     | ------------------------------------ similarly named constant `POSIX_MADV_DONTNEED` defined here
+     |
+help: a constant with a similar name exists
+     |
+  39 -         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+  39 +         libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_MADV_DONTNEED);
+     |
+
+For more information about this error, try `rustc --explain E0425`.
+error: could not compile `csv-engine` (test "fetch_perf") due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `csv-engine` (test "index_perf") due to 2 previous errors

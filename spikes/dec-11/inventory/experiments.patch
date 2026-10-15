@@ -1,0 +1,122 @@
+diff --git i/apps/brick/crates/csv-engine/src/source.rs w/apps/brick/crates/csv-engine/src/source.rs
+index 5140795..43140a1 100644
+--- i/apps/brick/crates/csv-engine/src/source.rs
++++ w/apps/brick/crates/csv-engine/src/source.rs
+@@ -70,6 +70,7 @@ impl Drop for Source {
+     }
+ }
+ 
++#[cfg(unix)]
+ #[allow(unsafe_code)] // signal handling has no safe interface; kept to this module
+ mod guard {
+     use std::cell::UnsafeCell;
+@@ -181,6 +182,18 @@ mod guard {
+     }
+ }
+ 
++// DEC-11 SPIKE EXPERIMENT: no truncation guard off unix (Windows can't truncate a mapped file).
++#[cfg(not(unix))]
++mod guard {
++    pub fn register(_start: usize, _len: usize) -> Option<usize> {
++        Some(0)
++    }
++    pub fn unregister(_i: usize) {}
++    pub fn faulted(_i: usize) -> bool {
++        false
++    }
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+diff --git i/apps/brick/crates/data-model/src/journal.rs w/apps/brick/crates/data-model/src/journal.rs
+index ad0746d..fe3d46f 100644
+--- i/apps/brick/crates/data-model/src/journal.rs
++++ w/apps/brick/crates/data-model/src/journal.rs
+@@ -29,7 +29,6 @@ use csv_engine::{Charset, Encoding, RowIndex};
+ use std::collections::HashMap;
+ use std::io::{self, Read, Write};
+ use std::ops::Range;
+-use std::os::unix::ffi::{OsStrExt, OsStringExt};
+ use std::path::PathBuf;
+ use std::sync::Arc;
+ 
+@@ -374,7 +373,7 @@ fn write_header<W: Write>(w: &mut Writer<W>, h: &JournalHeader) -> io::Result<()
+     w.blob(
+         h.path
+             .as_ref()
+-            .map_or(&[][..], |p| p.as_os_str().as_bytes()),
++            .map_or(&[][..], |p| p.as_os_str().as_encoded_bytes()),
+     )?;
+     w.u8(u8::from(h.path.is_some()))?;
+     w.u8(match h.kind {
+@@ -415,7 +414,8 @@ fn read_header_from<R: Read>(r: &mut Reader<R>) -> Result<(JournalHeader, u8), J
+         }
+     };
+     let header = JournalHeader {
+-        path: titled.then(|| PathBuf::from(std::ffi::OsString::from_vec(path))),
++        // DEC-11 SPIKE EXPERIMENT: was OsStringExt::from_vec (unix-only)
++        path: titled.then(|| PathBuf::from(String::from_utf8_lossy(&path).into_owned())),
+         kind,
+         file_size: r.u64()?,
+         file_mtime_ns: r.u64()?,
+diff --git i/crates/suite-file/src/lib.rs w/crates/suite-file/src/lib.rs
+index 1b9311e..c2db10c 100644
+--- i/crates/suite-file/src/lib.rs
++++ w/crates/suite-file/src/lib.rs
+@@ -28,6 +28,7 @@ pub fn document_name(path: &Path) -> Cow<'_, str> {
+ mod tests {
+     use super::*;
+     use std::ffi::OsStr;
++    #[cfg(unix)]
+     use std::os::unix::ffi::OsStrExt;
+ 
+     #[test]
+@@ -42,6 +43,7 @@ mod tests {
+         assert_eq!(document_name(Path::new("a/..")), "a/..");
+     }
+ 
++    #[cfg(unix)]
+     #[test]
+     fn document_name_replaces_invalid_utf8() {
+         let path = Path::new(OsStr::from_bytes(b"/tmp/bad\xff.csv"));
+diff --git i/crates/suite-file/src/recent.rs w/crates/suite-file/src/recent.rs
+index 8e3f4ca..e1d81c7 100644
+--- i/crates/suite-file/src/recent.rs
++++ w/crates/suite-file/src/recent.rs
+@@ -7,7 +7,6 @@
+ 
+ use std::ffi::OsStr;
+ use std::io::Write;
+-use std::os::unix::ffi::OsStrExt;
+ use std::path::{Path, PathBuf};
+ 
+ pub const MAX: usize = 10;
+@@ -25,7 +24,8 @@ impl Recent {
+                 bytes
+                     .split(|&b| b == b'\n')
+                     .filter(|l| l.first() == Some(&b'/'))
+-                    .map(|l| PathBuf::from(OsStr::from_bytes(l)))
++                    // DEC-11 SPIKE EXPERIMENT: was OsStrExt::from_bytes (unix-only)
++                    .map(|l| PathBuf::from(String::from_utf8_lossy(l).into_owned()))
+                     .take(MAX)
+                     .collect()
+             })
+@@ -41,7 +41,7 @@ impl Recent {
+     /// `file` (made absolute) goes to the top, once; the oldest past [`MAX`] go.
+     pub fn add(&mut self, file: &Path) -> std::io::Result<()> {
+         let file = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_owned());
+-        if !file.is_absolute() || file.as_os_str().as_bytes().contains(&b'\n') {
++        if !file.is_absolute() || file.as_os_str().as_encoded_bytes().contains(&b'\n') {
+             return Ok(()); // can't be kept one per line
+         }
+         self.reload();
+@@ -75,7 +75,7 @@ impl Recent {
+             .with_extension(format!("tmp-{}", std::process::id()));
+         let mut out = std::fs::File::create(&tmp)?;
+         for f in &self.files {
+-            out.write_all(f.as_os_str().as_bytes())?;
++            out.write_all(f.as_os_str().as_encoded_bytes())?;
+             out.write_all(b"\n")?;
+         }
+         out.sync_all()?;

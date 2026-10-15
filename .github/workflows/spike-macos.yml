@@ -1,0 +1,96 @@
+# DEC-11 spike (throwaway): what breaks building and running the suite on macOS.
+# Every phase records its result in out/logs/summary.txt and never fails the job; the
+# logs and screenshots are the artifact. Script: spikes/dec-11/macos/ci/run.sh.
+name: spike-macos
+on:
+  push:
+    branches: [spike/dec-11-macos]
+    paths: [".github/workflows/spike-macos.yml", "spikes/dec-11/macos/ci/**"]
+  workflow_dispatch:
+jobs:
+  arm64:
+    runs-on: macos-latest
+    timeout-minutes: 120
+    defaults: { run: { shell: bash } }
+    # FULL=1: every phase in order (runs 2 and 3: 38783201936, 38787324733). Otherwise only
+    # $PHASES (run 4 on: follow-ups).
+    env: { FULL: "0", PHASES: "patchbuild ui2" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { components: "rustfmt, clippy" }
+      - uses: Swatinem/rust-cache@v2
+      - name: brew
+        run: |
+          t0=$SECONDS
+          brew install gtk4 pkgconf adwaita-icon-theme hicolor-icon-theme 2>&1 | tail -20
+          mkdir -p out/logs && echo "brew install: $((SECONDS - t0)) s" >> out/logs/summary.txt
+      - run: spikes/dec-11/macos/ci/run.sh env
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh check
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh test
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh build
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh run
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh patched
+      # Interaction phases draw with cairo: run 1 showed Brick's window all black with the
+      # default renderer on the Intel runner VM.
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh input
+        env: { GSK_RENDERER: cairo }
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh dark
+        env: { GSK_RENDERER: cairo }
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh sweep
+        env: { GSK_RENDERER: cairo }
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh sigbus
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh app
+        env: { GSK_RENDERER: cairo }
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh relocate
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh fonts
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh ui
+        env: { GSK_RENDERER: cairo }
+      - if: env.FULL != '1'
+        run: for p in $PHASES; do spikes/dec-11/macos/ci/run.sh $p; done
+        env: { GSK_RENDERER: cairo }
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh minos
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh bundle
+      - if: always()
+        run: cat out/logs/summary.txt
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: macos-arm64, path: out, if-no-files-found: warn }
+  x86_64:
+    # Runs 1 and 2 covered Intel (38781402667, 38783201936); now only on demand.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-15-intel
+    timeout-minutes: 120
+    defaults: { run: { shell: bash } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: brew install gtk4 pkgconf adwaita-icon-theme 2>&1 | tail -20
+      - run: spikes/dec-11/macos/ci/run.sh env
+      - run: spikes/dec-11/macos/ci/run.sh check
+      - name: build and start brick
+        run: |
+          cargo build --release -p brick > out/logs/build-brick.log 2>&1; echo "build-brick: exit $?" >> out/logs/summary.txt
+          target/release/brick --version >> out/logs/summary.txt 2>&1
+          spikes/dec-11/macos/ci/run.sh run || true
+      - if: always()
+        run: cat out/logs/summary.txt
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: macos-x86_64, path: out, if-no-files-found: warn }

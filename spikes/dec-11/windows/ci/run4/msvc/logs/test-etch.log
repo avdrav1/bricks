@@ -1,0 +1,104 @@
+warning: unused import: `std::ffi::OsStr`
+ --> crates\suite-file\src\recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `dir`
+   --> crates\suite-file\src\save.rs:105:9
+    |
+105 |     let dir = dest
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_dir`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 2 warnings (run `cargo fix --lib -p suite-file` to apply 2 suggestions)
+   Compiling gtk4 v0.11.5
+   Compiling etch v0.2.1 (D:\a\cronkite\cronkite\apps\etch)
+error[E0599]: no associated function or constant named `from_vec` found for struct `OsString` in the current scope
+   --> apps\etch\src\recovery.rs:375:58
+    |
+375 |             path: Some(PathBuf::from(std::ffi::OsString::from_vec(
+    |                                                          ^^^^^^^^ associated function or constant not found in `OsString`
+    |
+note: if you're trying to build a new `OsString` consider using one of the following associated functions:
+      OsString::new
+      OsString::from_encoded_bytes_unchecked
+      OsString::with_capacity
+   --> /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library\std\src\ffi\os_str.rs:133:4
+help: there is an associated function `from` with a similar name
+    |
+375 -             path: Some(PathBuf::from(std::ffi::OsString::from_vec(
+375 +             path: Some(PathBuf::from(std::ffi::OsString::from(
+    |
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `etch` (bin "etch" test) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+== fallback: per target
+error: no library targets found in package `etch`
+warning: unused import: `std::ffi::OsStr`
+ --> crates\suite-file\src\recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `dir`
+   --> crates\suite-file\src\save.rs:105:9
+    |
+105 |     let dir = dest
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_dir`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 2 warnings (run `cargo fix --lib -p suite-file` to apply 2 suggestions)
+   Compiling etch v0.2.1 (D:\a\cronkite\cronkite\apps\etch)
+error[E0599]: no associated function or constant named `from_vec` found for struct `OsString` in the current scope
+   --> apps\etch\src\recovery.rs:375:58
+    |
+375 |             path: Some(PathBuf::from(std::ffi::OsString::from_vec(
+    |                                                          ^^^^^^^^ associated function or constant not found in `OsString`
+    |
+note: if you're trying to build a new `OsString` consider using one of the following associated functions:
+      OsString::new
+      OsString::from_encoded_bytes_unchecked
+      OsString::with_capacity
+   --> /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library\std\src\ffi\os_str.rs:133:4
+help: there is an associated function `from` with a similar name
+    |
+375 -             path: Some(PathBuf::from(std::ffi::OsString::from_vec(
+375 +             path: Some(PathBuf::from(std::ffi::OsString::from(
+    |
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `etch` (bin "etch" test) due to 1 previous error
+== target open_8k
+warning: unused import: `std::ffi::OsStr`
+ --> crates\suite-file\src\recent.rs:8:5
+  |
+8 | use std::ffi::OsStr;
+  |     ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `dir`
+   --> crates\suite-file\src\save.rs:105:9
+    |
+105 |     let dir = dest
+    |         ^^^ help: if this is intentional, prefix it with an underscore: `_dir`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `suite-file` (lib) generated 2 warnings (run `cargo fix --lib -p suite-file` to apply 2 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.14s
+     Running tests\open_8k.rs (target\debug\deps\open_8k-539001dd9933f09b.exe)
+
+running 1 test
+test an_8k_png_shows_within_1s ... ignored, opens a window; run with --ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
