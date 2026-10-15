@@ -26,7 +26,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 - [x] ET0: etch opens a blank canvas and draws with the pencil and eraser in the chosen colours and sizes, zooms from 10% to 3200% around the pointer and pans, and undoes and redoes each stroke; a stroke on a 7680×4320 image draws each segment and frame in under 8 ms p99 (`--bench-stroke`); `scripts/ship.sh etch build` and `verify` pass
 - [x] ET1: etch opens PNG, JPEG, and BMP files and draws on them with the brush, fill, colour picker, line, rectangle, ellipse, and text, each step undoable; Save and Save As write PNG, JPEG, and BMP that read back with the same pixels (JPEG within its loss, alpha composited onto white), atomically; closing an edited image asks Save, Discard, or Cancel
 - [x] ET2: etch selects a rectangle and moves its pixels, cuts, copies, and pastes through the system clipboard (to and from another app), crops to the selection, resizes the image and the canvas, rotates and flips, all with undo: the spec's V0.1 definition of done
-- [ ] ET3: etch opens dropped files, lists recent files, picks colours by chooser and hex, switches every tool by its key, and after a crash offers back unsaved images without touching their files
+- [x] ET3: etch opens dropped files, lists recent files, picks colours by chooser and hex, switches every tool by its key, and after a crash offers back unsaved images without touching their files
 
 ## Stories
 
