@@ -12,8 +12,9 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 120
     defaults: { run: { shell: bash } }
-    # FULL=1: every phase (run 2, 38783201936); 0: only those added since (run 3 on).
-    env: { FULL: "0" }
+    # FULL=1: every phase in order (runs 2 and 3: 38783201936, 38787324733). Otherwise only
+    # $PHASES (run 4 on: follow-ups).
+    env: { FULL: "0", PHASES: "patchbuild ui2" }
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -29,9 +30,12 @@ jobs:
         run: spikes/dec-11/macos/ci/run.sh check
       - if: env.FULL == '1'
         run: spikes/dec-11/macos/ci/run.sh test
-      - run: spikes/dec-11/macos/ci/run.sh build
-      - run: spikes/dec-11/macos/ci/run.sh run
-      - run: spikes/dec-11/macos/ci/run.sh patched
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh build
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh run
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh patched
       # Interaction phases draw with cairo: run 1 showed Brick's window all black with the
       # default renderer on the Intel runner VM.
       - if: env.FULL == '1'
@@ -45,11 +49,18 @@ jobs:
         env: { GSK_RENDERER: cairo }
       - if: env.FULL == '1'
         run: spikes/dec-11/macos/ci/run.sh sigbus
-      - run: spikes/dec-11/macos/ci/run.sh app
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh app
         env: { GSK_RENDERER: cairo }
-      - run: spikes/dec-11/macos/ci/run.sh relocate
-      - run: spikes/dec-11/macos/ci/run.sh fonts
-      - run: spikes/dec-11/macos/ci/run.sh ui
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh relocate
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh fonts
+      - if: env.FULL == '1'
+        run: spikes/dec-11/macos/ci/run.sh ui
+        env: { GSK_RENDERER: cairo }
+      - if: env.FULL != '1'
+        run: for p in $PHASES; do spikes/dec-11/macos/ci/run.sh $p; done
         env: { GSK_RENDERER: cairo }
       - if: env.FULL == '1'
         run: spikes/dec-11/macos/ci/run.sh minos

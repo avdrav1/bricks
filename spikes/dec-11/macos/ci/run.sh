@@ -435,6 +435,77 @@ end tell'
     shoot u-dark-etch 10 "$rel/etch" "$s/picture.png"
     osa 'tell application "System Events" to tell appearance preferences to set dark mode to false'
     ;;
+patchbuild)
+    git apply "$here/allow-macos.patch" && note "allow-macos.patch applied"
+    cargo build --release -p brick -p slate -p frame -p etch >"$logs/build-patched.log" 2>&1
+    note "build patched: exit $?"
+    ;;
+ui2)
+    # Follow-ups to ui: clicks (cliclick), key codes instead of characters, external paste,
+    # saving, Etch's own menus.
+    samples
+    s=$out/samples
+    brew install cliclick >"$logs/brew-cliclick.log" 2>&1
+    printf 'Typed on macOS: ' >"$s/codes.txt"
+    printf 'Typed on macOS: ' >"$s/chars.txt"
+    # Key codes (h e l l o space w o r l d), one every 0.2 s, after a click on the page.
+    KEEP=1 shoot v-codes-0 8 "$rel/slate" "$s/codes.txt"
+    pid=$(cat "$out/pid"); front "$pid"
+    cliclick c:500,300; sleep 1
+    osa 'tell application "System Events"
+repeat with k in {4, 14, 37, 37, 31, 49, 13, 31, 15, 37, 2}
+key code k
+delay 0.2
+end repeat
+end tell'
+    sleep 1; screencapture -x "$shots/v-codes-1.png"
+    osa 'tell application "System Events" to keystroke "s" using control down'
+    sleep 3; note "codes.txt after Ctrl+S: $(cat "$s/codes.txt")"
+    kill "$pid"; sleep 1; kill -9 "$pid" 2>/dev/null
+    # Characters, one every 0.2 s, after a click.
+    KEEP=1 shoot v-chars-0 8 "$rel/slate" "$s/chars.txt"
+    pid=$(cat "$out/pid"); front "$pid"
+    cliclick c:500,300; sleep 1
+    osa 'tell application "System Events"
+repeat with c in characters of "hello world"
+keystroke c
+delay 0.2
+end repeat
+end tell'
+    sleep 1; screencapture -x "$shots/v-chars-1.png"
+    # cliclick's own typing (CGEvents with Unicode strings).
+    cliclick t:" via cliclick"; sleep 1
+    screencapture -x "$shots/v-chars-2-cliclick.png"
+    osa 'tell application "System Events" to keystroke "s" using control down'
+    sleep 3; note "chars.txt after Ctrl+S: $(cat "$s/chars.txt")"
+    kill "$pid"; sleep 1; kill -9 "$pid" 2>/dev/null
+    # External paste: the pasteboard set before Slate starts, and after it copied, with an
+    # app switch in between.
+    printf 'Pasted from the macOS pasteboard' | pbcopy
+    printf '' >"$s/paste.txt"
+    KEEP=1 shoot v-paste-0 8 "$rel/slate" "$s/paste.txt"
+    pid=$(cat "$out/pid"); front "$pid"
+    cliclick c:500,300; sleep 1
+    osa 'tell application "System Events" to keystroke "v" using control down'
+    sleep 2; screencapture -x "$shots/v-paste-1-fresh.png"
+    osa 'tell application "System Events" to keystroke "a" using control down'
+    osa 'tell application "System Events" to keystroke "c" using control down'
+    sleep 1
+    printf 'Second pasteboard text' | pbcopy
+    osa 'tell application "Finder" to activate'; sleep 1
+    front "$pid"
+    osa 'tell application "System Events" to keystroke "v" using control down'
+    sleep 2; screencapture -x "$shots/v-paste-2-after-switch.png"
+    kill "$pid"; sleep 1; kill -9 "$pid" 2>/dev/null
+    # Etch: open its File menu in the global menu bar.
+    KEEP=1 shoot v-etch-0 8 "$rel/etch" "$s/picture.png"
+    pid=$(cat "$out/pid"); front "$pid"
+    osa "tell application \"System Events\" to tell (first process whose unix id is $pid) to get name of every menu item of menu 1 of menu bar item 3 of menu bar 1" out
+    osa "tell application \"System Events\" to tell (first process whose unix id is $pid) to click menu bar item 3 of menu bar 1"
+    sleep 1; screencapture -x "$shots/v-etch-file-menu.png"
+    osa 'tell application "System Events" to key code 53'
+    kill "$pid"; sleep 1; kill -9 "$pid" 2>/dev/null
+    ;;
 *) echo "unknown phase $phase"; exit 2 ;;
 esac
 exit 0
