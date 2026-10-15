@@ -1705,6 +1705,30 @@ glib::wrapper! {
 }
 
 impl Page {
+    /// The Pango context the page lays its document out with. Slate's document pixels are
+    /// 96 dpi on every system (a twip is 1/15 px). GTK on macOS gives widgets the Mac's
+    /// 72 dpi (`gtk-xft-dpi`), which would draw text at three quarters of its size on the
+    /// same page and break lines where Word doesn't, so there the page gets a context of
+    /// its own at 96 dpi (MAC-6). Linux keeps the widget's, at the desktop's resolution.
+    #[cfg(not(target_os = "macos"))]
+    fn document_context(&self) -> pango::Context {
+        self.pango_context()
+    }
+
+    #[cfg(target_os = "macos")]
+    #[allow(unsafe_code)]
+    fn document_context(&self) -> pango::Context {
+        use glib::translate::ToGlibPtr;
+        #[link(name = "pangocairo-1.0")]
+        extern "C" {
+            fn pango_cairo_context_set_resolution(context: *mut pango::ffi::PangoContext, dpi: f64);
+        }
+        let context = self.create_pango_context();
+        // SAFETY: a live context, which GTK created for the cairo font map it draws with.
+        unsafe { pango_cairo_context_set_resolution(context.to_glib_none().0, 96.0) };
+        context
+    }
+
     /// The page showing `doc`, whose runs [`document_edit::normalize`] has merged so undo
     /// gives each paragraph back exactly. Its embedded fonts' `fonts` are added to
     /// fontconfig first, and each of its fonts gets its family ([`crate::fonts`]).
@@ -1718,7 +1742,7 @@ impl Page {
         let imp = page.imp();
         imp.setting.set(setting);
         imp.page_twips.set(doc.format.page_text_width());
-        let context = page.pango_context();
+        let context = page.document_context();
         let families = crate::fonts::families(&doc.format, fonts, context.font_map().as_ref());
         let shaper = PangoShaper::new(context, &doc.styles, textures, families);
         let plain = matches!(doc.format, document_model::Format::Text(_));

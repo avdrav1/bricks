@@ -5,10 +5,13 @@
 //! Linux; the menu bar, native title bars, and a toolbar row on macOS) and the About
 //! dialog.
 //!
-//! The command palette, dialogs, and themes may move here once two apps need the same
-//! one.
+//! [`fonts`] chooses how text finds its fonts and adds the bundled ones on macOS;
+//! [`appearance`] switches the theme between light and dark. The command palette and
+//! dialogs may move here once two apps need the same one.
 
+pub mod appearance;
 pub mod chrome;
+pub mod fonts;
 pub mod im;
 pub mod keys;
 

@@ -11,6 +11,7 @@ publish = false
 [dependencies]
 gtk.workspace = true
 suite-core.workspace = true
+tracing.workspace = true
 
 [lints]
 workspace = true

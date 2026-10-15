@@ -40,8 +40,8 @@ Everything below about stories, invariants, crates, benchmarks, and ADRs is Bric
 | Crate | Owns |
 | --- | --- |
 | `suite-core` | `AppKind` (display name, command, app ID) and other app-independent primitives |
-| `suite-ui` | UI conventions shared by the apps (GTK 4): the primary modifier every shortcut uses (`keys`: Control on Linux, Command on macOS; accelerators, labels, key-handler matching, and the clash check the apps' shortcut-table tests run); input methods for the apps' own text widgets (`im`: the client widget set while realized, which GTK's macOS input method needs); window chrome (`chrome`: the menu bar with macOS's Window menu, the About dialog, and `Toolbar`, a header bar on Linux and a toolbar row under the system's title bar on macOS) |
-| `suite-platform` | OS integration (Linux, macOS): the platform check, each app's per-user folders (`dirs`: XDG on Linux, `~/Library/Application Support` and `~/Library/Caches` on macOS); toolkit-free, so engine crates use it too |
+| `suite-ui` | UI conventions shared by the apps (GTK 4): the primary modifier every shortcut uses (`keys`: Control on Linux, Command on macOS; accelerators, labels, key-handler matching, and the clash check the apps' shortcut-table tests run); input methods for the apps' own text widgets (`im`: the client widget set while realized, which GTK's macOS input method needs); how text finds its fonts (`fonts`: on macOS Pango on fontconfig with the bundled Liberation, Carlito, and Caladea); the theme's light or dark variant (`appearance`); window chrome (`chrome`: the menu bar with macOS's Window menu, the About dialog, and `Toolbar`, a header bar on Linux and a toolbar row under the system's title bar on macOS) |
+| `suite-platform` | OS integration (Linux, macOS): the platform check, each app's per-user folders (`dirs`: XDG on Linux, `~/Library/Application Support` and `~/Library/Caches` on macOS), the Mac's light or dark appearance and its changes (`appearance`, macOS only); toolkit-free, so engine crates use it too |
 | `suite-file` | format-independent file infrastructure (document names, atomic save, owner locks telling which processes keeping files in a folder still run, crash recovery journals' directory: atomic journal writes, crashed sessions; the recent files list, Brick's and Etch's) |
 
 Brick's crates, in `apps/brick/crates/`:
@@ -95,6 +95,8 @@ cargo run -p brick                       # or -p slate, -p frame, -p etch
 cargo test --release --workspace -- --ignored  # perf acceptance tests (timing asserted in release only)
 python3 scripts/gen_corpus.py            # builds corpus/ (gitignored)
 python3 scripts/fetch_delimiter_sample.py  # 50 real-world files into corpus/realworld/ (ENG-4 test)
+python3 scripts/fetch_fonts.py [DEST]    # the metric-compatible fonts the apps carry on macOS (Liberation, Carlito, Caladea, with licences; checksummed) into target/fonts (MAC-6)
+scripts/check_mac_look.sh [OUTDIR]       # on a macOS runner (ci.yml macos-look): Brick, Slate, Frame, Etch screenshotted in light and dark appearance, fonts from the bundle, the appearance followed while running (MAC-6)
 python3 scripts/lo_navigation.py         # re-record GRID-3's checklist from LibreOffice (needs LibreOffice)
 python3 scripts/lo_functions.py          # re-record formula results from LibreOffice (FML-5..8)
 python3 scripts/lo_formats.py            # re-record number format results from LibreOffice (STYLE-2)

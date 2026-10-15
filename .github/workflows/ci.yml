@@ -30,6 +30,9 @@ jobs:
         with: { components: "clippy" }
       - uses: Swatinem/rust-cache@v2
       - run: brew install gtk4 pkgconf
+      # The metric-compatible fonts the apps carry on macOS (MAC-6); suite-ui's tests use them.
+      - name: Fetch the bundled fonts
+        run: python3 scripts/fetch_fonts.py target/fonts
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - run: cargo test --workspace
       # Saving syncs with fcntl(F_FULLFSYNC) (MAC-2): trace suite-file's atomic-save tests
@@ -73,3 +76,22 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgtk-4-dev
       - run: python3 scripts/gen_corpus.py --max-mb 1024
       - run: cargo bench
+  macos-look:
+    # Fonts and dark mode on macOS (MAC-6): screenshots in light and dark appearance, and the
+    # Brick, Slate, Frame, and Etch windows following the Mac's appearance.
+    runs-on: macos-14
+    timeout-minutes: 60
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: brew install gtk4 pkgconf adwaita-icon-theme
+      - run: python3 scripts/fetch_fonts.py target/fonts
+      - run: cargo build -p brick -p slate -p frame -p etch
+      - run: scripts/check_mac_look.sh out
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: macos-look, path: "out/shots\nout/logs", if-no-files-found: warn }
