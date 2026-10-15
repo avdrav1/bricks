@@ -84,3 +84,20 @@ fn resizing_8k() {
         );
     }
 }
+
+#[test]
+#[ignore = "perf: run in release with --ignored"]
+fn resizing_the_canvas_8k() {
+    use image_model::{Anchor, Color};
+    for (w, h) in [(8000, 5000), (4000, 3000)] {
+        time(
+            &format!("canvas 7680×4320 to {w}×{h}"),
+            Transform::ResizeCanvas {
+                width: w,
+                height: h,
+                anchor: Anchor::Centre,
+                fill: Color::TRANSPARENT,
+            },
+        );
+    }
+}

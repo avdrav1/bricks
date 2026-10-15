@@ -79,6 +79,7 @@ Every change undoes and redoes: strokes, erasing, fills, shapes, text, crop, res
 | Ctrl+9 | Fit to Window |
 | Ctrl+Shift+X | Crop to Selection |
 | Ctrl+R | Resize Image |
+| Ctrl+Shift+R | Resize Canvas |
 | P, B, E, F, I, T, R, L, S | Pencil, Brush, Eraser, Fill, Colour picker, Text, Rectangle, Line, Selection (Ellipse: O) |
 | X | Swap the foreground and background colours |
 
@@ -135,7 +136,7 @@ Built so far (ETCH-6 to ETCH-14):
 
 ## ET2: image manipulation
 
-Built so far (ETCH-15 to ETCH-18):
+Built so far (ETCH-15 to ETCH-19):
 
 - **Selection.** The tool column's Selection (S) selects a rectangle by dragging: the pixels between the pixel edges nearest the press and the release (a drag across 200 pixels selects 200), clipped to the image. Its outline is dashed, black on white, so it shows on any colour, and the status bar says its size between the pointer position and the zoom: `Selection: 320×180`. A click outside it (or a drag selecting nothing) leaves no selection. Over the selection the pointer is a move cursor.
 - **Moving the selected pixels.** A drag inside the selection lifts its pixels and moves them with the pointer: they float over the image, which isn't touched until they land (the title stays unmarked), and the place they left shows transparency (the checkerboard), as the model is always RGBA, not the background colour. More drags move them further. They land, replacing the pixels under them (see-through and transparent ones too, as they were), clipped to the image, when the selection goes: Escape, a click or drag outside it, choosing another tool, Select All, or saving or closing (which land them and keep the selection where they landed). Lifting, every drag, and landing are one undo step; Ctrl+Z while they float drops the move and the selection goes back where they were. The arrow keys move the selection's pixels a pixel (Shift: ten), lifting them as a drag does.
@@ -145,6 +146,7 @@ Built so far (ETCH-15 to ETCH-18):
 - **Image menu.** After View, holding the commands that change the whole image, its size too. Each is one undo step whose undo gives back the image as it was, size and every pixel, and whose redo gives back the result, both at once whatever the image's size: history keeps the whole image on the step's other side (ADR 0010). The command runs off the UI thread on a copy of the image (16 ms for 8K on a Ryzen 9 5900), the canvas not taking input until it's done; then the image shows anew, as an opened one does (at 100% centred, or fitted when larger than the window), with no selection, and the status gives its new size. Text being typed and floating pixels go on the image first, each its own step.
 - **Crop to Selection** (Ctrl+Shift+X): the image becomes the selection's pixels, its top-left pixel the selection's. Floating pixels land first and the crop takes the selection where they landed (clipped to the image). Without a selection the command is greyed out. Cropping an 8K image takes 22 ms.
 - **Resize Image…** (Ctrl+R) asks for the new Width and Height in pixels (1 to 16384, the image's own at first), Keep aspect ratio (on at first: changing one side sets the other to keep the image's proportions, rounded), and the resampling: **Smooth** (at first) or **Nearest neighbour**. Nearest neighbour makes each new pixel the old pixel its centre falls in: no new colours, so doubling turns each pixel into a 2×2 square, as pixel art wants. Smooth averages the old pixels around each new one with a triangle filter (bilinear when enlarging; when shrinking, as wide as the shrink, so every old pixel counts), each colour weighted by its alpha, so the colour hidden in a transparent pixel never tints its neighbours; it gives what ImageMagick's `-filter Triangle -resize` gives, within a level. Resizing an 8K image runs off the UI thread: to 4K smooth 45 ms, to 15360×8640 smooth 295 ms (nearest 7 and 62 ms) on a Ryzen 9 5900's cores.
+- **Resize Canvas…** (Ctrl+Shift+R) asks for the canvas's new Width and Height (1 to 16384, the image's own at first), the anchor, where the image stays on it: nine toggle buttons in a 3×3 grid (↖ ↑ ↗ ← ● → ↙ ↓ ↘, named Top left to Bottom right for screen readers, the centre on at first), and what fills the new area: Transparent (at first) or Background colour (the window's, its hex value in the tooltip). The image's pixels aren't scaled: a larger canvas adds the new area around them as the anchor says, and a smaller one crops them as it says. Centred, a pixel left over goes to the right and bottom: 5 more pixels across adds 2 on the left and 3 on the right, 3 fewer takes 1 off the left and 2 off the right. 8K to 8000×5000 takes 32 ms off the UI thread.
 
 ## Non-goals for V0.1
 

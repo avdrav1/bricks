@@ -841,7 +841,8 @@ fn show(
 
     // Space held: dragging pans. Escape drops a shape being dragged, or deselects.
     // Ctrl+Shift+Z redoes, Ctrl+Shift+S is Save As, Ctrl+Shift+E Export, and Ctrl+Shift+X
-    // crops (shifted, a letter may arrive upper case, which an accelerator misses).
+    // and Ctrl+Shift+R crop and resize the canvas (shifted, a letter may arrive upper
+    // case, which an accelerator misses).
     // Ctrl+X, Ctrl+C, and Ctrl+V cut, copy, and paste, Ctrl+A selects all, Delete deletes
     // the selection, and the arrows move it a pixel (Shift: ten).
     // Unmodified, a tool's key picks it and X swaps the colours. None of them while a
@@ -1046,7 +1047,7 @@ fn new_settings() -> settings::Settings {
 }
 
 /// The background colour of `window` (the colour row's); white without one.
-fn background_of(window: Option<&gtk::Window>) -> Color {
+pub(crate) fn background_of(window: Option<&gtk::Window>) -> Color {
     let found = window.and_then(|window| {
         CONTROLS.with_borrow(|c| {
             c.iter()

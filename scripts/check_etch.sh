@@ -184,6 +184,19 @@
 #      pixels either side of the red half's edge are red at alpha 223 and 32 (ff0000df,
 #      ff000020), their colour unmixed with the transparent green beside it (the triangle
 #      filter over 4 source pixels, weighted by alpha); Ctrl+Z gives back 400×300.
+# ETCH-19 acceptance: resize canvas.
+#  24. `etch canvas.png` (a copy of t.png): Ctrl+Shift+R asks Resize Canvas with Width
+#      400, Height 300, the anchor's nine toggle buttons (named Top left to Bottom right)
+#      with Centre on, and the new area Transparent (on) or Background colour. 600 by 400
+#      with Top left pressed (AT-SPI) makes 600×400, marked: on screen the image at the
+#      top left (its red half there) and the checkerboard right of it and below; saved,
+#      the old pixels sit at 0,0 (ff0000ff to the blue corner 0000ff80 at 399,299) and
+#      the new area is transparent (00000000). One Ctrl+Z gives back 400×300 and every
+#      region. Indigo the background (right-click), 500 by 400 at Bottom right with
+#      Background colour (Alt+G) puts the old top-left pixel at 100,100 and fills the new
+#      area indigo (3f48ccff). Shrinking to 300 by 200 at the centre crops 50 px off each
+#      side (the red half's edge at x 150, the blue corner at 299,199); Ctrl+Z gives back
+#      400×300 with every region.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -1120,6 +1133,54 @@ session() {
   echo "smooth saved: $(px rgba /tmp/resize.png 0,0 99,10 100,10)"
   keys -M ctrl z -m ctrl; sleep 1; echo "smooth undone: $(size)"
   pkill -x etch; sleep 1
+
+  echo "== 24 canvas"
+  cp /tmp/t.png /tmp/canvas.png
+  etch /tmp/canvas.png >>/tmp/app.log 2>&1 & sleep 3
+  anchors() {
+    for a in "Top left" Top "Top right" Left Centre Right "Bottom left" Bottom "Bottom right"; do
+      python3 /tmp/a11y.py state "$a"
+    done | tr "\n" " " | sed "s/ $//"
+  }
+  # The canvas dialog: width W, height H (typed), then the anchor named A pressed.
+  ask_canvas() {
+    keys -M ctrl -M shift r -m shift -m ctrl; sleep 1
+    keys -M alt w -m alt; keys -M ctrl a -m ctrl; keys $1; keys -k Tab
+    keys -M alt h -m alt; keys -M ctrl a -m ctrl; keys $2; keys -k Tab
+    python3 /tmp/a11y.py press "$3"; sleep 0.5
+  }
+  keys -M ctrl -M shift r -m shift -m ctrl; sleep 1
+  shown dialog | grep -E "^dialog: (Resize Canvas|Top left|Bottom right|Centre|Transparent|Background colour)$"
+  echo "dialog: width $(field Width) height $(field Height) anchors $(anchors) checked $(px checked)"
+  keys -k Escape; sleep 1
+  ask_canvas 600 400 "Top left"
+  echo "pressed: anchors $(anchors)"
+  keys -M alt w -m alt; keys -k Return; sleep 2; shot canvas-top-left
+  read cx cy cw ch <<<"$(px canvas)"
+  l=$((cx + (cw - 600) / 2)); t=$((cy + (ch - 400) / 2))
+  echo "top left: $(size) $(titled canvas.png)"
+  echo "top left: red $(centred 600 400 0 0 200 300 FF0000) right $(px checkered /tmp/shot.png $((l + 404)) $((t + 4)) $((l + 596)) $((t + 396))) below $(px checkered /tmp/shot.png $((l + 4)) $((t + 304)) $((l + 396)) $((t + 396)))"
+  keys -M ctrl s -m ctrl; sleep 2
+  echo "top left saved: $(px rgba /tmp/canvas.png 0,0 399,299 400,0 0,300 599,399)"
+  keys -M ctrl z -m ctrl; sleep 1; shot canvas-undone
+  echo "canvas undone: $(size) $(titled canvas.png)"
+  px opened /tmp/shot.png 400 300 | sed "s/^/canvas undone: /"
+  read x y <<<"$(px where Indigo)"; python3 /scripts/dnd_helpers.py click $x $y 1 right; sleep 0.5
+  ask_canvas 500 400 "Bottom right"
+  keys -M alt g -m alt; echo "background: $(px checked)"
+  keys -M alt w -m alt; keys -k Return; sleep 2
+  keys -M ctrl s -m ctrl; sleep 2
+  echo "bottom right saved: $(px rgba /tmp/canvas.png 0,0 99,99 100,100 499,399)"
+  keys -M ctrl z -m ctrl; sleep 1
+  ask_canvas 300 200 Centre
+  keys -M alt w -m alt; keys -k Return; sleep 2
+  echo "shrunk: $(size)"
+  keys -M ctrl s -m ctrl; sleep 2
+  echo "shrunk saved: $(px rgba /tmp/canvas.png 0,0 149,0 150,0 299,199)"
+  keys -M ctrl z -m ctrl; sleep 1; shot shrink-undone
+  echo "shrink undone: $(size)"
+  px opened /tmp/shot.png 400 300 | sed "s/^/shrink undone: /"
+  pkill -x etch; sleep 1
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -1399,6 +1460,27 @@ check "23: ... and blue, as they were" "23 resize" "^resize undone: blended all$
 check "23: Smooth to 200 wide makes 200×150" "23 resize" "^smooth: 200×150 • resize\.png$"
 check "23: ... its red edge fading in alpha, never tinted by the transparent green" "23 resize" "^smooth saved: 200x150 ff0000ff ff0000df ff000020$"
 check "23: ... and Ctrl+Z gives back 400×300" "23 resize" "^smooth undone: 400×300$"
+check "24: Ctrl+Shift+R asks Resize Canvas" "24 canvas" "^dialog: Resize Canvas$"
+check "24: ... with the anchor's buttons, named" "24 canvas" "^dialog: Bottom right$"
+check "24: ... and the new area Transparent" "24 canvas" "^dialog: Transparent$"
+check "24: ... or the background colour" "24 canvas" "^dialog: Background colour$"
+check "24: ... offering 400 by 300, the centre anchored, Transparent on" "24 canvas" "^dialog: width 400 height 300 anchors off off off off on off off off off checked Transparent$"
+check "24: pressing Top left anchors there alone" "24 canvas" "^pressed: anchors on off off off off off off off off$"
+check "24: 600 by 400 makes 600×400, marked" "24 canvas" "^top left: 600×400 • canvas\.png$"
+check "24: ... the image at the top left, the new area right and below transparent" "24 canvas" "^top left: red all right checker all light 1 grey 1 below checker all light 1 grey 1$"
+check "24: ... saved: the old pixels at 0,0, the new area transparent" "24 canvas" "^top left saved: 600x400 ff0000ff 0000ff80 00000000 00000000 00000000$"
+check "24: one Ctrl+Z gives back 400×300" "24 canvas" "^canvas undone: 400×300 • canvas\.png$"
+check "24: ... red" "24 canvas" "^canvas undone: red all$"
+check "24: ... transparent" "24 canvas" "^canvas undone: checker all light 1 grey 1 green 0$"
+check "24: ... and blue, as they were" "24 canvas" "^canvas undone: blended all$"
+check "24: Alt+G picks the background colour for the new area" "24 canvas" "^background: Background colour$"
+check "24: Bottom right puts the old pixels at 100,100, the new area indigo" "24 canvas" "^bottom right saved: 500x400 3f48ccff 3f48ccff ff0000ff 0000ff80$"
+check "24: shrinking to 300 by 200 makes 300×200" "24 canvas" "^shrunk: 300×200$"
+check "24: ... cropping 50 px off each side about the centre" "24 canvas" "^shrunk saved: 300x200 ff0000ff ff0000ff 00ff0000 0000ff80$"
+check "24: Ctrl+Z gives back 400×300" "24 canvas" "^shrink undone: 400×300$"
+check "24: ... red" "24 canvas" "^shrink undone: red all$"
+check "24: ... transparent" "24 canvas" "^shrink undone: checker all light 1 grey 1 green 0$"
+check "24: ... and blue" "24 canvas" "^shrink undone: blended all$"
 absent "the app logs no errors or panics" "app log" "^etch:|panicked|CRITICAL"
 bench=$(section "8 bench" | sed -n "s/^bench: //p")
 if [ -z "$bench" ]; then echo "FAIL 8: --bench-stroke printed nothing"; fail=1; else
