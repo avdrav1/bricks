@@ -10,12 +10,15 @@
 //! with the foreground and a right-click with the background; with the colour picker, a
 //! click picks the foreground and a right-click the background; with a shape, the drag
 //! previews the shape over the image, which it doesn't touch until the release draws it,
-//! Shift constraining it and Escape cancelling it), a middle-button drag or a drag with
-//! Space held pans, the wheel pans (Shift+wheel sideways), and Ctrl+wheel zooms around the
-//! pointer. The widget emits `changed` whenever what the status bar or the Edit menu shows
-//! may have changed: the view, the history, or the pixel under the pointer.
+//! Shift constraining it and Escape cancelling it; with text, a click starts typing there
+//! and the text shows over the image until Enter or a click elsewhere puts it on, Escape
+//! dropping it), a middle-button drag or a drag with Space held pans, the wheel pans
+//! (Shift+wheel sideways), and Ctrl+wheel zooms around the pointer. The widget emits
+//! `changed` whenever what the status bar or the Edit menu shows may have changed: the
+//! view, the history, or the pixel under the pointer.
 
 use crate::colours;
+use crate::text::{KeyOutcome, TextBox, TextLook};
 use crate::tools::Action;
 use crate::view::View;
 use gtk::prelude::*;
@@ -36,6 +39,13 @@ const BOUNDARY: gdk::RGBA = gdk::RGBA::new(0.0, 0.0, 0.0, 0.35);
 const NOTCH_PX: f64 = 48.0;
 /// The tip's outline shows once the tip is this many screen pixels across.
 const OUTLINE_MIN_PX: f64 = 4.0;
+/// The caret: a dark line on a light one.
+const CARET_DARK: gdk::RGBA = gdk::RGBA::new(0.0, 0.0, 0.0, 1.0);
+const CARET_LIGHT: gdk::RGBA = gdk::RGBA::new(1.0, 1.0, 1.0, 0.7);
+/// The text's frame, dashed over the caret's light.
+const FRAME_DARK: gdk::RGBA = gdk::RGBA::new(0.0, 0.0, 0.0, 0.5);
+/// How far the text's frame stands off the text, in widget pixels.
+const TEXT_PAD: f64 = 4.0;
 const CHANGED: &str = "changed";
 
 /// What a drag in progress does.
@@ -57,7 +67,7 @@ enum Drag {
 
 mod imp {
     use super::*;
-    use std::cell::{Cell, RefCell};
+    use std::cell::{Cell, OnceCell, RefCell};
 
     #[derive(Default)]
     pub struct Canvas {
@@ -87,6 +97,12 @@ mod imp {
         /// The shape being dragged, not yet on the image, as the rectangles of one colour
         /// each that draw it over the image.
         pub preview: RefCell<Vec<(Rect, Color)>>,
+        /// The text being typed, not yet on the image.
+        pub text: RefCell<Option<TextBox>>,
+        /// The input method text is typed through, and the key controller it filters
+        /// keys for while text is typed.
+        pub im: OnceCell<gtk::IMMulticontext>,
+        pub text_keys: OnceCell<gtk::EventControllerKey>,
     }
 
     #[glib::object_subclass]
@@ -116,6 +132,7 @@ mod imp {
             obj.set_overflow(gtk::Overflow::Hidden);
             obj.set_cursor_from_name(Some("crosshair"));
             obj.add_inputs();
+            obj.add_text_inputs();
         }
     }
 
@@ -165,6 +182,7 @@ mod imp {
                 self.draw_tiles(snapshot, &view, &visible);
                 self.draw_preview(snapshot, &view);
             }
+            self.draw_text(snapshot, &view);
             self.draw_tip_outline(snapshot, &view);
             snapshot.pop();
             self.last_ms.set(t0.elapsed().as_secs_f64() * 1e3);
@@ -177,8 +195,67 @@ mod imp {
         pub(super) fn tip(&self) -> Option<Tip> {
             match self.action.get()? {
                 Action::Draw(tip) => Some(tip),
-                Action::Fill { .. } | Action::Pick | Action::Shape(_) => None,
+                Action::Fill { .. } | Action::Pick | Action::Shape(_) | Action::Text(_) => None,
             }
+        }
+
+        /// The text being typed, over the image as it will land (its pixels, scaled as the
+        /// tiles are), in a dashed frame, with the caret: a dark line on a light one, seen
+        /// on any colour.
+        fn draw_text(&self, snapshot: &gtk::Snapshot, view: &View) {
+            let text = self.text.borrow();
+            let Some(text) = text.as_ref() else {
+                return;
+            };
+            let scale = self.obj().surface_scale();
+            if let Some(r) = text.raster() {
+                let edge = |origin: f64, px: u32| {
+                    let at = origin + px as f64 * view.zoom;
+                    match view.zoom >= 1.0 {
+                        true => device_edge(at, scale),
+                        false => at as f32,
+                    }
+                };
+                let (x0, x1) = (
+                    edge(view.origin.0, r.rect.x),
+                    edge(view.origin.0, r.rect.right()),
+                );
+                let (y0, y1) = (
+                    edge(view.origin.1, r.rect.y),
+                    edge(view.origin.1, r.rect.bottom()),
+                );
+                let filter = match view.zoom >= 1.0 {
+                    true => gsk::ScalingFilter::Nearest,
+                    false => gsk::ScalingFilter::Trilinear,
+                };
+                snapshot.append_scaled_texture(
+                    &r.texture,
+                    filter,
+                    &graphene::Rect::new(x0, y0, x1 - x0, y1 - y0),
+                );
+            }
+            let (x, y, w, h) = text_area(text, view);
+            let builder = gsk::PathBuilder::new();
+            builder.add_rect(&graphene::Rect::new(
+                x as f32 + 0.5,
+                y as f32 + 0.5,
+                w as f32 - 1.0,
+                h as f32 - 1.0,
+            ));
+            let frame = builder.to_path();
+            let dashed = gsk::Stroke::new(1.0);
+            dashed.set_dash(&[4.0, 4.0]);
+            snapshot.append_stroke(&frame, &gsk::Stroke::new(1.0), &CARET_LIGHT);
+            snapshot.append_stroke(&frame, &dashed, &FRAME_DARK);
+            let (cx, cy, ch) = text.caret();
+            let (cx, cy) = view.to_widget((cx, cy));
+            let cx = device_edge(cx, scale);
+            let ch = (ch * view.zoom) as f32;
+            snapshot.append_color(
+                &CARET_LIGHT,
+                &graphene::Rect::new(cx - 1.0, cy as f32, 3.0, ch),
+            );
+            snapshot.append_color(&CARET_DARK, &graphene::Rect::new(cx, cy as f32, 1.0, ch));
         }
 
         /// The shape being dragged, over the image: its rectangles where the image's pixels
@@ -336,6 +413,21 @@ fn device_edge(at: f64, scale: f64) -> f32 {
     ((at * scale).round() / scale) as f32
 }
 
+/// Where the text's frame goes, in widget coordinates `(x, y, width, height)`: around the
+/// text and its caret, [`TEXT_PAD`] off them. A click inside it moves the caret.
+fn text_area(text: &TextBox, view: &View) -> (f64, f64, f64, f64) {
+    let (fx, fy, fw, fh) = text.frame();
+    let (cx, cy, ch) = text.caret();
+    let a = view.to_widget((fx.min(cx), fy.min(cy)));
+    let b = view.to_widget(((fx + fw).max(cx), (fy + fh).max(cy + ch)));
+    (
+        a.0 - TEXT_PAD,
+        a.1 - TEXT_PAD,
+        b.0 - a.0 + 2.0 * TEXT_PAD,
+        b.1 - a.1 + 2.0 * TEXT_PAD,
+    )
+}
+
 glib::wrapper! {
     pub struct Canvas(ObjectSubclass<imp::Canvas>)
         @extends gtk::Widget,
@@ -347,14 +439,11 @@ impl Canvas {
     /// `actual_size`, at 100% whatever its size.
     pub fn new(image: Image, actual_size: bool) -> Canvas {
         let canvas: Canvas = glib::Object::new();
-        let (w, h) = (image.width(), image.height());
-        canvas.update_property(&[
-            gtk::accessible::Property::Label("Canvas"),
-            gtk::accessible::Property::Description(&format!("{w}×{h} image")),
-        ]);
+        canvas.update_property(&[gtk::accessible::Property::Label("Canvas")]);
         let imp = canvas.imp();
         imp.doc.replace(Some(Document::new(image)));
         imp.actual_size.set(actual_size);
+        canvas.describe();
         canvas
     }
 
@@ -376,20 +465,26 @@ impl Canvas {
         (x >= 0.0 && y >= 0.0 && x < w as f64 && y < h as f64).then_some((x as u32, y as u32))
     }
 
+    /// Whether there's anything to undo: a step, or text being typed (undo drops it).
     pub fn can_undo(&self) -> bool {
-        self.imp()
-            .doc
-            .borrow()
-            .as_ref()
-            .is_some_and(Document::can_undo)
+        self.typing()
+            || self
+                .imp()
+                .doc
+                .borrow()
+                .as_ref()
+                .is_some_and(Document::can_undo)
     }
 
+    /// Whether there's a step to redo; not while text is typed.
     pub fn can_redo(&self) -> bool {
-        self.imp()
-            .doc
-            .borrow()
-            .as_ref()
-            .is_some_and(Document::can_redo)
+        !self.typing()
+            && self
+                .imp()
+                .doc
+                .borrow()
+                .as_ref()
+                .is_some_and(Document::can_redo)
     }
 
     /// Where the image stands in its history ([`Document::position`]).
@@ -409,13 +504,21 @@ impl Canvas {
         (doc.image().clone(), doc.position())
     }
 
+    /// Takes back the last step; while text is typed, drops the text instead.
     pub fn undo(&self) {
+        if self.cancel_text() {
+            return;
+        }
         self.set_drag(Drag::None);
         let changed = self.with_doc(Document::undo);
         self.invalidate(changed);
     }
 
+    /// Does the last step undone again; nothing while text is typed.
     pub fn redo(&self) {
+        if self.typing() {
+            return;
+        }
         self.set_drag(Drag::None);
         let changed = self.with_doc(Document::redo);
         self.invalidate(changed);
@@ -437,17 +540,37 @@ impl Canvas {
         self.change_view(View::fit);
     }
 
-    /// What the pointer's buttons do.
+    /// What the pointer's buttons do. Text being typed takes a new look from the text
+    /// tool, and goes on the image when another tool is chosen.
     pub fn set_action(&self, action: Action) {
-        self.imp().action.set(Some(action));
+        let imp = self.imp();
+        imp.action.set(Some(action));
+        match action {
+            Action::Text(look) => self.edit_text(|t| t.set_look(look)),
+            _ => {
+                self.commit_text();
+            }
+        }
+        if imp.drag.get() == Drag::None && !imp.space.get() {
+            self.set_cursor_from_name(Some(self.idle_cursor()));
+        }
         self.queue_draw();
+    }
+
+    /// The pointer's cursor while nothing is dragged: an I-beam for text, else a
+    /// crosshair.
+    fn idle_cursor(&self) -> &'static str {
+        match self.imp().action.get() {
+            Some(Action::Text(_)) => "text",
+            _ => "crosshair",
+        }
     }
 
     /// Space held or let go: while held, a primary-button drag pans.
     pub fn set_space(&self, held: bool) {
         let imp = self.imp();
         if imp.space.replace(held) != held && imp.drag.get() == Drag::None {
-            self.set_cursor_from_name(Some(if held { "grab" } else { "crosshair" }));
+            self.set_cursor_from_name(Some(if held { "grab" } else { self.idle_cursor() }));
         }
     }
 
@@ -569,6 +692,213 @@ impl Canvas {
         dragging
     }
 
+    /// Whether text is being typed (not yet on the image).
+    pub fn typing(&self) -> bool {
+        self.imp().text.borrow().is_some()
+    }
+
+    /// A primary-button click at widget point `at` with the text tool: in the text being
+    /// typed, the caret goes there; elsewhere that text goes on the image; with none, text
+    /// in `look` starts there, when it's on the image.
+    pub fn text_click(&self, at: (f64, f64), look: TextLook) {
+        let Some(view) = self.view() else { return };
+        let inside = self.imp().text.borrow().as_ref().map(|t| {
+            let (x, y, w, h) = text_area(t, &view);
+            at.0 >= x && at.0 < x + w && at.1 >= y && at.1 < y + h
+        });
+        let p = view.to_image(at);
+        match inside {
+            Some(true) => {
+                if let Some(im) = self.imp().im.get() {
+                    im.reset();
+                }
+                self.edit_text(|t| t.click(p));
+            }
+            Some(false) => {
+                self.commit_text();
+            }
+            None => {
+                let bounds = self.with_doc(|d| d.image().bounds());
+                let (x, y) = (p.0.floor(), p.1.floor());
+                if x < 0.0 || y < 0.0 || x >= bounds.width as f64 || y >= bounds.height as f64 {
+                    return;
+                }
+                let text = TextBox::new(&self.pango_context(), (x as i64, y as i64), look, bounds);
+                self.imp().text.replace(Some(text));
+                let imp = self.imp();
+                if let (Some(keys), Some(im)) = (imp.text_keys.get(), imp.im.get()) {
+                    keys.set_im_context(Some(im));
+                    im.focus_in();
+                }
+                self.text_shown();
+                self.emit_changed();
+            }
+        }
+    }
+
+    /// Puts the text being typed on the image, one undo step (none when it has no ink
+    /// there). Whether text was being typed.
+    pub fn commit_text(&self) -> bool {
+        let Some(text) = self.end_typing() else {
+            return false;
+        };
+        let changed = text
+            .into_raster()
+            .and_then(|r| self.with_doc(|d| d.blend((r.rect.x as i64, r.rect.y as i64), r.pixels)));
+        self.queue_draw();
+        self.invalidate(changed);
+        true
+    }
+
+    /// Escape: drops the text being typed, leaving the image as it was. Whether text was
+    /// being typed.
+    pub fn cancel_text(&self) -> bool {
+        let typed = self.end_typing().is_some();
+        if typed {
+            self.queue_draw();
+            self.emit_changed();
+        }
+        typed
+    }
+
+    /// Stops typing: the input method lets go (a composition it ends goes into the text
+    /// first) and the text is taken off the canvas.
+    fn end_typing(&self) -> Option<TextBox> {
+        let imp = self.imp();
+        if !self.typing() {
+            return None;
+        }
+        if let (Some(keys), Some(im)) = (imp.text_keys.get(), imp.im.get()) {
+            im.reset();
+            im.focus_out();
+            keys.set_im_context(None::<&gtk::IMContext>);
+        }
+        let text = imp.text.take();
+        self.describe();
+        text
+    }
+
+    /// Runs `f` on the text being typed, if any, and shows the result.
+    fn edit_text(&self, f: impl FnOnce(&mut TextBox)) {
+        let edited = self.imp().text.borrow_mut().as_mut().map(f);
+        if edited.is_some() {
+            self.text_shown();
+        }
+    }
+
+    /// After the text being typed changed: redraws, tells the input method where the
+    /// caret is, and describes the canvas again.
+    fn text_shown(&self) {
+        self.queue_draw();
+        let imp = self.imp();
+        if let (Some(view), Some(text), Some(im)) =
+            (self.view(), imp.text.borrow().as_ref(), imp.im.get())
+        {
+            let (x, y, h) = text.caret();
+            let (x, y) = view.to_widget((x, y));
+            im.set_cursor_location(&gdk::Rectangle::new(
+                x as i32,
+                y as i32,
+                1,
+                (h * view.zoom).ceil() as i32,
+            ));
+        }
+        self.describe();
+    }
+
+    /// The canvas's accessible description: the image's size, and the text being typed.
+    fn describe(&self) {
+        let (w, h) = self.image_size();
+        let description = match self.imp().text.borrow().as_ref() {
+            Some(t) => format!("{w}×{h} image, typing “{}”", t.text()),
+            None => format!("{w}×{h} image"),
+        };
+        self.update_property(&[gtk::accessible::Property::Description(&description)]);
+    }
+
+    /// A key pressed while text is typed (after the input method): the text's keys edit
+    /// it, Enter puts it on the image, Escape drops it.
+    fn text_key(&self, key: gdk::Key, mods: gdk::ModifierType) -> glib::Propagation {
+        let outcome = match self.imp().text.borrow_mut().as_mut() {
+            Some(t) => t.key(key, mods),
+            None => return glib::Propagation::Proceed,
+        };
+        match outcome {
+            KeyOutcome::Commit => {
+                self.commit_text();
+            }
+            KeyOutcome::Cancel => {
+                self.cancel_text();
+            }
+            KeyOutcome::Changed | KeyOutcome::Moved => self.text_shown(),
+            KeyOutcome::Ignored => return glib::Propagation::Proceed,
+        }
+        glib::Propagation::Stop
+    }
+
+    /// Typing: an input method (the desktop's, so any script composes) and the keys it
+    /// passes on, while text is typed.
+    fn add_text_inputs(&self) {
+        let im = gtk::IMMulticontext::new();
+        im.set_client_widget(Some(self));
+        im.connect_commit({
+            let canvas = self.downgrade();
+            move |_, s| {
+                if let Some(canvas) = canvas.upgrade() {
+                    canvas.edit_text(|t| {
+                        t.set_preedit(None);
+                        t.insert(s);
+                    });
+                }
+            }
+        });
+        im.connect_preedit_changed({
+            let canvas = self.downgrade();
+            move |im| {
+                let Some(canvas) = canvas.upgrade() else {
+                    return;
+                };
+                let (s, attrs, cursor) = im.preedit_string();
+                let cursor = s
+                    .char_indices()
+                    .nth(cursor.max(0) as usize)
+                    .map_or(s.len(), |(i, _)| i);
+                let preedit = (!s.is_empty()).then(|| (s.to_string(), attrs, cursor));
+                canvas.edit_text(|t| t.set_preedit(preedit));
+            }
+        });
+        let keys = gtk::EventControllerKey::new();
+        keys.connect_key_pressed({
+            let canvas = self.downgrade();
+            move |_, key, _, state| match canvas.upgrade() {
+                Some(canvas) => {
+                    canvas.text_key(key, state & gtk::accelerator_get_default_mod_mask())
+                }
+                None => glib::Propagation::Proceed,
+            }
+        });
+        self.add_controller(keys.clone());
+        let focus = gtk::EventControllerFocus::new();
+        focus.connect_enter({
+            let canvas = self.downgrade();
+            move |_| {
+                if let Some(canvas) = canvas.upgrade().filter(Canvas::typing) {
+                    if let Some(im) = canvas.imp().im.get() {
+                        im.focus_in();
+                    }
+                }
+            }
+        });
+        focus.connect_leave({
+            let im = im.clone();
+            move |_| im.focus_out()
+        });
+        self.add_controller(focus);
+        let imp = self.imp();
+        imp.im.set(im).expect("text inputs are added once");
+        imp.text_keys.set(keys).expect("text inputs are added once");
+    }
+
     /// What a drag does now; a shape's preview follows.
     fn set_drag(&self, drag: Drag) {
         let imp = self.imp();
@@ -620,6 +950,10 @@ impl Canvas {
             if Some(v) != imp.view.get() {
                 imp.view.set(Some(v));
                 self.queue_draw();
+                if self.typing() {
+                    // The caret moved on screen: the input method's window follows it.
+                    self.text_shown();
+                }
             }
             self.emit_changed();
         }
@@ -655,6 +989,7 @@ impl Canvas {
                     }
                     (1 | 3, Some(Action::Pick)) if !space => canvas.pick((x, y), secondary),
                     (1, Some(Action::Shape(_))) if !space => canvas.shape_begin((x, y)),
+                    (1, Some(Action::Text(look))) if !space => canvas.text_click((x, y), look),
                     (1, _) if !space => canvas.draw_begin((x, y)),
                     (1 | 2, _) => {
                         imp.drag.set(Drag::Pan { last: (0.0, 0.0) });
@@ -706,7 +1041,8 @@ impl Canvas {
                     Drag::Pan { .. } => {
                         canvas.imp().drag.set(Drag::None);
                         let held = canvas.imp().space.get();
-                        canvas.set_cursor_from_name(Some(if held { "grab" } else { "crosshair" }));
+                        let idle = canvas.idle_cursor();
+                        canvas.set_cursor_from_name(Some(if held { "grab" } else { idle }));
                     }
                     Drag::None => {}
                 }

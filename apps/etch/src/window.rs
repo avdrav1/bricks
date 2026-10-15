@@ -6,6 +6,7 @@
 use crate::canvas::Canvas;
 use crate::colours;
 use crate::saving::Saver;
+use crate::text;
 use crate::tools::{self, Settings, Tool};
 use gtk::prelude::*;
 use gtk::{gdk, gio, glib};
@@ -378,6 +379,14 @@ struct Controls {
     /// while one of them is the tool.
     style: gtk::Box,
     styles: [gtk::ToggleButton; 3],
+    /// The text's font family list, Bold, and Italic, shown while text is the tool.
+    font: gtk::Box,
+    families: &'static [String],
+    family: gtk::DropDown,
+    bold: gtk::ToggleButton,
+    italic: gtk::ToggleButton,
+    /// Set while the controls show the settings: their changes then aren't the user's.
+    showing: Cell<bool>,
 }
 
 /// The styles of the style buttons, in order.
@@ -391,11 +400,23 @@ impl Controls {
         self.show();
     }
 
+    /// A change the user made in a control: applied unless the controls are showing the
+    /// settings.
+    fn changed(&self, f: impl FnOnce(&mut Settings)) {
+        if !self.showing.get() {
+            self.update(f);
+        }
+    }
+
     fn show(&self) {
         let s = self.settings.get();
+        self.showing.set(true);
         self.canvas.set_action(s.action());
         self.indicator.set(s.foreground, s.background);
         self.sizing.set_visible(s.width().is_some());
+        let sizes = s.sizes();
+        self.size
+            .set_range(*sizes.start() as f64, *sizes.end() as f64);
         if let Some(w) = s.width().filter(|&w| self.size.value() as u32 != w) {
             self.size.set_value(w as f64);
         }
@@ -411,6 +432,28 @@ impl Controls {
             .map(|i| &self.styles[i]);
         if let Some(b) = style.filter(|b| !b.is_active()) {
             b.set_active(true);
+        }
+        self.font.set_visible(s.tool == Tool::Text);
+        if let Some(i) = self.families.iter().position(|f| f == s.family) {
+            if self.family.selected() != i as u32 {
+                self.family.set_selected(i as u32);
+            }
+        }
+        self.bold.set_active(s.bold);
+        self.italic.set_active(s.italic);
+        self.showing.set(false);
+    }
+
+    /// After a control changed the text's look: the keys go back to the text being typed.
+    fn back_to_text(&self) {
+        if self.canvas.typing() {
+            let canvas = self.canvas.clone();
+            // Once the event is handled: a list that closes gives the keys to its button.
+            glib::idle_add_local_once(move || {
+                if canvas.typing() {
+                    canvas.grab_focus();
+                }
+            });
         }
     }
 }
@@ -438,8 +481,46 @@ fn choice<const N: usize>(
     (row, buttons)
 }
 
+/// A toggle button showing `markup`, named `name` (for screen readers), with `tip`.
+fn toggle(markup: &str, name: &str, tip: &str) -> gtk::ToggleButton {
+    let label = gtk::Label::new(None);
+    label.set_markup(markup);
+    let b = gtk::ToggleButton::new();
+    b.set_child(Some(&label));
+    b.set_tooltip_text(Some(tip));
+    b.set_focusable(false);
+    b.set_valign(gtk::Align::Center);
+    b.update_property(&[gtk::accessible::Property::Label(name)]);
+    b
+}
+
+/// The text's font: a family list (searched by typing), Bold, and Italic.
+fn font_controls(context: &gtk::pango::Context) -> (gtk::Box, &'static [String], gtk::DropDown) {
+    let families = text::families(context);
+    let names: Vec<&str> = families.iter().map(String::as_str).collect();
+    let string = gtk::PropertyExpression::new(
+        gtk::StringObject::static_type(),
+        None::<gtk::Expression>,
+        "string",
+    );
+    let family = gtk::DropDown::new(Some(gtk::StringList::new(&names)), Some(string));
+    family.set_enable_search(true);
+    family.set_search_match_mode(gtk::StringFilterMatchMode::Substring);
+    family.set_valign(gtk::Align::Center);
+    family.set_size_request(150, -1);
+    family.set_tooltip_text(Some("Font (type to search)"));
+    // A drop-down is named by the item it shows: its description says what it is.
+    family.update_property(&[
+        gtk::accessible::Property::Label("Font"),
+        gtk::accessible::Property::Description("Font"),
+    ]);
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    row.append(&family);
+    (row, families, family)
+}
+
 /// The colour row and the size, left of the status: the colours, the palette, the
-/// current tool's size, the brush's edge, and the shapes' style.
+/// current tool's size, the text's font, the brush's edge, and the shapes' style.
 fn colour_row(controls: &Rc<Controls>) -> gtk::Box {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     row.append(&controls.indicator);
@@ -468,19 +549,58 @@ fn colour_row(controls: &Rc<Controls>) -> gtk::Box {
         let controls = Rc::downgrade(controls);
         move |spin| {
             if let Some(c) = controls.upgrade() {
-                c.update(|s| s.set_width(spin.value() as u32));
+                c.changed(|s| s.set_width(spin.value() as u32));
+            }
+        }
+    });
+    // Enter in the size gives the keys back to the text being typed.
+    controls.size.connect_activate({
+        let controls = Rc::downgrade(controls);
+        move |_| {
+            if let Some(c) = controls.upgrade() {
+                c.back_to_text();
             }
         }
     });
     controls.sizing.append(&controls.size);
     controls.sizing.append(&gtk::Label::new(Some("px")));
     row.append(&controls.sizing);
+    controls.family.connect_selected_notify({
+        let controls = Rc::downgrade(controls);
+        move |d| {
+            let Some(c) = controls.upgrade() else { return };
+            if let Some(family) = c.families.get(d.selected() as usize) {
+                if !c.showing.get() {
+                    c.update(|s| s.family = family);
+                    c.back_to_text();
+                }
+            }
+        }
+    });
+    for (button, set) in [
+        (
+            &controls.bold,
+            (|s, on| s.bold = on) as fn(&mut Settings, bool),
+        ),
+        (&controls.italic, |s, on| s.italic = on),
+    ] {
+        button.connect_toggled({
+            let controls = Rc::downgrade(controls);
+            move |b| {
+                if let Some(c) = controls.upgrade() {
+                    c.changed(|s| set(s, b.is_active()));
+                }
+            }
+        });
+        controls.font.append(button);
+    }
+    row.append(&controls.font);
     controls.soft.connect_toggled({
         let controls = Rc::downgrade(controls);
         move |soft| {
             if let Some(c) = controls.upgrade() {
                 if c.settings.get().soft != soft.is_active() {
-                    c.update(|s| s.soft = soft.is_active());
+                    c.changed(|s| s.soft = soft.is_active());
                 }
             }
         }
@@ -492,7 +612,7 @@ fn colour_row(controls: &Rc<Controls>) -> gtk::Box {
             move |b| {
                 if let Some(c) = controls.upgrade() {
                     if b.is_active() && c.settings.get().style != style {
-                        c.update(|s| s.style = style);
+                        c.changed(|s| s.style = style);
                     }
                 }
             }
@@ -534,6 +654,7 @@ fn show(
             ),
         ],
     );
+    let (font, families, family) = font_controls(&canvas.pango_context());
     let controls = Rc::new(Controls {
         settings: Cell::new(Settings::default()),
         canvas: canvas.clone(),
@@ -549,6 +670,12 @@ fn show(
         soft,
         style,
         styles,
+        font,
+        families,
+        family,
+        bold: toggle("<b>B</b>", "Bold", "Bold"),
+        italic: toggle("<i>I</i>", "Italic", "Italic"),
+        showing: Cell::new(false),
     });
     controls.show();
     let (bar, status) = Status::new();
@@ -614,7 +741,8 @@ fn show(
     // Space held: dragging pans. Escape drops a shape being dragged. Ctrl+Shift+Z redoes,
     // Ctrl+Shift+S is Save As, and Ctrl+Shift+E Export (shifted, a letter may arrive upper
     // case, which an accelerator misses). Unmodified, a tool's key picks it and X swaps
-    // the colours. None of them while a text field (the size) has the keys.
+    // the colours. None of them while a text field (the size) has the keys, and only the
+    // Ctrl+Shift ones while text is typed on the canvas: its keys are its letters.
     let keys = gtk::EventControllerKey::new();
     keys.set_propagation_phase(gtk::PropagationPhase::Capture);
     keys.connect_key_pressed({
@@ -623,14 +751,15 @@ fn show(
             let Some(window) = window.upgrade() else {
                 return glib::Propagation::Proceed;
             };
-            let typing = GtkWindowExt::focus(&window)
+            let field = GtkWindowExt::focus(&window)
                 .is_some_and(|f| f.is::<gtk::Text>() || f.is::<gtk::TextView>());
-            if typing {
+            if field {
                 return glib::Propagation::Proceed;
             }
+            let text = canvas.typing();
             let mods = state & gtk::accelerator_get_default_mod_mask();
             let redo = gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK;
-            if key == gdk::Key::space {
+            if key == gdk::Key::space && !text {
                 canvas.set_space(true);
                 return glib::Propagation::Stop;
             }
@@ -650,7 +779,7 @@ fn show(
                 ActionGroupExt::activate_action(&window, action, None);
                 return glib::Propagation::Stop;
             }
-            if !mods.is_empty() {
+            if !mods.is_empty() || text {
                 return glib::Propagation::Proceed;
             }
             if matches!(key, gdk::Key::x | gdk::Key::X) {

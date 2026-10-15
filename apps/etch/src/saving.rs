@@ -110,6 +110,10 @@ impl Saver {
             move |_| saver.show_title()
         });
         window.connect_close_request(move |_| {
+            // Text being typed goes on the image first: closing never drops it unasked.
+            if let Some(canvas) = saver.canvas.upgrade() {
+                canvas.commit_text();
+            }
             if saver.modified() && !saver.closing.get() {
                 saver.ask_before_closing();
                 glib::Propagation::Stop
@@ -256,6 +260,8 @@ impl Saver {
                 .push_back(Box::new(move |s| s.write(dest, format, kind, then)));
             return;
         }
+        // Text being typed is part of what's saved.
+        canvas.commit_text();
         let started = Instant::now();
         let (image, position) = canvas.copy_image();
         let copy_ms = started.elapsed().as_secs_f64() * 1e3;

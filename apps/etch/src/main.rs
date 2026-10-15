@@ -16,6 +16,7 @@
 mod canvas;
 mod colours;
 mod saving;
+mod text;
 mod tools;
 mod view;
 mod window;

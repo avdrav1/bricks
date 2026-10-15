@@ -96,6 +96,21 @@
 #      previews the line along the pointer's path, Escape before the release drops it,
 #      and after the release there's no ink and no mark; a line drawn then lands, and
 #      Ctrl+Z takes it back.
+# ETCH-12 acceptance: text.
+#  17. the font controls are hidden while the pencil is the tool; T picks text (the tool
+#      column shows it on) with Bold and Italic off, size 24. A click on the canvas and
+#      "Hello" typed (wtype) show dark text in the box while the title stays "Untitled"
+#      (the canvas describes the text typed); " pebfilrostx" typed goes into the text
+#      (described) and switches no tool (Text still on, Pencil and Eraser off) nor
+#      swaps the colours. Enter puts it on the image: the title marked, ink there, no text
+#      typed; one Ctrl+Z takes it all back (no ink, unmarked). Another click and "Gone"
+#      typed, then Escape: no ink, unmarked, no text. A click, "Click" typed, and a click
+#      elsewhere put it on (marked, ink, no new text there); Ctrl+Z takes it back. Then
+#      "illicit fillip" typed: Bold makes it darker (more black pixels); in DejaVu Sans
+#      Mono, picked from the font list (searched), it draws wider than in Sans, and typing
+#      goes on into it ("!" added); Escape drops it. Through an input method on the seat
+#      (scripts/ime_helpers.py): new text shows the composition "かな" (ink, nothing typed
+#      yet), takes the commit "仮名", and Enter puts it on the image.
 # Needs docker. VERBOSE=1 prints the transcript; SHOTS=DIR saves screenshots.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -108,11 +123,13 @@ if [ -n "${SHOTS:-}" ]; then mkdir -p "$SHOTS"; shots=(-v "$(realpath "$SHOTS"):
 out=$(docker run --rm --cap-add SYS_NICE -v "$bin:/usr/local/bin/etch:ro" \
   -v "$PWD/scripts:/scripts:ro" "${shots[@]}" archlinux:latest bash -c '
 set -uo pipefail
-pacman -Syu --noconfirm --needed sway wtype grim gtk4 ttf-dejavu dbus python-gobject at-spi2-core \
-  python-pywayland wlr-protocols wayland pkgconf >/dev/null 2>&1
+pacman -Syu --noconfirm --needed sway wtype grim gtk4 ttf-dejavu wqy-zenhei dbus python-gobject \
+  at-spi2-core python-pywayland wlr-protocols wayland pkgconf >/dev/null 2>&1
 mkdir -p /shots /tmp/rt /tmp/proto && chmod 700 /tmp/rt && touch /tmp/proto/__init__.py
 python -m pywayland.scanner -i /usr/share/wayland/wayland.xml \
   /usr/share/wlr-protocols/unstable/wlr-virtual-pointer-unstable-v1.xml -o /tmp/proto/wlr_proto >/dev/null
+python -m pywayland.scanner -i /usr/share/wayland/wayland.xml \
+  /scripts/protocols/input-method-unstable-v2.xml -o /tmp/proto/im_proto >/dev/null 2>&1
 export PYTHONPATH=/tmp/proto XDG_RUNTIME_DIR=/tmp/rt GDK_DEBUG=no-portals GDK_BACKEND=wayland
 printf "output HEADLESS-1 resolution 1280x720 position 0 0\ndefault_border none\n" > /tmp/sway.conf
 sed "s/^APP = .*/APP = \"etch\"/" /scripts/a11y_helpers.py > /tmp/a11y.py
@@ -205,7 +222,9 @@ elif cmd == "column":
     wc = tuple(int(want[i:i + 2], 16) for i in (0, 2, 4))
     print(sum(1 for y in range(t, t + h) if all(abs(a - b) <= 8 for a, b in zip(at(x, y), wc))))
 elif cmd == "where":
-    # The centre of the first widget named NAME, to click.
+    # The centre of the first widget named NAME (or described so: a drop-down is named by
+    # the item it shows), of role ROLE if given, to click.
+    role = sys.argv[3] if len(sys.argv) > 3 else None
     desktop = Atspi.get_desktop(0)
     stack = [desktop.get_child_at_index(i) for i in range(desktop.get_child_count())]
     stack = [a for a in stack if a is not None and a.get_name() == "etch"]
@@ -213,7 +232,8 @@ elif cmd == "where":
         n = stack.pop(0)
         if n is None:
             continue
-        if n.get_name() == sys.argv[2] and n.get_component_iface() is not None:
+        named = sys.argv[2] in (n.get_name(), n.get_description())
+        if named and (role is None or n.get_role_name() == role) and n.get_component_iface() is not None:
             e = n.get_component_iface().get_extents(Atspi.CoordType.WINDOW)
             if e.width > 0:
                 print(e.x + e.width // 2, e.y + e.height // 2)
@@ -268,6 +288,15 @@ elif cmd == "count":
     box = [at(x, y) for y in range(y0, y1) for x in range(x0, x1)]
     n = sum(1 for p in box if all(abs(a - b) <= 8 for a, b in zip(p, want)))
     print("all" if n == len(box) else f"{n}/{len(box)}")
+elif cmd == "dark":
+    # In the screen rectangle X0 Y0 X1 Y1: black pixels (darker than 60 in every channel),
+    # and the width the pixels darker than 100 span (the ink of text, not the grey frame).
+    at = pixels(sys.argv[2])
+    x0, y0, x1, y1 = map(int, sys.argv[3:7])
+    dark = [(x, y) for y in range(y0, y1) for x in range(x0, x1) if max(at(x, y)) < 100]
+    black = sum(1 for x, y in dark if max(at(x, y)) < 60)
+    width = max(x for x, _ in dark) - min(x for x, _ in dark) + 1 if dark else 0
+    print(f"black {black} width {width}")
 PY
 # The images sections 11 and 12 open.
 cat > /tmp/mk.py <<"PY"
@@ -622,6 +651,58 @@ session() {
   echo "line drawn: $(title) line $(px line /tmp/shot.png $l $t $r $b)"
   keys -M ctrl z -m ctrl; shot line-undone; echo "line undone: $(title) ink $(px ink /tmp/shot.png)"
   pkill -x etch; sleep 1
+
+  echo "== 17 text"
+  etch >>/tmp/app.log 2>&1 & sleep 3
+  keys -M ctrl 0 -m ctrl
+  desc() { python3 /tmp/a11y.py text | grep -E "^[0-9]+×[0-9]+ image" | head -1; }
+  colours() { python3 /tmp/a11y.py text | grep "^Foreground" | head -1 | sed "s/^/$1: /"; }
+  click() { python3 /scripts/dnd_helpers.py click $1 $2; sleep 0.5; }
+  echo "start: font $(tool Bold) $(tool Italic)"
+  keys t; echo "key t: text $(tool Text) pencil $(tool Pencil)"
+  echo "font: bold $(tool Bold) italic $(tool Italic)"
+  echo "text size: $(size)"
+  read mx my <<<"$(px centre)"
+  l=$((mx - 200)); t=$((my - 100))
+  # The text (24 px) and its frame, from where it was clicked.
+  ink() { px dark /tmp/shot.png $((l - 8)) $((t - 8)) $((l + 460)) $((t + 60)); }
+  click $l $t; keys Hello; shot typed
+  echo "typed: $(title) $(desc)"; echo "typed ink: $(ink)"
+  keys " pebfilrostx"; shot letters
+  echo "letters: text $(tool Text) pencil $(tool Pencil) eraser $(tool Eraser) $(desc)"
+  colours letters
+  keys -k Return; shot committed
+  echo "committed: $(title) $(desc)"; echo "committed ink: $(px ink /tmp/shot.png)"
+  keys -M ctrl z -m ctrl; shot text-undone; echo "text undone: $(title) ink $(px ink /tmp/shot.png)"
+  click $l $t; keys Gone; shot gone; echo "gone: $(desc)"
+  keys -k Escape; shot escaped; echo "escaped: $(title) ink $(px ink /tmp/shot.png) $(desc)"
+  click $l $t; keys Click; click $((l + 300)) $((t + 200)); shot clicked-away
+  echo "clicked away: $(title) $(desc)"; echo "clicked away ink: $(px ink /tmp/shot.png)"
+  keys -M ctrl z -m ctrl; shot click-undone; echo "click undone: $(title) ink $(px ink /tmp/shot.png)"
+  more() { [ "$2" -gt "$1" ] 2>/dev/null && echo yes || echo "no ($1 then $2)"; }
+  click $l $t; keys "illicit fillip"; shot sans
+  read _ sans _ sans_w <<<"$(ink)"; echo "sans: black $sans width $sans_w"
+  python3 /tmp/a11y.py press Bold; sleep 0.5; shot bold
+  read _ bold _ _ <<<"$(ink)"; echo "bold: $(tool Bold) darker $(more "$sans" "$bold")"
+  python3 /tmp/a11y.py press Bold; sleep 0.5
+  click $(px where Font); keys "DejaVu Sans Mono"; sleep 1; shot font-list
+  click $(px where "DejaVu Sans Mono" label); sleep 0.5; shot mono
+  read _ _ _ mono_w <<<"$(ink)"; echo "mono: wider $(more "$sans_w" "$mono_w")"
+  keys "!"; echo "mono typed: $(desc)"
+  keys -k Escape; shot font-escaped; echo "font escaped: $(title) ink $(px ink /tmp/shot.png) $(desc)"
+  # An input method on the seat (scripts/ime_helpers.py, zwp_input_method_v2 to the
+  # window): it composes "かな" and commits "仮名" into new text; a keyboard stays on the
+  # seat throughout.
+  mkfifo /tmp/ime.fifo
+  ime() { timeout 5 sh -c "echo \"$1\" > /tmp/ime.fifo"; sleep 1; }
+  wtype -s 60000 & board=$!; sleep 1
+  python3 /scripts/ime_helpers.py serve /tmp/ime.fifo /tmp/ime.log 2>>/tmp/app.log & sleep 1
+  click $l $t; ime "preedit かな 6"; shot ime-preedit
+  read _ composing _ _ <<<"$(ink)"; echo "composing: $(desc) black $composing"
+  ime "commit 仮名"; shot ime-committed; echo "composed: $(desc)"
+  keys -k Return; shot ime-on; echo "ime on: $(title) $(desc)"; echo "ime ink: $(px ink /tmp/shot.png)"
+  kill $board
+  pkill -x etch; sleep 1
   swaymsg exit >/dev/null 2>&1 || true
 }
 dbus-run-session -- bash -c "$(declare -f session); session" 2>/tmp/dbus.log
@@ -790,6 +871,31 @@ check "16: Escape drops it" "16 shapes" "^line escaped: ink 0$"
 check "16: ... and the release then draws nothing" "16 shapes" "^line released: Untitled ink 0$"
 check "16: a line dragged lands" "16 shapes" "^line drawn: • Untitled line 41/41$"
 check "16: ... and Ctrl+Z takes it back" "16 shapes" "^line undone: Untitled ink 0$"
+# ETCH-12: text.
+check "17: the font controls are hidden while the pencil is the tool" "17 text" "^start: font hidden hidden$"
+check "17: T picks text" "17 text" "^key t: text on pencil off$"
+check "17: ... showing Bold and Italic, off" "17 text" "^font: bold off italic off$"
+check "17: ... at size 24" "17 text" "^text size: 24$"
+check "17: typing shows the text on the canvas, the image untouched" "17 text" "^typed: Untitled 1024×768 image, typing “Hello”$"
+check "17: ... dark text in the box" "17 text" "^typed ink: black [1-9][0-9]{2,} width [1-9][0-9]+$"
+check "17: tool keys typed go into the text and switch no tool" "17 text" "^letters: text on pencil off eraser off 1024×768 image, typing “Hello pebfilrostx”$"
+check "17: ... nor swap the colours" "17 text" "^letters: Foreground #000000, background #FFFFFF$"
+check "17: Enter puts it on the image, marking the title" "17 text" "^committed: • Untitled 1024×768 image$"
+absent "17: ... ink and all" "17 text" "^committed ink: 0$"
+check "17: one Ctrl+Z takes it all back" "17 text" "^text undone: Untitled ink 0$"
+check "17: another click starts new text" "17 text" "^gone: 1024×768 image, typing “Gone”$"
+check "17: Escape drops it: no ink, no mark" "17 text" "^escaped: Untitled ink 0 1024×768 image$"
+check "17: a click elsewhere puts the text on, starting none there" "17 text" "^clicked away: • Untitled 1024×768 image$"
+absent "17: ... ink and all" "17 text" "^clicked away ink: 0$"
+check "17: ... and Ctrl+Z takes it back" "17 text" "^click undone: Untitled ink 0$"
+check "17: Bold makes the text being typed darker" "17 text" "^bold: on darker yes$"
+check "17: DejaVu Sans Mono, picked from the font list, draws it wider than Sans" "17 text" "^mono: wider yes$"
+check "17: ... and typing goes on into it" "17 text" "^mono typed: 1024×768 image, typing “illicit fillip!”$"
+check "17: Escape drops it" "17 text" "^font escaped: Untitled ink 0 1024×768 image$"
+check "17: an input method's composition shows in new text, nothing typed yet" "17 text" "^composing: 1024×768 image, typing “” black [1-9][0-9]+$"
+check "17: ... and its commit is typed" "17 text" "^composed: 1024×768 image, typing “仮名”$"
+check "17: Enter puts it on the image" "17 text" "^ime on: • Untitled 1024×768 image$"
+absent "17: ... ink and all" "17 text" "^ime ink: 0$"
 absent "the app logs no errors or panics" "app log" "^etch:|panicked|CRITICAL"
 bench=$(section "8 bench" | sed -n "s/^bench: //p")
 if [ -z "$bench" ]; then echo "FAIL 8: --bench-stroke printed nothing"; fail=1; else

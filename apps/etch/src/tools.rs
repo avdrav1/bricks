@@ -2,6 +2,7 @@
 //! with an icon drawn from a path in the theme's foreground colour, so the column needs
 //! no icon theme. The buttons drive the window's `tool` action, so exactly one is on.
 
+use crate::text::{TextLook, DEFAULT_FAMILY};
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{glib, graphene, gsk};
@@ -9,6 +10,9 @@ use image_model::{Brush, Color, Kind, Pencil, ShapeTool, Style, Tip};
 
 /// The widths a tool's size can take, in image pixels.
 pub const SIZES: std::ops::RangeInclusive<u32> = 1..=100;
+/// The sizes text can take: its font's size in image pixels (the em, as Pango's absolute
+/// size).
+pub const TEXT_SIZES: std::ops::RangeInclusive<u32> = 4..=400;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Tool {
@@ -18,6 +22,7 @@ pub enum Tool {
     Eraser,
     Fill,
     Picker,
+    Text,
     Line,
     Rectangle,
     Ellipse,
@@ -40,15 +45,19 @@ pub enum Action {
     /// A primary-button drag previews the shape from the press to the pointer, and the
     /// release draws it.
     Shape(ShapeTool),
+    /// A click starts typing text there in this look; while it's typed, a click elsewhere
+    /// puts it on the image.
+    Text(TextLook),
 }
 
 impl Tool {
-    pub const ALL: [Tool; 8] = [
+    pub const ALL: [Tool; 9] = [
         Tool::Pencil,
         Tool::Brush,
         Tool::Eraser,
         Tool::Fill,
         Tool::Picker,
+        Tool::Text,
         Tool::Line,
         Tool::Rectangle,
         Tool::Ellipse,
@@ -62,6 +71,7 @@ impl Tool {
             Tool::Eraser => "eraser",
             Tool::Fill => "fill",
             Tool::Picker => "picker",
+            Tool::Text => "text",
             Tool::Line => "line",
             Tool::Rectangle => "rectangle",
             Tool::Ellipse => "ellipse",
@@ -79,6 +89,7 @@ impl Tool {
             Tool::Eraser => "Eraser",
             Tool::Fill => "Fill",
             Tool::Picker => "Colour Picker",
+            Tool::Text => "Text",
             Tool::Line => "Line",
             Tool::Rectangle => "Rectangle",
             Tool::Ellipse => "Ellipse",
@@ -93,6 +104,7 @@ impl Tool {
             Tool::Eraser => 'E',
             Tool::Fill => 'F',
             Tool::Picker => 'I',
+            Tool::Text => 'T',
             Tool::Line => 'L',
             Tool::Rectangle => 'R',
             Tool::Ellipse => 'O',
@@ -120,6 +132,8 @@ impl Tool {
             Tool::Picker => {
                 "M 2 14 L 2.5 11.5 L 8.5 5.5 L 10.5 7.5 L 4.5 13.5 Z M 7.5 4.5 L 11.5 8.5 M 9.5 6.5 L 12 4 C 13 3 14.5 3 13.5 2.5 C 13 1.5 13 3 12 4"
             }
+            // A capital T with serifs at its arms' ends and its foot.
+            Tool::Text => "M 3 5 L 3 2.5 L 13 2.5 L 13 5 M 8 2.5 L 8 13.5 M 5.5 13.5 L 10.5 13.5",
             // A line rising right.
             Tool::Line => "M 2.5 13.5 L 13.5 2.5",
             // A rectangle, wider than tall.
@@ -133,8 +147,8 @@ impl Tool {
 }
 
 /// What drawing uses: the tool, the foreground and background colours, each tool's own
-/// size (switching tools keeps each one's), the brush's edge, and the rectangle's and
-/// ellipse's style.
+/// size (switching tools keeps each one's), the brush's edge, the rectangle's and
+/// ellipse's style, and the text's font.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Settings {
     pub tool: Tool,
@@ -145,11 +159,16 @@ pub struct Settings {
     /// Rectangles and ellipses outlined, filled, or both (one style for the two, as in
     /// Paint).
     pub style: Style,
+    /// The text's font family, bold, and italic; its size is the text tool's.
+    pub family: &'static str,
+    pub bold: bool,
+    pub italic: bool,
     /// The tool before the colour picker, which a pick goes back to.
     before_picker: Tool,
     pencil_width: u32,
     brush_width: u32,
     eraser_width: u32,
+    text_size: u32,
     line_width: u32,
     rectangle_width: u32,
     ellipse_width: u32,
@@ -163,10 +182,14 @@ impl Default for Settings {
             background: Color::WHITE,
             soft: true,
             style: Style::Outline,
+            family: DEFAULT_FAMILY,
+            bold: false,
+            italic: false,
             before_picker: Tool::Pencil,
             pencil_width: 1,
             brush_width: 8,
             eraser_width: 9,
+            text_size: 24,
             line_width: 1,
             rectangle_width: 1,
             ellipse_width: 1,
@@ -193,12 +216,13 @@ impl Settings {
         self.before_picker
     }
 
-    /// The current tool's size; the fill and the picker have none.
+    /// The current tool's size (text's is its font's); the fill and the picker have none.
     pub fn width(&self) -> Option<u32> {
         match self.tool {
             Tool::Pencil => Some(self.pencil_width),
             Tool::Brush => Some(self.brush_width),
             Tool::Eraser => Some(self.eraser_width),
+            Tool::Text => Some(self.text_size),
             Tool::Line => Some(self.line_width),
             Tool::Rectangle => Some(self.rectangle_width),
             Tool::Ellipse => Some(self.ellipse_width),
@@ -206,13 +230,24 @@ impl Settings {
         }
     }
 
-    /// Sets the current tool's size, kept within [`SIZES`]; nothing for a tool without one.
+    /// The sizes the current tool takes: [`TEXT_SIZES`] for text, else [`SIZES`].
+    pub fn sizes(&self) -> std::ops::RangeInclusive<u32> {
+        match self.tool {
+            Tool::Text => TEXT_SIZES,
+            _ => SIZES,
+        }
+    }
+
+    /// Sets the current tool's size, kept within [`Settings::sizes`]; nothing for a tool
+    /// without one.
     pub fn set_width(&mut self, width: u32) {
-        let w = width.clamp(*SIZES.start(), *SIZES.end());
+        let sizes = self.sizes();
+        let w = width.clamp(*sizes.start(), *sizes.end());
         match self.tool {
             Tool::Pencil => self.pencil_width = w,
             Tool::Brush => self.brush_width = w,
             Tool::Eraser => self.eraser_width = w,
+            Tool::Text => self.text_size = w,
             Tool::Line => self.line_width = w,
             Tool::Rectangle => self.rectangle_width = w,
             Tool::Ellipse => self.ellipse_width = w,
@@ -232,9 +267,10 @@ impl Settings {
 
     /// What the canvas does with the current tool: the pencil and the brush draw in the
     /// foreground, the eraser to transparency, each at its size; the fill fills; the
-    /// picker picks; the shapes draw at their size, outlined in the foreground and filled
-    /// with the background, or, filled without an outline, with the foreground (as Paint
-    /// and Paint.NET do).
+    /// picker picks; text is typed in the foreground at its size in the font chosen; the
+    /// shapes draw at their size, outlined in the foreground and filled with the
+    /// background, or, filled without an outline, with the foreground (as Paint and
+    /// Paint.NET do).
     pub fn action(&self) -> Action {
         let shape = |kind, width| {
             let fill = match self.style {
@@ -264,6 +300,13 @@ impl Settings {
                 background: self.background,
             },
             Tool::Picker => Action::Pick,
+            Tool::Text => Action::Text(TextLook {
+                family: self.family,
+                size: self.text_size,
+                bold: self.bold,
+                italic: self.italic,
+                color: self.foreground,
+            }),
             Tool::Line => shape(Kind::Line, self.line_width),
             Tool::Rectangle => shape(Kind::Rectangle(self.style), self.rectangle_width),
             Tool::Ellipse => shape(Kind::Ellipse(self.style), self.ellipse_width),
@@ -476,5 +519,42 @@ mod tests {
         s.set_tool(Tool::Picker);
         assert_eq!(s.pick(Color::TRANSPARENT, true), Tool::Fill);
         assert_eq!((s.foreground, s.background), (clear, Color::TRANSPARENT));
+    }
+
+    #[test]
+    fn text_is_typed_in_the_foreground_at_its_own_size_in_the_font_chosen() {
+        let red = Color::rgb(237, 28, 36);
+        let mut s = Settings {
+            foreground: red,
+            ..Settings::default()
+        };
+        s.set_tool(Tool::Text);
+        assert_eq!((s.width(), s.sizes()), (Some(24), TEXT_SIZES));
+        let look = |size, bold, italic| {
+            Action::Text(TextLook {
+                family: DEFAULT_FAMILY,
+                size,
+                bold,
+                italic,
+                color: red,
+            })
+        };
+        assert_eq!(s.action(), look(24, false, false));
+        // Text takes sizes beyond the pencil's 100, and keeps its own.
+        s.set_width(250);
+        (s.bold, s.italic) = (true, true);
+        assert_eq!(s.action(), look(250, true, true));
+        s.set_width(1);
+        assert_eq!(s.width(), Some(*TEXT_SIZES.start()));
+        s.set_tool(Tool::Pencil);
+        assert_eq!((s.width(), s.sizes()), (Some(1), SIZES));
+        s.set_width(250);
+        assert_eq!(s.width(), Some(100));
+        s.set_tool(Tool::Text);
+        s.family = "DejaVu Serif";
+        let Action::Text(t) = s.action() else {
+            panic!("text's action")
+        };
+        assert_eq!((t.family, t.size), ("DejaVu Serif", 4));
     }
 }

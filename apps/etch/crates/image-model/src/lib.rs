@@ -7,6 +7,7 @@
 //! that. History keeps each step's operation and the image's [`TILE`]-pixel tiles from
 //! before it touched them: undo writes the tiles back, redo replays the operation.
 
+mod blend;
 mod brush;
 mod color;
 mod document;
@@ -16,6 +17,7 @@ mod image;
 mod pencil;
 mod shape;
 
+pub use blend::Blend;
 pub use brush::Brush;
 pub use color::Color;
 pub use document::{Document, Operation, Stroke, Tip};

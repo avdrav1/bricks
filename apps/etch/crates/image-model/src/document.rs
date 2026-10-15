@@ -2,7 +2,7 @@
 
 use crate::brush::Coverage;
 use crate::geom::{join, pixel};
-use crate::{Brush, Color, Fill, Image, Pencil, Rect, Shape, TILE};
+use crate::{Blend, Brush, Color, Fill, Image, Pencil, Rect, Shape, TILE};
 use std::collections::BTreeMap;
 
 /// What a stroke draws with.
@@ -97,6 +97,7 @@ pub enum Operation {
     Stroke(Stroke),
     Fill(Fill),
     Shape(Shape),
+    Blend(Blend),
 }
 
 impl Operation {
@@ -107,6 +108,7 @@ impl Operation {
             Operation::Stroke(s) => s.apply(image),
             Operation::Fill(f) => f.apply(image, |_, _, _, _| {}),
             Operation::Shape(s) => s.apply(image, |_, _| {}),
+            Operation::Blend(b) => b.apply(image),
         }
     }
 }
@@ -327,6 +329,20 @@ impl Document {
         let changed = shape.apply(&mut self.image, |image, r| covering.cover(image, r))?;
         self.record(Operation::Shape(shape), covering.saved);
         Some(changed)
+    }
+
+    /// Lays `pixels` over the image with their top-left pixel at `at` ([`Blend`]:
+    /// source-over, clipped to the image), as one undo step keeping the tiles they cover;
+    /// redo lays the same pixels again. Pixels wholly off the image leave no step. Ends any
+    /// stroke under way.
+    pub fn blend(&mut self, at: (i64, i64), pixels: Image) -> Option<Rect> {
+        self.end_stroke();
+        let blend = Blend { at, pixels };
+        let mut before = Saved::default();
+        before.cover(&self.image, blend.bounds(&self.image)?);
+        let changed = blend.apply(&mut self.image);
+        self.record(Operation::Blend(blend), before);
+        changed
     }
 
     /// Makes `op`, done, the last step, with the pixels it replaced; drops the redo.
