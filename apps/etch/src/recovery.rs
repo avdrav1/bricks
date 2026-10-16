@@ -23,7 +23,6 @@ use gtk::glib;
 use image_io::Format;
 use image_model::Image;
 use std::io::{self, BufReader, Read, Write};
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 pub use suite_file::recovery::{identity, now_ms, Store};
@@ -89,7 +88,9 @@ fn write_header(w: &mut impl Write, h: &Header) -> io::Result<()> {
     }
     match &h.path {
         Some(p) => {
-            let bytes = p.as_os_str().as_bytes();
+            let bytes = suite_file::path_bytes(p).ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "the file's name isn't Unicode")
+            })?;
             let len = u32::try_from(bytes.len())
                 .ok()
                 .filter(|&n| n <= MAX_PATH)
@@ -143,7 +144,7 @@ fn read_header_from(r: &mut impl Read) -> io::Result<Header> {
             }
             let mut bytes = vec![0; len as usize];
             r.read_exact(&mut bytes)?;
-            Some(PathBuf::from(std::ffi::OsString::from_vec(bytes)))
+            Some(suite_file::path_from_bytes(&bytes).ok_or_else(damaged)?)
         }
         false => None,
     };
@@ -194,7 +195,7 @@ pub fn crashed_for(path: &Path) -> Option<Crashed> {
         c.header
             .path
             .as_deref()
-            .map(crate::window::canonical)
+            .map(suite_file::canonical)
             .as_deref()
             == Some(path)
     })
@@ -361,6 +362,22 @@ mod tests {
         Image::from_rgba(w, h, data).unwrap()
     }
 
+    /// A path with a quote and a line break in its name, and on Unix a byte that isn't
+    /// UTF-8 (Windows keeps names as Unicode: `suite_file::path_bytes`).
+    fn odd_path() -> PathBuf {
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            PathBuf::from(std::ffi::OsString::from_vec(
+                b"/tmp/caf\xe9 \"one\"\n.png".to_vec(),
+            ))
+        }
+        #[cfg(not(unix))]
+        {
+            std::env::temp_dir().join("café \"one\"\n.png")
+        }
+    }
+
     /// A journal reads back its header and its pixels exactly (transparent ones' colours
     /// too); listing reads only the headers, newest first; a file that isn't an Etch
     /// journal is left out.
@@ -369,9 +386,7 @@ mod tests {
         let (dir, store) = scratch("recovery");
         let image = pattern(70, 45);
         let older_header = Header {
-            path: Some(PathBuf::from(std::ffi::OsString::from_vec(
-                b"/tmp/caf\xe9 \"one\"\n.png".to_vec(),
-            ))),
+            path: Some(odd_path()),
             file: Some((12, 34)),
             saved_ms: 10,
             size: (70, 45),

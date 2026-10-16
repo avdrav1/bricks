@@ -23,6 +23,7 @@ use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Instant;
+use suite_file::canonical;
 use suite_ui::chrome::Toolbar;
 use suite_ui::keys::Primary;
 
@@ -31,10 +32,6 @@ thread_local! {
     /// window forward.
     static OPEN: RefCell<Vec<(PathBuf, glib::WeakRef<gtk::ApplicationWindow>)>> =
         const { RefCell::new(Vec::new()) };
-}
-
-fn canonical(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_owned())
 }
 
 fn window_for(path: &Path) -> Option<gtk::ApplicationWindow> {

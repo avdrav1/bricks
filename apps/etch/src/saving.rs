@@ -215,7 +215,7 @@ impl Saver {
                     let header = Header {
                         // The file's whole path, so an etch started in another folder
                         // finds it.
-                        path: path.as_deref().map(crate::window::canonical),
+                        path: path.as_deref().map(suite_file::canonical),
                         file,
                         saved_ms: recovery::now_ms(),
                         size: (image.width(), image.height()),

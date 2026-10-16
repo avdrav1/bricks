@@ -165,22 +165,37 @@ fn the_format_follows_the_extension() {
     }
 }
 
+/// A save that can't replace the file fails and leaves it as it was, with no temp file:
+/// on Unix the folder is read-only; on Windows, where anyone may add files to a read-only
+/// folder, the file is (WIN-1).
 #[test]
 fn a_save_that_fails_leaves_the_old_file() {
-    use std::os::unix::fs::PermissionsExt;
     let dir = dir("unwritable");
     let path = dir.join("old.png");
     let old = encode(&sample(), Format::Png).unwrap();
     std::fs::write(&path, &old).unwrap();
-    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+    #[cfg(unix)]
+    let protect = |on: bool| {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = if on { 0o555 } else { 0o755 };
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(mode)).unwrap();
+    };
+    #[cfg(not(unix))]
+    let protect = |on: bool| {
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        perms.set_readonly(on);
+        std::fs::set_permissions(&path, perms).unwrap();
+    };
+    protect(true);
     // Root writes into a read-only directory anyway; then there's nothing to test.
-    let enforced = std::fs::write(dir.join("probe"), b"").is_err();
+    let enforced = cfg!(not(unix)) || std::fs::write(dir.join("probe"), b"").is_err();
     let white = Image::new(96, 64, image_model::Color::WHITE).unwrap();
     let result = save(&path, &white, Format::Png);
-    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    protect(false);
     if enforced {
         let e = result.unwrap_err();
-        assert!(e.to_string().contains("ermission denied"), "{e}");
+        // "Permission denied" on Unix, "Access is denied" on Windows.
+        assert!(e.to_string().contains("denied"), "{e}");
         assert_eq!(
             std::fs::read(&path).unwrap(),
             old,

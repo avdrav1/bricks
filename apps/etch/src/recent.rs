@@ -42,7 +42,7 @@ pub fn add(path: &Path) {
 
 /// `path` can't be opened: it leaves the list.
 pub fn remove(path: &Path) {
-    let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
+    let path = suite_file::canonical(path);
     update(move |r| r.remove(&path));
 }
 

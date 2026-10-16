@@ -9,6 +9,8 @@ rust-version.workspace = true
 [dependencies]
 csv-engine.workspace = true
 formula.workspace = true
+# Paths in recovery journals, kept the same way on every system (WIN-1).
+suite-file.workspace = true
 memchr = "2.8.3"
 rayon = "1.12.0"
 

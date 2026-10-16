@@ -1,10 +1,11 @@
-//! Operating-system integration shared by every app in the suite: Linux and macOS
-//! (ADR 0011). [`current`] checks the build's platform; [`dirs`] has each app's per-user
-//! folders (XDG on Linux, `~/Library` on macOS); `appearance` (macOS only) reads the
-//! Mac's light or dark appearance and follows its changes; [`launch`] says when the app
-//! has finished launching (on macOS, after Finder's files have opened); [`bundle`] points
-//! GTK at the libraries' files inside a macOS app bundle. Nothing here depends on the UI
-//! toolkit, so engine crates may use it too.
+//! Operating-system integration shared by every app in the suite: Linux, macOS, and
+//! Windows (ADR 0011). [`current`] checks the build's platform; [`dirs`] has each app's
+//! per-user folders (XDG on Linux, `~/Library` on macOS, `%APPDATA%` and `%LOCALAPPDATA%`
+//! on Windows); `appearance` (macOS only) reads the Mac's light or dark appearance and
+//! follows its changes; [`launch`] says when the app has finished launching (on macOS,
+//! after Finder's files have opened); [`bundle`] points GTK at the libraries' files inside
+//! a macOS app bundle. Nothing here depends on the UI toolkit, so engine crates may use it
+//! too.
 //!
 //! File dialogs, clipboard, desktop integration, drag and drop, Wayland/X11 differences,
 //! and recent files may move here once two apps need them.
@@ -24,6 +25,7 @@ use std::fmt;
 pub enum Platform {
     Linux,
     MacOs,
+    Windows,
 }
 
 /// The suite was built for an operating system it doesn't support.
@@ -37,7 +39,7 @@ impl fmt::Display for Unsupported {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "unsupported operating system {:?}; only Linux and macOS are supported",
+            "unsupported operating system {:?}; only Linux, macOS, and Windows are supported",
             self.os
         )
     }
@@ -54,6 +56,7 @@ fn platform_of(os: &'static str) -> Result<Platform, Unsupported> {
     match os {
         "linux" => Ok(Platform::Linux),
         "macos" => Ok(Platform::MacOs),
+        "windows" => Ok(Platform::Windows),
         _ => Err(Unsupported { os }),
     }
 }
@@ -63,18 +66,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn linux_and_macos_are_supported() {
+    fn linux_macos_and_windows_are_supported() {
         assert_eq!(platform_of("linux"), Ok(Platform::Linux));
         assert_eq!(platform_of("macos"), Ok(Platform::MacOs));
-        let err = platform_of("windows").unwrap_err();
-        assert_eq!(err, Unsupported { os: "windows" });
-        assert!(err.to_string().contains("\"windows\""));
+        assert_eq!(platform_of("windows"), Ok(Platform::Windows));
+        let err = platform_of("freebsd").unwrap_err();
+        assert_eq!(err, Unsupported { os: "freebsd" });
+        assert!(err.to_string().contains("\"freebsd\""));
     }
 
     #[test]
     fn this_build_is_supported() {
         let expected = if cfg!(target_os = "macos") {
             Platform::MacOs
+        } else if cfg!(windows) {
+            Platform::Windows
         } else {
             Platform::Linux
         };

@@ -50,7 +50,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use suite_core::AppKind;
-use suite_file::recent;
+use suite_file::{canonical, recent};
 use suite_ui::chrome::Toolbar;
 use suite_ui::keys::Primary;
 use xlsx::{ImportError, Imported};
@@ -374,10 +374,6 @@ thread_local! {
     /// the session's current path, so it follows Save As.
     static OPEN_WINDOWS: RefCell<Vec<(Rc<Session>, glib::WeakRef<gtk::ApplicationWindow>)>> =
         const { RefCell::new(Vec::new()) };
-}
-
-fn canonical(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned())
 }
 
 /// The window already showing `path`, if any.

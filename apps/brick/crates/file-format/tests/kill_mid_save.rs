@@ -2,9 +2,10 @@
 //! file intact.
 //!
 //! The test re-runs its own binary as a child (`child_saver`) that saves a 64 MB CSV with
-//! one edit, slowed to ~1 ms per MiB so the parent can catch it mid-write. The parent kills
-//! it with SIGKILL once the temp file has data in it, then checks the original. A second
-//! child runs to completion to show the same save does replace the file.
+//! one edit, slowed to ~1 ms per 256 KiB so the parent can catch it mid-write. The parent
+//! kills it (SIGKILL on Unix, `TerminateProcess` on Windows) once the temp file has data in
+//! it, then checks the original. A second child runs to completion to show the same save
+//! does replace the file.
 
 use csv_engine::{Dialect, Source, SparseRowIndex};
 use data_model::{CellRef, ColId, CsvTable, Edit};
@@ -17,14 +18,16 @@ use std::time::{Duration, Instant};
 
 const CHILD_ENV: &str = "SAVE1_CHILD_FILE";
 
-/// Writes through to `inner`, pausing 1 ms per MiB.
+/// Writes through to `inner`, pausing 1 ms per 256 KiB: a quarter of a second or more for
+/// the whole file, time enough for the parent to see the temp file grow on a busy Windows
+/// runner too (DEC-11's R10).
 struct Slow<'a>(&'a mut dyn Write, usize);
 
 impl Write for Slow<'_> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let n = self.0.write(&buf[..buf.len().min(64 * 1024)])?;
         self.1 += n;
-        if self.1 >= 1 << 20 {
+        if self.1 >= 256 << 10 {
             self.1 = 0;
             std::thread::sleep(Duration::from_millis(1));
         }
@@ -84,13 +87,15 @@ fn spawn_child(file: &Path) -> Child {
         .unwrap()
 }
 
+/// The save temp files in `dir`, each with its size now, read from the file itself: a
+/// folder listing on Windows may show a file being written with an older size.
 fn temp_files(dir: &Path) -> Vec<(PathBuf, u64)> {
     std::fs::read_dir(dir)
         .unwrap()
         .filter_map(|e| {
             let e = e.ok()?;
             let name = e.file_name().into_string().ok()?;
-            let len = e.metadata().ok()?.len();
+            let len = std::fs::metadata(e.path()).ok()?.len();
             name.ends_with(suite_file::TEMP_SUFFIX)
                 .then(|| (e.path(), len))
         })

@@ -21,6 +21,7 @@ use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
 use std::time::Instant;
+use suite_file::canonical;
 use suite_ui::keys::Primary;
 
 /// `etch`'s first image (always white: the remembered size and background are New
@@ -383,10 +384,6 @@ fn window_for(path: &Path) -> Option<gtk::ApplicationWindow> {
             .find(|(p, _)| *p == path)
             .and_then(|(_, w)| w.upgrade())
     })
-}
-
-pub(crate) fn canonical(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned())
 }
 
 /// `window` now shows the file at `path` (saved as it): opening that file shows it.

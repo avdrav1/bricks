@@ -26,7 +26,6 @@ use gtk::prelude::*;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
-use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 /// An embedded face written to the private font directory.
@@ -78,16 +77,23 @@ pub fn write(table: &FontTable) -> Vec<FontFile> {
     out
 }
 
-/// The private font directory, made (mode 0700) if need be.
+/// The private font directory, made if need be: on Unix with mode 0700. Windows' per-user
+/// folders are the user's own already.
 fn private_dir() -> std::io::Result<PathBuf> {
     let dir = suite_platform::dirs::runtime_dir(crate::APP)
         .unwrap_or_else(|| suite_platform::dirs::cache_dir(crate::APP))
         .join("fonts");
-    std::fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(&dir)?;
-    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&dir)?;
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+    #[cfg(not(unix))]
+    std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }
 
@@ -224,7 +230,6 @@ mod fc {
     use gtk::glib::translate::{from_glib, ToGlibPtr};
     use gtk::prelude::*;
     use std::ffi::{c_char, c_int, c_void, CStr, CString};
-    use std::os::unix::ffi::OsStrExt;
     use std::path::Path;
 
     #[repr(C)]
@@ -274,9 +279,10 @@ mod fc {
         }
 
         /// Add the font file at `path` to the configuration's application fonts; the
-        /// families fontconfig reads from it, or `None` if it can't.
+        /// families fontconfig reads from it, or `None` if it can't. Fontconfig takes the
+        /// path's bytes: on Windows UTF-8, as `suite_file::path_bytes` gives them.
         pub fn add(&self, path: &Path) -> Option<Vec<String>> {
-            let file = CString::new(path.as_os_str().as_bytes()).ok()?;
+            let file = CString::new(suite_file::path_bytes(path)?).ok()?;
             let config = self.config();
             // SAFETY: a valid configuration (or null for the current one) and a
             // NUL-terminated path; fontconfig copies what it keeps.

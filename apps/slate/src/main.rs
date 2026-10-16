@@ -34,6 +34,7 @@ use std::cell::RefCell;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use suite_core::AppKind;
+use suite_file::canonical;
 use suite_ui::keys::Primary;
 use view::Command;
 
@@ -199,10 +200,6 @@ fn main() -> glib::ExitCode {
         suite_ui::launch::no_file(app, suite_platform::launch::when_finished, start_window)
     });
     suite_ui::launch::run(&app, &files)
-}
-
-fn canonical(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned())
 }
 
 /// The window already showing `path`, if any.

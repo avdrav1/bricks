@@ -1,7 +1,7 @@
 //! `save_atomic` failure paths: whatever goes wrong before the rename, the original stays as
 //! it was and no temp file is left behind.
 
-use std::os::unix::fs::PermissionsExt;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use suite_file::{save_atomic, SaveError};
@@ -26,7 +26,11 @@ fn replaces_contents_and_keeps_permissions() {
     let d = dir("ok");
     let f = d.join("a.csv");
     std::fs::write(&f, "old\n").unwrap();
-    std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o640)).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o640)).unwrap();
+    }
     save_atomic(
         &f,
         &AtomicBool::new(false),
@@ -42,11 +46,67 @@ fn replaces_contents_and_keeps_permissions() {
     )
     .unwrap();
     assert_eq!(std::fs::read(&f).unwrap(), b"new\n");
-    assert_eq!(
-        std::fs::metadata(&f).unwrap().permissions().mode() & 0o777,
-        0o640
-    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&f).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o640);
+    }
     assert_eq!(entries(&d), ["a.csv"]);
+    std::fs::remove_dir_all(d).unwrap();
+}
+
+/// A file open for reading is replaced, and the open file still reads the old bytes, on
+/// Windows too (WIN-1: the rename needs no folder sync, and Rust opens files shared for
+/// delete).
+#[test]
+fn replaces_a_file_that_is_open() {
+    let d = dir("open");
+    let f = d.join("a.csv");
+    std::fs::write(&f, "old\n").unwrap();
+    let mut open = std::fs::File::open(&f).unwrap();
+    save_atomic(
+        &f,
+        &AtomicBool::new(false),
+        |w| w.write_all(b"new\n"),
+        |_| Ok(()),
+    )
+    .unwrap();
+    assert_eq!(std::fs::read(&f).unwrap(), b"new\n");
+    let mut old = String::new();
+    open.read_to_string(&mut old).unwrap();
+    assert_eq!(old, "old\n");
+    drop(open);
+    assert_eq!(entries(&d), ["a.csv"]);
+    std::fs::remove_dir_all(d).unwrap();
+}
+
+/// A read-only file isn't replaced on Windows: the save fails, and the original stays
+/// with no temp file left (Unix's counterpart is a read-only folder: image-io's tests).
+#[cfg(windows)]
+#[test]
+fn read_only_file_on_windows_stays_and_no_temp() {
+    let d = dir("read-only");
+    let f = d.join("a.csv");
+    std::fs::write(&f, "old\n").unwrap();
+    let mut perms = std::fs::metadata(&f).unwrap().permissions();
+    perms.set_readonly(true);
+    std::fs::set_permissions(&f, perms.clone()).unwrap();
+    let r = save_atomic(
+        &f,
+        &AtomicBool::new(false),
+        |w| w.write_all(b"new\n"),
+        |_| Ok(()),
+    );
+    assert!(
+        matches!(&r, Err(SaveError::Io(e)) if e.kind() == std::io::ErrorKind::PermissionDenied),
+        "{r:?}"
+    );
+    assert_eq!(std::fs::read(&f).unwrap(), b"old\n");
+    assert_eq!(entries(&d), ["a.csv"]);
+    #[allow(clippy::permissions_set_readonly_false)] // Windows: clears the attribute
+    perms.set_readonly(false);
+    std::fs::set_permissions(&f, perms).unwrap();
     std::fs::remove_dir_all(d).unwrap();
 }
 

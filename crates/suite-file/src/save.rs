@@ -1,11 +1,17 @@
 //! Atomic saving (invariant 6): write a temp file in the same directory, fsync it, verify
-//! it, then atomically rename it over the original and fsync the directory. A crash or
-//! `kill -9` at any point leaves either the old file or the new one, never a mix. The rename
-//! also keeps any open mapping of the old file valid. Every app in the suite saves this way.
+//! it, then atomically rename it over the original and, on Unix, fsync the directory. A
+//! crash or `kill -9` at any point leaves either the old file or the new one, never a mix.
+//! The rename also keeps any open mapping of the old file valid. Every app in the suite
+//! saves this way.
 //!
-//! Both syncs are `File::sync_all`: `fsync` on Linux, and on macOS `fcntl(F_FULLFSYNC)`,
+//! The syncs are `File::sync_all`: `fsync` on Linux; on macOS `fcntl(F_FULLFSYNC)`,
 //! which Rust's standard library uses there because a plain `fsync` leaves the data in the
-//! drive's cache (MAC-2; macOS CI traces the call). APFS takes it on the directory too.
+//! drive's cache (MAC-2; macOS CI traces the call), and APFS takes it on the directory
+//! too; on Windows `FlushFileBuffers`. Windows doesn't sync the folder: a plain open of a
+//! folder fails there, which made every save report an error after the file was replaced
+//! (WIN-1), and NTFS logs the rename in its journal. There the rename (`std::fs::rename`:
+//! `SetFileInformationByHandle` with POSIX semantics) replaces the file even while it's
+//! mapped, as Brick maps the CSV it shows, or open in a program that shares it for delete.
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Seek, Write};
@@ -106,11 +112,14 @@ where
     verify(tmp).map_err(SaveError::Verify)?;
     std::fs::rename(tmp, dest)?;
     // Make the rename itself durable.
-    let dir = dest
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    File::open(dir)?.sync_all()?;
+    #[cfg(unix)]
+    {
+        let dir = dest
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        File::open(dir)?.sync_all()?;
+    }
     Ok(())
 }
 

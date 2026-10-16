@@ -1,14 +1,20 @@
 //! The source file, memory-mapped read-only (ADR 0002).
 //!
-//! A mapped file that another program truncates while we read it raises SIGBUS, which
-//! would kill the app and every unsaved edit with it. [`Source`] registers its mapping with
-//! a process-wide SIGBUS handler: a fault inside a registered mapping swaps a zero page in
-//! at the faulting address and flags the source as changed, and the read continues. Callers
-//! check [`Source::changed`] after reading and report "file changed on disk" instead of
-//! crashing. Faults outside our mappings go to the previous handler (Rust's stack-overflow
-//! reporter, or the default action).
+//! On Unix a mapped file that another program truncates while we read it raises SIGBUS,
+//! which would kill the app and every unsaved edit with it. [`Source`] registers its
+//! mapping with a process-wide SIGBUS handler: a fault inside a registered mapping swaps a
+//! zero page in at the faulting address and flags the source as changed, and the read
+//! continues. Callers check [`Source::changed`] after reading and report "file changed on
+//! disk" instead of crashing. Faults outside our mappings go to the previous handler
+//! (Rust's stack-overflow reporter, or the default action).
 //!
-//! Our own saves replace the file by rename (SAVE-1), which leaves an open mapping valid.
+//! Windows needs no guard: it refuses to truncate or shrink a file while it's mapped
+//! (`ERROR_USER_MAPPED_FILE`), so another program can't pull pages out from under Brick,
+//! and [`Source::changed`] stays false (WIN-1). Writing the same bytes' places in the file
+//! still works there, as it does on Unix.
+//!
+//! Our own saves replace the file by rename (SAVE-1), which leaves an open mapping valid,
+//! on Windows too.
 
 use memmap2::Mmap;
 use std::fs::File;
@@ -17,6 +23,8 @@ use std::path::Path;
 
 pub struct Source {
     map: Option<Mmap>,
+    /// The mapping's place in the SIGBUS guard.
+    #[cfg(unix)]
     slot: Option<usize>,
 }
 
@@ -25,20 +33,20 @@ impl Source {
     pub fn open(path: &Path) -> io::Result<Self> {
         let file = File::open(path)?;
         if file.metadata()?.len() == 0 {
-            return Ok(Self {
-                map: None,
-                slot: None,
-            });
+            return Ok(Self::empty());
         }
         // SAFETY: the mapping is read-only. Concurrent truncation by another process is
-        // contained by the SIGBUS guard registered next; in-place rewrites can still change
-        // bytes under us, which is inherent to mmap and documented in ADR 0002.
+        // contained by the SIGBUS guard registered next on Unix, and refused by Windows; in-
+        // place rewrites can still change bytes under us, which is inherent to mmap and
+        // documented in ADR 0002.
         #[allow(unsafe_code)]
         let map = unsafe { Mmap::map(&file)? };
+        #[cfg(unix)]
         let slot = guard::register(map.as_ptr() as usize, map.len())
             .ok_or_else(|| io::Error::other("too many files open at once"))?;
         Ok(Self {
             map: Some(map),
+            #[cfg(unix)]
             slot: Some(slot),
         })
     }
@@ -47,6 +55,7 @@ impl Source {
     pub fn empty() -> Self {
         Self {
             map: None,
+            #[cfg(unix)]
             slot: None,
         }
     }
@@ -57,11 +66,20 @@ impl Source {
     }
 
     /// True once any read hit a page the file no longer backs (it shrank while mapped).
+    /// Never on Windows, which doesn't let a mapped file shrink.
     pub fn changed(&self) -> bool {
-        self.slot.is_some_and(guard::faulted)
+        #[cfg(unix)]
+        {
+            self.slot.is_some_and(guard::faulted)
+        }
+        #[cfg(not(unix))]
+        {
+            false
+        }
     }
 }
 
+#[cfg(unix)]
 impl Drop for Source {
     fn drop(&mut self) {
         if let Some(slot) = self.slot {
@@ -70,6 +88,7 @@ impl Drop for Source {
     }
 }
 
+#[cfg(unix)]
 #[allow(unsafe_code)] // signal handling has no safe interface; kept to this module
 mod guard {
     use std::cell::UnsafeCell;
@@ -185,12 +204,14 @@ mod guard {
 mod tests {
     use super::*;
     use crate::testutil::TempFile;
-    use crate::{Dialect, IndexError, SparseRowIndex};
+    use crate::{Dialect, SparseRowIndex};
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
 
+    #[cfg(unix)]
     #[test]
     fn truncation_while_mapped_reports_changed_instead_of_crashing() {
+        use crate::IndexError;
         let content: Vec<u8> = (0..200_000)
             .flat_map(|i| format!("{i},x\n").into_bytes())
             .collect();
@@ -221,5 +242,59 @@ mod tests {
         let source = Source::open(file.path()).unwrap();
         assert!(source.bytes().is_empty());
         assert!(!source.changed());
+    }
+
+    /// WIN-1: on Windows another program can't truncate or recreate the CSV Brick has
+    /// mapped, so its bytes stay whole; writing over bytes in place still works, and a
+    /// save's rename replaces the file while the mapping keeps the old bytes.
+    #[cfg(windows)]
+    #[test]
+    fn another_program_cannot_truncate_a_mapped_file() {
+        use crate::RowIndex;
+        const ERROR_USER_MAPPED_FILE: i32 = 1224;
+        let content: Vec<u8> = (0..200_000)
+            .flat_map(|i| format!("{i},x\n").into_bytes())
+            .collect();
+        let file = TempFile::new(&content);
+        let source = Arc::new(Source::open(file.path()).unwrap());
+
+        let truncate = std::fs::OpenOptions::new()
+            .write(true)
+            .open(file.path())
+            .unwrap()
+            .set_len(0);
+        assert_eq!(
+            truncate.unwrap_err().raw_os_error(),
+            Some(ERROR_USER_MAPPED_FILE)
+        );
+        let recreate = std::fs::File::create(file.path());
+        assert_eq!(
+            recreate.unwrap_err().raw_os_error(),
+            Some(ERROR_USER_MAPPED_FILE)
+        );
+        assert_eq!(source.bytes(), &content[..], "every byte still there");
+        assert!(!source.changed());
+        let idx = SparseRowIndex::new(Arc::clone(&source), &Dialect::default());
+        idx.build(&AtomicBool::new(false)).unwrap();
+        assert_eq!(idx.row_count(), 200_000);
+
+        // Same-length writes in place go through, and the mapping sees them.
+        {
+            use std::io::Write;
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .open(file.path())
+                .unwrap();
+            f.write_all(b"9").unwrap();
+        }
+        assert_eq!(source.bytes()[0], b'9');
+
+        // A save renames over the mapped file; the mapping keeps reading what it mapped.
+        let other = file.path().with_extension("new");
+        std::fs::write(&other, b"a\n").unwrap();
+        std::fs::rename(&other, file.path()).unwrap();
+        assert_eq!(std::fs::read(file.path()).unwrap(), b"a\n");
+        assert_eq!(source.bytes().len(), content.len());
+        assert_eq!(&source.bytes()[1..], &content[1..]);
     }
 }

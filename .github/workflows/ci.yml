@@ -17,6 +17,48 @@ jobs:
       - run: cargo test --workspace
       - run: python3 -m unittest discover -s scripts
       - run: python3 scripts/backlog.py status
+  windows:
+    # x86_64 with MSYS2 UCRT64: MSYS2's own Rust (x86_64-pc-windows-gnu) and GTK 4 (ADR 0011,
+    # WIN-1). No `core.autocrlf` setting: .gitattributes keeps the fixtures' bytes.
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults: { run: { shell: "msys2 {0}" } }
+    env:
+      CARGO_HOME: D:\cargo-home
+      CARGO_INCREMENTAL: "0"
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+      # setup-msys2 caches the downloaded packages between runs.
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-rust
+      - name: Toolchain
+        run: |
+          rustc -vV
+          cargo clippy --version
+          echo "gtk4 $(pkg-config --modversion gtk4)"
+      # The crates' sources and the build, keyed by the toolchain and the lock file: a run
+      # restores the newest one and saves its own.
+      - id: toolchain
+        run: echo "rustc=$(rustc -V | tr -cd '[:alnum:].-')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            D:\cargo-home\registry
+            target
+          key: windows-${{ steps.toolchain.outputs.rustc }}-${{ hashFiles('Cargo.lock') }}-${{ github.run_id }}
+          restore-keys: |
+            windows-${{ steps.toolchain.outputs.rustc }}-${{ hashFiles('Cargo.lock') }}-
+            windows-${{ steps.toolchain.outputs.rustc }}-
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - run: cargo test --workspace
   macos:
     # arm64, the oldest macOS the suite supports (ADR 0011). GUI checks stay on Linux.
     runs-on: macos-14

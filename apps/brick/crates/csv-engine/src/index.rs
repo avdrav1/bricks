@@ -520,6 +520,9 @@ mod tests {
         }
     }
 
+    /// Unix only: Windows won't truncate a mapped file
+    /// (`source::tests::another_program_cannot_truncate_a_mapped_file`).
+    #[cfg(unix)]
     #[test]
     fn row_spans_report_a_file_changed_underneath() {
         let content: Vec<u8> = (0..100_000)

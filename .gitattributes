@@ -1,0 +1,8 @@
+# Every system checks out the bytes committed (WIN-1): Windows runners' `core.autocrlf`
+# turned LF fixtures into CRLF and broke tests. Text is committed with LF and checked out
+# with LF everywhere; a file committed with CRLF keeps it.
+* text=auto eol=lf
+
+# Test data is compared byte for byte, line endings included: never converted.
+**/tests/data/** -text
+apps/*/crates/*/data/** -text

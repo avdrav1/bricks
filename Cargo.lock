@@ -231,6 +231,7 @@ dependencies = [
  "formula",
  "memchr",
  "rayon",
+ "suite-file",
 ]
 
 [[package]]

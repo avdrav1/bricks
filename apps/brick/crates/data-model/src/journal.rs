@@ -29,7 +29,6 @@ use csv_engine::{Charset, Encoding, RowIndex};
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::ops::Range;
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -371,11 +370,13 @@ fn charset_of(code: u8) -> Result<Charset, JournalError> {
 
 fn write_header<W: Write>(w: &mut Writer<W>, h: &JournalHeader) -> io::Result<()> {
     w.bytes(MAGIC)?;
-    w.blob(
-        h.path
-            .as_ref()
-            .map_or(&[][..], |p| p.as_os_str().as_bytes()),
-    )?;
+    let path = match &h.path {
+        Some(p) => suite_file::path_bytes(p).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "the file's name isn't Unicode")
+        })?,
+        None => &[],
+    };
+    w.blob(path)?;
     w.u8(u8::from(h.path.is_some()))?;
     w.u8(match h.kind {
         FileKind::Csv => 0,
@@ -414,8 +415,15 @@ fn read_header_from<R: Read>(r: &mut Reader<R>) -> Result<(JournalHeader, u8), J
             _ => return Err(JournalError::Corrupt("unknown file kind")),
         }
     };
+    let path = match titled {
+        true => Some(
+            suite_file::path_from_bytes(&path)
+                .ok_or(JournalError::Corrupt("the file's name isn't Unicode"))?,
+        ),
+        false => None,
+    };
     let header = JournalHeader {
-        path: titled.then(|| PathBuf::from(std::ffi::OsString::from_vec(path))),
+        path,
         kind,
         file_size: r.u64()?,
         file_mtime_ns: r.u64()?,

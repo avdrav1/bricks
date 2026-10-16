@@ -1,13 +1,12 @@
 //! Recent files: the last [`MAX`] files opened or saved, newest first, kept in a file in
 //! the app's state folder (Brick's `~/.local/state/brick/recent`, Etch's
-//! `~/.local/state/etch/recent`), one absolute path per line, so the list survives
-//! restarts. Every change reads the file again first: each launch is its own process, and
-//! two windows must not drop each other's files. Writes go to a temporary file, synced,
-//! renamed over the old one. Brick's (APP-4) and Etch's (ETCH-22).
+//! `~/.local/state/etch/recent`), one absolute path per line ([`crate::path_bytes`]), so
+//! the list survives restarts. Paths are [`crate::canonical`]: on Windows `C:\…`, never
+//! `\\?\C:\…`. Every change reads the file again first: each launch is its own process,
+//! and two windows must not drop each other's files. Writes go to a temporary file,
+//! synced, renamed over the old one. Brick's (APP-4) and Etch's (ETCH-22).
 
-use std::ffi::OsStr;
 use std::io::Write;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 pub const MAX: usize = 10;
@@ -24,8 +23,8 @@ impl Recent {
             .map(|bytes| {
                 bytes
                     .split(|&b| b == b'\n')
-                    .filter(|l| l.first() == Some(&b'/'))
-                    .map(|l| PathBuf::from(OsStr::from_bytes(l)))
+                    .filter_map(crate::path_from_bytes)
+                    .filter(|p| p.is_absolute())
                     .take(MAX)
                     .collect()
             })
@@ -38,10 +37,12 @@ impl Recent {
         &self.files
     }
 
-    /// `file` (made absolute) goes to the top, once; the oldest past [`MAX`] go.
+    /// `file` (made [`crate::canonical`]) goes to the top, once; the oldest past [`MAX`]
+    /// go.
     pub fn add(&mut self, file: &Path) -> std::io::Result<()> {
-        let file = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_owned());
-        if !file.is_absolute() || file.as_os_str().as_bytes().contains(&b'\n') {
+        let file = crate::canonical(file);
+        let kept = crate::path_bytes(&file).is_some_and(|b| !b.contains(&b'\n'));
+        if !file.is_absolute() || !kept {
             return Ok(()); // can't be kept one per line
         }
         self.reload();
@@ -75,8 +76,11 @@ impl Recent {
             .with_extension(format!("tmp-{}", std::process::id()));
         let mut out = std::fs::File::create(&tmp)?;
         for f in &self.files {
-            out.write_all(f.as_os_str().as_bytes())?;
-            out.write_all(b"\n")?;
+            // Every listed path was kept by `add`, or read back from bytes.
+            if let Some(bytes) = crate::path_bytes(f) {
+                out.write_all(bytes)?;
+                out.write_all(b"\n")?;
+            }
         }
         out.sync_all()?;
         std::fs::rename(&tmp, &self.store)
@@ -112,12 +116,13 @@ mod tests {
     }
 
     /// A fresh folder for one test, by its canonical path: the list stores canonical paths,
-    /// and the temp dir may sit behind a symlink (macOS: `/var` → `/private/var`).
+    /// and the temp dir may sit behind a symlink (macOS: `/var` → `/private/var`) or a
+    /// short name (Windows: `C:\Users\RUNNER~1`).
     fn dir(name: &str) -> Dir {
         let d = std::env::temp_dir().join(format!("app4-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
-        Dir(std::fs::canonicalize(&d).unwrap())
+        Dir(crate::canonical(&d))
     }
 
     /// APP-4 acceptance: the last 10 files survive a restart, newest first.
@@ -213,7 +218,34 @@ mod tests {
             1,
             "a path that can't be made absolute is skipped"
         );
-        assert_eq!(files[0], std::fs::canonicalize(&odd).unwrap());
+        assert_eq!(files[0], crate::canonical(&odd));
+    }
+
+    /// WIN-1: the list keeps each file by its canonical name, which on Windows has no
+    /// `\\?\` prefix, in the file too.
+    #[test]
+    fn files_are_listed_by_their_canonical_names() {
+        let d = dir("names");
+        let store = d.0.join("recent");
+        std::fs::create_dir_all(d.0.join("sub")).unwrap();
+        let file = d.0.join("a.csv");
+        std::fs::write(&file, "").unwrap();
+        let mut recent = Recent::load_from(store.clone());
+        recent
+            .add(&d.0.join("sub").join("..").join("a.csv"))
+            .unwrap();
+        recent.add(&file).unwrap();
+        assert_eq!(
+            Recent::load_from(store.clone()).files(),
+            std::slice::from_ref(&file)
+        );
+        let kept = std::fs::read(&store).unwrap();
+        assert_eq!(kept, [crate::path_bytes(&file).unwrap(), b"\n"].concat());
+        assert!(
+            !kept.starts_with(br"\\?\"),
+            "{}",
+            String::from_utf8_lossy(&kept)
+        );
     }
 
     #[test]
