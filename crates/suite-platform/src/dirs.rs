@@ -1,27 +1,31 @@
-//! Per-user folders (ADR 0011, MAC-2): where each app keeps its settings, its state (recent
-//! files, crash recovery journals), and its caches (private package copies, scratch files).
-//! Linux keeps the XDG base directories; macOS uses the folders Apple's guidelines name,
-//! under the app's bundle identifier; Windows uses the roaming and local application data
-//! folders, under `Cronkite\<App>`.
+//! Per-user folders (ADR 0011, MAC-2, WIN-2): where each app keeps its settings, its recent
+//! files, its state (crash recovery journals), and its caches (private package copies,
+//! scratch files). Linux keeps the XDG base directories; macOS uses the folders Apple's
+//! guidelines name, under the app's bundle identifier; Windows uses the roaming and local
+//! application data folders, under `Cronkite\<App>`.
 //!
 //! | Folder | Linux | macOS | Windows |
 //! |---|---|---|---|
 //! | [`config_dir`] | `$XDG_CONFIG_HOME/<command>`, else `~/.config/<command>` | `~/Library/Application Support/<app id>` | `%APPDATA%\Cronkite\<App>` |
+//! | [`recent_dir`] | `$XDG_STATE_HOME/<command>`, else `~/.local/state/<command>` | `~/Library/Application Support/<app id>` | `%APPDATA%\Cronkite\<App>` |
 //! | [`state_dir`] | `$XDG_STATE_HOME/<command>`, else `~/.local/state/<command>` | `~/Library/Application Support/<app id>` | `%LOCALAPPDATA%\Cronkite\<App>` |
 //! | [`cache_dir`] | `$XDG_CACHE_HOME/<command>`, else `~/.cache/<command>` | `~/Library/Caches/<app id>` | `%LOCALAPPDATA%\Cronkite\<App>` |
 //! | [`runtime_dir`] | `$XDG_RUNTIME_DIR/<command>`, when that variable names a folder | none | none |
 //!
 //! `<command>` is the app's command, `brick` ([`AppKind::command`]); `<app id>` its bundle
 //! identifier, `dev.cronkite.Brick` ([`AppKind::app_id`]), as Apple asks of an app's own
-//! folders; `<App>` its name, `Brick` ([`AppKind::display_name`]). On macOS settings and
-//! state share one folder, and on Windows state and caches do (ADR 0011): their files have
-//! different names (`settings`, `recent`, `recovery/`, the caches' own). An XDG variable
-//! counts only when it's an absolute path, as the XDG spec says; macOS and Windows ignore
-//! them. The home folder is `$HOME`, else the user's entry in the password database, else
-//! the temporary folder. On Windows `%APPDATA%` and `%LOCALAPPDATA%` count when they're
-//! absolute, else they're `AppData\Roaming` and `AppData\Local` in the user's profile
-//! folder (`std::env::home_dir`; `HOME` is a Unix shell's, not Windows'). Nothing here
-//! makes a folder; whoever writes into one does.
+//! folders; `<App>` its name, `Brick` ([`AppKind::display_name`]). The recent files are
+//! state on Linux and macOS (XDG puts "recently used files" in `$XDG_STATE_HOME`); on
+//! Windows they roam with the user's settings (ADR 0011), while journals and caches, which
+//! name this machine's processes and can be large, stay local. On macOS settings and state
+//! share one folder, and on Windows settings and recent files do, as state and caches do
+//! (ADR 0011): their files have different names (`settings`, `recent`, `recovery/`, the
+//! caches' own). An XDG variable counts only when it's an absolute path, as the XDG spec
+//! says; macOS and Windows ignore them. The home folder is `$HOME`, else the user's entry
+//! in the password database, else the temporary folder. On Windows `%APPDATA%` and
+//! `%LOCALAPPDATA%` count when they're absolute, else they're `AppData\Roaming` and
+//! `AppData\Local` in the user's profile folder (`std::env::home_dir`; `HOME` is a Unix
+//! shell's, not Windows'). Nothing here makes a folder; whoever writes into one does.
 
 use crate::Platform;
 use std::ffi::OsString;
@@ -33,7 +37,13 @@ pub fn config_dir(app: AppKind) -> PathBuf {
     folder(PLATFORM, Folder::Config, app, &env)
 }
 
-/// Where `app` keeps what it remembers between runs: recent files, crash recovery.
+/// Where `app` keeps its recent-files list: its state folder on Linux and macOS, its
+/// settings folder on Windows.
+pub fn recent_dir(app: AppKind) -> PathBuf {
+    folder(PLATFORM, Folder::Recent, app, &env)
+}
+
+/// Where `app` keeps what it remembers between runs on this machine: crash recovery.
 pub fn state_dir(app: AppKind) -> PathBuf {
     folder(PLATFORM, Folder::State, app, &env)
 }
@@ -52,6 +62,7 @@ pub fn runtime_dir(app: AppKind) -> Option<PathBuf> {
 #[derive(Clone, Copy, Debug)]
 enum Folder {
     Config,
+    Recent,
     State,
     Cache,
 }
@@ -79,7 +90,7 @@ fn folder(platform: Platform, folder: Folder, app: AppKind, env: Env) -> PathBuf
         Platform::Linux => {
             let (var, default) = match folder {
                 Folder::Config => ("XDG_CONFIG_HOME", ".config"),
-                Folder::State => ("XDG_STATE_HOME", ".local/state"),
+                Folder::Recent | Folder::State => ("XDG_STATE_HOME", ".local/state"),
                 Folder::Cache => ("XDG_CACHE_HOME", ".cache"),
             };
             absolute(env(var))
@@ -89,14 +100,16 @@ fn folder(platform: Platform, folder: Folder, app: AppKind, env: Env) -> PathBuf
         Platform::MacOs => {
             let library = home(env).join("Library");
             match folder {
-                Folder::Config | Folder::State => library.join("Application Support"),
+                Folder::Config | Folder::Recent | Folder::State => {
+                    library.join("Application Support")
+                }
                 Folder::Cache => library.join("Caches"),
             }
             .join(app.app_id())
         }
         Platform::Windows => {
             let (var, default) = match folder {
-                Folder::Config => ("APPDATA", "Roaming"),
+                Folder::Config | Folder::Recent => ("APPDATA", "Roaming"),
                 Folder::State | Folder::Cache => ("LOCALAPPDATA", "Local"),
             };
             absolute(env(var))
@@ -160,8 +173,10 @@ mod tests {
         }
     }
 
-    fn all(platform: Platform, app: AppKind, env: Env) -> [PathBuf; 3] {
-        [Folder::Config, Folder::State, Folder::Cache].map(|f| folder(platform, f, app, env))
+    /// `[config, recent, state, cache]`.
+    fn all(platform: Platform, app: AppKind, env: Env) -> [PathBuf; 4] {
+        [Folder::Config, Folder::Recent, Folder::State, Folder::Cache]
+            .map(|f| folder(platform, f, app, env))
     }
 
     // Linux's and macOS's folders are tested with Unix paths (`/home/me`), which Windows
@@ -175,6 +190,7 @@ mod tests {
             all(Platform::Linux, AppKind::Brick, &env),
             [
                 "/home/me/.config/brick",
+                "/home/me/.local/state/brick",
                 "/home/me/.local/state/brick",
                 "/home/me/.cache/brick"
             ]
@@ -194,7 +210,7 @@ mod tests {
         ]);
         assert_eq!(
             all(Platform::Linux, AppKind::Etch, &env),
-            ["/cfg/etch", "/st/etch", "/ca/etch"].map(PathBuf::from)
+            ["/cfg/etch", "/st/etch", "/st/etch", "/ca/etch"].map(PathBuf::from)
         );
     }
 
@@ -212,6 +228,7 @@ mod tests {
             all(Platform::Linux, AppKind::Slate, &env),
             [
                 "/home/me/.config/slate",
+                "/home/me/.local/state/slate",
                 "/home/me/.local/state/slate",
                 "/home/me/.cache/slate"
             ]
@@ -241,6 +258,7 @@ mod tests {
             [
                 "/Users/me/Library/Application Support/dev.cronkite.Frame",
                 "/Users/me/Library/Application Support/dev.cronkite.Frame",
+                "/Users/me/Library/Application Support/dev.cronkite.Frame",
                 "/Users/me/Library/Caches/dev.cronkite.Frame"
             ]
             .map(PathBuf::from)
@@ -250,6 +268,8 @@ mod tests {
         assert_eq!(runtime(Platform::MacOs, AppKind::Frame, &env), None);
     }
 
+    /// Settings and recent files roam (`%APPDATA%`); state and caches stay on this machine
+    /// (`%LOCALAPPDATA%`).
     #[test]
     fn windows_uses_the_application_data_folders_by_app_name() {
         // Paths absolute on whichever system runs the test.
@@ -263,7 +283,12 @@ mod tests {
         let cronkite = |dir: &Path| dir.join("Cronkite").join("Frame");
         assert_eq!(
             all(Platform::Windows, AppKind::Frame, &env),
-            [cronkite(&roaming), cronkite(&local), cronkite(&local)]
+            [
+                cronkite(&roaming),
+                cronkite(&roaming),
+                cronkite(&local),
+                cronkite(&local)
+            ]
         );
         let env = vars(&[("XDG_RUNTIME_DIR", base.to_str().unwrap())]);
         assert_eq!(runtime(Platform::Windows, AppKind::Frame, &env), None);
@@ -280,7 +305,12 @@ mod tests {
         let cronkite = |dir: &str| app_data.join(dir).join("Cronkite").join("Etch");
         assert_eq!(
             all(Platform::Windows, AppKind::Etch, &env),
-            [cronkite("Roaming"), cronkite("Local"), cronkite("Local")]
+            [
+                cronkite("Roaming"),
+                cronkite("Roaming"),
+                cronkite("Local"),
+                cronkite("Local")
+            ]
         );
     }
 
@@ -293,18 +323,19 @@ mod tests {
         for app in AppKind::ALL {
             let runtime = runtime_dir(app).map_or("-".into(), |p| p.display().to_string());
             println!(
-                "folders\t{}\t{}\t{}\t{}\t{runtime}",
+                "folders\t{}\t{}\t{}\t{}\t{}\t{runtime}",
                 app.command(),
                 config_dir(app).display(),
+                recent_dir(app).display(),
                 state_dir(app).display(),
                 cache_dir(app).display(),
             );
         }
     }
 
-    /// Every app's folders, `[config, state, cache, runtime]`, as a process with `HOME` at
-    /// `home`, `%APPDATA%` and `%LOCALAPPDATA%` at its `Roaming` and `Local`, and the XDG
-    /// variables under `xdg` (or none) finds them.
+    /// Every app's folders, `[config, recent, state, cache, runtime]`, as a process with
+    /// `HOME` at `home`, `%APPDATA%` and `%LOCALAPPDATA%` at its `Roaming` and `Local`, and
+    /// the XDG variables under `xdg` (or none) finds them.
     fn folders_in_a_process(home: &Path, xdg: Option<&Path>) -> Vec<Vec<String>> {
         let mut cmd = Command::new(std::env::current_exe().unwrap());
         cmd.args([
@@ -351,6 +382,7 @@ mod tests {
                         let name = app.display_name();
                         vec![
                             p(roaming.join(name)),
+                            p(roaming.join(name)),
                             p(local.join(name)),
                             p(local.join(name)),
                             "-".into(),
@@ -358,11 +390,18 @@ mod tests {
                     } else if cfg!(target_os = "macos") {
                         let support = home.join("Library/Application Support").join(app.app_id());
                         let caches = home.join("Library/Caches").join(app.app_id());
-                        vec![p(support.clone()), p(support), p(caches), "-".into()]
+                        vec![
+                            p(support.clone()),
+                            p(support.clone()),
+                            p(support),
+                            p(caches),
+                            "-".into(),
+                        ]
                     } else if with_xdg {
                         let cmd = app.command();
                         vec![
                             p(xdg.join("XDG_CONFIG_HOME").join(cmd)),
+                            p(xdg.join("XDG_STATE_HOME").join(cmd)),
                             p(xdg.join("XDG_STATE_HOME").join(cmd)),
                             p(xdg.join("XDG_CACHE_HOME").join(cmd)),
                             p(xdg.join("XDG_RUNTIME_DIR").join(cmd)),
@@ -371,6 +410,7 @@ mod tests {
                         let cmd = app.command();
                         vec![
                             p(home.join(".config").join(cmd)),
+                            p(home.join(".local/state").join(cmd)),
                             p(home.join(".local/state").join(cmd)),
                             p(home.join(".cache").join(cmd)),
                             "-".into(),

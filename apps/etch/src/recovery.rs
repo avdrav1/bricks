@@ -2,10 +2,11 @@
 //! written [`WRITE_AFTER`] after the first change not yet in it (so at most that often while
 //! drawing goes on), off the UI thread, in `recovery` in Etch's state folder
 //! ([`suite_platform::dirs`]: `$XDG_STATE_HOME/etch` on Linux, `~/Library/Application
-//! Support/dev.cronkite.Etch` on macOS), kept by the suite's [`Store`]: one journal per
-//! window, an owner lock per process. The journal goes once nothing is unsaved (saved, or
-//! every change undone) and when the window closes, so one still there after its process
-//! ended means a crash or a kill (`saving::Saver` keeps it).
+//! Support/dev.cronkite.Etch` on macOS, `%LOCALAPPDATA%\Cronkite\Etch` on Windows), kept by
+//! the suite's [`Store`]: one journal per window, an owner lock per process. The journal
+//! goes once nothing is unsaved (saved, or every change undone) and when the window closes,
+//! so one still there after its process ended means a crash or a kill (`saving::Saver`
+//! keeps it).
 //!
 //! A journal is [`MAGIC`], a binary [`Header`] (when it was written, the image's size, the
 //! file's size and modification time when it was read or last saved, its path), then the
@@ -55,7 +56,8 @@ pub struct Crashed {
     pub header: Header,
 }
 
-/// The user's recovery directory: `recovery` in Etch's state folder (`~/.local/state/etch`).
+/// The user's recovery directory: `recovery` in Etch's state folder (`~/.local/state/etch`,
+/// `%LOCALAPPDATA%\Cronkite\Etch`).
 pub fn store() -> Store {
     Store::at(suite_platform::dirs::state_dir(crate::APP).join("recovery"))
 }
@@ -524,5 +526,117 @@ mod tests {
                 "an 8K journal took {write_ms:.0} ms to write"
             );
         }
+    }
+
+    /// Run in a child process by [`a_killed_etchs_journal_is_offered_back`]: an Etch with
+    /// `$ETCH_CRASH_FILE` open (so in its recent files), drawn on, and in its journal, until
+    /// it's killed (or its stdin closes). Prints where its files are.
+    #[test]
+    fn crash_with_unsaved_changes_for_parent() {
+        let Some(file) = std::env::var_os("ETCH_CRASH_FILE").map(PathBuf::from) else {
+            return;
+        };
+        suite_file::recent::Recent::load_from(crate::recent::store())
+            .add(&file)
+            .unwrap();
+        let header = Header {
+            file: identity(&file),
+            path: Some(file),
+            saved_ms: now_ms(),
+            size: (6, 5),
+        };
+        let store = store();
+        let journal = store.new_journal();
+        write(&store, &journal, &header, &pattern(6, 5)).unwrap();
+        println!("journal\t{}", journal.display());
+        println!("settings\t{}", crate::settings::path().display());
+        let _ = std::io::stdin().read_line(&mut String::new());
+    }
+
+    /// WIN-2: an Etch killed with unsaved changes leaves its journal in Etch's state folder
+    /// (`%LOCALAPPDATA%\Cronkite\Etch\recovery` on Windows), which another Etch leaves alone
+    /// while it runs and offers back once it's gone, onto the file as it was; its settings
+    /// and recent files are in Etch's settings folder (`%APPDATA%\Cronkite\Etch`).
+    #[test]
+    fn a_killed_etchs_journal_is_offered_back() {
+        use std::io::BufRead;
+        use std::process::{Command, Stdio};
+        let base = std::env::temp_dir().join(format!("etch-crash-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let file = base.join("cat.png");
+        image_io::save(&file, &Image::new(6, 5, Color::WHITE).unwrap(), Format::Png).unwrap();
+        let mut etch = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "recovery::tests::crash_with_unsaved_changes_for_parent",
+                "--nocapture",
+            ])
+            .env("ETCH_CRASH_FILE", &file)
+            .env("HOME", base.join("home"))
+            .env("APPDATA", base.join("Roaming"))
+            .env("LOCALAPPDATA", base.join("Local"))
+            .env("XDG_CONFIG_HOME", base.join("config"))
+            .env("XDG_STATE_HOME", base.join("state"))
+            .env("XDG_CACHE_HOME", base.join("cache"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let printed: std::collections::HashMap<String, PathBuf> =
+            BufReader::new(etch.stdout.take().unwrap())
+                .lines()
+                .map_while(Result::ok)
+                .filter_map(|l| {
+                    let (what, path) = l.split_once('\t')?;
+                    Some((what.to_owned(), PathBuf::from(path)))
+                })
+                .take(2)
+                .collect();
+        // Each system's folder for Etch under `base`.
+        let folder = |linux: &str, windows: &str| {
+            if cfg!(windows) {
+                base.join(windows).join("Cronkite").join("Etch")
+            } else if cfg!(target_os = "macos") {
+                base.join("home/Library/Application Support/dev.cronkite.Etch")
+            } else {
+                base.join(linux).join("etch")
+            }
+        };
+        let (config, state) = (folder("config", "Roaming"), folder("state", "Local"));
+        let recent = folder("state", "Roaming").join("recent");
+        assert_eq!(
+            suite_file::recent::Recent::load_from(recent).files(),
+            [suite_file::canonical(&file)]
+        );
+        let journal = &printed["journal"];
+        assert_eq!(journal.parent(), Some(state.join("recovery").as_path()));
+        assert_eq!(printed["settings"], config.join("settings"));
+
+        let store = Store::at(state.join("recovery"));
+        assert!(crashed(&store).is_empty(), "a running Etch's journal stays");
+        etch.kill().unwrap();
+        etch.wait().unwrap();
+        let start = Instant::now();
+        let found = loop {
+            // Windows drops a killed process's locks soon after it ends.
+            let found = crashed(&store);
+            if !found.is_empty() || start.elapsed() > Duration::from_secs(10) {
+                break found;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(&found[0].journal, journal);
+        assert_eq!(found[0].header.path.as_deref(), Some(file.as_path()));
+        let recovered = Recovered::read(found[0].clone(), identity(&file)).unwrap();
+        assert_eq!(
+            recovered.image,
+            Some(Ok(pattern(6, 5))),
+            "offered onto the file"
+        );
+        store.remove(journal);
+        assert!(!journal.exists());
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

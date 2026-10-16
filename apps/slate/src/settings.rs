@@ -1,7 +1,7 @@
 //! The user's settings (ADR 0005): the text width, remembered in `settings` in Slate's
 //! config folder ([`suite_platform::dirs`]: `$XDG_CONFIG_HOME/slate` on Linux,
-//! `~/Library/Application Support/dev.cronkite.Slate` on macOS), a `key=value` file
-//! written atomically.
+//! `~/Library/Application Support/dev.cronkite.Slate` on macOS, `%APPDATA%\Cronkite\Slate`
+//! on Windows), a `key=value` file written atomically.
 //!
 //! A missing or unreadable file, or one without a value Slate knows, means the defaults.
 //! Writes run on a thread of their own, in order, so the UI thread never waits on the disk;

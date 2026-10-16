@@ -1,7 +1,7 @@
 //! What Etch remembers across runs: New Image's last size and background, in `settings` in
 //! Etch's config folder ([`suite_platform::dirs`]: `$XDG_CONFIG_HOME/etch` on Linux,
-//! `~/Library/Application Support/dev.cronkite.Etch` on macOS), a `key=value` file
-//! written atomically (as Slate's).
+//! `~/Library/Application Support/dev.cronkite.Etch` on macOS, `%APPDATA%\Cronkite\Etch` on
+//! Windows), a `key=value` file written atomically (as Slate's).
 //!
 //! A missing or unreadable file, or values Etch doesn't know, mean the defaults.
 

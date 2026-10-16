@@ -2,10 +2,11 @@
 //! written [`WRITE_AFTER`] after the first edit not yet in it (so at most that often while
 //! editing goes on), off the UI thread, in `recovery` in Slate's state folder
 //! ([`suite_platform::dirs`]: `$XDG_STATE_HOME/slate` on Linux, `~/Library/Application
-//! Support/dev.cronkite.Slate` on macOS), kept by the suite's [`Store`]: one journal per
-//! window, an owner lock per process. The journal goes once nothing is unsaved (saved, or
-//! every edit undone) and when the window closes, so one still there after its process
-//! ended means a crash or a kill (`saving::Saver` keeps it).
+//! Support/dev.cronkite.Slate` on macOS, `%LOCALAPPDATA%\Cronkite\Slate` on Windows), kept
+//! by the suite's [`Store`]: one journal per window, an owner lock per process. The journal
+//! goes once nothing is unsaved (saved, or every edit undone) and when the window closes,
+//! so one still there after its process ended means a crash or a kill (`saving::Saver`
+//! keeps it).
 //!
 //! A journal holds a line of [`Header`] (the file's path, its size and modification time
 //! when it was read or last saved, when the journal was written) and the document's blocks,
@@ -51,7 +52,7 @@ pub struct Crashed {
 }
 
 /// The user's recovery directory: `recovery` in Slate's state folder
-/// (`~/.local/state/slate`).
+/// (`~/.local/state/slate`, `%LOCALAPPDATA%\Cronkite\Slate`).
 pub fn store() -> Store {
     Store::at(suite_platform::dirs::state_dir(crate::APP).join("recovery"))
 }
@@ -394,5 +395,130 @@ mod tests {
         assert!(p.own.is_empty() && p.tabs.is_empty());
         // And one without them is written as before.
         assert_eq!(serde_json::to_string(&blocks).unwrap(), old);
+    }
+
+    /// The edits a crashing Slate keeps in its journal.
+    fn unsaved() -> Vec<Block> {
+        let mut p = Paragraph::default();
+        p.push("Unsaved words", &RunStyle::default());
+        vec![Block::Paragraph(p)]
+    }
+
+    /// Run in a child process by [`a_killed_slates_journal_is_offered_back`]: a Slate with
+    /// `$SLATE_CRASH_FILE` open, edited, and in its journal, and a Word document's package
+    /// copy, until it's killed (or its stdin closes). Prints where its files are.
+    #[test]
+    fn crash_with_unsaved_edits_for_parent() {
+        let Some(file) = std::env::var_os("SLATE_CRASH_FILE").map(PathBuf::from) else {
+            return;
+        };
+        let header = Header {
+            file: identity(&file),
+            path: Some(file),
+            saved_ms: now_ms(),
+        };
+        let store = store();
+        let journal = store.new_journal();
+        write(&store, &journal, &header, &unsaved()).unwrap();
+        let copy = crate::saving::Original::of_bytes(b"package").unwrap();
+        println!("journal\t{}", journal.display());
+        println!("copy\t{}", copy.path().display());
+        println!("settings\t{}", crate::settings::path().display());
+        let _ = std::io::stdin().read_line(&mut String::new());
+    }
+
+    /// WIN-2: a Slate killed with unsaved edits leaves its journal in Slate's state folder
+    /// (`%LOCALAPPDATA%\Cronkite\Slate\recovery` on Windows), which another Slate leaves
+    /// alone while it runs and offers back once it's gone, onto the file as it was; its
+    /// settings are in Slate's settings folder (`%APPDATA%\Cronkite\Slate`) and its package
+    /// copies in its cache folder.
+    #[test]
+    fn a_killed_slates_journal_is_offered_back() {
+        use std::io::BufRead;
+        use std::process::{Command, Stdio};
+        let base = std::env::temp_dir().join(format!("slate-crash-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let file = base.join("notes.md");
+        std::fs::write(&file, "Saved words\n").unwrap();
+        let mut slate = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "recovery::tests::crash_with_unsaved_edits_for_parent",
+                "--nocapture",
+            ])
+            .env("SLATE_CRASH_FILE", &file)
+            .env("HOME", base.join("home"))
+            .env("APPDATA", base.join("Roaming"))
+            .env("LOCALAPPDATA", base.join("Local"))
+            .env("XDG_CONFIG_HOME", base.join("config"))
+            .env("XDG_STATE_HOME", base.join("state"))
+            .env("XDG_CACHE_HOME", base.join("cache"))
+            .env_remove("XDG_RUNTIME_DIR")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let printed: std::collections::HashMap<String, PathBuf> =
+            std::io::BufReader::new(slate.stdout.take().unwrap())
+                .lines()
+                .map_while(Result::ok)
+                .filter_map(|l| {
+                    let (what, path) = l.split_once('\t')?;
+                    Some((what.to_owned(), PathBuf::from(path)))
+                })
+                .take(3)
+                .collect();
+        // Each system's folder for Slate under `base`.
+        let folder = |linux: &str, macos: &str, windows: &str| {
+            if cfg!(windows) {
+                base.join(windows).join("Cronkite").join("Slate")
+            } else if cfg!(target_os = "macos") {
+                base.join("home/Library")
+                    .join(macos)
+                    .join("dev.cronkite.Slate")
+            } else {
+                base.join(linux).join("slate")
+            }
+        };
+        let config = folder("config", "Application Support", "Roaming");
+        let state = folder("state", "Application Support", "Local");
+        let cache = folder("cache", "Caches", "Local");
+        let journal = &printed["journal"];
+        assert_eq!(journal.parent(), Some(state.join("recovery").as_path()));
+        assert_eq!(printed["copy"].parent(), Some(cache.as_path()));
+        assert_eq!(printed["settings"], config.join("settings"));
+
+        let store = Store::at(state.join("recovery"));
+        assert!(
+            crashed(&store).is_empty(),
+            "a running Slate's journal stays"
+        );
+        slate.kill().unwrap();
+        slate.wait().unwrap();
+        let start = std::time::Instant::now();
+        let found = loop {
+            // Windows drops a killed process's locks soon after it ends.
+            let found = crashed(&store);
+            if !found.is_empty() || start.elapsed() > Duration::from_secs(10) {
+                break found;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(&found[0].journal, journal);
+        assert_eq!(found[0].header.path.as_deref(), Some(file.as_path()));
+        let Ok(mut opened) = open::read(&file) else {
+            panic!("cannot read {}", file.display());
+        };
+        let recovered = Recovered::read(found[0].clone(), true, &mut opened).unwrap();
+        assert_eq!(
+            recovered.blocks,
+            Some(Ok(unsaved())),
+            "offered onto the file"
+        );
+        store.remove(journal);
+        assert!(!journal.exists());
+        let _ = std::fs::remove_dir_all(&base);
     }
 }
