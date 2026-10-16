@@ -1,0 +1,454 @@
+# WIN-4 acceptance on a Windows runner (ci.yml, job windows-open): each app opens its files
+# from the command line, as Explorer's Open with and a registered file type start it, and
+# from a drag out of another program; its own options still work; the documents draw in
+# the bundled fonts through fontconfig; and the renderer GTK picks is logged.
+#
+#   powershell -File scripts/check_win_open.ps1 [-Bin target\debug] [-Out out\win-open] [-PathPrefix DIR]
+#
+# Needs Windows PowerShell 5.1 (WinForms and C# 5 through Add-Type), an interactive
+# desktop (GitHub's windows-latest), the four apps built in -Bin, MSYS2's UCRT64 bin
+# folder in -PathPrefix (their DLLs), and the fonts fetched into target\fonts
+# (python scripts/fetch_fonts.py). The sample files sit in a folder whose name has spaces
+# and letters outside ASCII, as a user's folders may. The environment is Explorer's: no
+# HOME, no XDG_* variables.
+#   1. Command line: `app FILE` with a relative name, from that folder, for each sample.
+#   2. Open with: `cmd /c start "" app.exe "C:\...\FILE"`, the command line Explorer's Open
+#      with runs (`"app.exe" "%1"`), with a file name outside ASCII.
+#   3. A registered type: a ProgID under HKCU with `"app.exe" "%1"` as its open command;
+#      the file opens by its type through ShellExecute (Start-Process FILE, what a
+#      double-click runs) when the extension has no UserChoice, else through the ProgID's
+#      class (ShellExecuteEx with SEE_MASK_CLASSNAME). The keys are removed afterwards.
+#   4. The apps' own options: a benchmark with the file named first and the option after
+#      it (GLib on Windows used to hand the last arguments to GApplication).
+#   5. Drag and drop: the app starts with no file; a small window of this script starts an
+#      OLE drag of the file (CF_HDROP, as Explorer offers it), and SendInput carries the
+#      pointer onto the app's window and lets go. The file must open.
+#   6. Look: Slate on office-fonts.docx and on Markdown (Liberation Sans), Frame's deck,
+#      and Brick's grid with Pango's Win32 font map (PANGOCAIRO_BACKEND=win32) beside the
+#      apps' own (fontconfig); GSK_RENDERER=gl and =vulkan beside GTK's own choice.
+# Every window is screenshotted into $Out\shots and every app's stderr kept in $Out\logs;
+# each check is a line of $Out\summary.txt. Ends with "check_win_open: OK" or "FAILED".
+param(
+    [string]$Bin = "target\debug",
+    [string]$Out = "out\win-open",
+    [string]$PathPrefix = ""
+)
+$ErrorActionPreference = "Continue"
+$root = (Resolve-Path "$PSScriptRoot\..").Path
+$Bin = (Resolve-Path $Bin).Path
+New-Item -ItemType Directory -Force "$Out\shots", "$Out\logs", "$Out\files" | Out-Null
+$Out = (Resolve-Path $Out).Path
+$shots = "$Out\shots"; $logs = "$Out\logs"
+$summary = "$Out\summary.txt"
+Set-Content -Encoding utf8 $summary ""
+$script:failed = $false
+
+Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition @"
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+using System.Windows.Forms;
+
+public static class Win {
+    delegate bool EnumProc(IntPtr h, IntPtr p);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc f, IntPtr p);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowTextW(IntPtr h, StringBuilder s, int n);
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
+    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out RECT r);
+    [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
+    [DllImport("shell32.dll")] static extern void SHChangeNotify(int e, uint f, IntPtr a, IntPtr b);
+    [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+
+    // The visible top-level windows of process `pid` that have a title, as "handle<TAB>title".
+    public static string[] Windows(int pid) {
+        var found = new List<string>();
+        EnumWindows(delegate (IntPtr h, IntPtr p) {
+            uint owner;
+            GetWindowThreadProcessId(h, out owner);
+            if (owner == (uint)pid && IsWindowVisible(h)) {
+                var s = new StringBuilder(512);
+                GetWindowTextW(h, s, 512);
+                if (s.Length > 0) found.Add(h.ToInt64() + "\t" + s);
+            }
+            return true;
+        }, IntPtr.Zero);
+        return found.ToArray();
+    }
+
+    public static void Front(long h) {
+        ShowWindow(new IntPtr(h), 9);
+        SetForegroundWindow(new IntPtr(h));
+    }
+
+    public static int[] Rect(long h) {
+        RECT r;
+        GetWindowRect(new IntPtr(h), out r);
+        return new int[] { r.Left, r.Top, r.Right, r.Bottom };
+    }
+
+    // The window alone, drawn by PrintWindow (PW_RENDERFULLCONTENT), even if covered.
+    public static void Shot(long h, string file) {
+        int[] r = Rect(h);
+        int w = r[2] - r[0], hh = r[3] - r[1];
+        if (w <= 0 || hh <= 0) return;
+        using (var bmp = new Bitmap(w, hh)) {
+            using (var g = Graphics.FromImage(bmp)) {
+                IntPtr dc = g.GetHdc();
+                PrintWindow(new IntPtr(h), dc, 2);
+                g.ReleaseHdc(dc);
+            }
+            bmp.Save(file, System.Drawing.Imaging.ImageFormat.Png);
+        }
+    }
+
+    public static void Screen(string file) {
+        Rectangle b = System.Windows.Forms.Screen.PrimaryScreen.Bounds;
+        using (var bmp = new Bitmap(b.Width, b.Height)) {
+            using (var g = Graphics.FromImage(bmp)) g.CopyFromScreen(b.Location, Point.Empty, b.Size);
+            bmp.Save(file, System.Drawing.Imaging.ImageFormat.Png);
+        }
+    }
+
+    // Tell the shell that file associations changed (SHCNE_ASSOCCHANGED).
+    public static void AssociationsChanged() {
+        SHChangeNotify(0x08000000, 0, IntPtr.Zero, IntPtr.Zero);
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct SHELLEXECUTEINFO {
+        public int cbSize; public uint fMask; public IntPtr hwnd; public string lpVerb; public string lpFile;
+        public string lpParameters; public string lpDirectory; public int nShow; public IntPtr hInstApp;
+        public IntPtr lpIDList; public string lpClass; public IntPtr hkeyClass; public uint dwHotKey;
+        public IntPtr hIcon; public IntPtr hProcess;
+    }
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool ShellExecuteExW(ref SHELLEXECUTEINFO i);
+
+    // Open `file` with the open verb of ProgID `cls` (SEE_MASK_CLASSNAME): what the shell
+    // does for a file of a type registered to it. Whether the shell started it.
+    public static bool OpenAs(string file, string cls) {
+        var i = new SHELLEXECUTEINFO();
+        i.cbSize = Marshal.SizeOf(typeof(SHELLEXECUTEINFO));
+        i.fMask = 0x1; // SEE_MASK_CLASSNAME
+        i.lpVerb = "open"; i.lpFile = file; i.lpClass = cls; i.nShow = 1;
+        return ShellExecuteExW(ref i);
+    }
+}
+
+public static class Drag {
+    [StructLayout(LayoutKind.Sequential)] struct MOUSEINPUT { public int dx, dy; public uint mouseData, dwFlags, time; public IntPtr dwExtraInfo; }
+    [StructLayout(LayoutKind.Sequential)] struct INPUT { public uint type; public MOUSEINPUT mi; }
+    [DllImport("user32.dll", SetLastError = true)] static extern uint SendInput(uint n, INPUT[] inputs, int size);
+    const uint MOVE = 0x1, LEFTDOWN = 0x2, LEFTUP = 0x4, ABSOLUTE = 0x8000;
+
+    // The pointer to (x, y) on the primary screen, with `button` (LEFTDOWN, LEFTUP, or 0).
+    static void Send(uint button, int x, int y) {
+        Rectangle b = System.Windows.Forms.Screen.PrimaryScreen.Bounds;
+        var i = new INPUT();
+        i.type = 0;
+        i.mi.dx = (int)(x * 65535.0 / (b.Width - 1));
+        i.mi.dy = (int)(y * 65535.0 / (b.Height - 1));
+        i.mi.dwFlags = MOVE | ABSOLUTE | button;
+        SendInput(1, new INPUT[] { i }, Marshal.SizeOf(typeof(INPUT)));
+    }
+
+    // Drag `path` from a small window at (sx, sy) and drop it at (x, y): the window starts an
+    // OLE drag of the file as a file drop (CF_HDROP) when the button goes down on it, and the
+    // pointer carries it across and lets go. Returns the drop effect the target chose
+    // ("None" if it refused), then keeps the source alive 3 s for the target to read it.
+    public static string Run(string path, int sx, int sy, int x, int y) {
+        string result = "no drag started";
+        var t = new Thread(delegate () {
+            var form = new Form();
+            form.FormBorderStyle = FormBorderStyle.None;
+            form.StartPosition = FormStartPosition.Manual;
+            form.Location = new Point(sx - 40, sy - 40);
+            form.Size = new Size(80, 80);
+            form.TopMost = true;
+            form.ShowInTaskbar = false;
+            form.BackColor = Color.DarkOrange;
+            form.MouseDown += delegate (object s, MouseEventArgs e) {
+                var data = new DataObject(DataFormats.FileDrop, new string[] { path });
+                result = form.DoDragDrop(data, DragDropEffects.Copy | DragDropEffects.Move | DragDropEffects.Link).ToString();
+                var close = new System.Windows.Forms.Timer();
+                close.Interval = 3000;
+                close.Tick += delegate (object a, EventArgs b) { close.Stop(); form.Close(); };
+                close.Start();
+            };
+            form.Shown += delegate (object s, EventArgs e) {
+                var mover = new Thread(delegate () {
+                    Thread.Sleep(700);
+                    Send(0, sx, sy); Thread.Sleep(300);
+                    Send(LEFTDOWN, sx, sy); Thread.Sleep(500);
+                    for (int k = 1; k <= 30; k++) {
+                        Send(0, sx + (x - sx) * k / 30, sy + (y - sy) * k / 30);
+                        Thread.Sleep(40);
+                    }
+                    Thread.Sleep(800);
+                    Send(0, x + 3, y + 3); Thread.Sleep(500);
+                    Send(LEFTUP, x + 3, y + 3);
+                });
+                mover.IsBackground = true;
+                mover.Start();
+            };
+            Application.Run(form);
+        });
+        t.SetApartmentState(ApartmentState.STA);
+        t.Start();
+        if (!t.Join(40000)) return "timeout (" + result + ")";
+        return result;
+    }
+}
+"@
+
+function Say([string]$line) { Write-Host $line; Add-Content -Encoding utf8 $summary $line }
+function Pass([string]$what) { Say "ok: $what" }
+function Fail([string]$what) { Say "FAILED: $what"; $script:failed = $true }
+
+# A visible window of a process whose title contains $text; waits up to $seconds. Returns
+# the handle (0 if none) and leaves the process's titles in $script:titles.
+function Wait-Window($procs, [string]$text, [int]$seconds = 40) {
+    $deadline = (Get-Date).AddSeconds($seconds)
+    do {
+        $script:titles = @()
+        foreach ($p in @(& $procs)) {
+            foreach ($w in [Win]::Windows($p.Id)) {
+                $h, $t = $w -split "`t", 2
+                $script:titles += $t
+                if ($t.IndexOf($text, [StringComparison]::OrdinalIgnoreCase) -ge 0) { return [long]$h }
+            }
+        }
+        Start-Sleep -Milliseconds 250
+    } while ((Get-Date) -lt $deadline)
+    return 0
+}
+
+# Every running process of $app (started since $since).
+function Of([string]$app, [datetime]$since) {
+    return { Get-Process -Name $app -ErrorAction SilentlyContinue | Where-Object { $_.StartTime -ge $since } }.GetNewClosure()
+}
+
+# Stop every app, and the shell's "How do you want to open" dialog if a check raised one.
+function Stop-Apps() {
+    foreach ($a in "brick", "slate", "frame", "etch", "OpenWith") { Get-Process -Name $a -ErrorAction SilentlyContinue | Stop-Process -Force }
+    Start-Sleep -Milliseconds 800
+}
+
+# Let the window lay out and draw, bring it to the front, and keep it as shots\$name.png.
+function Shot([long]$h, [string]$name) {
+    Start-Sleep -Seconds 3
+    [Win]::Front($h)
+    Start-Sleep -Milliseconds 800
+    [Win]::Shot($h, "$shots\$name.png")
+}
+
+# Start $app with $argv in $dir, stderr and stdout to logs\$name.*; returns the process.
+function Start-App([string]$app, [string[]]$argv, [string]$name, [string]$dir = $files) {
+    $how = @{
+        FilePath = "$Bin\$app.exe"; WorkingDirectory = $dir; PassThru = $true; NoNewWindow = $true
+        RedirectStandardOutput = "$logs\$name.out.txt"; RedirectStandardError = "$logs\$name.err.txt"
+    }
+    if ($argv) { $how.ArgumentList = $argv }
+    $p = Start-Process @how
+    # Keep a handle now, or ExitCode stays empty once it has exited.
+    $null = $p.Handle
+    return $p
+}
+
+# Start $app on $argv, wait for a window titled with $expect, screenshot it as $name.
+# Returns the milliseconds it took (0 if no window came).
+function Open-Check([string]$app, [string[]]$argv, [string]$expect, [string]$name, [string]$what) {
+    $t0 = Get-Date
+    $p = Start-App $app $argv $name
+    $h = Wait-Window ({ $p }.GetNewClosure()) $expect
+    $ms = [math]::Round(((Get-Date) - $t0).TotalMilliseconds)
+    if ($h) {
+        Shot $h $name
+        Pass "$what (window '$expect' after $ms ms)"
+    } else {
+        [Win]::Screen("$shots\$name-screen.png")
+        Fail "$what (no window titled '$expect'; titles: $($script:titles -join ' | '); exited: $($p.HasExited))"
+        $ms = 0
+    }
+    Stop-Apps
+    return $ms
+}
+
+# The renderer GTK chose, from GSK_DEBUG=renderer's line in a log.
+function Renderer([string]$name) {
+    $line = Select-String -Path "$logs\$name.err.txt" -Pattern "Using renderer '(\w+)'" | Select-Object -First 1
+    if ($line) { return $line.Matches[0].Groups[1].Value } else { return "none logged" }
+}
+
+# --- Setup ---------------------------------------------------------------------------------
+if ($PathPrefix) { $env:PATH = "$PathPrefix;$env:PATH" }
+# As Explorer starts them: no HOME and no XDG_* (MSYS2 and Git Bash set HOME).
+foreach ($v in "HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "GSK_RENDERER", "PANGOCAIRO_BACKEND") {
+    Remove-Item "env:$v" -ErrorAction SilentlyContinue
+}
+$env:GSK_DEBUG = "renderer"
+# A cold fontconfig cache, as on a fresh install: the first start builds it.
+foreach ($d in "$env:LOCALAPPDATA\fontconfig", "$env:USERPROFILE\.cache\fontconfig") {
+    Remove-Item -Recurse -Force $d -ErrorAction SilentlyContinue
+}
+
+# Spaces and letters outside ASCII in the folder's name (é and 文件).
+$u = [string][char]0x00E9 + [char]0x6587 + [char]0x4EF6
+$files = "$Out\files\Cronkite r" + [char]0x00E9 + "sum" + [char]0x00E9 + " " + [char]0x6587 + [char]0x4EF6
+New-Item -ItemType Directory -Force $files | Out-Null
+$rows = @("id,name,city,zip,amount,date")
+$rng = New-Object System.Random 11
+foreach ($i in 0..1999) {
+    $rows += "$i,Person $i,$(@('Paris', 'Austin', 'Kyoto', 'Lagos')[$rng.Next(4)]),0$($rng.Next(1000, 9999)),$('{0:F2}' -f ($rng.NextDouble() * 1000)),2026-$('{0:D2}' -f $rng.Next(1, 13))-$('{0:D2}' -f $rng.Next(1, 29))"
+}
+[IO.File]::WriteAllLines("$files\people list.csv", $rows)
+Copy-Item "$root\apps\brick\crates\xlsx\tests\data\fixture.xlsx" "$files\book.xlsx"
+[IO.File]::WriteAllText("$files\read me.md", "# Read me`n`nOpened on **Windows**, in Liberation Sans: the quick brown fox jumps over the lazy dog, and the sphinx of black quartz judges my vow while the line runs long enough to wrap.`n`n- one`n- two`n")
+Copy-Item "$root\apps\slate\crates\docx\tests\data\fixture.docx" "$files\letter.docx"
+python "$root\scripts\office_fonts_docx.py" "$files\office-fonts.docx"
+Copy-Item "$root\apps\frame\crates\pptx\tests\data\fixture.pptx" "$files\deck.pptx"
+Copy-Item "$root\apps\slate\crates\document-model\tests\data\picture.png" "$files\picture.png"
+# One file per app named outside ASCII, for Explorer's launches.
+$named = @{
+    brick = "people $u.csv"; slate = "letter $u.docx"; frame = "deck $u.pptx"; etch = "picture $u.png"
+}
+Copy-Item "$files\people list.csv" "$files\$($named.brick)"
+Copy-Item "$files\letter.docx" "$files\$($named.slate)"
+Copy-Item "$files\deck.pptx" "$files\$($named.frame)"
+Copy-Item "$files\picture.png" "$files\$($named.etch)"
+Copy-Item "$files\office-fonts.docx" "$shots\office-fonts.docx"
+$screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+Say "screen $($screen.Width)x$($screen.Height); files in $files"
+Say "fonts folder: $((Get-ChildItem "$root\target\fonts" -Filter *.ttf | Measure-Object).Count) .ttf files in $root\target\fonts"
+
+# --- 1. Command line ---------------------------------------------------------------------
+Say "== 1. command line (relative names, from the files' folder)"
+$first = Open-Check brick @('"people list.csv"') "people list.csv" "brick-cmd-csv" "brick people list.csv (the first start, cold fontconfig cache)"
+$second = Open-Check brick @('"book.xlsx"') "book.xlsx" "brick-cmd-xlsx" "brick book.xlsx"
+Say "start to window: first $first ms (cold fontconfig cache), second $second ms"
+Open-Check slate @('"read me.md"') "read me.md" "slate-cmd-md" "slate read me.md" | Out-Null
+Open-Check slate @('"letter.docx"') "letter.docx" "slate-cmd-docx" "slate letter.docx" | Out-Null
+Open-Check slate @('"office-fonts.docx"') "office-fonts.docx" "slate-cmd-office-fonts" "slate office-fonts.docx" | Out-Null
+Open-Check frame @('"deck.pptx"') "deck.pptx" "frame-cmd-pptx" "frame deck.pptx" | Out-Null
+Open-Check etch @('"picture.png"') "picture.png" "etch-cmd-png" "etch picture.png" | Out-Null
+foreach ($n in "brick-cmd-csv", "slate-cmd-docx", "frame-cmd-pptx", "etch-cmd-png") {
+    $log = Get-Content -Raw "$logs\$n.err.txt" -ErrorAction SilentlyContinue
+    if ($log -match "fonts: added (.*) to fontconfig in (\d+) ms") { Pass "$n added the bundled fonts ($($Matches[1]), $($Matches[2]) ms)" }
+    else { Fail "$n didn't add the bundled fonts" }
+    Say "$n renderer: $(Renderer $n)"
+}
+if ((Get-Content -Raw "$logs\slate-cmd-docx.err.txt") -match "isn't fontconfig's") { Fail "slate's font map isn't fontconfig's" }
+else { Pass "slate's font map is fontconfig's (embedded fonts can show)" }
+
+# --- 2. Explorer's Open with ---------------------------------------------------------------
+Say "== 2. Open with: cmd /c start `"`" app.exe `"FULL PATH`""
+foreach ($app in "brick", "slate", "frame", "etch") {
+    $file = "$files\$($named[$app])"
+    $t0 = Get-Date
+    # The whole line as cmd gets it: cmd.exe /c start "" "C:\...\app.exe" "C:\...\FILE".
+    Start-Process -FilePath cmd.exe -WindowStyle Hidden -ArgumentList "/c start `"`" `"$Bin\$app.exe`" `"$file`""
+    $h = Wait-Window (Of $app $t0) $named[$app]
+    if ($h) { Shot $h "$app-open-with"; Pass "$app opens $($named[$app]) as Open with starts it" }
+    else { [Win]::Screen("$shots\$app-open-with-screen.png"); Fail "$app via start: no window titled $($named[$app]) (titles: $($script:titles -join ' | '))" }
+    Stop-Apps
+}
+
+# --- 3. A registered file type -------------------------------------------------------------
+Say "== 3. a registered type: HKCU ProgID with `"app.exe`" `"%1`""
+$classes = "HKCU:\Software\Classes"
+foreach ($app in "brick", "slate", "frame", "etch") {
+    $file = "$files\$($named[$app])"
+    $ext = [IO.Path]::GetExtension($file)
+    $progid = "Cronkite.Check.$app"
+    $command = "$classes\$progid\shell\open\command"
+    New-Item -Force $command | Out-Null
+    Set-Item -Path $command -Value "`"$Bin\$app.exe`" `"%1`""
+    $choice = Test-Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\$ext\UserChoice"
+    $hadExt = Test-Path "$classes\$ext"
+    $oldDefault = if ($hadExt) { (Get-Item "$classes\$ext").GetValue("") } else { $null }
+    $t0 = Get-Date
+    if ($choice) {
+        $how = "the ProgID's class (the user chose another app for $ext)"
+        [void][Win]::OpenAs($file, $progid)
+    } else {
+        $how = "its type, as a double-click does"
+        if (-not $hadExt) { New-Item -Force "$classes\$ext" | Out-Null }
+        Set-Item -Path "$classes\$ext" -Value $progid
+        [Win]::AssociationsChanged()
+        Start-Process -FilePath $file
+    }
+    $h = Wait-Window (Of $app $t0) $named[$app]
+    if ($h) { Shot $h "$app-registered"; Pass "$app opens $($named[$app]) by $how" }
+    else { [Win]::Screen("$shots\$app-registered-screen.png"); Fail "$app by $how`: no window titled $($named[$app]) (titles: $($script:titles -join ' | '))" }
+    Stop-Apps
+    if (-not $choice) {
+        if ($hadExt) { Set-Item -Path "$classes\$ext" -Value $oldDefault } else { Remove-Item -Recurse -Force "$classes\$ext" }
+    }
+    Remove-Item -Recurse -Force "$classes\$progid"
+    [Win]::AssociationsChanged()
+}
+
+# --- 4. The apps' own options --------------------------------------------------------------
+Say "== 4. the apps' own options, after the file"
+$benches = @(
+    @("brick", @('"people list.csv"', "--bench-open")),
+    @("slate", @('"letter.docx"', "--bench-flow")),
+    @("frame", @('"deck.pptx"', "--bench-draw", "10")),
+    @("etch", @("--bench-stroke", "10"))
+)
+foreach ($b in $benches) {
+    $app = $b[0]; $argv = $b[1]
+    $p = Start-App $app $argv "$app-bench"
+    if (-not $p.WaitForExit(180000)) { Stop-Apps; Fail "$app $($argv -join ' '): still running after 180 s"; continue }
+    $report = (Get-Content -Raw "$logs\$app-bench.out.txt" -ErrorAction SilentlyContinue)
+    if ($p.ExitCode -eq 0 -and $report) { Pass "$app $($argv -join ' '): exit 0, $($report.Trim() -replace '\s+', ' ')" }
+    else { Fail "$app $($argv -join ' '): exit $($p.ExitCode), stdout '$report', stderr $(Get-Content -Raw "$logs\$app-bench.err.txt")" }
+}
+
+# --- 5. Drag and drop ----------------------------------------------------------------------
+Say "== 5. drag and drop onto the app's window"
+$untitled = @{ brick = "Brick"; slate = "Slate"; frame = "Untitled"; etch = "Untitled" }
+$dropped = @{ brick = "people list.csv"; slate = "letter.docx"; frame = "deck.pptx"; etch = "picture.png" }
+foreach ($app in "brick", "slate", "frame", "etch") {
+    $t0 = Get-Date
+    $p = Start-App $app @() "$app-drop"
+    $h = Wait-Window (Of $app $t0) $untitled[$app]
+    if (-not $h) { Fail "$app without a file: no window '$($untitled[$app])' (titles: $($script:titles -join ' | '))"; Stop-Apps; continue }
+    Start-Sleep -Seconds 2
+    [Win]::Front($h)
+    Start-Sleep -Milliseconds 800
+    $r = [Win]::Rect($h)
+    $x = [int](($r[0] + $r[2]) / 2); $y = [int](($r[1] + $r[3]) / 2)
+    [Win]::Screen("$shots\$app-drop-1-before.png")
+    $effect = [Drag]::Run("$files\$($dropped[$app])", 60, $screen.Height - 120, $x, $y)
+    $h2 = Wait-Window (Of $app $t0) $dropped[$app] 20
+    if ($h2) { Shot $h2 "$app-drop-2-opened"; Pass "$app opens $($dropped[$app]) dropped on its window (drop effect $effect)" }
+    else { [Win]::Screen("$shots\$app-drop-2-screen.png"); Fail "$app: dropping $($dropped[$app]) at $x,$y (effect $effect) opened nothing (titles: $($script:titles -join ' | '))" }
+    Stop-Apps
+}
+
+# --- 6. Look: fonts and renderer -----------------------------------------------------------
+Say "== 6. look: Pango's Win32 font map and other renderers beside the apps' own"
+$env:PANGOCAIRO_BACKEND = "win32"
+Open-Check slate @('"office-fonts.docx"') "office-fonts.docx" "slate-win32-office-fonts" "slate office-fonts.docx with PANGOCAIRO_BACKEND=win32" | Out-Null
+Open-Check slate @('"read me.md"') "read me.md" "slate-win32-md" "slate read me.md with PANGOCAIRO_BACKEND=win32" | Out-Null
+Open-Check frame @('"deck.pptx"') "deck.pptx" "frame-win32-pptx" "frame deck.pptx with PANGOCAIRO_BACKEND=win32" | Out-Null
+Open-Check brick @('"people list.csv"') "people list.csv" "brick-win32-csv" "brick people list.csv with PANGOCAIRO_BACKEND=win32" | Out-Null
+Remove-Item env:PANGOCAIRO_BACKEND
+foreach ($r in "gl", "ngl", "vulkan") {
+    $env:GSK_RENDERER = $r
+    Open-Check slate @('"office-fonts.docx"') "office-fonts.docx" "slate-gsk-$r" "slate with GSK_RENDERER=$r" | Out-Null
+    Say "GSK_RENDERER=$r`: renderer $(Renderer "slate-gsk-$r"); $((Select-String -Path "$logs\slate-gsk-$r.err.txt" -Pattern 'GL|Vulkan|renderer' | Select-Object -First 4 | ForEach-Object { $_.Line.Trim() }) -join ' / ')"
+}
+Remove-Item env:GSK_RENDERER
+
+Stop-Apps
+if ($script:failed) { Say "check_win_open: FAILED"; exit 1 }
+Say "check_win_open: OK"
+exit 0

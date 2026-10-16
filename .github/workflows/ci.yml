@@ -30,7 +30,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # setup-msys2 caches the downloaded packages between runs.
-      - uses: msys2/setup-msys2@v2
+      - id: msys2
+        uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
           update: true
@@ -58,8 +59,37 @@ jobs:
             windows-${{ steps.toolchain.outputs.rustc }}-${{ hashFiles('Cargo.lock') }}-
             windows-${{ steps.toolchain.outputs.rustc }}-
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      # The metric-compatible fonts the apps carry (MAC-6, WIN-4); suite-ui's tests use them.
+      - name: Fetch the bundled fonts
+        shell: pwsh
+        run: python scripts/fetch_fonts.py target/fonts
       # Every failing test target reports, not only the first.
       - run: cargo test --workspace --no-fail-fast
+      # Opening files on Windows (WIN-4): each app opens its samples from the command line,
+      # as Explorer's Open with and a registered type start it, and dropped from another
+      # program, in the bundled fonts; its own options still work. Screenshots, logs, and
+      # the renderer GTK picks are the artifact.
+      - id: build
+        if: always()
+        run: cargo build -p brick -p slate -p frame -p etch
+      - name: Each app opens its files
+        if: always() && steps.build.outcome == 'success'
+        shell: powershell
+        run: '& .\scripts\check_win_open.ps1 -Bin target\debug -Out out\win-open -PathPrefix "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin"'
+      - name: GTK, Pango, and fontconfig's matches
+        if: always() && steps.build.outcome == 'success'
+        run: |
+          mkdir -p out/win-open
+          {
+            for m in gtk4 pango cairo fontconfig freetype2; do echo "$m $(pkg-config --modversion $m)"; done
+            for f in Calibri 'Calibri Light' Cambria Arial 'Times New Roman' 'Courier New' 'Segoe UI' 'Liberation Sans' sans-serif; do
+              echo "fc-match (system config, no bundled fonts) '$f': $(fc-match "$f")"
+            done
+          } > out/win-open/env.txt 2>&1
+          cat out/win-open/env.txt
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: windows-open, path: "out/win-open/shots\nout/win-open/logs\nout/win-open/summary.txt\nout/win-open/env.txt", if-no-files-found: warn }
   macos:
     # arm64, the oldest macOS the suite supports (ADR 0011). GUI checks stay on Linux.
     runs-on: macos-14

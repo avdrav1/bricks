@@ -8,10 +8,11 @@
 # into target/fonts (python3 scripts/fetch_fonts.py). Draws with GSK_RENDERER=cairo: GL
 # drew black windows on the runner VMs (DEC-11).
 #
-#   1. Light appearance. Brick on a CSV of digits and Slate on office-fonts.docx (written
-#      here: Calibri, Cambria, Arial, Times New Roman, Courier New), each with the suite's
-#      Pango backend (fontconfig) and, for comparison, CoreText (PANGOCAIRO_BACKEND=coretext);
-#      Frame on its fixture deck. Each app's log names the fonts folder it added.
+#   1. Light appearance. Brick on a CSV of digits and Slate on office-fonts.docx
+#      (scripts/office_fonts_docx.py: Calibri, Cambria, Arial, Times New Roman, Courier
+#      New), each with the suite's Pango backend (fontconfig) and, for comparison,
+#      CoreText (PANGOCAIRO_BACKEND=coretext); Frame on its fixture deck. Each app's log
+#      names the fonts folder it added.
 #   2. Dark appearance, set as System Settings does (System Events): Brick, Slate, Frame,
 #      and Etch draw dark.
 #   3. Following changes: Slate starts light; the appearance turns dark, then light,
@@ -130,34 +131,7 @@ with open(sys.argv[1], "w") as f:
                 f"0{random.randint(1000, 9999)},{random.random() * 1000:.2f},"
                 f"2026-{random.randint(1, 12):02d}-{random.randint(1, 28):02d}\n")
 PY
-python3 - "$work/office-fonts.docx" <<'PY'
-import sys, zipfile
-W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
-PKG = "http://schemas.openxmlformats.org/package/2006/relationships"
-OOXML = "application/vnd.openxmlformats-officedocument.wordprocessingml"
-HEAD = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-BODY = ("Sphinx of black quartz, judge my vow. The quick brown fox jumps over the lazy dog "
-        "while 0123456789 fly past; this paragraph runs long enough to wrap where Word "
-        "wraps it when the font's widths match Word's own.")
-def para(font, size, text):
-    return (f'<w:p><w:r><w:rPr><w:rFonts w:ascii="{font}" w:hAnsi="{font}"/>'
-            f'<w:sz w:val="{size}"/></w:rPr><w:t xml:space="preserve">{text}</w:t></w:r></w:p>')
-paras = [para("Cambria", 40, "Cambria heading, drawn in Caladea"),
-         para("Calibri", 22, "Calibri body, drawn in Carlito. " + BODY)]
-paras += [para(f, 22, f"{f}: {BODY}") for f in ("Arial", "Times New Roman", "Courier New")]
-paras += [para("Cambria", 22, "Cambria body. " + BODY)]
-sect = '<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:left="1440" w:right="1440" w:top="1440" w:bottom="1440"/></w:sectPr>'
-with zipfile.ZipFile(sys.argv[1], "w") as z:
-    z.writestr("[Content_Types].xml", HEAD + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-               '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
-               '<Default Extension="xml" ContentType="application/xml"/>'
-               f'<Override PartName="/word/document.xml" ContentType="{OOXML}.document.main+xml"/></Types>')
-    z.writestr("_rels/.rels", HEAD + f'<Relationships xmlns="{PKG}"><Relationship Id="rId1" '
-               f'Type="{REL}/officeDocument" Target="word/document.xml"/></Relationships>')
-    z.writestr("word/document.xml", HEAD + f'<w:document xmlns:w="{W}"><w:body>'
-               + "".join(paras) + sect + "</w:body></w:document>")
-PY
+python3 scripts/office_fonts_docx.py "$work/office-fonts.docx"
 cp apps/frame/crates/pptx/tests/data/fixture.pptx apps/slate/crates/document-model/tests/data/picture.png "$work/"
 cp "$work/office-fonts.docx" "$shots/"
 
