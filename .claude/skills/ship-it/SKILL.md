@@ -78,6 +78,8 @@ scripts/ship.sh <app> build --macos   # dispatches release-macos.yml at HEAD, wa
 
 Check: the run's URL, its `verify` job's `check_mac_install: OK`, the run summary's sizes, and the screenshots in its `macos-install` artifact (`gh run download RUN_ID -n macos-install`). Report the DMG's size and sha256.
 
+Windows (WIN-5, a preview: nothing ships for Windows until WIN-6 wires it into `ship.sh` and the pages, and the user decides to release). `.github/workflows/release-windows.yml` (the same `apps` input; release tags and pushes that change the bundling run it too) builds each app's self-contained folder and its unsigned per-user Inno Setup installer, `dist/<app>-X.Y.Z-x86_64-windows-setup.exe` and `.sha256`, on `windows-latest` with MSYS2's UCRT64 GTK (`scripts/win_bundle.sh`: the stripped exe and every DLL it needs in `bin\`, GTK's data, the fonts, `licenses\THIRD-PARTY.txt` from `scripts/win_licenses.py`, which refuses GPL code, and `THIRD-PARTY-RUST.txt`; cairo and libtiff rebuilt without lzo and jbig by `scripts/win_libs.sh`, whose pins follow MSYS2's packages: when MSYS2 updates cairo or libtiff the build stops until the pin is updated). Its `verify` job, on a fresh runner with MSYS2 moved away, installs each app through Setup.exe and through `install.ps1`, starts it, opens and saves a file, and uninstalls it with nothing left (`scripts/check_win_install.ps1`). Check: `check_win_install: OK`, the run summary's sizes, and the `windows-install` artifact's screenshots. The artifact `windows-<app>` holds the installer.
+
 ## 4. Dry run, then confirm
 
 ```sh

@@ -204,8 +204,9 @@ python3 "$root/scripts/rust_licenses.py" "$app" x86_64-pc-windows-gnu "$(win "$B
 
 # The installer.
 # MSYS2 would take Inno Setup's /D options for paths and convert them.
-MSYS2_ARG_CONV_EXCL="*" "$iscc" /Q "/DAppDefs=$(cygpath -w "$work/app.iss")" "/DSource=$(cygpath -w "$B")" \
-  "/DOutputDir=$(cygpath -w "$out")" "$(cygpath -w "$root/packaging/windows/setup.iss")" >"$work/iscc.log" 2>&1 ||
+[[ -s $work/app.iss ]] || { echo "win_bundle: win_app.py wrote no $work/app.iss"; exit 1; }
+MSYS2_ARG_CONV_EXCL="*" "$iscc" /Q "/DAppDefs=$(win "$work/app.iss")" "/DSource=$(win "$B")" \
+  "/DOutputDir=$(win "$out")" "$(win "$root/packaging/windows/setup.iss")" >"$work/iscc.log" 2>&1 ||
   { cat "$work/iscc.log"; exit 1; }
 setup=$out/$stem-setup.exe
 [[ -f $setup ]] || { cat "$work/iscc.log"; echo "win_bundle: Inno Setup made no $setup"; exit 1; }

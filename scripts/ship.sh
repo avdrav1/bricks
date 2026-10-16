@@ -249,9 +249,9 @@ site)
   python3 -c 'import sys; p, rel = sys.argv[1], open(sys.argv[2]).read().strip()
 html = open(p).read(); assert "@RELEASE_JSON@" in html, p
 open(p, "w").write(html.replace("@RELEASE_JSON@", rel.replace("</", "<\\/")))' "$OUT/site/index.html" "$OUT/latest.json"
-  # The installer reads latest.json from the bucket (PKG-1).
+  # The installers read latest.json from the bucket (PKG-1; install.ps1, WIN-5).
   need DOWNLOAD_BASE_URL
-  sed -i "s|@DOWNLOAD_BASE_URL@|$(base)|" "$OUT/site/install.sh"
+  sed -i "s|@DOWNLOAD_BASE_URL@|$(base)|" "$OUT/site/install.sh" "$OUT/site/install.ps1"
   pages_project "${!PAGES_VAR}"
   run wr pages deploy "$OUT/site" --project-name "${!PAGES_VAR}" --branch main --commit-dirty=true
   ;;
