@@ -278,6 +278,9 @@ mod tests {
         assert_eq!(website(AppKind::Etch), "https://etch.cronkite.cc");
     }
 
+    /// macOS has no icon theme with the apps' icons, so the About dialog decodes them
+    /// (Homebrew's gdk-pixbuf has an SVG loader; Ubuntu's runner image hasn't).
+    #[cfg(target_os = "macos")]
     #[test]
     fn each_apps_icon_decodes_for_the_about_dialog() {
         for kind in APPS {
