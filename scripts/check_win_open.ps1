@@ -495,12 +495,13 @@ foreach ($b in $benches) {
 Say "== 5. drag and drop onto the app's window"
 $untitled = @{ brick = "Brick"; slate = "Slate"; frame = "Untitled"; etch = "Untitled" }
 $dropped = @{ brick = "people list.csv"; slate = "letter.docx"; frame = "deck.pptx"; etch = "picture.png" }
-# Each drag's last move, from the window's centre (680x600 at 320,40): Brick's into the
-# "Recent" heading, Slate's over the Open button's top edge, Frame's from the canvas into
-# the slide list, Etch's from the tool column into the canvas.
+# Each drag's last move, from the window's top-left corner (placed at 320,40; Etch's may
+# be wider than asked): Brick's into the "Recent" heading, Slate's over the Open button's
+# top edge, Frame's from the canvas into the slide list, Etch's from the tool column into
+# the canvas.
 $edges = @{
-    brick = @(@(0, 0), @(3, 3)); slate = @(@(-65, 34), @(-65, 44))
-    frame = @(@(-80, 60), @(-100, 60)); etch = @(@(-290, 0), @(-270, 0))
+    brick = @(@(340, 300), @(343, 303)); slate = @(@(275, 334), @(275, 344))
+    frame = @(@(260, 360), @(240, 360)); etch = @(@(50, 300), @(70, 300))
 }
 foreach ($app in "brick", "slate", "frame", "etch") {
     $t0 = Get-Date
@@ -515,11 +516,11 @@ foreach ($app in "brick", "slate", "frame", "etch") {
     [Win]::Front($h)
     Start-Sleep -Milliseconds 1500
     $r = [Win]::Rect($h)
-    $cx = [int](($r[0] + $r[2]) / 2); $cy = [int](($r[1] + $r[3]) / 2)
+    $left = $r[0]; $top = $r[1]
     # The drag rests, then its last move crosses into another widget and stops: there GTK
     # reports no action for that move and GDK's Win32 drop kept it (WIN-3's Notes).
     $a, $b = $edges[$app]
-    $x = $cx + $a[0]; $y = $cy + $a[1]; $bx = $cx + $b[0]; $by = $cy + $b[1]
+    $x = $left + $a[0]; $y = $top + $a[1]; $bx = $left + $b[0]; $by = $top + $b[1]
     [Win]::Screen("$shots\$app-drop-1-before.png")
     $effect = [Drag]::Run("$files\$($dropped[$app])", 120, 340, $x, $y, $bx, $by)
     $h2 = Wait-Window (Of $app $t0) $dropped[$app] 20
