@@ -44,7 +44,7 @@ checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
 
 [[package]]
 name = "brick"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "commands",
  "csv-engine",
@@ -155,7 +155,7 @@ dependencies = [
 
 [[package]]
 name = "commands"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "csv-engine",
  "data-model",
@@ -212,7 +212,7 @@ checksum = "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6"
 
 [[package]]
 name = "csv-engine"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "encoding_rs",
  "libc",
@@ -225,7 +225,7 @@ dependencies = [
 
 [[package]]
 name = "data-model"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "csv-engine",
  "formula",
@@ -315,7 +315,7 @@ dependencies = [
 
 [[package]]
 name = "etch"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "gtk4",
  "image",
@@ -382,7 +382,7 @@ dependencies = [
 
 [[package]]
 name = "file-format"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "csv-engine",
  "data-model",
@@ -410,11 +410,11 @@ dependencies = [
 
 [[package]]
 name = "formula"
-version = "0.3.0"
+version = "0.4.0"
 
 [[package]]
 name = "frame"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "deck-edit",
  "gtk4",
@@ -665,7 +665,7 @@ dependencies = [
 
 [[package]]
 name = "grid"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "data-model",
 ]
@@ -811,7 +811,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "jobs"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "async-channel",
  "csv-engine",
@@ -1252,7 +1252,7 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
 name = "slate"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "document-edit",
  "document-model",
@@ -1487,7 +1487,7 @@ dependencies = [
 
 [[package]]
 name = "xlsx"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "calamine",
  "csv-engine",

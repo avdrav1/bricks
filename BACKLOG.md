@@ -28,7 +28,7 @@ Source of truth for what to build next. The `next-story` skill reads and updates
 - [x] ET2: etch selects a rectangle and moves its pixels, cuts, copies, and pastes through the system clipboard (to and from another app), crops to the selection, resizes the image and the canvas, rotates and flips, all with undo: the spec's V0.1 definition of done
 - [x] ET3: etch opens dropped files, lists recent files, picks colours by chooser and hex, switches every tool by its key, and after a crash offers back unsaved images without touching their files
 - [x] XP0: a decision record (ADR, accepted by the user) says how the suite builds, packages, and tests on macOS and Windows, from a spike that built and started every app there and listed what breaks
-- [ ] XP1: Brick, Slate, Frame, and Etch install on macOS (Apple Silicon, macOS 14 or later) from a curl installer or a DMG as unsigned previews, start, open and save their files, keep their data in `~/Library`, use Command shortcuts and the macOS menu bar with native title bars, and open files from Finder; CI builds, tests, and smoke-tests them on macOS
+- [x] XP1: Brick, Slate, Frame, and Etch install on macOS (Apple Silicon, macOS 14 or later) from a curl installer or a DMG as unsigned previews, start, open and save their files, keep their data in `~/Library`, use Command shortcuts and the macOS menu bar with native title bars, and open files from Finder; CI builds, tests, and smoke-tests them on macOS
 
 ## Stories
 

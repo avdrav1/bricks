@@ -2,6 +2,58 @@
 
 Releases are added by the ship-it skill.
 
+## Etch v0.3.0 (2026-10-16)
+
+Etch runs on macOS (Apple Silicon, macOS 14 or later) as a preview: install it with the same curl command or a DMG. It uses Command shortcuts and the macOS menu bar with native title bars, follows light and dark mode, opens images from Finder, and keeps its settings in `~/Library`. The download isn't signed by Apple yet, so a DMG from the browser needs Open Anyway once (the download page says how). On Linux, files now reach Etch through GTK's open handling, and every release carries the licence notices of the Rust crates and libraries inside it.
+
+- MAC-1: Add a macOS CI job and make every crate and test portable to macOS
+- MAC-2: Keep each app's data in ~/Library on macOS
+- MAC-3: Use Command shortcuts on macOS
+- MAC-4: Put the menus in the macOS menu bar, with native title bars
+- MAC-5: Open files from Finder and the command line through GApplication
+- MAC-6: Follow macOS light and dark mode
+- MAC-7: Ship a self-contained macOS app, DMG, and curl install
+- PKG-6: Include the licence notices of the Rust crates in every release
+
+## Frame v0.2.0 (2026-10-16)
+
+Frame runs on macOS (Apple Silicon, macOS 14 or later) as a preview: install it with the same curl command or a DMG. It uses Command shortcuts and the macOS menu bar with a toolbar row and native title bars, follows light and dark mode, opens decks from Finder, and draws PowerPoint's fonts with the bundled metric-compatible ones. The download isn't signed by Apple yet, so a DMG from the browser needs Open Anyway once. Every release now carries the licence notices of the Rust crates and libraries inside it.
+
+- MAC-1: Add a macOS CI job and make every crate and test portable to macOS
+- MAC-2: Keep each app's data in ~/Library on macOS
+- MAC-3: Use Command shortcuts on macOS
+- MAC-4: Put the menus in the macOS menu bar, with native title bars
+- MAC-5: Open files from Finder and the command line through GApplication
+- MAC-6: Bundle the metric-compatible fonts and follow macOS light and dark mode
+- MAC-7: Ship a self-contained macOS app, DMG, and curl install
+- PKG-6: Include the licence notices of the Rust crates in every release
+
+## Slate v0.4.0 (2026-10-16)
+
+Slate runs on macOS (Apple Silicon, macOS 14 or later) as a preview: install it with the same curl command or a DMG. It uses Command shortcuts and Mac text navigation, the macOS menu bar with native title bars, follows light and dark mode, opens documents from Finder, keeps its data and crash recovery in `~/Library`, and draws Word documents in the bundled metric-compatible fonts with the same line breaks as on Linux. The download isn't signed by Apple yet, so a DMG from the browser needs Open Anyway once. Every release now carries the licence notices of the Rust crates and libraries inside it.
+
+- MAC-1: Add a macOS CI job and make every crate and test portable to macOS
+- MAC-2: Keep each app's data in ~/Library on macOS; a second Slate no longer removes the first one's working copy
+- MAC-3: Use Command shortcuts and Mac caret keys on macOS
+- MAC-4: Put the menus in the macOS menu bar, with native title bars
+- MAC-5: Open files from Finder and the command line through GApplication
+- MAC-6: Bundle the metric-compatible fonts and follow macOS light and dark mode
+- MAC-7: Ship a self-contained macOS app, DMG, and curl install
+- PKG-6: Include the licence notices of the Rust crates in every release
+
+## v0.4.0 (2026-10-16)
+
+Brick runs on macOS (Apple Silicon, macOS 14 or later) as a preview: install it with the same curl command or a DMG. It uses Command shortcuts and the macOS menu bar with a toolbar row and native title bars, follows light and dark mode, opens spreadsheets from Finder, and keeps its recent files and recovery in `~/Library`. The download isn't signed by Apple yet, so a DMG from the browser needs Open Anyway once. Every release now carries the licence notices of the Rust crates and libraries inside it.
+
+- MAC-1: Add a macOS CI job and make every crate and test portable to macOS
+- MAC-2: Keep each app's data in ~/Library on macOS
+- MAC-3: Use Command shortcuts on macOS
+- MAC-4: Put the menus in the macOS menu bar, with native title bars
+- MAC-5: Open files from Finder and the command line through GApplication
+- MAC-6: Bundle the metric-compatible fonts and follow macOS light and dark mode
+- MAC-7: Ship a self-contained macOS app, DMG, and curl install
+- PKG-6: Include the licence notices of the Rust crates in every release
+
 ## Etch v0.2.1 (2026-10-15)
 
 The canvas draws cleanly on HiDPI screens: at a display scale of 2 (or 1.5), faint pale lines no longer cross the image every 256 pixels, and the checkerboard behind transparent pixels has crisp squares right up to the image's edge, with any GTK renderer.
