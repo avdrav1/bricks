@@ -12,8 +12,10 @@
 #   APP-V-arm64-macos.{tar.gz,dmg}.sha256
 # The bundle runs without Homebrew: every dylib it loads is in Contents/Frameworks, linked
 # by @executable_path, and GTK's data is in Contents/Resources (the app points the
-# libraries there when it starts, suite_platform::bundle). It fails if any Mach-O still
-# names a library outside the bundle and the system.
+# libraries there when it starts, suite_platform::bundle). Contents/Resources/licenses has
+# every bundled formula's licence files and THIRD-PARTY.txt (scripts/mac_licenses.py). It
+# fails if any Mach-O still names a library outside the bundle and the system, or a
+# bundled library has no formula or licence.
 set -euo pipefail
 app=${1:?usage: mac_bundle.sh APP [BIN_DIR [OUT]]}
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -82,17 +84,19 @@ pixbuf=lib/gdk-pixbuf-2.0/2.10.0
 loaders=$R/$pixbuf/loaders
 mkdir -p "$loaders"
 GDK_PIXBUF_MODULEDIR=$brew/$pixbuf/loaders gdk-pixbuf-query-loaders >"$work/loaders.cache"
-python3 - "$work/loaders.cache" "$loaders" "$pixbuf/loaders" >"$R/$pixbuf/loaders.cache" <<'EOF'
+python3 - "$work/loaders.cache" "$loaders" "$pixbuf/loaders" "$work/loader-sources.tsv" >"$R/$pixbuf/loaders.cache" <<'EOF'
 import os, shutil, sys
-cache, dest, rel = sys.argv[1:]
-for line in open(cache).read().splitlines():
-    s = line.strip()
-    if s.startswith('"/') and s.endswith('.so"') and s.count('"') == 2:
-        src = s[1:-1]
-        base = os.path.basename(src)
-        shutil.copy2(os.path.realpath(src), os.path.join(dest, base))
-        os.chmod(os.path.join(dest, base), 0o755)
-        line = f'"{rel}/{base}"'
+cache, dest, rel, sources = sys.argv[1:]
+with open(sources, "w") as tsv:
+    for line in open(cache).read().splitlines():
+        s = line.strip()
+        if s.startswith('"/') and s.endswith('.so"') and s.count('"') == 2:
+            src = s[1:-1]
+            base = os.path.basename(src)
+            shutil.copy2(os.path.realpath(src), os.path.join(dest, base))
+            os.chmod(os.path.join(dest, base), 0o755)
+            tsv.write(f"{base}\t{os.path.realpath(src)}\n")
+            line = f'"{rel}/{base}"'
     elif line.startswith("# LoaderDir"):
         line = f"# LoaderDir = {rel}"
     print(line)
@@ -142,6 +146,12 @@ while IFS= read -r f; do
   fi
 done < <(find "$C" -type f \( -name '*.dylib' -o -name '*.so' -o -path "*/MacOS/*" \))
 ((bad == 0)) || exit 1
+
+# Third-party licence notices: each bundled library's and data's Homebrew formula, its
+# licence files, version, SPDX licence, and source (Resources/licenses/THIRD-PARTY.txt).
+python3 "$root/scripts/mac_licenses.py" "$C" "$work/loader-sources.tsv" >"$work/licenses.txt" ||
+  { cat "$work/licenses.txt"; exit 1; }
+cat "$work/licenses.txt"
 
 # Ad-hoc signatures: each library and loader, then the app (arm64 runs no unsigned code).
 broken=$(find "$C" -type l ! -exec test -e {} \; -print)

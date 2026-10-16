@@ -19,6 +19,7 @@ on:
     paths:
       - .github/workflows/release-macos.yml
       - scripts/mac_bundle.sh
+      - scripts/mac_licenses.py
       - scripts/mac_app.py
       - scripts/check_mac_install.sh
       - crates/suite-platform/src/bundle.rs

@@ -134,6 +134,15 @@ check() {
     pass "$app: signature valid ($(codesign -dv "$appdir" 2>&1 | grep -E '^Signature' | tr '\n' ' '))"
   else fail "$app: codesign --verify: $(tr '\n' '|' <"$logs/$app-codesign.log")"; fi
   note "$app: spctl --assess: $(spctl --assess --type execute "$appdir" 2>&1 | tr '\n' ' ')"
+  # Every bundled library named in the third-party notice, with its formula's licence files.
+  local notice=$appdir/Contents/Resources/licenses/THIRD-PARTY.txt unnamed=""
+  for lib in "$appdir"/Contents/Frameworks/*; do
+    grep -qF "Frameworks/$(basename "$lib")" "$notice" 2>/dev/null || unnamed+=" $(basename "$lib")"
+  done
+  if [[ -s $notice && -z $unnamed ]]; then
+    pass "$app: THIRD-PARTY.txt names all $(ls "$appdir/Contents/Frameworks" | wc -l | tr -d ' ') libraries; licence files of $(ls -d "$appdir"/Contents/Resources/licenses/*/ | wc -l | tr -d ' ') formulas"
+  else fail "$app: third-party notice missing or without:$unnamed"; fi
+  cp "$notice" "$logs/$app-THIRD-PARTY.txt" 2>/dev/null
   if "$lsregister" -dump 2>/dev/null | grep -q "path: *$appdir "; then
     pass "$app: registered with Launch Services"
   elif "$lsregister" -dump 2>/dev/null | grep -qF "$appdir"; then

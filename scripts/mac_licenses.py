@@ -1,0 +1,185 @@
+#!/usr/bin/env python3
+"""Third-party licence notices for a macOS app bundle (MAC-7).
+
+    python3 scripts/mac_licenses.py CONTENTS LOADER_SOURCES
+
+scripts/mac_bundle.sh runs it once the libraries are in the bundle, before signing. CONTENTS
+is the bundle's Contents folder; LOADER_SOURCES has a line per gdk-pixbuf loader, its name
+and the Homebrew file it was copied from, tab-separated.
+
+For every dylib in Contents/Frameworks and every loader it finds the Homebrew formula the
+file came from (the formula's copy under $(brew --prefix)/opt/*/lib, resolved into the
+Cellar), and adds the formulas whose data the bundle carries (DATA). Each formula's licence
+files (COPYING, LICENSE, NOTICE, ... in its keg, its share/doc, or its share/licenses) go to
+Contents/Resources/licenses/<formula>/, and Contents/Resources/licenses/THIRD-PARTY.txt
+lists every formula: version, SPDX licence (`brew info`), upstream source, Homebrew's
+recipe, its licence files, and what of it the app carries. It fails when a library comes
+from no formula or a formula has no licence file. It prints one line per formula.
+"""
+
+import glob
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+# Formulas whose data the bundle carries (scripts/mac_bundle.sh), and what.
+DATA = {
+    "gtk4": "Resources/share/glib-2.0/schemas (GTK's settings schemas)",
+    "adwaita-icon-theme": "Resources/share/icons/Adwaita (symbolic icons)",
+    "hicolor-icon-theme": "Resources/share/icons/hicolor/index.theme",
+    "fontconfig": "Resources/etc/fonts (fonts.conf, conf.d)",
+}
+
+LICENCE = re.compile(r"^(copying|licen[cs]e|notice|copyright|unlicense)", re.IGNORECASE)
+
+
+def cellar_formula(path, cellar):
+    """(formula, version) of a file or folder that resolves into the Cellar, else None."""
+    rel = os.path.relpath(os.path.realpath(path), os.path.realpath(cellar))
+    parts = rel.split(os.sep)
+    if rel.startswith("..") or len(parts) < 2:
+        return None
+    return parts[0], parts[1]
+
+
+def is_licence(name):
+    return bool(LICENCE.match(name))
+
+
+def licence_files(keg):
+    """A keg's licence files: in its root, share/doc/*, and share/licenses/*."""
+    dirs = [keg, *sorted(glob.glob(os.path.join(keg, "share", "doc", "*"))),
+            *sorted(glob.glob(os.path.join(keg, "share", "licenses", "*")))]
+    found = []
+    for d in dirs:
+        if not os.path.isdir(d):
+            continue
+        for name in sorted(os.listdir(d)):
+            path = os.path.join(d, name)
+            if os.path.isfile(path) and is_licence(name):
+                found.append(path)
+    return found
+
+
+def render(title, own, entries, fonts):
+    """THIRD-PARTY.txt. `entries`: formula -> dict(version, spdx, source, files, licences,
+    stable); `own`: the app's own licence files; `fonts`: the fonts folder's licence files."""
+    out = [
+        f"Third-party software in {title}.app",
+        "",
+        f"{title} itself is free software under the MIT or Apache-2.0 licence ({', '.join('../' + f for f in own)}).",
+        f"{title}.app carries the libraries and data below, built by Homebrew for macOS 14 (arm64). The",
+        "libraries are dynamically linked, each a file of its own in Contents/Frameworks or",
+        "Contents/Resources/lib, so you may replace one with your own build of the same library",
+        f"and then sign the app again: codesign --force --deep -s - {title}.app",
+        "Each library's licence texts are in this folder, a subfolder per Homebrew formula. Its",
+        "source is the upstream release listed (the one Homebrew built), and Homebrew's build",
+        "recipe is at the formula's page.",
+        "",
+    ]
+    for name in sorted(entries):
+        e = entries[name]
+        version = e["version"]
+        if e["stable"] and not version.split("_")[0] == e["stable"]:
+            version += f" (formula's current release {e['stable']})"
+        out.append(f"{name} {version}: {e['spdx']}")
+        out.append(f"  Source:   {e['source']}")
+        out.append(f"  Recipe:   https://formulae.brew.sh/formula/{name}")
+        out.append(f"  Licences: {', '.join(e['licences'])}")
+        out.append(f"  In {title}.app: {', '.join(e['files'])}")
+        out.append("")
+    if fonts:
+        out.append("Fonts (Resources/fonts): Liberation 2.1.5, Carlito, and Caladea, under the SIL Open Font")
+        out.append(f"License 1.1; their licence texts are beside them: {', '.join('../fonts/' + f for f in fonts)}.")
+        out.append("")
+    return "\n".join(out)
+
+
+def brew(*args):
+    return subprocess.run(["brew", *args], capture_output=True, text=True, check=True).stdout
+
+
+def main(contents, sources):
+    prefix = brew("--prefix").strip()
+    cellar = brew("--cellar").strip()
+    info = {f["name"]: f for f in json.loads(brew("info", "--json=v2", "--installed"))["formulae"]}
+    res = os.path.join(contents, "Resources")
+    title = os.path.basename(os.path.dirname(os.path.abspath(contents)))[: -len(".app")]
+    files = {}  # (formula, version) -> what the app carries of it
+    problems = []
+
+    def add(formula, what):
+        files.setdefault(formula, []).append(what)
+
+    frameworks = os.path.join(contents, "Frameworks")
+    for base in sorted(os.listdir(frameworks)):
+        hits = {cellar_formula(p, cellar) for p in glob.glob(os.path.join(prefix, "opt", "*", "lib", base))}
+        hits.discard(None)
+        if not hits:
+            hits = {cellar_formula(p, cellar) for p in glob.glob(os.path.join(cellar, "*", "*", "lib", "**", base), recursive=True)}
+            hits.discard(None)
+        if len(hits) != 1:
+            problems.append(f"Frameworks/{base}: {'formulas ' + str(sorted(hits)) if hits else 'from no Homebrew formula'}")
+            continue
+        add(hits.pop(), f"Frameworks/{base}")
+    for line in open(sources).read().splitlines():
+        base, src = line.split("\t")
+        formula = cellar_formula(src, cellar)
+        if formula is None:
+            problems.append(f"loader {base}: {src} is in no Homebrew formula")
+            continue
+        add(formula, f"Resources/lib/gdk-pixbuf-2.0/2.10.0/loaders/{base}")
+    for name, what in DATA.items():
+        formula = cellar_formula(os.path.join(prefix, "opt", name), cellar)
+        if formula is None:
+            problems.append(f"{name}: not installed, yet the bundle carries its {what}")
+            continue
+        add(formula, what)
+
+    dest = os.path.join(res, "licenses")
+    shutil.rmtree(dest, ignore_errors=True)
+    entries = {}
+    for (name, version), what in files.items():
+        keg = os.path.join(cellar, name, version)
+        texts = licence_files(keg)
+        if not texts:
+            problems.append(f"{name} {version}: no licence file in {keg}")
+            continue
+        os.makedirs(os.path.join(dest, name))
+        copied = []
+        for path in texts:
+            target = os.path.basename(path)
+            if target in copied:
+                target = f"{os.path.basename(os.path.dirname(path))}-{target}"
+            shutil.copy2(path, os.path.join(dest, name, target))
+            os.chmod(os.path.join(dest, name, target), 0o644)
+            copied.append(target)
+        f = info.get(name, {})
+        entries[name] = {
+            "version": version,
+            "stable": (f.get("versions") or {}).get("stable"),
+            "spdx": f.get("license") or "no SPDX licence in Homebrew; see the licence files",
+            "source": ((f.get("urls") or {}).get("stable") or {}).get("url") or f.get("homepage") or "unknown",
+            "files": sorted(what),
+            "licences": [f"{name}/{t}" for t in copied],
+        }
+    if problems:
+        print("mac_licenses: " + "\n  ".join(["no licence notice for:", *problems]), file=sys.stderr)
+        return 1
+    own = sorted(f for f in os.listdir(res) if f.startswith("LICENSE"))
+    fonts_dir = os.path.join(res, "fonts")
+    fonts = sorted(f for f in os.listdir(fonts_dir) if f.endswith(".txt")) if os.path.isdir(fonts_dir) else []
+    with open(os.path.join(dest, "THIRD-PARTY.txt"), "w") as out:
+        out.write(render(title, own, entries, fonts))
+    for name in sorted(entries):
+        print(f"licence: {name} {entries[name]['version']}: {entries[name]['spdx']} ({len(entries[name]['licences'])} files)")
+    return 0
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        raise SystemExit(__doc__.split("\n\n")[1])
+    sys.exit(main(*sys.argv[1:]))
