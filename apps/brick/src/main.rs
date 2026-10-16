@@ -219,6 +219,8 @@ fn main() -> glib::ExitCode {
     });
     let (opened, failed) = (RefCell::new(opened), RefCell::new(failed));
     let bench = RefCell::new(args.bench);
+    // The first `open` brings the command line's file, opened above; later ones, and the
+    // system's (Finder), open each file in its own window.
     app.connect_open(move |app, files, _| {
         if let Some((session, book)) = opened.take() {
             build_window(app, &session, book, bench.take());

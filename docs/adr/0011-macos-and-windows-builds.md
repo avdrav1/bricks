@@ -51,6 +51,7 @@ Not exercised on either: GPU rendering on real hardware, HiDPI (Windows), input 
    - the repository gets a `.gitattributes` so fixtures keep their bytes.
 4. **Engine crates stay toolkit- and OS-free.** `csv-engine`'s SIGBUS guard is Unix-only; on Windows the mapped file can't be truncated, so the guard isn't needed there. Its Windows behaviour gets a test of its own.
 5. **Renderer:** keep GTK's default and verify it on real hardware first. If GL draws black on real Macs or Windows machines, the apps choose cairo there (unless `GSK_RENDERER` is set). That's one line per app, decided on evidence.
+   - *Amended by MAC-5 (2026-10-15):* with no real Mac to verify GL on, and GL black again on the macOS 14 runner, macOS defaults to cairo (unless `GSK_RENDERER` is set) from one place, `suite_ui::renderer::MAC_DEFAULT`. Once GL draws on a real Apple Silicon Mac (`GSK_RENDERER=gl`), setting it to `None` gives GTK's default back.
 6. **Packaging:**
    - Windows: one per-user installer per app (Inno Setup, no admin rights), each bundling its GTK runtime (about 30 MB compressed), built as a GUI-subsystem program (no console), and registering its file types under `HKCU`. Signed with Authenticode (Azure Trusted Signing, or an OV certificate).
    - macOS: one `.app` per app (`dylibbundler` plus the GTK data: schemas, icons, pixbuf loaders), in a DMG, signed with a Developer ID, with the hardened runtime, and notarized ($99 a year).

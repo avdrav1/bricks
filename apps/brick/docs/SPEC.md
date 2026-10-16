@@ -21,6 +21,7 @@ V0.1 ships at the end of M3; the curl-installer release (per user, on Arch, Ubun
 - Crate tags match the PRD workspace: `csv-engine`, `data-model`, `grid`, `commands`, `app`, plus `bench` for the harness.
 - Every story carries acceptance criteria. A story is done when its criteria pass in CI on the test corpus.
 - Shortcuts are written once with the primary modifier (`apps/brick/src/keys.rs`, MAC-3): on macOS, Command replaces Ctrl in every shortcut; Redo is ⇧⌘Z (no Ctrl+Y), Replace ⌥⌘F, and Control stays for ⌃Space and ⇧⌃Space (selections), ⌃⇧digit number formats, and ⌃Page Down/Up (sheets), as in Excel for Mac.
+- On macOS (MAC-5), Finder's Open and Open With, a file dropped on Brick's Dock icon, and `open -a Brick` open each file in a window of its own in the running Brick (Launch Services keeps one Brick, and GTK hands it the files through GApplication's `open`, as the command line's file goes too); a file already open brings its window forward, and without a file Brick shows its start window. On Linux each `brick FILE` is its own process, as before. The apps draw with cairo on macOS unless `GSK_RENDERER` names another renderer: GTK's GL renderer drew black windows on GitHub's macOS runners and is untried on a real Mac.
 
 The roadmap below shows each milestone and the gate that closes it.
 

@@ -14,8 +14,6 @@ pub mod fonts;
 pub mod im;
 pub mod keys;
 pub mod launch;
-#[cfg(target_os = "macos")]
-pub mod probe;
 pub mod renderer;
 
 use suite_core::AppKind;

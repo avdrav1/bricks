@@ -23,8 +23,6 @@ use std::path::PathBuf;
 /// any, `activate`. Relative paths are made absolute first, so no file is read as an
 /// option.
 pub fn run(app: &impl IsA<gio::Application>, files: &[PathBuf]) -> glib::ExitCode {
-    #[cfg(target_os = "macos")]
-    crate::probe::attach(app.upcast_ref());
     app.run_with_args_os(&args(files))
 }
 
