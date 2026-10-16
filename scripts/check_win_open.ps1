@@ -429,7 +429,7 @@ foreach ($app in "brick", "slate", "frame", "etch") {
     $effect = [Drag]::Run("$files\$($dropped[$app])", 60, $screen.Height - 120, $x, $y)
     $h2 = Wait-Window (Of $app $t0) $dropped[$app] 20
     if ($h2) { Shot $h2 "$app-drop-2-opened"; Pass "$app opens $($dropped[$app]) dropped on its window (drop effect $effect)" }
-    else { [Win]::Screen("$shots\$app-drop-2-screen.png"); Fail "$app: dropping $($dropped[$app]) at $x,$y (effect $effect) opened nothing (titles: $($script:titles -join ' | '))" }
+    else { [Win]::Screen("$shots\$app-drop-2-screen.png"); Fail "${app}: dropping $($dropped[$app]) at $x,$y (effect $effect) opened nothing (titles: $($script:titles -join ' | '))" }
     Stop-Apps
 }
 

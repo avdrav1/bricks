@@ -27,8 +27,10 @@
 //! FreeType (MAC-6's runner screenshots). Windows' system font (`Segoe UI`, GTK's
 //! `gtk-font-name` there) is a font file fontconfig reads like any other.
 
+use std::ffi::CString;
+use std::path::Path;
 #[cfg(any(target_os = "macos", windows, test))]
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// Choose how Pango finds fonts and add the bundled ones; see the module docs. Does
 /// nothing on Linux.
@@ -50,11 +52,125 @@ fn folder_for(exe: &Path) -> Option<PathBuf> {
         .find(|dir| dir.is_dir())
 }
 
+/// A path as fontconfig and FreeType take it, for `FcConfigAppFontAdd*`: its own bytes on
+/// Unix. On Windows both open files through the system's ANSI functions
+/// (`GetFileAttributesExA`, `CreateFileA`), so it's the path in the ANSI code page, or
+/// else its short (8.3) name, whose letters that code page has: a folder under a user
+/// named in another script (`C:\Users\文件\…` on a Western system) has no ANSI name of its
+/// own. `None` if neither names it.
+pub fn fontconfig_path(path: &Path) -> Option<CString> {
+    #[cfg(unix)]
+    return CString::new(std::os::unix::ffi::OsStrExt::as_bytes(path.as_os_str())).ok();
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        let wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+        ansi::encode(&wide).or_else(|| ansi::encode(&ansi::short(&wide)?))
+    }
+}
+
+/// The system's ANSI code page, which fontconfig and FreeType read file names in.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+mod ansi {
+    use std::ffi::CString;
+    use std::ptr::{null, null_mut};
+
+    const CP_ACP: u32 = 0;
+    const CP_UTF8: u32 = 65001;
+    const WC_NO_BEST_FIT_CHARS: u32 = 0x400;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetACP() -> u32;
+        fn WideCharToMultiByte(
+            page: u32,
+            flags: u32,
+            wide: *const u16,
+            wide_len: i32,
+            out: *mut u8,
+            out_len: i32,
+            default: *const u8,
+            used_default: *mut i32,
+        ) -> i32;
+        fn GetShortPathNameW(long: *const u16, short: *mut u16, len: u32) -> u32;
+    }
+
+    /// `wide` in the ANSI code page, or `None` if a character has no exact equivalent
+    /// there (no best fit: `é` doesn't become `e`).
+    pub fn encode(wide: &[u16]) -> Option<CString> {
+        let len = i32::try_from(wide.len()).ok().filter(|&n| n > 0)?;
+        // SAFETY: no arguments.
+        let utf8 = unsafe { GetACP() } == CP_UTF8;
+        // UTF-8 has every character, and refuses the flag and the out-parameter.
+        let flags = if utf8 { 0 } else { WC_NO_BEST_FIT_CHARS };
+        let mut used = 0;
+        let used_ptr = if utf8 {
+            null_mut()
+        } else {
+            &mut used as *mut i32
+        };
+        // SAFETY: `wide` holds `len` units; a null output asks for the length only.
+        let n = unsafe {
+            WideCharToMultiByte(
+                CP_ACP,
+                flags,
+                wide.as_ptr(),
+                len,
+                null_mut(),
+                0,
+                null(),
+                used_ptr,
+            )
+        };
+        if n <= 0 || used != 0 {
+            return None;
+        }
+        let mut out = vec![0u8; usize::try_from(n).ok()?];
+        // SAFETY: `out` has room for the `n` bytes the first call asked for.
+        let written = unsafe {
+            WideCharToMultiByte(
+                CP_ACP,
+                flags,
+                wide.as_ptr(),
+                len,
+                out.as_mut_ptr(),
+                n,
+                null(),
+                null_mut(),
+            )
+        };
+        (written == n).then_some(())?;
+        CString::new(out).ok()
+    }
+
+    /// The short (8.3) name of the existing file or folder `wide`; the long name where
+    /// the volume keeps no short names.
+    pub fn short(wide: &[u16]) -> Option<Vec<u16>> {
+        let long: Vec<u16> = wide.iter().copied().chain([0]).collect();
+        // SAFETY: a NUL-terminated name; a null output asks for the length, NUL included.
+        let n = unsafe { GetShortPathNameW(long.as_ptr(), null_mut(), 0) };
+        if n == 0 {
+            return None;
+        }
+        let mut out = vec![0u16; n as usize];
+        // SAFETY: `out` has room for the `n` units the first call asked for.
+        let written = unsafe { GetShortPathNameW(long.as_ptr(), out.as_mut_ptr(), n) };
+        if written == 0 || written >= n {
+            return None;
+        }
+        out.truncate(written as usize);
+        Some(out)
+    }
+}
+
 /// Pango on fontconfig, with the bundled fonts (macOS and Windows).
 #[cfg(any(target_os = "macos", windows))]
 #[allow(unsafe_code)]
 mod fc {
-    use std::ffi::{c_char, c_int, c_void, CString};
+    #[cfg(target_os = "macos")]
+    use std::ffi::CString;
+    use std::ffi::{c_char, c_int, c_void};
     use std::path::Path;
     use std::time::Instant;
 
@@ -96,7 +212,12 @@ mod fc {
         if !alias_system_font() {
             tracing::warn!("fontconfig refused the system font's alias");
         }
+        // The executable's real place on macOS, where a symlink may start it; on Windows
+        // its name as is (canonicalize gives a `\\?\` name).
+        #[cfg(target_os = "macos")]
         let exe = std::env::current_exe().and_then(std::fs::canonicalize);
+        #[cfg(windows)]
+        let exe = std::env::current_exe();
         match exe.ok().as_deref().and_then(super::folder_for) {
             Some(dir) if add_folder(&dir) => tracing::info!(
                 "fonts: added {} to fontconfig in {} ms",
@@ -146,7 +267,7 @@ mod fc {
     /// Add every font file in `dir` to the current configuration as this process's
     /// application fonts. Whether fontconfig could.
     pub fn add_folder(dir: &Path) -> bool {
-        let Some(dir) = c_path(dir) else {
+        let Some(dir) = super::fontconfig_path(dir) else {
             return false;
         };
         // SAFETY: a live configuration and a NUL-terminated path; fontconfig copies what
@@ -154,20 +275,10 @@ mod fc {
         unsafe { FcConfigAppFontAddDir(current(), dir.as_ptr()) != 0 }
     }
 
-    /// A path as fontconfig takes it: its own bytes on Unix, UTF-8 on Windows (where
-    /// fontconfig and FreeType open files by UTF-8 names).
-    fn c_path(path: &Path) -> Option<CString> {
-        #[cfg(unix)]
-        let bytes = std::os::unix::ffi::OsStrExt::as_bytes(path.as_os_str());
-        #[cfg(windows)]
-        let bytes = path.to_str()?.as_bytes();
-        CString::new(bytes).ok()
-    }
-
     #[cfg(test)]
     mod tests {
         use super::*;
-        use std::ffi::CStr;
+        use std::ffi::{CStr, CString};
         use std::path::PathBuf;
 
         #[link(name = "fontconfig")]
@@ -253,8 +364,10 @@ mod fc {
             assert_eq!(matched(".AppleSystemUIFont"), "Helvetica Neue");
         }
 
-        // One test, as above. The bundled fonts are read from a folder whose name isn't
-        // ASCII, as a user's profile folder (where the apps install) may be.
+        // One test, as above. The bundled fonts are read from folders whose names aren't
+        // ASCII, as a user's profile folder (where the apps install) may be: Liberation
+        // from one the ANSI code page can name (é), Carlito and Caladea from one only its
+        // short name can (文件, on a Western system).
         #[cfg(windows)]
         #[test]
         fn pango_takes_fontconfig_which_reads_windows_fonts_and_the_bundled_ones() {
@@ -277,17 +390,26 @@ mod fc {
                 "Liberation Sans",
                 "Windows has no Liberation of its own"
             );
-            let copy =
-                std::env::temp_dir().join(format!("suite-ui fonts ü 文件 {}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&copy);
-            std::fs::create_dir_all(&copy).unwrap();
-            for entry in std::fs::read_dir(&dir).unwrap() {
-                let path = entry.unwrap().path();
-                if path.extension().is_some_and(|e| e == "ttf") {
-                    std::fs::copy(&path, copy.join(path.file_name().unwrap())).unwrap();
+            assert_ne!(matched("Carlito"), "Carlito", "nor Carlito");
+            let tmp = std::env::temp_dir();
+            let pid = std::process::id();
+            let latin = tmp.join(format!("suite-ui fonts é {pid}"));
+            let cjk = tmp.join(format!("suite-ui fonts 文件 {pid}"));
+            for (folder, prefix) in [(&latin, "Liberation"), (&cjk, "Ca")] {
+                let _ = std::fs::remove_dir_all(folder);
+                std::fs::create_dir_all(folder).unwrap();
+                for entry in std::fs::read_dir(&dir).unwrap() {
+                    let path = entry.unwrap().path();
+                    let name = path.file_name().unwrap().to_str().unwrap();
+                    if name.starts_with(prefix) && name.ends_with(".ttf") {
+                        std::fs::copy(&path, folder.join(name)).unwrap();
+                    }
                 }
+                let named = crate::fonts::fontconfig_path(folder);
+                eprintln!("{} reaches fontconfig as {named:?}", folder.display());
+                assert!(named.is_some(), "{}", folder.display());
+                assert!(add_folder(folder));
             }
-            assert!(add_folder(&copy));
             for (asked, drawn) in [
                 ("Carlito", "Carlito"),
                 ("Caladea", "Caladea"),
@@ -308,7 +430,8 @@ mod fc {
                 let drawn = matched(asked);
                 assert!(drawn == asked || drawn == alias, "{asked}: {drawn}");
             }
-            let _ = std::fs::remove_dir_all(&copy);
+            let _ = std::fs::remove_dir_all(&latin);
+            let _ = std::fs::remove_dir_all(&cjk);
         }
     }
 }
