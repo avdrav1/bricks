@@ -84,6 +84,16 @@ class ChainTest(unittest.TestCase):
         got = backlog.next_story("etch")
         self.assertEqual((got["action"], got["id"]), ("start", "ETCH-6"))
 
+    def test_a_story_with_an_escaped_pipe_in_its_acceptance_counts(self):
+        self.write(
+            ["- [ ] XP0: spike"],
+            [row("DEC-11", "XP0", "done").replace("proof", r"runs `irm url \| iex`")],
+        )
+        _, stories, _ = backlog.load()
+        self.assertEqual([s["id"] for s in stories], ["DEC-11"])
+        self.assertEqual(stories[0]["acceptance"], "runs `irm url | iex`")
+        self.assertEqual(backlog.next_story("suite")["action"], "gate")
+
 
 if __name__ == "__main__":
     unittest.main()

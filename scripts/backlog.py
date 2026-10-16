@@ -39,7 +39,8 @@ def load():
             gates[m.group(2)] = m.group(1) == "x"
             continue
         if line.startswith("| ") and not line.startswith("| ID") and not line.startswith("| ---"):
-            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            # Markdown escapes a pipe inside a cell as `\|`; only bare pipes split cells.
+            cells = [c.strip().replace("\\|", "|") for c in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
             if len(cells) == len(COLS):
                 s = dict(zip(COLS, cells))
                 s["depends"] = [] if s["depends"] in ("-", "") else [d.strip() for d in s["depends"].split(",")]
