@@ -18,6 +18,9 @@
 //! FRAMES frames and prints how long each took (ETCH-2's acceptance test); `--bench-open`
 //! opens FILE and prints how long it took to show (ETCH-6's).
 
+// On Windows a GUI program: no console window opens with it (WIN-3).
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod canvas;
 mod colours;
 mod image_menu;
@@ -89,6 +92,8 @@ fn parse_args() -> Result<Args, String> {
 
 fn main() -> glib::ExitCode {
     let start = Instant::now();
+    // Before anything prints: on Windows the terminal Etch was started from (WIN-3).
+    suite_platform::console::attach();
     let args = match parse_args() {
         Ok(a) => a,
         Err(e) => {
@@ -114,14 +119,15 @@ fn main() -> glib::ExitCode {
         Err(e) => tracing::warn!("bundle: {e}"),
     }
     suite_ui::renderer::init();
+    suite_ui::chrome::init();
     suite_ui::fonts::init();
 
     let app = gtk::Application::builder()
         .application_id(APP_ID)
         .flags(gio::ApplicationFlags::NON_UNIQUE | gio::ApplicationFlags::HANDLES_OPEN)
         .build();
-    // GTK on macOS doesn't follow the Mac's light or dark appearance by itself.
-    #[cfg(target_os = "macos")]
+    // macOS and Windows: the system's light or dark mode (GTK doesn't follow the Mac's).
+    #[cfg(any(target_os = "macos", windows))]
     app.connect_startup(|_| suite_platform::appearance::follow(suite_ui::appearance::set_dark));
     app.connect_startup(window::install_app_actions);
     // Files, from the command line or the system (Finder), each open in their own window

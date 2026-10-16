@@ -52,8 +52,9 @@ enum Bench {
     Open { start: Instant, read_ms: f64 },
 }
 
-/// The app's actions, shortcuts, menu bar (every window shows it on Linux; on macOS it's
-/// the system's, after GTK's app menu with About and Quit), and style.
+/// The app's actions, shortcuts, menu bar (every window shows it on Linux and Windows,
+/// Windows' with Help; on macOS it's the system's, after GTK's app menu with About and
+/// Quit), and style.
 pub fn install_app_actions(app: &gtk::Application) {
     colours::install_style();
     let new = gio::ActionEntry::builder("new")
@@ -108,8 +109,10 @@ pub fn install_app_actions(app: &gtk::Application) {
             ("_Close", "window.close"),
         ],
     );
-    // macOS has Quit in the app menu.
-    if !suite_ui::chrome::MENU_BAR {
+    // macOS has Quit in the app menu; Windows' File ends with Exit.
+    if let Some(exit) = suite_ui::chrome::exit_section() {
+        file.append_section(None, &exit);
+    } else if !suite_ui::chrome::MENU_BAR {
         append(&file, &[("_Quit", "app.quit")]);
     }
     let edit = menu_of(&[("_Undo", "win.undo"), ("_Redo", "win.redo")]);
@@ -136,12 +139,15 @@ pub fn install_app_actions(app: &gtk::Application) {
         ("_Fit to Window", "win.fit"),
     ]);
     let labels = ["File", "Edit", "View", "Image"].map(keys::mnemonic);
-    let menu = suite_ui::chrome::menu_bar(&[
-        (&labels[0], &file),
-        (&labels[1], &edit),
-        (&labels[2], &view),
-        (&labels[3], &image_menu::menu()),
-    ]);
+    let menu = suite_ui::chrome::menu_bar(
+        crate::APP,
+        &[
+            (&labels[0], &file),
+            (&labels[1], &edit),
+            (&labels[2], &view),
+            (&labels[3], &image_menu::menu()),
+        ],
+    );
     app.set_menubar(Some(&menu));
 }
 

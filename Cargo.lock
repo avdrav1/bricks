@@ -1293,6 +1293,7 @@ name = "suite-platform"
 version = "0.1.0"
 dependencies = [
  "suite-core",
+ "windows-sys",
 ]
 
 [[package]]
@@ -1302,6 +1303,7 @@ dependencies = [
  "gtk4",
  "suite-core",
  "tracing",
+ "windows-sys",
 ]
 
 [[package]]

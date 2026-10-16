@@ -1,20 +1,22 @@
 //! Operating-system integration shared by every app in the suite: Linux, macOS, and
 //! Windows (ADR 0011). [`current`] checks the build's platform; [`dirs`] has each app's
 //! per-user folders (XDG on Linux, `~/Library` on macOS, `%APPDATA%` and `%LOCALAPPDATA%`
-//! on Windows); `appearance` (macOS only) reads the Mac's light or dark appearance and
-//! follows its changes; [`launch`] says when the app has finished launching (on macOS,
-//! after Finder's files have opened); [`bundle`] points GTK at the libraries' files inside
-//! a macOS app bundle. Nothing here depends on the UI toolkit, so engine crates may use it
+//! on Windows); `appearance` (macOS and Windows) reads the system's light or dark mode and
+//! follows its changes; [`console`] lets a Windows GUI program print to the terminal it
+//! was started from; [`launch`] says when the app has finished launching (on macOS, after
+//! Finder's files have opened); [`bundle`] points GTK at the libraries' files inside a
+//! macOS app bundle. Nothing here depends on the UI toolkit, so engine crates may use it
 //! too.
 //!
 //! File dialogs, clipboard, desktop integration, drag and drop, Wayland/X11 differences,
 //! and recent files may move here once two apps need them.
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 pub mod appearance;
 pub mod bundle;
 #[cfg(target_os = "macos")]
 mod cf;
+pub mod console;
 pub mod dirs;
 pub mod launch;
 

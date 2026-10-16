@@ -15,6 +15,9 @@
 //! `--bench-typing` measures typing in it (SLATE-6's), `--bench-find` finding in it
 //! (SLATE-16's). Each prints a JSON line.
 
+// On Windows a GUI program: no console window opens with it (WIN-3).
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod bench;
 mod find_bar;
 mod fonts;
@@ -72,6 +75,8 @@ thread_local! {
 }
 
 fn main() -> glib::ExitCode {
+    // Before anything prints: on Windows the terminal Slate was started from (WIN-3).
+    suite_platform::console::attach();
     let (mut files, mut bench) = (Vec::new(), None);
     for arg in std::env::args_os().skip(1) {
         match arg.to_str() {
@@ -114,14 +119,15 @@ fn main() -> glib::ExitCode {
         Err(e) => tracing::warn!("bundle: {e}"),
     }
     suite_ui::renderer::init();
+    suite_ui::chrome::init();
     suite_ui::fonts::init();
 
     let app = gtk::Application::builder()
         .application_id(APP_ID)
         .flags(gio::ApplicationFlags::NON_UNIQUE | gio::ApplicationFlags::HANDLES_OPEN)
         .build();
-    // GTK on macOS doesn't follow the Mac's light or dark appearance by itself.
-    #[cfg(target_os = "macos")]
+    // macOS and Windows: the system's light or dark mode (GTK doesn't follow the Mac's).
+    #[cfg(any(target_os = "macos", windows))]
     app.connect_startup(|_| suite_platform::appearance::follow(suite_ui::appearance::set_dark));
     app.connect_startup(|app| {
         let css = gtk::CssProvider::new();
@@ -226,7 +232,8 @@ fn moved(window: &gtk::ApplicationWindow, path: &Path) {
 }
 
 /// Slate's menus (MAC-4), built once for every window: File, Edit, Format, and View. Linux
-/// shows them in the header bar's menu (`primary`, with Quit), macOS in the menu bar.
+/// shows them in the header bar's menu (`primary`, with Quit), macOS and Windows in the
+/// menu bar (Windows' File ending with Exit).
 struct Menus {
     file: gio::Menu,
     edit: gio::Menu,
@@ -247,6 +254,9 @@ impl Menus {
             Does::Action("win.save-as"),
         ));
         file.append(Some("Close Window"), Some("app.close"));
+        if let Some(exit) = suite_ui::chrome::exit_section() {
+            file.append_section(None, &exit);
+        }
         // View → Text Width: a radio item per width, checked by `app.text-width`'s state.
         let widths = gio::Menu::new();
         for width in TextWidth::ALL {
@@ -278,20 +288,23 @@ impl Menus {
         }
     }
 
-    /// The menu bar (macOS): File, Edit, Format, View, and the Window menu; Quit is in the
-    /// app menu.
+    /// The menu bar (macOS, Windows): File, Edit, Format, View, and the Window menu (macOS,
+    /// whose app menu has Quit) or the Help menu (Windows).
     fn bar(&self) -> gio::Menu {
-        suite_ui::chrome::menu_bar(&[
-            ("File", &self.file),
-            ("Edit", &self.edit),
-            ("Format", &self.format),
-            ("View", &self.view),
-        ])
+        suite_ui::chrome::menu_bar(
+            APP,
+            &[
+                ("File", &self.file),
+                ("Edit", &self.edit),
+                ("Format", &self.format),
+                ("View", &self.view),
+            ],
+        )
     }
 }
 
-/// A window's header bar (Linux; macOS windows keep their own title bar): Open, the
-/// title, and the menu.
+/// A window's header bar (Linux; macOS and Windows windows keep their own title bar):
+/// Open, the title, and the menu.
 fn header(title: &str) -> gtk::HeaderBar {
     let header = gtk::HeaderBar::new();
     let open = gtk::Button::from_icon_name("document-open-symbolic");
@@ -314,8 +327,8 @@ fn header(title: &str) -> gtk::HeaderBar {
     header
 }
 
-/// `window`'s chrome: the header bar titled `title` on Linux; nothing on macOS, whose
-/// title bar shows the window's title and whose menu bar has the menus.
+/// `window`'s chrome: the header bar titled `title` on Linux; nothing on macOS and
+/// Windows, whose title bar shows the window's title and whose menu bar has the menus.
 fn put_header(window: &gtk::ApplicationWindow, title: &str) {
     if !suite_ui::chrome::MENU_BAR {
         window.set_titlebar(Some(&header(title)));

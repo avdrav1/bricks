@@ -52,7 +52,8 @@ fn file_name(path: &Path) -> String {
 }
 
 /// The header bar every window has on Linux: New (Ctrl+N) and Open (Ctrl+O) buttons.
-/// macOS windows keep their own title bar, and New and Open are in the menu bar.
+/// macOS and Windows windows keep their own title bar, and New and Open are in the menu
+/// bar.
 fn put_header(window: &gtk::ApplicationWindow) {
     if suite_ui::chrome::MENU_BAR {
         return;
@@ -852,8 +853,8 @@ fn show_deck(
         run("move-slide-up", |v| slide_list::move_by(v, -1)),
         run("move-slide-down", |v| slide_list::move_by(v, 1)),
     ]);
-    // The deck's buttons: in the header bar on Linux, after its New and Open; on macOS in
-    // a toolbar row over the deck, as the menu bar has New, Open, and Save.
+    // The deck's buttons: in the header bar on Linux, after its New and Open; on macOS and
+    // Windows in a toolbar row over the deck, as the menu bar has New, Open, and Save.
     let bar = match window.titlebar().and_downcast::<gtk::HeaderBar>() {
         Some(header) => Toolbar::Header(header),
         None => {

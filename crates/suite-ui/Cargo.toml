@@ -13,6 +13,10 @@ gtk.workspace = true
 suite-core.workspace = true
 tracing.workspace = true
 
+# Windows' dark title bars (DWM).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Graphics_Dwm"] }
+
 [lints]
 workspace = true
 

@@ -11,6 +11,10 @@ publish = false
 [dependencies]
 suite-core.workspace = true
 
+# The console a GUI program prints to, and the app mode in the registry (WIN-3).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_System_Console", "Win32_System_Registry"] }
+
 [lints]
 workspace = true
 

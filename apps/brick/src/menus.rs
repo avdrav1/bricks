@@ -1,7 +1,7 @@
-//! Brick's menus (MAC-4). On macOS the menu bar has File, Edit, Sheet, Format, and Data,
-//! each item with its key from [`crate::keys`], running the window's actions
-//! ([`add_window_actions`]) and the app's. Linux has the header bar's buttons instead; its
-//! recent files menu and File → Open Recent are both [`fill_recent`].
+//! Brick's menus (MAC-4, WIN-3). On macOS and Windows the menu bar has File, Edit, Sheet,
+//! Format, and Data, each item with its key from [`crate::keys`], running the window's
+//! actions ([`add_window_actions`]) and the app's. Linux has the header bar's buttons
+//! instead; its recent files menu and File → Open Recent are both [`fill_recent`].
 
 use crate::grid_view::{FontToggle, GridView};
 use crate::keys::{self, Command};
@@ -14,7 +14,7 @@ use suite_ui::chrome::MENU_BAR;
 use suite_ui::keys::Primary;
 
 thread_local! {
-    /// File → Open Recent (macOS), filled again whenever the list may have changed.
+    /// File → Open Recent (macOS, Windows), filled again whenever the list may have changed.
     static RECENT: gio::Menu = gio::Menu::new();
 }
 
@@ -38,8 +38,8 @@ pub fn fill_recent(menu: &gio::Menu) {
     menu.append_section(None, &clear);
 }
 
-/// File → Open Recent shows the list as it is now (macOS; Linux reads it as its menu
-/// opens).
+/// File → Open Recent shows the list as it is now (macOS, Windows; Linux reads it as its
+/// menu opens).
 pub fn refresh_recent() {
     if MENU_BAR {
         RECENT.with(|menu| {
@@ -108,6 +108,9 @@ pub fn menus() -> [(&'static str, gio::Menu); 5] {
             command("Save As…", "win.save-as", C::SaveAs),
         ],
     ]);
+    if let Some(exit) = suite_ui::chrome::exit_section() {
+        file.append_section(None, &exit);
+    }
     let grid =
         |label: &str, action: &str| item(label, action, keys::grid_accel(Primary::HERE, label));
     let edit = menu(&[
@@ -183,11 +186,11 @@ pub fn menus() -> [(&'static str, gio::Menu); 5] {
     ]
 }
 
-/// The menu bar: the menus and macOS's Window menu.
+/// The menu bar: the menus, then macOS's Window menu or Windows' Help menu.
 pub fn bar() -> gio::Menu {
     let menus = menus();
     let refs: Vec<(&str, &gio::Menu)> = menus.iter().map(|(l, m)| (*l, m)).collect();
-    suite_ui::chrome::menu_bar(&refs)
+    suite_ui::chrome::menu_bar(crate::APP, &refs)
 }
 
 /// Add the action `name` to `window`: `activate` runs with its target, a string where
@@ -203,8 +206,8 @@ fn add(
     window.add_action(&action);
 }
 
-/// The window's actions the menu bar's items run (macOS; on Linux nothing shows them).
-/// `run` does a window command as its key does.
+/// The window's actions the menu bar's items run (macOS, Windows; on Linux nothing shows
+/// them). `run` does a window command as its key does.
 pub fn add_window_actions(
     window: &gtk::ApplicationWindow,
     grid: &GridView,
@@ -336,8 +339,11 @@ mod tests {
             })
             .collect();
         let mut want = vec!["File", "Edit", "Sheet", "Format", "Data"];
-        if MENU_BAR {
+        if cfg!(target_os = "macos") {
             want.push("Window");
+        } else if cfg!(windows) {
+            want.push("Help");
+            assert!(all.contains(&("Exit".to_owned(), Some("app.quit".to_owned()), None)));
         }
         assert_eq!(top, want);
     }

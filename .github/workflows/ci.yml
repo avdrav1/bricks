@@ -30,7 +30,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # setup-msys2 caches the downloaded packages between runs.
-      - uses: msys2/setup-msys2@v2
+      - id: msys2
+        uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
           update: true
@@ -60,6 +61,24 @@ jobs:
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       # Every failing test target reports, not only the first.
       - run: cargo test --workspace --no-fail-fast
+      # Windows-like windows (WIN-3): each app's exe is a GUI program whose --version still
+      # prints from a terminal, its window has Windows' title bar (snaps with Win+Left), its
+      # menus are in a menu bar row (Help → About, File → Exit), and it follows the app mode
+      # (AppsUseLightTheme) live; the screenshots are the artifact.
+      - id: apps
+        if: always()
+        run: cargo build -p brick -p slate -p frame -p etch
+      - name: Windows' title bars, menu bars, and dark mode
+        if: always() && steps.apps.outcome == 'success'
+        shell: pwsh
+        env:
+          GSK_RENDERER: cairo
+        run: |
+          $env:PATH = "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin;$env:PATH"
+          scripts/check_win_ui.ps1 -Bin target\debug -Out out\win-ui
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: windows-ui, path: out/win-ui, if-no-files-found: warn }
   macos:
     # arm64, the oldest macOS the suite supports (ADR 0011). GUI checks stay on Linux.
     runs-on: macos-14

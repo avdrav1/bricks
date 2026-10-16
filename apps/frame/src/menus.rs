@@ -1,5 +1,6 @@
-//! Frame's menus in macOS's menu bar (MAC-4): File, Edit, Insert, Slide, and View, each
-//! item with its key from [`crate::keys`]; Linux has the header bar's buttons instead.
+//! Frame's menus in the menu bar on macOS (MAC-4) and Windows (WIN-3): File, Edit,
+//! Insert, Slide, and View, each item with its key from [`crate::keys`]; Linux has the
+//! header bar's buttons instead.
 //! The window's actions they run are `crate::window`'s, `crate::slide_list`'s, and
 //! `crate::insert`'s.
 
@@ -45,6 +46,9 @@ pub fn menus() -> [(&'static str, gio::Menu); 5] {
             ("Save As…", "win.save-as", Some(A::SaveAs)),
         ],
     ]);
+    if let Some(exit) = suite_ui::chrome::exit_section() {
+        file.append_section(None, &exit);
+    }
     let edit = menu(&[&[
         ("Undo", "win.undo", Some(A::Undo)),
         ("Redo", "win.redo", Some(A::Redo)),
@@ -91,11 +95,11 @@ pub fn menus() -> [(&'static str, gio::Menu); 5] {
     ]
 }
 
-/// The menu bar: the menus and macOS's Window menu.
+/// The menu bar: the menus, then macOS's Window menu or Windows' Help menu.
 pub fn bar() -> gio::Menu {
     let menus = menus();
     let refs: Vec<(&str, &gio::Menu)> = menus.iter().map(|(l, m)| (*l, m)).collect();
-    suite_ui::chrome::menu_bar(&refs)
+    suite_ui::chrome::menu_bar(crate::APP, &refs)
 }
 
 #[cfg(test)]
@@ -140,8 +144,11 @@ mod tests {
             })
             .collect();
         let mut want = vec!["File", "Edit", "Insert", "Slide", "View"];
-        if suite_ui::chrome::MENU_BAR {
+        if cfg!(target_os = "macos") {
             want.push("Window");
+        } else if cfg!(windows) {
+            want.push("Help");
+            assert!(all.contains(&("Exit".to_owned(), Some("app.quit".to_owned()), None)));
         }
         assert_eq!(top, want);
     }

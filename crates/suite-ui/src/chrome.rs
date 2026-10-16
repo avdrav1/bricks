@@ -1,30 +1,52 @@
-//! Window chrome and menus (MAC-4): GNOME's on Linux, the Mac's on macOS.
+//! Window chrome and menus (MAC-4, WIN-3): GNOME's on Linux, the Mac's on macOS, Windows'
+//! on Windows.
 //!
 //! On Linux a window has a header bar with its buttons; Slate's menus are behind a menu
 //! button in it, and Etch shows its menu bar in the window. On macOS the app's menus are
 //! in the menu bar ([`menu_bar`]), after the app menu GTK makes there (About, Settings,
 //! Services, Hide ⌘H, Hide Others ⌥⌘H, Show All, Quit ⌘Q, whose About and Quit run
 //! `app.about` and `app.quit`) and before a Window menu (Minimize ⌘M, Zoom, then the
-//! windows, which AppKit lists). Windows keep macOS's own title bar there, and the buttons
-//! a header bar would hold go in a toolbar row at the top of the window ([`Toolbar`]).
+//! windows, which AppKit lists). On Windows each window shows the same menus in a menu bar
+//! row under its title bar (GTK's `GtkApplicationWindow` puts the app's menu bar there),
+//! followed by Help with About, and File ends with Exit ([`exit_section`]). Windows keep
+//! the system's own title bar on both ([`init`] asks GTK for it on Windows), and the
+//! buttons a header bar would hold go in a toolbar row at the top of the window
+//! ([`Toolbar`]).
 //!
-//! Each app builds its menus once, as `gio::Menu`s, and shows the same ones on both.
+//! Each app builds its menus once, as `gio::Menu`s, and shows the same ones everywhere.
 
 use gtk::prelude::*;
 use gtk::{gio, glib};
 use suite_core::AppKind;
 
-/// Whether this build puts the app's menus in the menu bar and keeps the system's title
-/// bars: on macOS.
-pub const MENU_BAR: bool = cfg!(target_os = "macos");
+/// Whether this build puts the app's menus in a menu bar and keeps the system's title
+/// bars: on macOS (the system's menu bar) and Windows (a row in each window).
+pub const MENU_BAR: bool = cfg!(any(target_os = "macos", windows));
+
+/// Ask GTK for the system's title bars where windows keep them: on Windows GTK draws its
+/// own title bar (client-side decorations) unless `GTK_CSD` is `0`, even on a window
+/// without a header bar. Leaves a `GTK_CSD` the environment sets alone. Call in `main`
+/// before GTK starts and before any thread does; elsewhere it does nothing.
+pub fn init() {
+    if let Some(value) = csd(cfg!(windows), std::env::var_os("GTK_CSD").is_some()) {
+        // Before any other thread runs (the caller's contract), so nothing reads the
+        // environment meanwhile.
+        std::env::set_var("GTK_CSD", value);
+    }
+}
+
+/// The `GTK_CSD` to set on Windows (`windows`) when the environment has none (`set`).
+fn csd(windows: bool, set: bool) -> Option<&'static str> {
+    (windows && !set).then_some("0")
+}
 
 /// The `gio::Menu` attribute that makes a submenu macOS's Window menu (GTK's macOS
 /// backend hands it to `NSApp.windowsMenu`, where AppKit lists the windows).
 const MACOS_SPECIAL: &str = "gtk-macos-special";
 
 /// Install the app actions every app has, at startup: `app.about` (the About dialog, the
-/// app menu's first item on macOS) and the Window menu's `app.minimize` (⌘M on macOS) and
-/// `app.zoom`, which act on the active window.
+/// app menu's first item on macOS, Help's on Windows) and the Window menu's `app.minimize`
+/// (⌘M on macOS) and `app.zoom`, which act on the active window.
 pub fn install(app: &gtk::Application, kind: AppKind, version: &'static str) {
     let about_entry = gio::ActionEntry::builder("about")
         .activate(move |app: &gtk::Application, _, _| {
@@ -50,20 +72,22 @@ pub fn install(app: &gtk::Application, kind: AppKind, version: &'static str) {
         })
         .build();
     app.add_action_entries([about_entry, minimize, zoom]);
-    if MENU_BAR {
+    if cfg!(target_os = "macos") {
         app.set_accels_for_action("app.minimize", &["<Meta>m"]);
     }
 }
 
-/// The menu bar of `menus`, each a submenu with its label, and on macOS the Window menu
-/// after them.
-pub fn menu_bar(menus: &[(&str, &gio::Menu)]) -> gio::Menu {
+/// The menu bar of `menus`, each a submenu with its label; after them the Window menu on
+/// macOS and the Help menu (About) on Windows.
+pub fn menu_bar(kind: AppKind, menus: &[(&str, &gio::Menu)]) -> gio::Menu {
     let bar = gio::Menu::new();
     for (label, menu) in menus {
         bar.append_submenu(Some(label), *menu);
     }
-    if MENU_BAR {
+    if cfg!(target_os = "macos") {
         bar.append_item(&window_menu());
+    } else if cfg!(windows) {
+        bar.append_item(&help_menu(kind));
     }
     bar
 }
@@ -76,6 +100,27 @@ fn window_menu() -> gio::MenuItem {
     let item = gio::MenuItem::new_submenu(Some("Window"), &menu);
     item.set_attribute_value(MACOS_SPECIAL, Some(&"window-submenu".to_variant()));
     item
+}
+
+/// Windows' Help menu: About the app.
+fn help_menu(kind: AppKind) -> gio::MenuItem {
+    let menu = gio::Menu::new();
+    menu.append(
+        Some(&format!("About {}", kind.display_name())),
+        Some("app.about"),
+    );
+    gio::MenuItem::new_submenu(Some("Help"), &menu)
+}
+
+/// The section File ends with on Windows: Exit, which runs `app.quit` (each app's closes
+/// every window, asking about unsaved changes). `None` elsewhere: macOS has Quit in the
+/// app menu, and Linux keeps each app's own.
+pub fn exit_section() -> Option<gio::Menu> {
+    cfg!(windows).then(|| {
+        let menu = gio::Menu::new();
+        menu.append(Some("Exit"), Some("app.quit"));
+        menu
+    })
 }
 
 /// What the About dialog says the app is.
@@ -141,8 +186,8 @@ pub fn about(parent: Option<&gtk::Window>, kind: AppKind, version: &str) {
     dialog.present();
 }
 
-/// Where a window's buttons go: its header bar on Linux; on macOS a toolbar row at the top
-/// of the window, under the system's title bar.
+/// Where a window's buttons go: its header bar on Linux; on macOS and Windows a toolbar
+/// row at the top of the window, under the system's title bar (and Windows' menu bar).
 #[derive(Clone, Debug)]
 pub enum Toolbar {
     Header(gtk::HeaderBar),
@@ -232,11 +277,11 @@ mod tests {
     ];
 
     #[test]
-    fn the_menu_bar_has_the_menus_and_on_macos_the_window_menu() {
+    fn the_menu_bar_has_the_menus_then_window_on_macos_and_help_on_windows() {
         let file = gio::Menu::new();
         file.append(Some("Open…"), Some("app.open"));
         let edit = gio::Menu::new();
-        let bar = menu_bar(&[("File", &file), ("Edit", &edit)]);
+        let bar = menu_bar(AppKind::Brick, &[("File", &file), ("Edit", &edit)]);
         let label = |i| {
             bar.item_attribute_value(i, "label", Some(glib::VariantTy::STRING))
                 .and_then(|v| v.get::<String>())
@@ -253,7 +298,7 @@ mod tests {
             item("Open…", Some("app.open")),
             item("Edit", None),
         ];
-        if MENU_BAR {
+        if cfg!(target_os = "macos") {
             assert_eq!(bar.n_items(), 3);
             assert_eq!(label(2).as_deref(), Some("Window"));
             assert_eq!(special.as_deref(), Some("window-submenu"));
@@ -262,10 +307,31 @@ mod tests {
                 item("Minimize", Some("app.minimize")),
                 item("Zoom", Some("app.zoom")),
             ]);
+        } else if cfg!(windows) {
+            assert_eq!(bar.n_items(), 3);
+            assert_eq!(label(2).as_deref(), Some("Help"));
+            assert_eq!(special, None);
+            want.extend([item("Help", None), item("About Brick", Some("app.about"))]);
         } else {
-            assert_eq!(bar.n_items(), 2, "Linux has no Window menu");
+            assert_eq!(bar.n_items(), 2, "Linux has no Window or Help menu");
         }
         assert_eq!(items(&bar), want);
+    }
+
+    #[test]
+    fn file_ends_with_exit_on_windows_only() {
+        let exit = exit_section().map(|exit| items(&exit));
+        let want =
+            cfg!(windows).then(|| vec![("Exit".to_owned(), Some("app.quit".to_owned()), None)]);
+        assert_eq!(exit, want);
+    }
+
+    #[test]
+    fn windows_asks_for_the_systems_title_bars_unless_the_environment_chooses() {
+        assert_eq!(csd(true, false), Some("0"));
+        assert_eq!(csd(true, true), None);
+        assert_eq!(csd(false, false), None);
+        assert_eq!(csd(false, true), None);
     }
 
     #[test]
@@ -278,9 +344,10 @@ mod tests {
         assert_eq!(website(AppKind::Etch), "https://etch.cronkite.cc");
     }
 
-    /// macOS has no icon theme with the apps' icons, so the About dialog decodes them
-    /// (Homebrew's gdk-pixbuf has an SVG loader; Ubuntu's runner image hasn't).
-    #[cfg(target_os = "macos")]
+    /// macOS and Windows have no icon theme with the apps' icons, so the About dialog
+    /// decodes them (Homebrew's and MSYS2's gdk-pixbuf have an SVG loader; Ubuntu's runner
+    /// image hasn't).
+    #[cfg(any(target_os = "macos", windows))]
     #[test]
     fn each_apps_icon_decodes_for_the_about_dialog() {
         for kind in APPS {
