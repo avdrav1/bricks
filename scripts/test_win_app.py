@@ -39,7 +39,7 @@ class Installer(unittest.TestCase):
         # The ProgID opens the file with the installed exe; Open with lists it.
         self.assertIn('Root: HKCU; Subkey: "Software\\Classes\\Cronkite.Slate.docx\\shell\\open\\command"; '
                       'ValueType: string; ValueName: ""; ValueData: """{app}\\bin\\slate.exe"" ""%1"""', registry)
-        self.assertIn('Root: HKCU; Subkey: "Software\\Classes\\.md\\OpenWithProgids"; ValueType: none; '
+        self.assertIn('Root: HKCU; Subkey: "Software\\Classes\\.md\\OpenWithProgids"; ValueType: string; '
                       'ValueName: "Cronkite.Slate.md"; ValueData: ""; Flags: uninsdeletevalue uninsdeletekeyifempty', registry)
         self.assertIn('Root: HKCU; Subkey: "Software\\Classes\\Applications\\slate.exe\\SupportedTypes"; '
                       'ValueType: string; ValueName: ".txt"; ValueData: ""', registry)

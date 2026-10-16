@@ -653,7 +653,7 @@ function Wait-Uninstalled([string]$name) {
 function Uninstall-By-Hand([string]$app, [string]$tag) {
     $name = $Names[$app]
     $u = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\dev.cronkite.${name}_is1"
-    Start-Process -FilePath $u.UninstallString.Trim('"')
+    Start-Process -FilePath $u.UninstallString.Trim('"') -ArgumentList "/LOG=`"$logs\$tag-uninstall.log`""
     $answers = @(@{ key = 0x59; what = "confirm" }, @{ key = 0x4E; what = "data" }, @{ key = 0x0D; what = "done" })
     $seen = @()
     $handled = @{}
@@ -666,7 +666,15 @@ function Uninstall-By-Hand([string]$app, [string]$tag) {
                 $uninstaller = (Get-Process -Id $owner -ErrorAction SilentlyContinue).Name -match '^(_iu|unins)'
                 if ($class -eq "#32770" -and ($uninstaller -or $t -like "*$name*") -and -not $handled.ContainsKey($h)) { $dialog = $w; break }
             }
-            if (-not $dialog) { Start-Sleep -Milliseconds 300 }
+            if (-not $dialog) {
+                Start-Sleep -Milliseconds 300
+                # What's on screen meanwhile, for the logs.
+                $all = [Win]::Windows(0) | ForEach-Object {
+                    $f = $_ -split "`t", 4
+                    "$($f[1]) $((Get-Process -Id $f[1] -ErrorAction SilentlyContinue).Name) $($f[2]) '$($f[3])'"
+                }
+                Add-Content -Encoding utf8 "$logs\$tag-uninstall-windows.txt" "-- $(Get-Date -Format HH:mm:ss.fff) waiting for $($a.what)`n$($all -join "`n")"
+            }
         } while (-not $dialog -and (Get-Date) -lt $deadline)
         if (-not $dialog) { break }
         $h = ($dialog -split "`t")[0]

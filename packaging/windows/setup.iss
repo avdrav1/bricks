@@ -80,25 +80,35 @@ procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   Roaming, Local: String;
 begin
-  if CurUninstallStep <> usPostUninstall then
-    Exit;
-  Roaming := ExpandConstant('{userappdata}\Cronkite\{#Name}');
-  Local := ExpandConstant('{localappdata}\Cronkite\{#Name}');
-  DelTree(Local + '\fontconfig', True, True, True);
-  if (not UninstallSilent) and (DirExists(Roaming) or DirExists(Local)) then
-    if MsgBox('Also remove your {#Name} settings, recent files, and recovered work?' + #13#10#13#10 +
-              Roaming + #13#10 + Local + #13#10#13#10 +
-              'Choose No to keep them for when you install {#Name} again.',
-              mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
-    begin
-      DelTree(Roaming, True, True, True);
-      DelTree(Local, True, True, True);
-    end;
-  RemoveDir(Local);
-  RemoveDir(Roaming);
-  RemoveDir(ExpandConstant('{localappdata}\Cronkite'));
-  RemoveDir(ExpandConstant('{userappdata}\Cronkite'));
-  // %LOCALAPPDATA%\Programs, which Setup made if this was the user's first per-user
-  // program, goes too when nothing else is in it.
-  RemoveDir(ExpandConstant('{userpf}'));
+  if CurUninstallStep = usPostUninstall then
+  begin
+    Roaming := ExpandConstant('{userappdata}\Cronkite\{#Name}');
+    Local := ExpandConstant('{localappdata}\Cronkite\{#Name}');
+    DelTree(Local + '\fontconfig', True, True, True);
+    Log(Format('User data: %s (%d), %s (%d); silent: %d',
+      [Roaming, Ord(DirExists(Roaming)), Local, Ord(DirExists(Local)), Ord(UninstallSilent)]));
+    if (not UninstallSilent) and (DirExists(Roaming) or DirExists(Local)) then
+      if MsgBox('Also remove your {#Name} settings, recent files, and recovered work?' + #13#10#13#10 +
+                Roaming + #13#10 + Local + #13#10#13#10 +
+                'Choose No to keep them for when you install {#Name} again.',
+                mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+      begin
+        Log('Removing the user data');
+        DelTree(Roaming, True, True, True);
+        DelTree(Local, True, True, True);
+      end
+      else
+        Log('Keeping the user data');
+    RemoveDir(Local);
+    RemoveDir(Roaming);
+    RemoveDir(ExpandConstant('{localappdata}\Cronkite'));
+    RemoveDir(ExpandConstant('{userappdata}\Cronkite'));
+  end
+  else if CurUninstallStep = usDone then
+  begin
+    // %LOCALAPPDATA%\Programs, which Setup made if this was the user's first per-user
+    // program, goes too when nothing else is in it (the app's folder, once empty, first).
+    RemoveDir(ExpandConstant('{app}'));
+    RemoveDir(ExpandConstant('{userpf}'));
+  end;
 end;

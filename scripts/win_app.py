@@ -118,9 +118,10 @@ def registry(app, name):
         value(f"Software\\Classes\\{progid}\\shell\\open\\command", "", run)
         # Shared with every program that opens the type: only our value is ours, and the
         # keys go when nothing else is left in them. Uninstall undoes entries last to first.
+        # An empty string value (Inno's ValueType none writes the key alone, no value).
         key(f"Software\\Classes\\{ext}", "uninsdeletekeyifempty")
         value(f"Software\\Classes\\{ext}\\OpenWithProgids", progid, '""',
-              "uninsdeletevalue uninsdeletekeyifempty", "none")
+              "uninsdeletevalue uninsdeletekeyifempty")
     return lines
 
 
