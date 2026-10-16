@@ -101,10 +101,10 @@ EOF
 # its cache first in the app's Caches folder, and conf.d (the metric aliases, MAC-6).
 fc=$R/etc/fonts
 mkdir -p "$fc"
-python3 - "$brew" "$id" <"$brew/etc/fonts/fonts.conf" >"$fc/fonts.conf" <<'EOF'
+python3 - "$brew" "$id" "$brew/etc/fonts/fonts.conf" >"$fc/fonts.conf" <<'EOF'
 import sys
-brew, app_id = sys.argv[1:]
-lines = sys.stdin.read().splitlines()
+brew, app_id, conf = sys.argv[1:]
+lines = open(conf).read().splitlines()
 has_conf_d = any(brew not in l and "conf.d</include>" in l for l in lines)
 for line in lines:
     if brew in line:
