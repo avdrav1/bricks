@@ -112,6 +112,8 @@ mod tests {
     fn the_list_lives_in_etchs_state_folder() {
         let folder = if cfg!(target_os = "macos") {
             "Library/Application Support/dev.cronkite.Etch/recent"
+        } else if cfg!(windows) {
+            "Cronkite/Etch/recent"
         } else {
             "etch/recent"
         };

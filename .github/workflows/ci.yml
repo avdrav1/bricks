@@ -58,7 +58,8 @@ jobs:
             windows-${{ steps.toolchain.outputs.rustc }}-${{ hashFiles('Cargo.lock') }}-
             windows-${{ steps.toolchain.outputs.rustc }}-
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-      - run: cargo test --workspace
+      # Every failing test target reports, not only the first.
+      - run: cargo test --workspace --no-fail-fast
   macos:
     # arm64, the oldest macOS the suite supports (ADR 0011). GUI checks stay on Linux.
     runs-on: macos-14
