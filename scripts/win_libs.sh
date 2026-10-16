@@ -78,14 +78,14 @@ else
   src=$s/cairo-${CAIRO%-*}
   (cd "$src" && patch -p1 -s -i ../0001-DWrite-Get-glyph-bitmap-with-D2D-in-selected-cases.patch && patch -p1 -s -i ../673.patch)
   rm -rf "$prefix/cairo"
-  # shellcheck disable=SC2086 # the options are words
-  CFLAGS="$CFLAGS $CAIRO_CFLAGS" CXXFLAGS="$CXXFLAGS $CAIRO_CFLAGS" MSYS2_ARG_CONV_EXCL="--prefix=" \
-    meson setup "$work/cairo-build" "$src" --prefix="$prefix/cairo" $CAIRO_OPTIONS >"$work/setup.log" 2>&1 ||
+  # shellcheck disable=SC2086 # the options are words. meson is a Windows program: a Windows prefix.
+  CFLAGS="$CFLAGS $CAIRO_CFLAGS" CXXFLAGS="$CXXFLAGS $CAIRO_CFLAGS" \
+    meson setup "$work/cairo-build" "$src" --prefix="$(cygpath -m "$prefix/cairo")" $CAIRO_OPTIONS >"$work/setup.log" 2>&1 ||
     { cat "$work/setup.log"; exit 1; }
   meson compile -C "$work/cairo-build" >"$work/compile.log" 2>&1 || { tail -50 "$work/compile.log"; exit 1; }
   meson install -C "$work/cairo-build" >"$work/install.log" 2>&1 || { cat "$work/install.log"; exit 1; }
   for dll in libcairo-2.dll libcairo-gobject-2.dll libcairo-script-interpreter-2.dll; do
-    [[ -f $prefix/cairo/bin/$dll ]] || { echo "win_libs: the cairo build made no $dll"; exit 1; }
+    [[ -f $prefix/cairo/bin/$dll ]] || { tail -30 "$work/install.log"; echo "win_libs: the cairo build made no $dll"; exit 1; }
     links_none "$prefix/cairo/bin/$dll" lzo
   done
   mkdir -p "$prefix/cairo/share/licenses/cairo"
@@ -124,7 +124,7 @@ else
     "$src/configure" --prefix="$prefix/libtiff" $TIFF_OPTIONS >"$work/configure.log" 2>&1) ||
     { tail -50 "$work/configure.log"; exit 1; }
   make -C "$work/tiff-build/libtiff" -j"$(nproc)" install >"$work/make.log" 2>&1 || { tail -50 "$work/make.log"; exit 1; }
-  [[ -f $prefix/libtiff/bin/libtiff-6.dll ]] || { echo "win_libs: the libtiff build made no libtiff-6.dll"; exit 1; }
+  [[ -f $prefix/libtiff/bin/libtiff-6.dll ]] || { tail -30 "$work/make.log"; echo "win_libs: the libtiff build made no libtiff-6.dll"; exit 1; }
   links_none "$prefix/libtiff/bin/libtiff-6.dll" jbig
   mkdir -p "$prefix/libtiff/share/licenses/libtiff"
   cp "$src/LICENSE.md" "$prefix/libtiff/share/licenses/libtiff/"
