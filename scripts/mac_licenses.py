@@ -111,6 +111,7 @@ def render(title, own, entries, fonts):
         f"Third-party software in {title}.app",
         "",
         f"{title} itself is free software under the MIT or Apache-2.0 licence ({', '.join('../' + f for f in own)}).",
+        "The Rust crates compiled into it and their licences are in THIRD-PARTY-RUST.txt, beside this file.",
         f"{title}.app carries the libraries and data below, built by Homebrew for macOS 14 (arm64)",
         "unless an entry says otherwise. The libraries are dynamically linked, each a file of its",
         "own in Contents/Frameworks or Contents/Resources/lib, so you may replace one with your",

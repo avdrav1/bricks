@@ -88,6 +88,7 @@ class Licences(unittest.TestCase):
         text = mac_licenses.render("Slate", ["LICENSE", "LICENSE-APACHE"], entries, ["OFL-Carlito.txt"])
         self.assertIn("Third-party software in Slate.app", text)
         self.assertIn("../LICENSE, ../LICENSE-APACHE", text)
+        self.assertIn("THIRD-PARTY-RUST.txt, beside this file", text)
         self.assertIn("codesign --force --deep -s - Slate.app", text)
         self.assertIn("glib 2.86.0_1: LGPL-2.1-or-later\n", text)
         self.assertIn("pango 1.58.0 (formula's current release 1.58.2): LGPL-2.0-or-later", text)

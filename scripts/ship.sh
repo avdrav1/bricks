@@ -189,6 +189,9 @@ build)
   cp packaging/$ID.desktop packaging/$ID.svg "dist/$NAME/"
   [ -f apps/$APP/README.md ] && cp apps/$APP/README.md "dist/$NAME/"
   cp LICENSE* "dist/$NAME/" 2>/dev/null || true
+  # The Rust crates compiled into the binary, their licences and texts (PKG-6); fails on a
+  # crate without a licence text or outside the allowlist.
+  python3 scripts/rust_licenses.py $APP $TARGET "dist/$NAME/THIRD-PARTY-RUST.txt"
   tar -C dist -czf "$TAR" "$NAME"
   (cd dist && sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256")
   sha=$(cut -d' ' -f1 "$TAR.sha256"); size=$(stat -c%s "$TAR")

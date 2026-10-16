@@ -20,6 +20,7 @@ on:
       - .github/workflows/release-macos.yml
       - scripts/mac_bundle.sh
       - scripts/mac_licenses.py
+      - scripts/rust_licenses.py
       - scripts/mac_cairo.sh
       - scripts/mac_app.py
       - scripts/check_mac_install.sh

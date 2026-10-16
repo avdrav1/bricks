@@ -12,8 +12,10 @@
 #   3. with GTK 4 and other apps' defaults for .docx, .md, and .png: install; the .docx and
 #      .md defaults are Slate's, the .png one stays; `gio open` (what a file manager's
 #      double-click does) on t.docx and t.md each starts Slate on that file, and it is
-#      still running 4 s later (the .docx window holds its private package copy). Then
-#      reinstall (update) and --uninstall: nothing of Slate's is left, the .png default is.
+#      still running 4 s later (the .docx window holds its private package copy); its
+#      licences are in ~/.local/share/doc/slate, THIRD-PARTY-RUST.txt naming gtk4 (PKG-6).
+#      Then reinstall (update) and --uninstall: nothing of Slate's is left, the .png
+#      default is.
 # Needs docker and python3. VERBOSE=1 prints each container's transcript; ONLY=Fedora (or
 # Arch, Ubuntu) runs one distro.
 set -euo pipefail
@@ -80,6 +82,7 @@ for c in "${checks[@]}"; do
     as 'mkdir -p ~/.config; printf \"[Default Applications]\nimage/png=eog.desktop\n$DOCX=libreoffice-writer.desktop\ntext/markdown=org.gnome.TextEditor.desktop\n\" > ~/.config/mimeapps.list'
     as \"curl -fsSL \$url/install.sh | SLATE_DOWNLOAD_URL=\$url/good sh\"
     as 'cat ~/.config/mimeapps.list; grep ^Exec= ~/.local/share/applications/dev.cronkite.Slate.desktop'
+    as 'cd ~/.local/share/doc/slate && echo licences: \$(ls) && echo notice: \$(wc -c < THIRD-PARTY-RUST.txt) bytes, gtk4 \$(grep -c \"^gtk4 [0-9]\" THIRD-PARTY-RUST.txt)' || echo 'licences: none'
     as 'gio mime $DOCX | head -1 | sed s/^/docx-/; gio mime text/markdown | head -1 | sed s/^/md-/'
     as 'nohup gtk4-broadwayd :5 >/dev/null 2>&1 & sleep 1'
     as \"\$open /tmp/t.docx; \$open /tmp/t.md; sleep 4\"
@@ -92,6 +95,7 @@ for c in "${checks[@]}"; do
     echo '== uninstall'
     as \"curl -fsSL \$url/install.sh | sh -s -- --uninstall\" >/dev/null
     as 'ls ~/.local/bin/slate ~/.local/share/applications/dev.cronkite.Slate.desktop ~/.local/share/icons/hicolor/scalable/apps/dev.cronkite.Slate.svg 2>&1 | grep -c \"No such\" | sed s/^/gone:/'
+    as 'ls -d ~/.local/share/doc/slate 2>/dev/null || echo doc-gone'
     as 'grep -c Slate ~/.config/mimeapps.list | sed s/^/slate-defaults:/ || true'
     as 'grep ^image/png= ~/.config/mimeapps.list | sed s/^/kept:/'
   " 2>&1) || true
@@ -110,11 +114,14 @@ for c in "${checks[@]}"; do
   check "^running:/home/tester/.local/bin/slate /tmp/t.docx $" "double-click (gio open) did not start Slate on the .docx"
   check "^running:/home/tester/.local/bin/slate /tmp/t.md $" "double-click (gio open) did not start Slate on the .md"
   check "^package copies: 1$" "the .docx window doesn't hold its document"
+  check "^licences: LICENSE LICENSE-APACHE THIRD-PARTY-RUST.txt$" "licences not installed in ~/.local/share/doc/slate"
+  check "^notice: [0-9]\{5,\} bytes, gtk4 1$" "THIRD-PARTY-RUST.txt empty or without gtk4"
   check "^gone:3$" "uninstall left files"
+  check "^doc-gone$" "uninstall left ~/.local/share/doc/slate"
   check "^slate-defaults:0$" "uninstall left Slate's defaults"
   check "^kept:image/png=eog.desktop$" "install or uninstall lost another app's default"
   if $ok; then
-    echo "ok   $distro: installs, refuses a bad checksum, hints '$hint', takes .docx and .md, gio open opens both, uninstalls"
+    echo "ok   $distro: installs, refuses a bad checksum, hints '$hint', takes .docx and .md, gio open opens both, installs its licences, uninstalls"
     [ -n "${VERBOSE:-}" ] && sed 's/^/     /' <<<"$out"
   else
     sed 's/^/     /' <<<"$out" | tail -40; fail=1

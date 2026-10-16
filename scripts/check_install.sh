@@ -15,8 +15,9 @@
 #   3. with GTK 4: install v0.2.1 (Bricks) and open a CSV with it, then install this
 #      release over it: the old binary, menu entry, icon, and CSV default are gone, and
 #      `gio open t.csv` (what a file manager's double-click does) starts Brick on that
-#      file, its recent-files list holding both files. Then reinstall (update) and
-#      --uninstall;
+#      file, its recent-files list holding both files; its licences are in
+#      ~/.local/share/doc/brick, THIRD-PARTY-RUST.txt naming gtk4 (PKG-6). Then reinstall
+#      (update) and --uninstall, which removes them too;
 #   4. the same from v0.1.0 (Spreadsheet): its app is replaced and its recent files kept.
 # Needs docker, git, and python3; the old tarballs come from dist/ or the download site
 # (BRICKS_TARBALL=path and SPREADSHEET_TARBALL=path override). VERBOSE=1 prints each
@@ -102,6 +103,7 @@ for c in "${checks[@]}"; do
     echo '== upgrade'
     as \"curl -fsSL \$url/install.sh | BRICK_DOWNLOAD_URL=\$url/good sh\"
     as 'cat ~/.config/mimeapps.list; grep ^Exec= ~/.local/share/applications/dev.cronkite.Brick.desktop'
+    as 'cd ~/.local/share/doc/brick && echo licences: \$(ls) && echo notice: \$(wc -c < THIRD-PARTY-RUST.txt) bytes, gtk4 \$(grep -c \"^gtk4 [0-9]\" THIRD-PARTY-RUST.txt)' || echo 'licences: none'
     as 'grep -c dev.bricks.Bricks ~/.config/mimeapps.list | sed s/^/old-defaults:/ || true'
     gone bricks dev.bricks.Bricks | sed s/^/old-gone:/
     as 'gio mime text/csv | head -1'
@@ -114,6 +116,7 @@ for c in "${checks[@]}"; do
     echo '== uninstall'
     as \"curl -fsSL \$url/install.sh | sh -s -- --uninstall\" >/dev/null
     gone brick dev.cronkite.Brick | sed s/^/gone:/
+    as 'ls -d ~/.local/share/doc/brick 2>/dev/null || echo doc-gone'
     as 'grep -c Brick ~/.config/mimeapps.list | sed s/^/brick-defaults:/ || true'
     as 'grep ^image/png= ~/.config/mimeapps.list | sed s/^/kept:/'
 
@@ -141,7 +144,10 @@ for c in "${checks[@]}"; do
   check "^recent:/tmp/t.csv$" "double-click (gio open) did not open the CSV"
   check "^recent:/tmp/old.csv$" "Bricks' recent files lost"
   check "^state: brick$" "state folder not moved to brick"
+  check "^licences: LICENSE LICENSE-APACHE THIRD-PARTY-RUST.txt$" "licences not installed in ~/.local/share/doc/brick"
+  check "^notice: [0-9]\{5,\} bytes, gtk4 1$" "THIRD-PARTY-RUST.txt empty or without gtk4"
   check "^gone:3$" "uninstall left files"
+  check "^doc-gone$" "uninstall left ~/.local/share/doc/brick"
   check "^brick-defaults:0$" "uninstall left Brick's defaults"
   check "^kept:image/png=eog.desktop$" "install or uninstall lost another app's default"
   check "^oldest-recent:/tmp/oldest.csv$" "v0.1.0 didn't install and open a CSV (setup)"
@@ -150,7 +156,7 @@ for c in "${checks[@]}"; do
   check "^oldest-defaults:0$" "Spreadsheet's CSV default left behind"
   check "^oldest-then:/tmp/oldest.csv$" "Spreadsheet's recent files lost"
   if $ok; then
-    echo "ok   $distro: installs, refuses a bad checksum, hints '$hint', replaces Bricks v0.2.1 and Spreadsheet v0.1.0 keeping their recent files, gio open opens the CSV, uninstalls"
+    echo "ok   $distro: installs, refuses a bad checksum, hints '$hint', replaces Bricks v0.2.1 and Spreadsheet v0.1.0 keeping their recent files, gio open opens the CSV, installs its licences, uninstalls"
     [ -n "${VERBOSE:-}" ] && sed 's/^/     /' <<<"$out"
   else
     sed 's/^/     /' <<<"$out" | tail -40; fail=1

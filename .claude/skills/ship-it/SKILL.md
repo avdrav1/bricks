@@ -66,6 +66,8 @@ scripts/ship.sh <app> verify   # starts the binary on clean Arch, Ubuntu 24.04, 
 
 Check the output: tarball exists, size is plausible, `dist/<name>/<app> --version` prints the new version, and `verify` ends with `RELEASE OK` and `INSTALL OK`. Stop on any FAIL. Report size and sha256.
 
+Every release carries `THIRD-PARTY-RUST.txt` (PKG-6, `scripts/rust_licenses.py`): each Rust crate compiled into the app for that platform, its licence, and the licence texts. `build` prints the crate count and the licences used, and fails on a crate without a licence text or with a licence outside the script's allowlist (`ALLOWED`: MIT, Apache-2.0, BSD, ISC, Zlib, 0BSD, Unicode, BSL-1.0, CC0-1.0, Unlicense, MPL-2.0; never GPL, AGPL, or LGPL). If a dependency update trips it, stop and tell the user which crate and licence; don't widen the allowlist without their yes. The Linux installer puts the notice and the app's LICENSE files in `~/.local/share/doc/<app>/`; the Mac bundle has it in `Contents/Resources/licenses/`.
+
 Then the macOS build. It runs on GitHub at the release commit, so that commit must be on GitHub first: ask before pushing it (`git push origin main`; the tag comes later).
 
 ```sh

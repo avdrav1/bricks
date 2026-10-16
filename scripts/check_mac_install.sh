@@ -10,8 +10,10 @@
 # and a tampered copy. Per app:
 #   1. the installer refuses the tampered tarball and installs nothing;
 #   2. `curl …/install.sh | sh` (APP_DOWNLOAD_URL pointing at the site) installs
-#      ~/Applications/<Name>.app: no quarantine flag, a valid signature, registered with
-#      Launch Services, which lists it for the app's sample file;
+#      ~/Applications/<Name>.app: no quarantine flag, a valid signature, its licence
+#      notices (THIRD-PARTY.txt naming every bundled library, THIRD-PARTY-RUST.txt the
+#      Rust crates, gtk4 among them, PKG-6), registered with Launch Services, which lists
+#      it for the app's sample file;
 #   3. the installed app starts on the sample file and shows a window, loading every
 #      library from its bundle and none from /opt/homebrew (DYLD_PRINT_LIBRARIES); it says
 #      it runs from the bundle, writes gdk-pixbuf's loader list and fontconfig's cache into
@@ -149,6 +151,14 @@ check() {
   if ((lzo == 0)) && ! grep -qi "^lzo\|^hicolor" "$notice" && grep -q "Built for $name.app without lzo" "$notice"; then
     pass "$app: no file links lzo (otool -L), THIRD-PARTY.txt names no lzo or hicolor and cairo built without lzo"
   else fail "$app: lzo references: $lzo; notice: $(grep -iE '^(lzo|hicolor|cairo)' "$notice" | tr '\n' '|')"; fi
+  # The Rust crates compiled into it (PKG-6): the notice is there, for this platform, and
+  # names gtk4.
+  local rust=$appdir/Contents/Resources/licenses/THIRD-PARTY-RUST.txt
+  if [[ -s $rust ]] && head -1 "$rust" | grep -q "^Rust crates in $name .*(aarch64-apple-darwin)$" &&
+    grep -q "^gtk4 [0-9]" "$rust"; then
+    pass "$app: THIRD-PARTY-RUST.txt: $(grep -c '^  Source:' "$rust") crates in $(wc -c <"$rust" | tr -d ' ') bytes, among them $(grep "^gtk4 [0-9]" "$rust" | cut -d: -f1)"
+  else fail "$app: THIRD-PARTY-RUST.txt missing, empty, or without gtk4: $(head -1 "$rust" 2>&1)"; fi
+  cp "$rust" "$logs/$app-THIRD-PARTY-RUST.txt" 2>/dev/null
   if "$lsregister" -dump 2>/dev/null | grep -q "path: *$appdir "; then
     pass "$app: registered with Launch Services"
   elif "$lsregister" -dump 2>/dev/null | grep -qF "$appdir"; then

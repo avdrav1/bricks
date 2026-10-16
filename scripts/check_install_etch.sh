@@ -15,8 +15,10 @@
 #      the menu entry runs the installed binary and `gio launch` on it (what a menu click
 #      does) starts Etch; `gio open` on t.png (what a file manager's double-click does)
 #      starts Etch on that file, which logs that it opened the image (16×12), and it is
-#      still running 4 s later. Then reinstall (update) and --uninstall: nothing of Etch's
-#      is left, no default names Etch, and the .gif and .txt defaults are as they were.
+#      still running 4 s later; its licences are in ~/.local/share/doc/etch,
+#      THIRD-PARTY-RUST.txt naming gtk4 (PKG-6). Then reinstall (update) and --uninstall:
+#      nothing of Etch's is left, no default names Etch, and the .gif and .txt defaults are
+#      as they were.
 # Needs docker and python3. VERBOSE=1 prints each container's transcript; ONLY=Fedora (or
 # Arch, Ubuntu) runs one distro.
 set -euo pipefail
@@ -83,6 +85,7 @@ for c in "${checks[@]}"; do
     as \"curl -fsSL \$url/install.sh | ETCH_DOWNLOAD_URL=\$url/good sh\"
     as 'cat ~/.config/mimeapps.list; grep ^Exec= ~/.local/share/applications/dev.cronkite.Etch.desktop'
     as 'ls ~/.local/share/icons/hicolor/scalable/apps/dev.cronkite.Etch.svg >/dev/null && echo icon-installed'
+    as 'cd ~/.local/share/doc/etch && echo licences: \$(ls) && echo notice: \$(wc -c < THIRD-PARTY-RUST.txt) bytes, gtk4 \$(grep -c \"^gtk4 [0-9]\" THIRD-PARTY-RUST.txt)' || echo 'licences: none'
     for t in image/png image/jpeg image/bmp; do as \"gio mime \$t | head -1 | sed 's|^|gio-\$t: |'\"; done
     as 'nohup gtk4-broadwayd :5 >/dev/null 2>&1 & sleep 1'
     as \"\$gdk gio launch ~/.local/share/applications/dev.cronkite.Etch.desktop; sleep 4\"
@@ -96,6 +99,7 @@ for c in "${checks[@]}"; do
     echo '== uninstall'
     as \"curl -fsSL \$url/install.sh | sh -s -- --uninstall\" >/dev/null
     as 'ls ~/.local/bin/etch ~/.local/share/applications/dev.cronkite.Etch.desktop ~/.local/share/icons/hicolor/scalable/apps/dev.cronkite.Etch.svg 2>&1 | grep -c \"No such\" | sed s/^/gone:/'
+    as 'ls -d ~/.local/share/doc/etch 2>/dev/null || echo doc-gone'
     as 'grep -c Etch ~/.config/mimeapps.list | sed s/^/etch-defaults:/ || true'
     as 'grep -e ^image/gif= -e ^text/plain= ~/.config/mimeapps.list | sed s/^/kept:/'
   " 2>&1) || true
@@ -107,6 +111,8 @@ for c in "${checks[@]}"; do
   check "nothing-installed" "tampered tarball left files"
   check "^Exec=/home/tester/.local/bin/etch %F$" "desktop entry not pointing at the binary"
   check "^icon-installed$" "no icon"
+  check "^licences: LICENSE LICENSE-APACHE THIRD-PARTY-RUST.txt$" "licences not installed in ~/.local/share/doc/etch"
+  check "^notice: [0-9]\{5,\} bytes, gtk4 1$" "THIRD-PARTY-RUST.txt empty or without gtk4"
   for t in image/png image/jpeg image/bmp; do
     check "^$t=dev.cronkite.Etch.desktop$" "$t default not set"
     check "^gio-$t: Default application for .*dev.cronkite.Etch.desktop" "gio doesn't name Etch for $t"
@@ -118,11 +124,12 @@ for c in "${checks[@]}"; do
   check "opened /tmp/t.png: 16×12" "Etch didn't open the .png"
   check "^Updated Etch\|^Installed Etch 9.9.9" "reinstall failed"
   check "^gone:3$" "uninstall left files"
+  check "^doc-gone$" "uninstall left ~/.local/share/doc/etch"
   check "^etch-defaults:0$" "uninstall left Etch's defaults"
   check "^kept:image/gif=eog.desktop$" "install or uninstall lost the image/gif default"
   check "^kept:text/plain=gedit.desktop$" "install or uninstall lost the text/plain default"
   if $ok; then
-    echo "ok   $distro: installs, refuses a bad checksum, hints '$hint', starts from its menu entry, takes PNG, JPEG, and BMP, gio open opens a .png, keeps other defaults, uninstalls"
+    echo "ok   $distro: installs, refuses a bad checksum, hints '$hint', starts from its menu entry, takes PNG, JPEG, and BMP, gio open opens a .png, keeps other defaults, installs its licences, uninstalls"
     [ -n "${VERBOSE:-}" ] && sed 's/^/     /' <<<"$out"
   else
     sed 's/^/     /' <<<"$out" | tail -40; fail=1

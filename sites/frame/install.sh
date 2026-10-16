@@ -5,12 +5,13 @@
 #   curl -fsSL https://frame.cronkite.cc/install.sh | sh
 #   curl -fsSL https://frame.cronkite.cc/install.sh | sh -s -- --uninstall
 #
-# Linux: puts the binary in ~/.local/bin, its icon and desktop entry in ~/.local/share, and
+# Linux: puts the binary in ~/.local/bin, its icon and desktop entry in ~/.local/share, its
+# licences in ~/.local/share/doc/frame (THIRD-PARTY-RUST.txt: the Rust crates in it), and
 # makes it the default for .pptx files (~/.config/mimeapps.list), so double-clicking a
 # presentation opens it. GTK 4 comes from the system: if it is missing, this says how to
 # install it. A release is a latest.json ({"version", "url", "sha256"}) beside a tarball
-# holding one folder with `frame`, dev.cronkite.Frame.desktop, and dev.cronkite.Frame.svg,
-# as Brick's are (sites/brick/install.sh).
+# holding one folder with `frame`, dev.cronkite.Frame.desktop, dev.cronkite.Frame.svg, and
+# the licence files, as Brick's are (sites/brick/install.sh).
 #
 # macOS (Apple Silicon, macOS 14 or later): puts Frame.app, which carries its own GTK, in
 # ~/Applications and registers it with Launch Services, so presentations list it under
@@ -31,6 +32,7 @@ DATA="${XDG_DATA_HOME:-$HOME/.local/share}"
 CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}"
 DESKTOP="$DATA/applications/$ID.desktop"
 ICON="$DATA/icons/hicolor/scalable/apps/$ID.svg"
+DOC="$DATA/doc/$APP"
 MIMEAPPS="$CONFIG/mimeapps.list"
 TYPES="application/vnd.openxmlformats-officedocument.presentationml.presentation"
 
@@ -85,6 +87,7 @@ refresh_caches() {
 
 uninstall() {
   rm -f "$BIN_DIR/$APP" "$DESKTOP" "$ICON"
+  rm -rf "$DOC"
   [ -f "$MIMEAPPS" ] && set_defaults ""
   refresh_caches
   say "Removed Frame. Your presentations are untouched."
@@ -131,6 +134,11 @@ install_app() {
   # Replace, never write into, a binary that may be running.
   cp "$src" "$BIN_DIR/.$APP.new" && chmod 755 "$BIN_DIR/.$APP.new" && mv -f "$BIN_DIR/.$APP.new" "$BIN_DIR/$APP"
   cp "$dir/$ID.svg" "$ICON"
+  # Its licences and the Rust crates' compiled into it (PKG-6).
+  rm -rf "$DOC"; mkdir -p "$DOC"
+  for f in LICENSE LICENSE-APACHE THIRD-PARTY-RUST.txt; do
+    if [ -f "$dir/$f" ]; then cp "$dir/$f" "$DOC/"; fi
+  done
   # The full path, so it starts from a launcher even when ~/.local/bin isn't on its PATH.
   sed "s|^Exec=$APP |Exec=$BIN_DIR/$APP |" "$dir/$ID.desktop" > "$DESKTOP"
   set_defaults "$ID.desktop"

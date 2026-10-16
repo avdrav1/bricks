@@ -12,7 +12,8 @@
 #   3. with GTK 4 and other apps' defaults for .pptx and .png: install; the .pptx default
 #      is Frame's, the .png one stays; `gio open` (what a file manager's double-click does)
 #      on t.pptx starts Frame on that file, and 4 s later it is still running and holds
-#      the deck's package copy (~/.cache/frame), so it read the deck. Then reinstall
+#      the deck's package copy (~/.cache/frame), so it read the deck; its licences are in
+#      ~/.local/share/doc/frame, THIRD-PARTY-RUST.txt naming gtk4 (PKG-6). Then reinstall
 #      (update) and --uninstall: nothing of Frame's is left, the .png default is.
 # Needs docker and python3. VERBOSE=1 prints each container's transcript; ONLY=Fedora (or
 # Arch, Ubuntu) runs one distro.
@@ -79,6 +80,7 @@ for c in "${checks[@]}"; do
     as 'mkdir -p ~/.config; printf \"[Default Applications]\nimage/png=eog.desktop\n$PPTX=libreoffice-impress.desktop\n\" > ~/.config/mimeapps.list'
     as \"curl -fsSL \$url/install.sh | FRAME_DOWNLOAD_URL=\$url/good sh\"
     as 'cat ~/.config/mimeapps.list; grep ^Exec= ~/.local/share/applications/dev.cronkite.Frame.desktop'
+    as 'cd ~/.local/share/doc/frame && echo licences: \$(ls) && echo notice: \$(wc -c < THIRD-PARTY-RUST.txt) bytes, gtk4 \$(grep -c \"^gtk4 [0-9]\" THIRD-PARTY-RUST.txt)' || echo 'licences: none'
     as 'gio mime $PPTX | head -1 | sed s/^/pptx-/'
     as 'nohup gtk4-broadwayd :5 >/dev/null 2>&1 & sleep 1'
     as \"\$open /tmp/t.pptx; sleep 4\"
@@ -91,6 +93,7 @@ for c in "${checks[@]}"; do
     echo '== uninstall'
     as \"curl -fsSL \$url/install.sh | sh -s -- --uninstall\" >/dev/null
     as 'ls ~/.local/bin/frame ~/.local/share/applications/dev.cronkite.Frame.desktop ~/.local/share/icons/hicolor/scalable/apps/dev.cronkite.Frame.svg 2>&1 | grep -c \"No such\" | sed s/^/gone:/'
+    as 'ls -d ~/.local/share/doc/frame 2>/dev/null || echo doc-gone'
     as 'grep -c Frame ~/.config/mimeapps.list | sed s/^/frame-defaults:/ || true'
     as 'grep ^image/png= ~/.config/mimeapps.list | sed s/^/kept:/'
   " 2>&1) || true
@@ -106,11 +109,14 @@ for c in "${checks[@]}"; do
   check "^pptx-Default application for .*dev.cronkite.Frame.desktop" "gio doesn't name Frame for .pptx"
   check "^running:/home/tester/.local/bin/frame /tmp/t.pptx $" "double-click (gio open) did not start Frame on the .pptx"
   check "^package copies: 1$" "Frame didn't read the deck"
+  check "^licences: LICENSE LICENSE-APACHE THIRD-PARTY-RUST.txt$" "licences not installed in ~/.local/share/doc/frame"
+  check "^notice: [0-9]\{5,\} bytes, gtk4 1$" "THIRD-PARTY-RUST.txt empty or without gtk4"
   check "^gone:3$" "uninstall left files"
+  check "^doc-gone$" "uninstall left ~/.local/share/doc/frame"
   check "^frame-defaults:0$" "uninstall left Frame's default"
   check "^kept:image/png=eog.desktop$" "install or uninstall lost another app's default"
   if $ok; then
-    echo "ok   $distro: installs, refuses a bad checksum, hints '$hint', takes .pptx, gio open opens it, uninstalls"
+    echo "ok   $distro: installs, refuses a bad checksum, hints '$hint', takes .pptx, gio open opens it, installs its licences, uninstalls"
     [ -n "${VERBOSE:-}" ] && sed 's/^/     /' <<<"$out"
   else
     sed 's/^/     /' <<<"$out" | tail -40; fail=1

@@ -15,9 +15,10 @@
 # The bundle runs without Homebrew: every dylib it loads is in Contents/Frameworks, linked
 # by @executable_path, and GTK's data is in Contents/Resources (the app points the
 # libraries there when it starts, suite_platform::bundle). Contents/Resources/licenses has
-# every bundled formula's licence files and THIRD-PARTY.txt (scripts/mac_licenses.py). It
-# fails if any Mach-O still names a library outside the bundle and the system, or a
-# bundled library has no formula or licence.
+# every bundled formula's licence files and THIRD-PARTY.txt (scripts/mac_licenses.py), and
+# THIRD-PARTY-RUST.txt, the Rust crates compiled into the app (scripts/rust_licenses.py).
+# It fails if any Mach-O still names a library outside the bundle and the system, or a
+# bundled library or crate has no licence text or one the release can't carry.
 set -euo pipefail
 app=${1:?usage: mac_bundle.sh APP [BIN_DIR [OUT]]}
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -219,6 +220,11 @@ done < <(find "$C" -type f \( -name '*.dylib' -o -name '*.so' -o -path "*/MacOS/
 python3 "$root/scripts/mac_licenses.py" "$C" "$work/loader-sources.tsv" "$cairo" >"$work/licenses.txt" ||
   { cat "$work/licenses.txt"; exit 1; }
 cat "$work/licenses.txt"
+
+# The Rust crates compiled into the app, their licences and texts (PKG-6,
+# Resources/licenses/THIRD-PARTY-RUST.txt); fails on a crate without a licence text or
+# outside the allowlist. After mac_licenses.py, which writes the licenses folder afresh.
+python3 "$root/scripts/rust_licenses.py" "$app" aarch64-apple-darwin "$R/licenses/THIRD-PARTY-RUST.txt"
 
 # Ad-hoc signatures: each library and loader, then the app (arm64 runs no unsigned code).
 broken=$(find "$C" -type l ! -exec test -e {} \; -print)
