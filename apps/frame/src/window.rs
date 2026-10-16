@@ -175,7 +175,7 @@ pub fn choose_and_open(app: &gtk::Application) {
 
 /// Files dropped on a window open as Open does, each in its own window ([`open_later`]).
 fn accept_file_drops(app: &gtk::Application, window: &gtk::ApplicationWindow) {
-    let target = gtk::DropTarget::new(gdk::FileList::static_type(), gdk::DragAction::COPY);
+    let target = suite_ui::launch::file_drop_target();
     target.connect_drop({
         let (app, window) = (app.clone(), window.downgrade());
         move |_, value, _, _| {
