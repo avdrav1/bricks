@@ -11,7 +11,8 @@
 #   2. text longer than its column overflows into the empty one beside it: it spans more
 #      than 140 px (a column is 120);
 #   3. the fixture's Styles sheet draws its fills (yellow, three theme tints, dark blue),
-#      red and blue text, and its dark-blue cell's white text;
+#      red and blue text, and its dark-blue cell's white text, with the cursor on J19:
+#      the edge cell past the data (A1:I18), off the styled cells and on their screen;
 #   4. number formats show: B8 `1,234.50`, B9 `12.50%`, B10 `(1,234)` (accounting), B13
 #      `Dec 9, 2025`.
 #   5. merged cells (Styles!A1:D1 "Styled title", Styles!E8:G9): Right from A1 lands on
@@ -186,7 +187,10 @@ session() {
     keys -M ctrl g -m ctrl -s 300 "Styles!$cell" -s 300 -k Return; sleep 0.5; shown
   done
   echo "== 3 colours"
-  keys -M ctrl g -m ctrl -s 300 "Styles!J30" -s 300 -k Return; sleep 1; shot styles
+  # J19 is the edge cell just past the data. Since GRID-6, Go To reaches any cell past
+  # the data and scrolls to it, so a farther cell scrolls the styled rows out of view
+  # (this was J30, which stopped at the edge row J19 before).
+  keys -M ctrl g -m ctrl -s 300 "Styles!J19" -s 300 -k Return; sleep 1; shot styles
   python3 /tmp/px.py /shots/styles.png FFFF00 C4FEBB 127A02 E9706D 305496 C00000 0070C0 FFFFFF
   pkill -x brick
   # 5: merged cells, on a fresh copy of the fixture.
