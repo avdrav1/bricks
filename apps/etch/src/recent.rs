@@ -1,6 +1,7 @@
 //! File → Open Recent (ETCH-22): the last ten images opened or saved, newest first, across
 //! runs. The list is the suite's ([`suite_file::recent`], as Brick's), kept in `recent` in
-//! Etch's state folder ([`suite_platform::dirs`]: `~/.local/state/etch/recent` on Linux).
+//! Etch's recent-files folder ([`suite_platform::dirs::recent_dir`]:
+//! `~/.local/state/etch/recent` on Linux, `%APPDATA%\Cronkite\Etch\recent` on Windows).
 //! The submenu shows each image by its name and its folder; it's read again whenever a
 //! window becomes active (another `etch` may have changed the list) and after every
 //! change. Reading and writing the list run off the UI thread.
@@ -18,9 +19,9 @@ thread_local! {
     static SHOWN: RefCell<Option<Vec<PathBuf>>> = const { RefCell::new(None) };
 }
 
-/// `recent` in Etch's state folder, as Brick's.
-fn store() -> PathBuf {
-    suite_platform::dirs::state_dir(crate::APP).join("recent")
+/// `recent` in Etch's recent-files folder, as Brick's.
+pub(crate) fn store() -> PathBuf {
+    suite_platform::dirs::recent_dir(crate::APP).join("recent")
 }
 
 /// The Open Recent submenu, filled once the list is read.
@@ -87,8 +88,8 @@ fn show(files: Vec<PathBuf>) {
     SHOWN.set(Some(files));
 }
 
-/// The item's label: the file's name, then its folder with the home folder as `~`, each
-/// underscore doubled (a single one would mark a mnemonic).
+/// The item's label: the file's name, then its folder ([`recent::label`]), each underscore
+/// doubled (a single one would mark a mnemonic).
 fn label(file: &Path) -> String {
     let (name, dir) = recent::label(file);
     format!("{name}  ({dir})").replace('_', "__")
@@ -98,6 +99,7 @@ fn label(file: &Path) -> String {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     #[test]
     fn items_show_the_name_and_folder_keeping_underscores() {
         let home = PathBuf::from(std::env::var_os("HOME").unwrap());
@@ -108,15 +110,30 @@ mod tests {
         assert_eq!(label(Path::new("/tmp/my_shot.png")), "my__shot.png  (/tmp)");
     }
 
+    #[cfg(windows)]
     #[test]
-    fn the_list_lives_in_etchs_state_folder() {
-        let folder = if cfg!(target_os = "macos") {
-            "Library/Application Support/dev.cronkite.Etch/recent"
+    fn items_show_the_name_and_folder_keeping_underscores() {
+        assert_eq!(
+            label(Path::new(r"C:\Users\me\Pictures\my_cat.png")),
+            r"my__cat.png  (C:\Users\me\Pictures)"
+        );
+    }
+
+    /// WIN-2: the list is state on Linux and macOS, and roams with the settings on Windows.
+    #[test]
+    fn the_list_lives_in_etchs_recent_files_folder() {
+        use suite_platform::dirs;
+        let (folder, end) = if cfg!(target_os = "macos") {
+            (
+                dirs::state_dir(crate::APP),
+                "Library/Application Support/dev.cronkite.Etch/recent",
+            )
         } else if cfg!(windows) {
-            "Cronkite/Etch/recent"
+            (dirs::config_dir(crate::APP), r"Cronkite\Etch\recent")
         } else {
-            "etch/recent"
+            (dirs::state_dir(crate::APP), "etch/recent")
         };
-        assert!(store().ends_with(folder), "{}", store().display());
+        assert_eq!(store(), folder.join("recent"));
+        assert!(store().ends_with(end), "{}", store().display());
     }
 }

@@ -1,7 +1,9 @@
 //! The app's state folder ([`suite_platform::dirs::state_dir`]): `$XDG_STATE_HOME/brick`
 //! (default `~/.local/state/brick`) on Linux, `~/Library/Application
-//! Support/dev.cronkite.Brick` on macOS, holding the recent-files list (APP-4) and crash
-//! recovery journals (APP-7).
+//! Support/dev.cronkite.Brick` on macOS, `%LOCALAPPDATA%\Cronkite\Brick` on Windows, holding
+//! the crash recovery journals (APP-7), and the recent-files list (APP-4), which is kept
+//! there too on Linux and macOS, and in `%APPDATA%\Cronkite\Brick` on Windows
+//! ([`suite_platform::dirs::recent_dir`]).
 //!
 //! Earlier releases, all Linux-only, kept it under their own names: `…/bricks` (v0.1.1 to
 //! v0.2.1, PKG-4) and `…/spreadsheet` (v0.1.0). On Linux the first use moves the newest of
@@ -27,9 +29,14 @@ pub fn dir() -> &'static Path {
     &DIR
 }
 
-/// The recent files (APP-4), kept in `recent` in the state folder.
+/// The recent files (APP-4), kept in `recent` in the recent-files folder (the state folder,
+/// once an earlier release's is moved over, on Linux and macOS).
 pub fn recent() -> suite_file::recent::Recent {
-    suite_file::recent::Recent::load_from(dir().join("recent"))
+    static STORE: LazyLock<PathBuf> = LazyLock::new(|| {
+        LazyLock::force(&DIR);
+        suite_platform::dirs::recent_dir(AppKind::Brick).join("recent")
+    });
+    suite_file::recent::Recent::load_from(STORE.clone())
 }
 
 /// Unless `dir` exists, move the newest earlier release's folder beside it there.

@@ -1,6 +1,7 @@
 //! Recent files: the last [`MAX`] files opened or saved, newest first, kept in a file in
-//! the app's state folder (Brick's `~/.local/state/brick/recent`, Etch's
-//! `~/.local/state/etch/recent`), one absolute path per line ([`crate::path_bytes`]), so
+//! the app's recent-files folder (`suite_platform::dirs::recent_dir`: Brick's
+//! `~/.local/state/brick/recent`, Etch's `~/.local/state/etch/recent`; on Windows
+//! `%APPDATA%\Cronkite\<App>\recent`), one absolute path per line ([`crate::path_bytes`]), so
 //! the list survives restarts. Paths are [`crate::canonical`]: on Windows `C:\…`, never
 //! `\\?\C:\…`. Every change reads the file again first: each launch is its own process,
 //! and two windows must not drop each other's files. Writes go to a temporary file,
@@ -87,15 +88,27 @@ impl Recent {
     }
 }
 
-/// How the menu shows `file`: its name, then its folder with the home folder as `~`.
+/// How the menu shows `file`: its name, then its folder, on Unix with the home folder as
+/// `~` (`~/data`), on Windows in full (`C:\Users\me\Documents`), as Windows' own recent
+/// lists show it: `~` means nothing there, and `$HOME`, when a Unix shell sets one, isn't
+/// the user's profile folder.
 pub fn label(file: &Path) -> (String, String) {
+    let home = if cfg!(windows) {
+        None
+    } else {
+        std::env::var_os("HOME").map(PathBuf::from)
+    };
+    label_from(file, home.as_deref())
+}
+
+/// [`label`] with the home folder `home` shortened to `~`.
+fn label_from(file: &Path, home: Option<&Path>) -> (String, String) {
     let name = file
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     let dir = file.parent().unwrap_or(Path::new("/"));
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    let dir = match home.as_deref().and_then(|h| dir.strip_prefix(h).ok()) {
+    let dir = match home.and_then(|h| dir.strip_prefix(h).ok()) {
         Some(rest) if rest.as_os_str().is_empty() => "~".to_owned(),
         Some(rest) => format!("~/{}", rest.display()),
         None => dir.display().to_string(),
@@ -248,6 +261,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn labels_show_the_folder_from_home() {
         let home = PathBuf::from(std::env::var_os("HOME").unwrap());
@@ -259,6 +273,45 @@ mod tests {
         assert_eq!(
             label(Path::new("/srv/z.csv")),
             ("z.csv".into(), "/srv".into())
+        );
+    }
+
+    /// WIN-2: Windows shows the whole folder, whatever `HOME` a Unix shell set.
+    #[cfg(windows)]
+    #[test]
+    fn labels_show_the_whole_folder_on_windows() {
+        let profile = std::env::home_dir().unwrap();
+        let documents = profile.join("Documents");
+        assert_eq!(
+            label(&documents.join("x.csv")),
+            ("x.csv".into(), documents.display().to_string())
+        );
+        assert_eq!(
+            label(Path::new(r"C:\Users\me\Documents\x.csv")),
+            ("x.csv".into(), r"C:\Users\me\Documents".into())
+        );
+        assert_eq!(
+            label(Path::new(r"D:\y.csv")),
+            ("y.csv".into(), r"D:\".into())
+        );
+        assert_eq!(
+            label(Path::new(r"\\server\share\z.csv")),
+            ("z.csv".into(), r"\\server\share\".into())
+        );
+    }
+
+    #[test]
+    fn the_home_folder_is_shortened_when_given() {
+        let home = std::env::temp_dir().join("me");
+        let label = |p: PathBuf| label_from(&p, Some(&home));
+        assert_eq!(label(home.join("a.csv")), ("a.csv".into(), "~".into()));
+        assert_eq!(
+            label(home.join("data").join("b.csv")),
+            ("b.csv".into(), "~/data".into())
+        );
+        assert_eq!(
+            label_from(&home.join("c.csv"), None).1,
+            home.display().to_string()
         );
     }
 }

@@ -118,9 +118,10 @@ pub fn open_text_as(path: &Path, encoding: Encoding) -> io::Result<Source> {
 }
 
 /// A fresh path for a scratch copy in Brick's cache folder (`$XDG_CACHE_HOME/brick`, on
-/// macOS `~/Library/Caches/dev.cronkite.Brick`; [`suite_platform::dirs`], created if
-/// missing): decoded copies of non-UTF-8 files, imported XLSX sheets. Callers map the copy
-/// and then remove it; the mapping stays valid after unlink.
+/// macOS `~/Library/Caches/dev.cronkite.Brick`, on Windows `%LOCALAPPDATA%\Cronkite\Brick`;
+/// [`suite_platform::dirs`], created if missing): decoded copies of non-UTF-8 files,
+/// imported XLSX sheets. Callers map the copy and then remove it; the mapping stays valid
+/// after unlink.
 pub fn scratch_path() -> io::Result<PathBuf> {
     static N: AtomicU64 = AtomicU64::new(0);
     let dir = suite_platform::dirs::cache_dir(suite_core::AppKind::Brick);
@@ -348,5 +349,23 @@ mod tests {
     fn unmappable_text_is_an_error_naming_the_character() {
         let err = encode_all("ok\n東\n", enc(Charset::Windows1252, false), 1000).unwrap_err();
         assert!(err.to_string().contains('東'), "{err}");
+    }
+
+    /// WIN-2: a scratch copy is in Brick's cache folder, and removing it once it's mapped
+    /// works on every system (on Windows too) while the mapping keeps its bytes, so no copy
+    /// stays behind.
+    #[test]
+    fn a_mapped_scratch_copy_is_removed_and_keeps_its_bytes() {
+        let copy = scratch_path().unwrap();
+        assert_eq!(
+            copy.parent(),
+            Some(suite_platform::dirs::cache_dir(suite_core::AppKind::Brick).as_path())
+        );
+        std::fs::write(&copy, "name\nJosé\n").unwrap();
+        let source = Source::open(&copy).unwrap();
+        std::fs::remove_file(&copy).unwrap();
+        assert_eq!(source.bytes(), "name\nJosé\n".as_bytes());
+        drop(source);
+        assert!(!copy.exists(), "{}", copy.display());
     }
 }
