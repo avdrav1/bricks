@@ -180,8 +180,10 @@ for base in ("libcairo.2.dylib", "libcairo-gobject.2.dylib", "libcairo-script-in
     for d in deps(dest):
         if d.startswith(("/usr/lib/", "/System/", REF)):
             continue
-        name = os.path.basename(d)
-        if not os.path.exists(os.path.join(fw, name)):
+        # dylibbundler copies a library under its file's real name (libxcb.1.1.0.dylib).
+        names = [os.path.basename(os.path.realpath(d)), os.path.basename(d)]
+        name = next((n for n in names if os.path.exists(os.path.join(fw, n))), None)
+        if name is None:
             sys.exit(f"mac_bundle: our {base} needs {d}, which the bundle lacks")
         tool("-change", d, REF + name, dest)
     print(f"mac_bundle: {base} is cairo built without lzo")
