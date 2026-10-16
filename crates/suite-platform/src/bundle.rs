@@ -14,6 +14,7 @@
 //! | `Resources/lib/gdk-pixbuf-2.0/2.10.0` | gdk-pixbuf's loaders (SVG among them) and `loaders.cache`, whose module paths are relative to `Resources` |
 //! | `Resources/etc/fonts` | fontconfig's `fonts.conf` and `conf.d` (the metric aliases) |
 //! | `Resources/fonts` | the bundled fonts (`suite_ui::fonts`) |
+//! | `Resources/licenses` | each bundled Homebrew formula's licence files and `THIRD-PARTY.txt` |
 //!
 //! Those libraries were built to look in Homebrew's prefix, so [`init`] points them at the
 //! bundle through their environment variables: `XDG_DATA_DIRS` (schemas, icons),
