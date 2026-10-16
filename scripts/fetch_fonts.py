@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch the metric-compatible fonts the apps carry on macOS (MAC-6).
+"""Fetch the metric-compatible fonts the apps carry on macOS and Windows (MAC-6, WIN-4).
 
 Liberation (Arial, Times New Roman, Courier New), Carlito (Calibri), and Caladea
 (Cambria) come from pinned upstream releases, each file checked against its SHA-256,
@@ -7,9 +7,10 @@ into one flat folder with their licence texts:
 
     python3 scripts/fetch_fonts.py [DEST]     # DEST defaults to target/fonts
 
-On macOS each app looks for this folder next to its executable: `../Resources/fonts`
-inside an app bundle (MAC-7 copies it there), else `../fonts`, which is `target/fonts`
-for `target/{debug,release}/<app>`. Linux uses the system's fonts and never reads it.
+On macOS and Windows each app looks for this folder next to its executable:
+`../Resources/fonts` inside an app bundle (MAC-7 copies it there), else `../fonts`, which
+is `target/fonts` for `target/{debug,release}/<app>` and `<App>\\fonts` for a Windows
+folder's `<App>\\bin\\<app>.exe`. Linux uses the system's fonts and never reads it.
 Files already in DEST with the right checksum aren't fetched again.
 """
 

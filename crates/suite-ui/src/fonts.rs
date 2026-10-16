@@ -30,8 +30,9 @@
 //! Document text lays out with the fonts' own widths: GDK on Windows tells GTK to hint
 //! font metrics (`gtk-hint-font-metrics`, `gdkwin32misc.c`), which rounds each glyph's
 //! width to whole pixels, so Courier New and Cambria broke lines elsewhere than on Linux
-//! (WIN-4's runs). Slate's page and Frame's slides take [`unhinted_metrics`]; the apps'
-//! own interface keeps GTK's.
+//! (WIN-4's runs). Slate's page and Frame's slides take [`unhinted_metrics`], with
+//! Linux's slight hinting, so full hinting doesn't snap glyphs placed between pixels
+//! unevenly; the apps' own interface keeps GTK's.
 
 use std::ffi::CString;
 use std::path::Path;
@@ -75,9 +76,9 @@ pub fn fontconfig_path(path: &Path) -> Option<CString> {
     }
 }
 
-/// Lay `context`'s text out with the fonts' own (unhinted) widths and unrounded glyph
-/// positions, as GTK does on Linux, so lines break there as on Linux and in Word. Changes
-/// only Windows' contexts, where GTK hints font metrics.
+/// Lay `context`'s text out with the fonts' own (unhinted) widths, unrounded glyph
+/// positions, and slight hinting, as GTK does on Linux, so lines break there as on Linux
+/// and in Word. Changes only Windows' contexts, where GTK hints font metrics.
 pub fn unhinted_metrics(context: &gtk::pango::Context) {
     #[cfg(windows)]
     unhinted::set(context);
@@ -88,7 +89,7 @@ pub fn unhinted_metrics(context: &gtk::pango::Context) {
 #[cfg(windows)]
 #[allow(unsafe_code)]
 mod unhinted {
-    use gtk::cairo::{self, FontOptions, HintMetrics};
+    use gtk::cairo::{self, FontOptions, HintMetrics, HintStyle};
     use gtk::glib::translate::ToGlibPtr;
     use gtk::pango;
 
@@ -118,6 +119,7 @@ mod unhinted {
             return;
         };
         options.set_hint_metrics(HintMetrics::Off);
+        options.set_hint_style(HintStyle::Slight);
         // SAFETY: a live context and options, which Pango copies.
         unsafe { pango_cairo_context_set_font_options(ptr, options.to_raw_none()) };
         context.set_round_glyph_positions(false);

@@ -12,10 +12,10 @@
 # and letters outside ASCII, as a user's folders may. The environment is Explorer's: no
 # HOME, no XDG_* variables.
 #   1. Command line: `app FILE` with a relative name, from that folder, for each sample:
-#      among them office-fonts.docx (scripts/office_fonts.py: Calibri, Cambria, Arial,
-#      Times New Roman, Courier New, which Windows has), the same naming the bundled
-#      stand-ins (Carlito, Caladea, Liberation), and Frame's fixture deck with its Arial
-#      renamed to Liberation Sans; each log names the fonts folder added.
+#      among them office-fonts.docx and office-fonts.pptx (scripts/office_fonts.py:
+#      Calibri, Cambria, Arial, Times New Roman, Courier New, which Windows has) and the
+#      same naming the bundled stand-ins (Carlito, Caladea, Liberation), which it hasn't;
+#      each log names the fonts folder added.
 #   2. Open with: `cmd /c start "" app.exe "C:\...\FILE"`, the command line Explorer's Open
 #      with runs (`"app.exe" "%1"`), with a file name outside ASCII.
 #   3. A registered type: a ProgID under HKCU with `"app.exe" "%1"` as its open command;
@@ -372,10 +372,12 @@ Copy-Item "$root\apps\brick\crates\xlsx\tests\data\fixture.xlsx" "$files\book.xl
 [IO.File]::WriteAllText("$files\read me.md", "# Read me`n`nOpened on **Windows**, in Liberation Sans: the quick brown fox jumps over the lazy dog, and the sphinx of black quartz judges my vow while the line runs long enough to wrap.`n`n- one`n- two`n")
 Copy-Item "$root\apps\slate\crates\docx\tests\data\fixture.docx" "$files\letter.docx"
 python "$root\scripts\office_fonts.py" docx "$files\office-fonts.docx"
-# The same document and the fixture deck naming the bundled fonts themselves (Carlito,
-# Caladea, Liberation), which Windows doesn't have: they must draw in the bundled ones.
+# The same document, and a deck of it, naming the Office fonts and the bundled stand-ins
+# themselves (Carlito, Caladea, Liberation), which Windows doesn't have: those must draw
+# in the bundled ones.
 python "$root\scripts\office_fonts.py" docx "$files\stand-ins.docx" --stand-ins
-python "$root\scripts\office_fonts.py" pptx "$root\apps\frame\crates\pptx\tests\data\fixture.pptx" "$files\deck stand-ins.pptx"
+python "$root\scripts\office_fonts.py" pptx "$files\office-fonts.pptx"
+python "$root\scripts\office_fonts.py" pptx "$files\stand-ins.pptx" --stand-ins
 Copy-Item "$root\apps\frame\crates\pptx\tests\data\fixture.pptx" "$files\deck.pptx"
 Copy-Item "$root\apps\slate\crates\document-model\tests\data\picture.png" "$files\picture.png"
 # One file per app named outside ASCII, for Explorer's launches.
@@ -401,7 +403,8 @@ Open-Check slate @('"letter.docx"') "letter.docx" "slate-cmd-docx" "slate letter
 Open-Check slate @('"office-fonts.docx"') "office-fonts.docx" "slate-cmd-office-fonts" "slate office-fonts.docx" | Out-Null
 Open-Check slate @('"stand-ins.docx"') "stand-ins.docx" "slate-cmd-stand-ins" "slate stand-ins.docx (Carlito, Caladea, Liberation by name)" | Out-Null
 Open-Check frame @('"deck.pptx"') "deck.pptx" "frame-cmd-pptx" "frame deck.pptx" | Out-Null
-Open-Check frame @('"deck stand-ins.pptx"') "deck stand-ins.pptx" "frame-cmd-stand-ins" "frame deck stand-ins.pptx (Liberation by name)" | Out-Null
+Open-Check frame @('"office-fonts.pptx"') "office-fonts.pptx" "frame-cmd-office-fonts" "frame office-fonts.pptx" | Out-Null
+Open-Check frame @('"stand-ins.pptx"') "stand-ins.pptx" "frame-cmd-stand-ins" "frame stand-ins.pptx (Carlito, Caladea, Liberation by name)" | Out-Null
 Open-Check etch @('"picture.png"') "picture.png" "etch-cmd-png" "etch picture.png" | Out-Null
 foreach ($n in "brick-cmd-csv", "slate-cmd-docx", "frame-cmd-pptx", "etch-cmd-png") {
     $log = Get-Content -Raw "$logs\$n.err.txt" -ErrorAction SilentlyContinue
@@ -411,6 +414,15 @@ foreach ($n in "brick-cmd-csv", "slate-cmd-docx", "frame-cmd-pptx", "etch-cmd-pn
 }
 if ((Get-Content -Raw "$logs\slate-cmd-docx.err.txt") -match "isn't fontconfig's") { Fail "slate's font map isn't fontconfig's" }
 else { Pass "slate's font map is fontconfig's (embedded fonts can show)" }
+# Pango warns "couldn't load font X, falling back" for a family it can't find (DEC-11 R8).
+function Missing([string]$name) {
+    return @(Select-String -Path "$logs\$name.err.txt" -Pattern "couldn't load font" -ErrorAction SilentlyContinue)
+}
+foreach ($n in "slate-cmd-md", "slate-cmd-office-fonts", "slate-cmd-stand-ins", "frame-cmd-office-fonts", "frame-cmd-stand-ins") {
+    $missing = Missing $n
+    if ($missing.Count -eq 0) { Pass "$n found every font it asked for" }
+    else { Fail "${n}: $($missing[0].Line.Trim())" }
+}
 
 # --- 2. Explorer's Open with ---------------------------------------------------------------
 Say "== 2. Open with: cmd /c start `"`" app.exe `"FULL PATH`""
@@ -509,9 +521,13 @@ $env:PANGOCAIRO_BACKEND = "win32"
 Open-Check slate @('"office-fonts.docx"') "office-fonts.docx" "slate-win32-office-fonts" "slate office-fonts.docx with PANGOCAIRO_BACKEND=win32" | Out-Null
 Open-Check slate @('"stand-ins.docx"') "stand-ins.docx" "slate-win32-stand-ins" "slate stand-ins.docx with PANGOCAIRO_BACKEND=win32" | Out-Null
 Open-Check slate @('"read me.md"') "read me.md" "slate-win32-md" "slate read me.md with PANGOCAIRO_BACKEND=win32" | Out-Null
-Open-Check frame @('"deck.pptx"') "deck.pptx" "frame-win32-pptx" "frame deck.pptx with PANGOCAIRO_BACKEND=win32" | Out-Null
+Open-Check frame @('"stand-ins.pptx"') "stand-ins.pptx" "frame-win32-stand-ins" "frame stand-ins.pptx with PANGOCAIRO_BACKEND=win32" | Out-Null
 Open-Check brick @('"people list.csv"') "people list.csv" "brick-win32-csv" "brick people list.csv with PANGOCAIRO_BACKEND=win32" | Out-Null
 Remove-Item env:PANGOCAIRO_BACKEND
+foreach ($n in "slate-win32-stand-ins", "slate-win32-md", "frame-win32-stand-ins") {
+    $missing = Missing $n
+    Say "${n}: $($missing.Count) fonts Pango's Win32 font map couldn't load$(if ($missing.Count) { ', first: ' + $missing[0].Line.Trim() })"
+}
 foreach ($r in "gl", "ngl", "vulkan") {
     $env:GSK_RENDERER = $r
     Open-Check slate @('"office-fonts.docx"') "office-fonts.docx" "slate-gsk-$r" "slate with GSK_RENDERER=$r" | Out-Null
