@@ -264,7 +264,7 @@ if [[ -n $gk_dmg ]]; then
   pid=$(pids "$gk" | head -1)
   note "$gk_app: opening it quarantined: $([[ -n $pid ]] && echo "it started (pid $pid; Gatekeeper let it)" || echo "it didn't start (Gatekeeper)"); open: $(kill -0 "$opener" 2>/dev/null && echo "still waiting" || echo "returned") $(tr '\n' ' ' <"$logs/gatekeeper-open.log")"
   # Dismiss the alert (Launch Services holds the app's next opens while it's up).
-  osa 'tell application "System Events" to tell process "CoreServicesUIAgent" to click button 1 of window 1' ||
+  osa 'tell application "System Events" to tell process "CoreServicesUIAgent" to click button "OK" of window 1' ||
     killall -9 CoreServicesUIAgent 2>/dev/null
   sleep 2
   kill "$opener" 2>/dev/null
@@ -281,7 +281,7 @@ if [[ -n $gk_dmg ]]; then
   if [[ -n $pid ]] && [[ -n $(wait_windows "$pid" 1) ]]; then
     pass "$gk_app: after xattr -dr com.apple.quarantine it starts"
   else fail "$gk_app: after xattr -dr com.apple.quarantine it doesn't start"; fi
-  shot gatekeeper-2-after-xattr
+  shot gatekeeper-3-after-xattr
   [[ -n $pid ]] && { kill "$pid"; sleep 2; kill -9 "$pid" 2>/dev/null; }
   kill "$opener" 2>/dev/null
   "$lsregister" -u "$gk" 2>/dev/null
