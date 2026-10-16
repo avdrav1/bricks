@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cronkite: a fast, native office suite for Linux</title>
-<meta name="description" content="Cronkite is a fast, native office suite for Linux: Brick for spreadsheets, Slate for documents, Frame for presentations, Etch for images. Install each with one command.">
+<title>Cronkite: a fast, native office suite for Linux and macOS</title>
+<meta name="description" content="Cronkite is a fast, native office suite for Linux and macOS: Brick for spreadsheets, Slate for documents, Frame for presentations, Etch for images. Install each with one command.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=League+Spartan:wght@400;500;700;800&display=swap" rel="stylesheet">
@@ -96,7 +96,7 @@
 <main>
   <header class="masthead">
     <h1 class="wordmark">Cronkite</h1>
-    <p class="tagline">A fast, native office suite for Linux. No subscriptions, no browser tab, no waiting.</p>
+    <p class="tagline">A fast, native office suite for Linux and macOS. No subscriptions, no browser tab, no waiting.</p>
     <p class="dateline">Spreadsheets &middot; Documents &middot; Presentations &middot; Images &middot; Written in Rust</p>
   </header>
 
@@ -185,45 +185,46 @@
 
   <section id="install" aria-labelledby="install-h">
     <h2 id="install-h">Install</h2>
-    <p class="sub">One command per app, for your user only. No sudo, no package manager. Paste it into a terminal; then start the app from your app menu.</p>
+    <p class="sub">One command per app, for your user only, on Linux or a Mac. No sudo, no package manager. Paste it into a terminal; then start the app from your app menu, or on a Mac from Launchpad or Applications.</p>
 
     <h3 id="install-brick">Brick</h3>
     <div class="cmd primary">
       <pre id="install-brick-cmd">curl -fsSL https://brick.cronkite.cc/install.sh | sh</pre>
       <button type="button" data-copy="install-brick-cmd">Copy</button>
     </div>
-    <p class="note">The command is <code>brick</code>. CSV and TSV files open with it. Download page: <a href="https://brick.cronkite.cc">brick.cronkite.cc</a>.</p>
+    <p class="note">On Linux the command is <code>brick</code>, and CSV and TSV files open with it. Download page: <a href="https://brick.cronkite.cc">brick.cronkite.cc</a>.</p>
 
     <h3 id="install-slate">Slate</h3>
     <div class="cmd primary">
       <pre id="install-slate-cmd">curl -fsSL https://slate.cronkite.cc/install.sh | sh</pre>
       <button type="button" data-copy="install-slate-cmd">Copy</button>
     </div>
-    <p class="note">The command is <code>slate</code>. Word documents (<code>.docx</code>) and Markdown (<code>.md</code>) open with it, and it offers to open plain text. Download page: <a href="https://slate.cronkite.cc">slate.cronkite.cc</a>.</p>
+    <p class="note">On Linux the command is <code>slate</code>, Word documents (<code>.docx</code>) and Markdown (<code>.md</code>) open with it, and it offers to open plain text. Download page: <a href="https://slate.cronkite.cc">slate.cronkite.cc</a>.</p>
 
     <h3 id="install-frame">Frame</h3>
     <div class="cmd primary">
       <pre id="install-frame-cmd">curl -fsSL https://frame.cronkite.cc/install.sh | sh</pre>
       <button type="button" data-copy="install-frame-cmd">Copy</button>
     </div>
-    <p class="note">The command is <code>frame</code>. PowerPoint presentations (<code>.pptx</code>) open with it. Download page: <a href="https://frame.cronkite.cc">frame.cronkite.cc</a>.</p>
+    <p class="note">On Linux the command is <code>frame</code>, and PowerPoint presentations (<code>.pptx</code>) open with it. Download page: <a href="https://frame.cronkite.cc">frame.cronkite.cc</a>.</p>
 
     <h3 id="install-etch">Etch</h3>
     <div class="cmd primary">
       <pre id="install-etch-cmd">curl -fsSL https://etch.cronkite.cc/install.sh | sh</pre>
       <button type="button" data-copy="install-etch-cmd">Copy</button>
     </div>
-    <p class="note">The command is <code>etch</code>. PNG, JPEG, and BMP images open with it. Download page: <a href="https://etch.cronkite.cc">etch.cronkite.cc</a>.</p>
+    <p class="note">On Linux the command is <code>etch</code>, and PNG, JPEG, and BMP images open with it. Download page: <a href="https://etch.cronkite.cc">etch.cronkite.cc</a>.</p>
 
     <h3>What an installer does</h3>
     <ol class="steps">
-      <li>Downloads the app's latest release and checks it against its published sha256. If the checksum doesn't match, nothing is installed.</li>
-      <li>Puts the app (<code>brick</code>, <code>slate</code>, <code>frame</code>, <code>etch</code>) in <code>~/.local/bin</code>, and its menu entry and icon in <code>~/.local/share</code>.</li>
-      <li>Makes it the default app for its files (above), so double-clicking one opens it. Other apps' defaults for other files are kept.</li>
+      <li>Downloads the app's latest release for your system and checks it against its published sha256. If the checksum doesn't match, nothing is installed.</li>
+      <li>On Linux, puts the app (<code>brick</code>, <code>slate</code>, <code>frame</code>, <code>etch</code>) in <code>~/.local/bin</code>, and its menu entry and icon in <code>~/.local/share</code>. On a Mac, puts it (<code>Brick.app</code>, …) in <code>~/Applications</code>, with GTK and everything else it needs inside.</li>
+      <li>On Linux, makes it the default app for its files (above), so double-clicking one opens it; other apps' defaults for other files are kept. On a Mac, its files list it under Open With, and your default apps stay as they are: to make it one, select a file in Finder, then File &gt; Get Info &gt; Open with &gt; Change All.</li>
     </ol>
 
     <h3>Requirements</h3>
-    <p>An x86_64 Linux system with GTK 4.14 or newer. GNOME desktops already have it. Tested on Arch, Ubuntu 24.04, and Fedora, and newer releases of each. If GTK 4 is missing, the installer tells you how to get it:</p>
+    <p>A Mac with Apple Silicon (M1 or later) and macOS 14 Sonoma or later; nothing else to install. Intel Macs aren't supported.</p>
+    <p>Or an x86_64 Linux system with GTK 4.14 or newer. GNOME desktops already have it. Tested on Arch, Ubuntu 24.04, and Fedora, and newer releases of each. If GTK 4 is missing, the installer tells you how to get it:</p>
     <table>
       <thead><tr><th>Distribution</th><th>Install GTK 4</th></tr></thead>
       <tbody>
@@ -254,10 +255,11 @@
       <pre id="uninstall-etch-cmd">curl -fsSL https://etch.cronkite.cc/install.sh | sh -s -- --uninstall</pre>
       <button type="button" data-copy="uninstall-etch-cmd">Copy</button>
     </div>
-    <p class="note">Removes the app, its menu entry, and its file defaults. Your files are untouched.</p>
+    <p class="note">Removes the app, and on Linux its menu entry and file defaults. Your files are untouched.</p>
 
-    <h3>Prefer a tarball?</h3>
-    <p>Each app's download page has its latest release as a <code>.tar.gz</code>, with its version, size, and sha256: <a href="https://brick.cronkite.cc">Brick</a>, <a href="https://slate.cronkite.cc">Slate</a>, <a href="https://frame.cronkite.cc">Frame</a>, <a href="https://etch.cronkite.cc">Etch</a>.</p>
+    <h3>Prefer a download?</h3>
+    <p>Each app's download page has its latest release as a Linux <code>.tar.gz</code> and a Mac <code>.dmg</code>, with its version, size, and sha256: <a href="https://brick.cronkite.cc">Brick</a>, <a href="https://slate.cronkite.cc">Slate</a>, <a href="https://frame.cronkite.cc">Frame</a>, <a href="https://etch.cronkite.cc">Etch</a>.</p>
+    <p>The apps aren't notarized by Apple yet, so the first time you open one from a DMG, macOS says it can't check it. On macOS 15 or later, open System Settings &gt; Privacy &amp; Security and click Open Anyway; on macOS 14, Control-click the app in Applications and choose Open. Or run <code>xattr -dr com.apple.quarantine /Applications/Brick.app</code> (with the app's name) once in Terminal. The install command needs none of this.</p>
   </section>
 
   <section aria-labelledby="source-h">
@@ -265,7 +267,7 @@
     <p>Cronkite is open source (MIT or Apache-2.0) and built in the open: <a href="https://github.com/avdrav1/cronkite">github.com/avdrav1/cronkite</a>.</p>
   </section>
 </main>
-<footer>Cronkite &middot; a native office suite for Linux &middot; <a href="https://brick.cronkite.cc">brick.cronkite.cc</a> &middot; <a href="https://slate.cronkite.cc">slate.cronkite.cc</a> &middot; <a href="https://frame.cronkite.cc">frame.cronkite.cc</a> &middot; <a href="https://etch.cronkite.cc">etch.cronkite.cc</a></footer>
+<footer>Cronkite &middot; a native office suite for Linux and macOS &middot; <a href="https://brick.cronkite.cc">brick.cronkite.cc</a> &middot; <a href="https://slate.cronkite.cc">slate.cronkite.cc</a> &middot; <a href="https://frame.cronkite.cc">frame.cronkite.cc</a> &middot; <a href="https://etch.cronkite.cc">etch.cronkite.cc</a></footer>
 <dialog class="viewer" aria-label="Screenshot">
   <img alt="">
   <div class="bar">

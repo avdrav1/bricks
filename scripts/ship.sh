@@ -58,7 +58,7 @@ esac
 # Where the build puts latest.json and the deploy its copy of the site: dist/ for Brick,
 # dist/APP/ for the others.
 OUT="dist${PREFIX:+/${PREFIX%/}}"
-version() { sed -n "/^\[$SECTION\]/,/^\[/{s/^version = \"\(.*\)\"/\1/p}" "$MANIFEST"; }
+version() { sed -n "/^\[$SECTION\]/,/^\[/{s/^version = \"\(.*\)\"/\1/p;}" "$MANIFEST"; }
 V=$(version)
 TAG="$TAG_PREFIX$V"
 NAME="$APP-$V-x86_64-linux"

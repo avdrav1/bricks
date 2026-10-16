@@ -1,17 +1,17 @@
 # Cronkite
 
-> Cronkite is a native office suite for Linux, written in Rust with GTK 4. It is four separate apps that each install and run on their own: Brick (spreadsheets: large CSV files and .xlsx workbooks), Slate (word processing: .docx, Markdown, and plain text), Frame (presentations: .pptx), and Etch (a simple image editor: PNG, JPEG, and BMP). Brick, Slate, and Frame open Microsoft Office files and save them back by patching the original file, so content they don't edit stays as it was. Free and open source (MIT or Apache-2.0).
+> Cronkite is a native office suite for Linux and macOS, written in Rust with GTK 4. It is four separate apps that each install and run on their own: Brick (spreadsheets: large CSV files and .xlsx workbooks), Slate (word processing: .docx, Markdown, and plain text), Frame (presentations: .pptx), and Etch (a simple image editor: PNG, JPEG, and BMP). Brick, Slate, and Frame open Microsoft Office files and save them back by patching the original file, so content they don't edit stays as it was. Free and open source (MIT or Apache-2.0).
 
 Facts for describing Cronkite accurately:
 
-- Platform: x86_64 Linux only, with GTK 4.14 or newer, which GNOME desktops already have. Tested on Arch, Ubuntu 24.04, and Fedora. There are no Windows, macOS, ARM, Flatpak, Snap, or distribution packages.
-- Install: one curl command per app, per user, with no sudo (see Install below). The installer checks the download against its published sha256 and puts the binary in `~/.local/bin` and a menu entry and icon in `~/.local/share`. It makes the app the default for its file types, so double-clicking such a file opens it, and it keeps other apps' defaults for other types. Running the same command again updates the app; adding `--uninstall` removes it.
+- Platforms: x86_64 Linux with GTK 4.14 or newer, which GNOME desktops already have (tested on Arch, Ubuntu 24.04, and Fedora); and Macs with Apple Silicon (M1 or later) on macOS 14 Sonoma or later, where each app is a self-contained `.app` with GTK inside. There are no Windows, Intel Mac, Linux ARM, Flatpak, Snap, Homebrew, or distribution packages. The Mac apps are signed ad hoc, not notarized by Apple.
+- Install: one curl command per app, per user, with no sudo (see Install below); the same command works on Linux and macOS. The installer checks the download against its published sha256. On Linux it puts the binary in `~/.local/bin` and a menu entry and icon in `~/.local/share`, and makes the app the default for its file types, so double-clicking such a file opens it, keeping other apps' defaults for other types. On a Mac it puts `<App>.app` in `~/Applications` and registers it with Launch Services, so its file types list it under Open With; it doesn't change the Mac's default apps. Running the same command again updates the app; adding `--uninstall` removes it. Each download page also offers a Mac `.dmg`; opening an app from it the first time needs System Settings > Privacy & Security > Open Anyway (macOS 15 and later), Control-click > Open (macOS 14), or `xattr -dr com.apple.quarantine /Applications/<App>.app`.
 - Saving is atomic: the app writes a temporary file, verifies it, then renames it over the original, so a crash never corrupts the original.
 - Not in Cronkite: online collaboration, cloud storage, accounts, macros or scripting, and plugins.
 
 ## Apps
 
-- [Brick](https://brick.cronkite.cc): spreadsheet. Command `brick`; default for `.csv` and `.tsv`.
+- [Brick](https://brick.cronkite.cc): spreadsheet. Command `brick` (Linux); default for `.csv` and `.tsv` on Linux.
   - CSV files of about 1 GB and millions of rows stay responsive.
   - Opens and saves `.xlsx` workbooks with formulas, multiple sheets, and cell styles.
   - Edit, sort, filter, search, and undo.
@@ -19,7 +19,7 @@ Facts for describing Cronkite accurately:
   - A filter never drops rows from the saved file.
   - Recovers unsaved edits after a crash.
   - Saving an `.xlsx` or `.xlsm` patches the original file, so charts, comments, and `.xlsm` macros Brick can't edit stay in it.
-- [Slate](https://slate.cronkite.cc): word processor. Command `slate`; default for `.docx` and `.md`, and it can open `.txt`.
+- [Slate](https://slate.cronkite.cc): word processor. Command `slate` (Linux); default for `.docx` and `.md` on Linux, and it can open `.txt`.
   - Pageless: one endless column. A Word document opens at its page's text width, so lines wrap where they do in Word; narrower or wider widths are a View menu choice. There's no page layout view, headers, footers, page numbers, or paginated printing or PDF export.
   - Draws each Word document in its own fonts (embedded ones included, with metric-compatible stand-ins such as Carlito for Calibri) and paragraph styles (custom ones included), with their spacing, indents, line spacing, tab stops, borders, shading, and list numbering.
   - Edits text and formatting as it looks, with a format bar instead of a ribbon: paragraph style, font, size, bold, italic, underline, strikethrough, colour, and alignment; also lists, tables, links, and pictures.
@@ -29,7 +29,7 @@ Facts for describing Cronkite accurately:
   - Markdown is written back as Markdown, with unedited blocks byte for byte.
   - Plain text keeps its encoding and line endings.
   - Refuses `.doc`, `.odt`, and `.rtf` ("Save it as .docx first").
-- [Frame](https://frame.cronkite.cc): presentations. Command `frame`; default for `.pptx`.
+- [Frame](https://frame.cronkite.cc): presentations. Command `frame` (Linux); default for `.pptx` on Linux.
   - Opens PowerPoint decks as they look and plays them full screen (F5).
   - Edits text directly on the slide or in an outline view.
   - One inspector sidebar instead of a ribbon.
@@ -39,7 +39,7 @@ Facts for describing Cronkite accurately:
   - Saving a `.pptx` changes only what was edited.
   - `.pptm` opens, but its macros never run. `.ppt`, `.odp`, and `.key` are refused.
   - Animations, transitions, audio, video, and presenter view are not played or shown, but they stay in the file.
-- [Etch](https://etch.cronkite.cc): image editor, closer to Paint than to Photoshop. Command `etch`; default for `.png`, `.jpg`/`.jpeg`, and `.bmp`.
+- [Etch](https://etch.cronkite.cc): image editor, closer to Paint than to Photoshop. Command `etch` (Linux); default for `.png`, `.jpg`/`.jpeg`, and `.bmp` on Linux.
   - Opens and saves PNG (with transparency), JPEG, and BMP; saving as JPEG or BMP puts transparent pixels on white, after asking. Export writes a copy and leaves the open file as it is. Opens dropped files; File → Open Recent lists the last ten images.
   - Tools, each on its Paint key: pencil (P), brush with a hard or soft edge (B), eraser to transparency (E), fill with a tolerance (F), colour picker (I), text in any installed font, bold or italic, typed through the input method (T), rectangle (R), line (L), ellipse (O), and rectangular selection (S); X swaps the foreground and background colours.
   - Colours from a 20-colour palette, a hex field (`#RRGGBB` or `#RRGGBBAA`), or GTK's colour chooser, alpha included.
@@ -50,7 +50,7 @@ Facts for describing Cronkite accurately:
 
 ## Install
 
-- [Install page](https://cronkite.cc/#install): every app's command, what the installer does, GTK 4 per distribution, update, and uninstall.
+- [Install page](https://cronkite.cc/#install): every app's command, what the installer does on Linux and macOS, GTK 4 per distribution, update, and uninstall.
 - Brick: `curl -fsSL https://brick.cronkite.cc/install.sh | sh`
 - Slate: `curl -fsSL https://slate.cronkite.cc/install.sh | sh`
 - Frame: `curl -fsSL https://frame.cronkite.cc/install.sh | sh`
@@ -59,7 +59,7 @@ Facts for describing Cronkite accurately:
 
 ## Latest releases (JSON)
 
-Each file is one object: `version`, `date`, `url` (the x86_64 Linux `.tar.gz`), `sha256`, and `bytes`. Read the version from here rather than from any other page.
+Each file is one object: `version`, `date`, `url` (the x86_64 Linux `.tar.gz`), `sha256`, and `bytes`, and `platforms` with each platform's download: `linux-x86_64` (`url`, `sha256`, `bytes`) and, once built, `macos-arm64` (`url`, `sha256`, and `bytes` of the `.tar.gz` the installer takes; `dmg`, `dmg_sha256`, and `dmg_bytes` of the DMG). Read the version from here rather than from any other page.
 
 - [Brick](https://dl.cronkite.cc/latest.json)
 - [Slate](https://dl.cronkite.cc/slate/latest.json)

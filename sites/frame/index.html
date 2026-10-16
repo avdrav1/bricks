@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Frame: a lightweight presentation app for Linux</title>
-<meta name="description" content="Open, edit, show, and save PowerPoint presentations on Linux, with one inspector and an outline instead of a ribbon.">
+<title>Frame: a lightweight presentation app for Linux and macOS</title>
+<meta name="description" content="Open, edit, show, and save PowerPoint presentations on Linux and macOS, with one inspector and an outline instead of a ribbon.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
@@ -37,6 +37,7 @@
   .facts span { color: var(--muted); }
   h2 { font-size: 24px; margin: 48px 0 12px; }
   pre { background: var(--canvas); border-left: 3px solid var(--accent); padding: 14px 16px; overflow-x: auto; font-size: 14px; }
+  #downloads code { word-break: break-all; font-size: 13px; }
   .status { position: sticky; bottom: 0; margin-top: 48px; display: flex; border-top: 1px solid var(--rule); background: var(--slide); font-size: 13px; color: var(--muted); }
   .status span { padding: 6px 16px; border-right: 1px solid var(--rule); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .status span:last-child { margin-left: auto; border-right: 0; border-left: 1px solid var(--rule); }
@@ -52,8 +53,8 @@
   <div class="band" aria-hidden="true"></div>
   <div class="body">
     <h1>Slides, without the ribbon.</h1>
-    <p class="lede">Frame is a lightweight, native presentation app for Linux. It opens PowerPoint decks, lets you edit them on the slide or as an outline, shows them full screen, and saves them back without touching what you didn't change.</p>
-    <a class="get" id="dl" href="#install">Download for Linux</a>
+    <p class="lede">Frame is a lightweight, native presentation app for Linux and macOS. It opens PowerPoint decks, lets you edit them on the slide or as an outline, shows them full screen, and saves them back without touching what you didn't change.</p>
+    <a class="get" id="dl" href="#install">Download</a>
     <ul class="facts">
       <li><b>PowerPoint files</b><span>.pptx decks, opened as they look, played with F5.</span></li>
       <li><b>Fewer steps</b><span>A four-slide deck in 15 keys and clicks; PowerPoint's shortest documented way takes 21.</span></li>
@@ -61,15 +62,22 @@
     </ul>
     <section id="install">
       <h2>Install</h2>
-      <p>For your user, no sudo: the app, its menu entry, and .pptx files opening with it. Start it from your app menu or with <code>frame</code>. Run the command again to update.</p>
+      <p>For your user, no sudo, on Linux or a Mac. Run the command again to update.</p>
       <pre id="cmd">curl -fsSL https://this-site/install.sh | sh</pre>
-      <p>It needs GTK 4, which GNOME desktops have; otherwise the installer says how to get it. Or download the tarball above and check it against the published sha256. To remove it:</p>
+      <p>On Linux it installs the app, its menu entry, and .pptx files opening with it; start it from your app menu or with <code>frame</code>. It needs GTK 4, which GNOME desktops have; otherwise the installer says how to get it.</p>
+      <p>On a Mac with Apple Silicon and macOS 14 or later, it puts Frame in your Applications folder, with everything it needs inside. PowerPoint presentations list Frame under Open With; to open them with Frame by default, select one in Finder, then File &gt; Get Info &gt; Open with &gt; Change All.</p>
+      <p>To remove it:</p>
       <pre id="uninstall">curl -fsSL https://this-site/install.sh | sh -s -- --uninstall</pre>
+      <h2>Downloads</h2>
+      <ul id="downloads"><li>No release published yet</li></ul>
+      <p id="gatekeeper">From the DMG: open it and drag Frame to Applications. Frame isn't notarized by Apple yet, so the first time you open it macOS says it can't check it. On macOS 15 or later, open System Settings &gt; Privacy &amp; Security and click Open Anyway beside Frame's name; on macOS 14, Control-click Frame in Applications and choose Open. Or run this once in Terminal:</p>
+      <pre>xattr -dr com.apple.quarantine /Applications/Frame.app</pre>
+      <p>The install command needs none of this: what curl downloads isn't flagged. Check a download against its sha256 with <code>shasum -a 256</code> on a Mac or <code>sha256sum</code> on Linux.</p>
     </section>
   </div>
 </main>
 <footer class="status" aria-live="polite">
-  <span id="ver">Loading release</span><span id="size"></span><span id="sha"></span><span>x86_64 Linux</span>
+  <span id="ver">Loading release</span><span id="size"></span><span id="sha"></span><span id="plat">x86_64 Linux</span>
 </footer>
 <!-- The release (latest.json): scripts/ship.sh frame site writes it in when it deploys the page. -->
 <script id="release" type="application/json">@RELEASE_JSON@</script>
@@ -80,13 +88,33 @@
   document.getElementById("uninstall").textContent = "curl -fsSL " + script + " | sh -s -- --uninstall";
   let rel = null;
   try { rel = JSON.parse(document.getElementById("release").textContent); } catch (e) {}
-  if (rel && rel.version) {
-    document.getElementById("dl").href = rel.url;
-    document.getElementById("dl").textContent = "Download v" + rel.version;
+  // Each platform's download (MAC-7): the button offers the visitor's, the list both. A
+  // release from before MAC-7 has only the top-level Linux fields.
+  const platforms = (rel && rel.platforms) || {};
+  const linux = platforms["linux-x86_64"] || (rel && rel.url ? { url: rel.url, sha256: rel.sha256, bytes: rel.bytes } : null);
+  const macos = platforms["macos-arm64"];
+  const onMac = /mac/i.test((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent);
+  const mb = (bytes) => (bytes / 1048576).toFixed(1) + " MB";
+  if (rel && rel.version && linux) {
+    const files = [{ name: "Linux", label: "x86_64 Linux", what: "tarball", url: linux.url, bytes: linux.bytes, sha: linux.sha256 }];
+    if (macos) files.push({ name: "Mac", label: "Apple Silicon, macOS 14+", what: "DMG", url: macos.dmg, bytes: macos.dmg_bytes, sha: macos.dmg_sha256 });
+    const pick = files.find((f) => f.name === (onMac ? "Mac" : "Linux")) || files[0];
+    document.getElementById("dl").href = pick.url;
+    document.getElementById("dl").textContent = "Download v" + rel.version + " for " + pick.name;
     document.getElementById("ver").textContent = "v" + rel.version + " released " + rel.date;
-    document.getElementById("size").textContent = (rel.bytes / 1048576).toFixed(1) + " MB";
-    document.getElementById("sha").textContent = "sha256 " + rel.sha256;
-    document.getElementById("sha").title = rel.sha256;
+    document.getElementById("size").textContent = mb(pick.bytes);
+    document.getElementById("sha").textContent = "sha256 " + pick.sha;
+    document.getElementById("sha").title = pick.sha;
+    document.getElementById("plat").textContent = pick.label;
+    const list = document.getElementById("downloads");
+    list.replaceChildren(...files.map((f) => {
+      const li = document.createElement("li"), a = document.createElement("a"), code = document.createElement("code");
+      a.href = f.url; a.textContent = f.name + " (" + f.label + "): " + f.what;
+      code.textContent = f.sha; code.title = "sha256";
+      li.append(a, ", " + mb(f.bytes) + ", sha256 ", code);
+      return li;
+    }));
+    if (!macos) list.append(Object.assign(document.createElement("li"), { textContent: "Mac: not in this release yet" }));
   } else {
     document.getElementById("ver").textContent = "No release published yet";
   }

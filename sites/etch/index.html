@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Etch: a simple image editor for Linux</title>
-<meta name="description" content="Etch is a fast, simple, native image editor for Linux: closer to Paint than to Photoshop. Early preview: draw with a pencil and eraser on a blank canvas.">
+<title>Etch: a simple image editor for Linux and macOS</title>
+<meta name="description" content="Etch is a fast, simple, native image editor for Linux and macOS: closer to Paint than to Photoshop. Early preview: draw with a pencil and eraser on a blank canvas.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
@@ -43,6 +43,7 @@
   .facts span { color: var(--muted); }
   h2 { font-size: 24px; margin: 48px 0 12px; }
   pre { background: var(--backdrop); border-left: 3px solid var(--accent); padding: 14px 16px; overflow-x: auto; font-size: 14px; }
+  #downloads code { word-break: break-all; font-size: 13px; }
   .status { grid-column: 1 / -1; position: sticky; bottom: 0; display: flex; align-items: center; border-top: 1px solid var(--rule);
             background: var(--backdrop); font-size: 13px; color: var(--muted); }
   .status .swatches { display: flex; gap: 3px; padding: 6px 14px; border-right: 1px solid var(--rule); }
@@ -69,8 +70,8 @@
     <div class="body">
       <h1>I just need to edit this image.</h1>
       <svg class="scribble" viewBox="0 0 240 26" aria-hidden="true"><path d="M4 20c30-18 52-18 70-6s40 10 60-4 46-10 70 4 24 6 32 2" fill="none" stroke="var(--stroke)" stroke-width="5" stroke-linecap="round"/></svg>
-      <p class="lede">Etch is a fast, simple, native image editor for Linux, closer to Paint than to Photoshop. Open a PNG, JPEG, or BMP, draw with the pencil, brush, fill, lines, rectangles, ellipses, and text, select and move pixels, copy and paste with other apps, crop, resize, rotate, and flip, then save. Every step undoes.</p>
-      <a class="get" id="dl" href="#install">Download for Linux</a>
+      <p class="lede">Etch is a fast, simple, native image editor for Linux and macOS, closer to Paint than to Photoshop. Open a PNG, JPEG, or BMP, draw with the pencil, brush, fill, lines, rectangles, ellipses, and text, select and move pixels, copy and paste with other apps, crop, resize, rotate, and flip, then save. Every step undoes.</p>
+      <a class="get" id="dl" href="#install">Download</a>
       <ul class="facts">
         <li><b>Familiar</b><span>Tools on the left, colours at the bottom, Paint's keys: P, B, E, F, T, S, X.</span></li>
         <li><b>Immediate</b><span>A stroke on an 8K image draws in about a millisecond a frame.</span></li>
@@ -78,16 +79,23 @@
       </ul>
       <section id="install">
         <h2>Install</h2>
-        <p>For your user, no sudo: the app and its menu entry. Start it from your app menu or with <code>etch</code>. Run the command again to update. It makes Etch the default app for PNG, JPEG, and BMP images, so double-clicking one opens it in Etch; other file types keep their apps, and removing Etch drops its defaults.</p>
+        <p>For your user, no sudo, on Linux or a Mac. Run the command again to update.</p>
         <pre id="cmd">curl -fsSL https://this-site/install.sh | sh</pre>
-        <p>It needs GTK 4, which GNOME desktops have; otherwise the installer says how to get it. Or download the tarball above and check it against the published sha256. To remove it:</p>
+        <p>On Linux it installs the app and its menu entry; start it from your app menu or with <code>etch</code>. It makes Etch the default app for PNG, JPEG, and BMP images, so double-clicking one opens it in Etch; other file types keep their apps, and removing Etch drops its defaults. It needs GTK 4, which GNOME desktops have; otherwise the installer says how to get it.</p>
+        <p>On a Mac with Apple Silicon and macOS 14 or later, it puts Etch in your Applications folder, with everything it needs inside. PNG, JPEG, and BMP images list Etch under Open With; to open them with Etch by default, select one in Finder, then File &gt; Get Info &gt; Open with &gt; Change All.</p>
+        <p>To remove it:</p>
         <pre id="uninstall">curl -fsSL https://this-site/install.sh | sh -s -- --uninstall</pre>
+        <h2>Downloads</h2>
+        <ul id="downloads"><li>No release published yet</li></ul>
+        <p id="gatekeeper">From the DMG: open it and drag Etch to Applications. Etch isn't notarized by Apple yet, so the first time you open it macOS says it can't check it. On macOS 15 or later, open System Settings &gt; Privacy &amp; Security and click Open Anyway beside Etch's name; on macOS 14, Control-click Etch in Applications and choose Open. Or run this once in Terminal:</p>
+        <pre>xattr -dr com.apple.quarantine /Applications/Etch.app</pre>
+        <p>The install command needs none of this: what curl downloads isn't flagged. Check a download against its sha256 with <code>shasum -a 256</code> on a Mac or <code>sha256sum</code> on Linux.</p>
       </section>
     </div>
   </main>
   <footer class="status" aria-live="polite">
     <div class="swatches" aria-hidden="true"><i style="background:#000"></i><i style="background:#ed1c24"></i><i style="background:#fff200"></i><i style="background:#22b14c"></i><i style="background:#3f48cc"></i></div>
-    <span id="ver">Loading release</span><span id="size"></span><span id="sha"></span><span>x86_64 Linux</span>
+    <span id="ver">Loading release</span><span id="size"></span><span id="sha"></span><span id="plat">x86_64 Linux</span>
   </footer>
 </div>
 <!-- The release (latest.json): scripts/ship.sh etch site writes it in when it deploys the page. -->
@@ -99,13 +107,33 @@
   document.getElementById("uninstall").textContent = "curl -fsSL " + script + " | sh -s -- --uninstall";
   let rel = null;
   try { rel = JSON.parse(document.getElementById("release").textContent); } catch (e) {}
-  if (rel && rel.version) {
-    document.getElementById("dl").href = rel.url;
-    document.getElementById("dl").textContent = "Download v" + rel.version;
+  // Each platform's download (MAC-7): the button offers the visitor's, the list both. A
+  // release from before MAC-7 has only the top-level Linux fields.
+  const platforms = (rel && rel.platforms) || {};
+  const linux = platforms["linux-x86_64"] || (rel && rel.url ? { url: rel.url, sha256: rel.sha256, bytes: rel.bytes } : null);
+  const macos = platforms["macos-arm64"];
+  const onMac = /mac/i.test((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent);
+  const mb = (bytes) => (bytes / 1048576).toFixed(1) + " MB";
+  if (rel && rel.version && linux) {
+    const files = [{ name: "Linux", label: "x86_64 Linux", what: "tarball", url: linux.url, bytes: linux.bytes, sha: linux.sha256 }];
+    if (macos) files.push({ name: "Mac", label: "Apple Silicon, macOS 14+", what: "DMG", url: macos.dmg, bytes: macos.dmg_bytes, sha: macos.dmg_sha256 });
+    const pick = files.find((f) => f.name === (onMac ? "Mac" : "Linux")) || files[0];
+    document.getElementById("dl").href = pick.url;
+    document.getElementById("dl").textContent = "Download v" + rel.version + " for " + pick.name;
     document.getElementById("ver").textContent = "v" + rel.version + " released " + rel.date;
-    document.getElementById("size").textContent = (rel.bytes / 1048576).toFixed(1) + " MB";
-    document.getElementById("sha").textContent = "sha256 " + rel.sha256;
-    document.getElementById("sha").title = rel.sha256;
+    document.getElementById("size").textContent = mb(pick.bytes);
+    document.getElementById("sha").textContent = "sha256 " + pick.sha;
+    document.getElementById("sha").title = pick.sha;
+    document.getElementById("plat").textContent = pick.label;
+    const list = document.getElementById("downloads");
+    list.replaceChildren(...files.map((f) => {
+      const li = document.createElement("li"), a = document.createElement("a"), code = document.createElement("code");
+      a.href = f.url; a.textContent = f.name + " (" + f.label + "): " + f.what;
+      code.textContent = f.sha; code.title = "sha256";
+      li.append(a, ", " + mb(f.bytes) + ", sha256 ", code);
+      return li;
+    }));
+    if (!macos) list.append(Object.assign(document.createElement("li"), { textContent: "Mac: not in this release yet" }));
   } else {
     document.getElementById("ver").textContent = "No release published yet";
   }
