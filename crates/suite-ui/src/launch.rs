@@ -87,29 +87,28 @@ mod tests {
         seen.take()
     }
 
+    /// One test, so the two runs don't share the main context at once.
     #[test]
-    fn no_file_activates() {
+    fn files_reach_open_and_none_activates() {
         assert_eq!(emitted(&[]), ["activate"]);
-    }
-
-    /// Not on Windows: there GLib ignores the arguments `g_application_run` is given and
-    /// reads the process's own command line (`g_win32_get_command_line`), so `run` can't
-    /// hand it files; how files reach a Windows app is WIN-4's.
-    #[cfg(not(windows))]
-    #[test]
-    fn files_reach_open() {
-        let cwd = std::env::current_dir().unwrap();
-        assert_eq!(
-            emitted(&[
-                PathBuf::from("a b.csv"),
-                PathBuf::from("-x.md"),
-                PathBuf::from("/tmp/c.pptx"),
-            ]),
-            [
-                format!("open {}", cwd.join("a b.csv").display()),
-                format!("open {}", cwd.join("-x.md").display()),
-                "open /tmp/c.pptx".to_owned(),
-            ]
-        );
+        // Not on Windows: there GLib ignores the arguments `g_application_run` is given
+        // and reads the process's own command line (`g_win32_get_command_line`), so `run`
+        // can't hand it files; how files reach a Windows app is WIN-4's.
+        #[cfg(not(windows))]
+        {
+            let cwd = std::env::current_dir().unwrap();
+            assert_eq!(
+                emitted(&[
+                    PathBuf::from("a b.csv"),
+                    PathBuf::from("-x.md"),
+                    PathBuf::from("/tmp/c.pptx"),
+                ]),
+                [
+                    format!("open {}", cwd.join("a b.csv").display()),
+                    format!("open {}", cwd.join("-x.md").display()),
+                    "open /tmp/c.pptx".to_owned(),
+                ]
+            );
+        }
     }
 }
