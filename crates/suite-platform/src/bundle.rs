@@ -35,7 +35,7 @@
 //!
 //! | In `<Name>\` | What |
 //! |---|---|
-//! | `bin\<app>.exe` | the app, beside every DLL it loads and `gdbus.exe` (GLib's session bus) |
+//! | `bin\<app>.exe` | the app, beside every DLL it loads (not GLib's `gdbus.exe`: no D-Bus session bus on Windows; GApplication runs without one) |
 //! | `lib\gdk-pixbuf-2.0\2.10.0` | gdk-pixbuf's loaders and `loaders.cache` (paths relative to `<Name>`) |
 //! | `share\glib-2.0\schemas`, `share\icons` | GTK's schemas, compiled; Adwaita's symbolic icons, hicolor with the app's icon |
 //! | `etc\fonts` | fontconfig's `fonts.conf`, whose cache is `<cachedir prefix="xdg">`, and `conf.d` |
@@ -260,7 +260,9 @@ mod windows {
         // SAFETY: two NUL-terminated UTF-16 strings, which the C library copies.
         match unsafe { _wputenv_s(wide(OsStr::new(name)).as_ptr(), wide(value).as_ptr()) } {
             0 => Ok(()),
-            e => Err(format!("the C library's environment refused {name} (error {e})")),
+            e => Err(format!(
+                "the C library's environment refused {name} (error {e})"
+            )),
         }
     }
 }
@@ -292,10 +294,8 @@ mod tests {
 
     #[test]
     fn only_a_windows_install_folder_with_its_files_counts() {
-        let tmp = std::env::temp_dir().join(format!(
-            "suite-platform-win-bundle-{}",
-            std::process::id()
-        ));
+        let tmp =
+            std::env::temp_dir().join(format!("suite-platform-win-bundle-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let root = tmp.join("Programs").join("Brick");
         let exe = root.join("bin").join("brick.exe");

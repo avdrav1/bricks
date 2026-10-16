@@ -44,7 +44,8 @@ class Installer(unittest.TestCase):
         self.assertIn('Root: HKCU; Subkey: "Software\\Classes\\Applications\\slate.exe\\SupportedTypes"; '
                       'ValueType: string; ValueName: ".txt"; ValueData: ""', registry)
         self.assertIn('Root: HKCU; Subkey: "Software\\RegisteredApplications"; ValueType: string; '
-                      'ValueName: "Cronkite Slate"; ValueData: "Software\\Cronkite\\Slate\\Capabilities"; Flags: uninsdeletevalue', registry)
+                      'ValueName: "Cronkite Slate"; ValueData: "Software\\Cronkite\\Slate\\Capabilities"; '
+                      'Flags: uninsdeletevalue uninsdeletekeyifempty', registry)
         # Never the extension's default: Windows keeps the user's.
         for ext in (".docx", ".md", ".markdown", ".txt"):
             ext_key = f'Subkey: "Software\\Classes\\{ext}";'
@@ -55,6 +56,7 @@ class Installer(unittest.TestCase):
                     "Software\\Classes\\Cronkite.Slate.txt"):
             self.assertIn(f'Root: HKCU; Subkey: "{key}"; Flags: uninsdeletekey', registry)
         self.assertIn('Root: HKCU; Subkey: "Software\\Cronkite"; Flags: uninsdeletekeyifempty', registry)
+        self.assertIn('Root: HKCU; Subkey: "Software\\Classes\\Applications"; Flags: uninsdeletekeyifempty', registry)
 
     def test_an_icon_holds_each_png_smallest_first(self):
         images = [png(256), png(16), png(48)]

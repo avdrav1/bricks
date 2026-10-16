@@ -98,4 +98,7 @@ begin
   RemoveDir(Roaming);
   RemoveDir(ExpandConstant('{localappdata}\Cronkite'));
   RemoveDir(ExpandConstant('{userappdata}\Cronkite'));
+  // %LOCALAPPDATA%\Programs, which Setup made if this was the user's first per-user
+  // program, goes too when nothing else is in it.
+  RemoveDir(ExpandConstant('{userpf}'));
 end;

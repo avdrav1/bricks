@@ -99,7 +99,10 @@ def registry(app, name):
     value(caps, "ApplicationName", f'"{name}"')
     value(caps, "ApplicationDescription", f'"{iss_string(comment(app))}"')
     value(caps, "ApplicationIcon", '"{app}\\' + app + '.ico,0"')
-    value("Software\\RegisteredApplications", f"Cronkite {name}", f'"{caps}"', "uninsdeletevalue")
+    value("Software\\RegisteredApplications", f"Cronkite {name}", f'"{caps}"',
+          "uninsdeletevalue uninsdeletekeyifempty")
+    # Classes\Applications is shared, and new on a fresh profile: it goes when left empty.
+    key("Software\\Classes\\Applications", "uninsdeletekeyifempty")
     apps = f"Software\\Classes\\Applications\\{exe}"
     key(apps, "uninsdeletekey")
     value(apps, "FriendlyAppName", f'"{name}"')

@@ -16,7 +16,7 @@
 #      /CURRENTUSER` and once through `irm .../install.ps1 | iex` (which prints "Installed
 #      <Name> <version>"):
 #      - per user, no admin: %LOCALAPPDATA%\Programs\<Name> with bin\<app>.exe (a GUI
-#        program), GTK's DLLs, gdbus.exe, loaders, schemas, icons, fontconfig's files, the
+#        program), GTK's DLLs and no gdbus.exe, loaders, schemas, icons, fontconfig's files, the
 #        fonts (Brick, Slate, Frame), the .ico, the licence notices (THIRD-PARTY.txt naming
 #        gtk4 and no lzo or jbig, THIRD-PARTY-RUST.txt for x86_64-pc-windows-gnu with gtk4),
 #        and Inno Setup's log saying it installs in non-administrative mode under HKCU;
@@ -265,14 +265,7 @@ function Of([string]$exe) {
 
 function Stop-All([string]$exe) {
     & (Of $exe) | Stop-Process -Force -ErrorAction SilentlyContinue
-    # GLib's session bus (gdbus.exe from the app's folder) ends 3 s after its last client.
-    $dir = Split-Path $exe
-    $deadline = (Get-Date).AddSeconds(20)
-    while ((Get-Process -Name gdbus -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$dir\*" }) -and (Get-Date) -lt $deadline) {
-        Start-Sleep -Milliseconds 500
-    }
-    Get-Process -Name gdbus -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$dir\*" } | Stop-Process -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Milliseconds 500
+    Start-Sleep -Milliseconds 800
 }
 
 function Shot([long]$h, [string]$name) {
@@ -451,13 +444,14 @@ function Check-Installed([string]$app, [string]$tag, $defaults) {
     $dir = "$env:LOCALAPPDATA\Programs\$name"
     $exe = "$dir\bin\$app.exe"
     Check (Test-Path $exe) "${tag}: installed for this user in $dir"
-    $missing = @("bin\libgtk-4-1.dll", "bin\gdbus.exe", "bin\libcairo-script-interpreter-2.dll", "bin\libtiff-6.dll",
+    $missing = @("bin\libgtk-4-1.dll", "bin\libcairo-script-interpreter-2.dll", "bin\libtiff-6.dll",
         "lib\gdk-pixbuf-2.0\2.10.0\loaders.cache", "lib\gdk-pixbuf-2.0\2.10.0\loaders\pixbufloader_svg.dll",
         "share\glib-2.0\schemas\gschemas.compiled", "share\icons\Adwaita\index.theme",
         "share\icons\hicolor\48x48\apps\dev.cronkite.$name.png", "etc\fonts\fonts.conf", "etc\fonts\conf.d\30-metric-aliases.conf",
         "$app.ico", "LICENSE", "LICENSE-APACHE", "licenses\THIRD-PARTY.txt", "licenses\THIRD-PARTY-RUST.txt", "unins000.exe") |
         Where-Object { -not (Test-Path "$dir\$_") }
     Check ($missing.Count -eq 0) "${tag}: the bundle's files are there$(if ($missing) { '; missing: ' + ($missing -join ', ') })"
+    Check (-not (Test-Path "$dir\bin\gdbus.exe")) "${tag}: no gdbus.exe (no D-Bus session bus on Windows)"
     $dlls = @(Get-ChildItem "$dir\bin\*.dll")
     $gpl = @($dlls | Where-Object { $_.Name -match 'lzo|jbig' })
     Check ($gpl.Count -eq 0) "${tag}: $($dlls.Count) DLLs in bin, none of them lzo or jbig ($($gpl.Name -join ', '))"
@@ -487,8 +481,8 @@ function Check-Installed([string]$app, [string]$tag, $defaults) {
     $bad = @()
     foreach ($ext in $Types[$app]) {
         $progid = "Cronkite.$name$ext"
-        $openWith = Get-ItemProperty "$classes\$ext\OpenWithProgids" -ErrorAction SilentlyContinue
-        if (-not ($openWith -and ($openWith.PSObject.Properties.Name -contains $progid))) { $bad += "$ext\OpenWithProgids lacks $progid" }
+        $openWith = Get-Item "$classes\$ext\OpenWithProgids" -ErrorAction SilentlyContinue
+        if (-not ($openWith -and ($openWith.GetValueNames() -contains $progid))) { $bad += "$ext\OpenWithProgids lacks $progid" }
         $cmd = (Get-ItemProperty "$classes\$progid\shell\open\command" -ErrorAction SilentlyContinue).'(default)'
         if ($cmd -ne $command) { $bad += "$progid opens with '$cmd'" }
         $supported = Get-ItemProperty "$classes\Applications\$app.exe\SupportedTypes" -ErrorAction SilentlyContinue
@@ -594,7 +588,7 @@ function Use-App([string]$app, [string]$tag, [string]$exe) {
     switch ($app) {
         brick { Type-Text "zz"; [Win]::Keys(@(), 0x0D); Start-Sleep -Milliseconds 500 }
         slate { Type-Text "Hello " }
-        frame { Ctrl 'n' -Shift }
+        frame { Ctrl 'm' }
         etch { Ctrl 'g' }
     }
     Start-Sleep -Milliseconds 800
@@ -625,16 +619,20 @@ function Check-Gone([string]$app, [string]$tag, $before) {
     Check (-not (Test-Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\dev.cronkite.${name}_is1")) "${tag}: Settings > Apps no longer lists it"
     $after = Snapshot "$tag-after"
     $added = Added $before.reg $after.reg
-    $windows = @($added | Where-Object { $_ -like "HKEY_CURRENT_USER\Software\Microsoft\*" -or $_ -like "HKEY_CURRENT_USER\Software\Classes\Local Settings*" })
+    # Windows' own records (Software\Microsoft, Classes\Local Settings) and those of other
+    # programs on the runner that run on their own schedule (Firefox's default browser
+    # agent, Software\Mozilla) aren't the app's.
+    $windows = @($added | Where-Object { $_ -like "HKEY_CURRENT_USER\Software\Microsoft\*" -or $_ -like "HKEY_CURRENT_USER\Software\Classes\Local Settings*" -or $_ -like "HKEY_CURRENT_USER\Software\Mozilla*" })
     $left = @($added | Where-Object { $windows -notcontains $_ })
     Set-Content -Encoding utf8 "$logs\$tag-registry-windows.txt" $windows
-    Check ($left.Count -eq 0) "${tag}: nothing it wrote is left under HKCU\Software ($($windows.Count) of Windows' own records under Software\Microsoft, in logs)$(if ($left) { '; left: ' + ($left -join '; ') })"
+    Check ($left.Count -eq 0) "${tag}: nothing it wrote is left under HKCU\Software ($($windows.Count) records of Windows' and other programs', in logs)$(if ($left) { '; left: ' + ($left -join '; ') })"
     $removed = Added $after.reg $before.reg
-    $removedOutside = @($removed | Where-Object { $_ -notlike "HKEY_CURRENT_USER\Software\Microsoft\*" })
+    $removedOutside = @($removed | Where-Object { $_ -notlike "HKEY_CURRENT_USER\Software\Microsoft\*" -and $_ -notlike "HKEY_CURRENT_USER\Software\Mozilla*" })
     Check ($removedOutside.Count -eq 0) "${tag}: and nothing that was there before is gone$(if ($removedOutside) { ': ' + ($removedOutside -join '; ') })"
     $newFiles = Added $before.files $after.files
+    $others = @($newFiles | Where-Object { $_ -like "$env:LOCALAPPDATA\Mozilla*" -or $_ -like "$env:APPDATA\Mozilla*" })
     $kept = @($newFiles | Where-Object { Kept $_ $name })
-    $leftFiles = @($newFiles | Where-Object { -not (Kept $_ $name) })
+    $leftFiles = @($newFiles | Where-Object { -not (Kept $_ $name) -and $others -notcontains $_ })
     Set-Content -Encoding utf8 "$logs\$tag-files-kept.txt" $kept
     Check ($leftFiles.Count -eq 0) "${tag}: no file or folder left but the user's data ($($kept.Count) kept in %APPDATA%\Cronkite\$name and %LOCALAPPDATA%\Cronkite\$name, in logs)$(if ($leftFiles) { '; left: ' + ($leftFiles -join '; ') })"
     Check (-not (Test-Path "$env:LOCALAPPDATA\Cronkite\$name\fontconfig")) "${tag}: fontconfig's cache is gone"
@@ -665,7 +663,8 @@ function Uninstall-By-Hand([string]$app, [string]$tag) {
         do {
             foreach ($w in [Win]::Windows(0)) {
                 $h, $owner, $class, $t = $w -split "`t", 4
-                if ($class -eq "#32770" -and $t -like "*$name*" -and -not $handled.ContainsKey($h)) { $dialog = $w; break }
+                $uninstaller = (Get-Process -Id $owner -ErrorAction SilentlyContinue).Name -match '^(_iu|unins)'
+                if ($class -eq "#32770" -and ($uninstaller -or $t -like "*$name*") -and -not $handled.ContainsKey($h)) { $dialog = $w; break }
             }
             if (-not $dialog) { Start-Sleep -Milliseconds 300 }
         } while (-not $dialog -and (Get-Date) -lt $deadline)

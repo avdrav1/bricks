@@ -12,10 +12,12 @@
 #                                                suite_platform::bundle's Windows section)
 #   APP-V-x86_64-windows-setup.exe              the installer (packaging/windows/setup.iss)
 #   APP-V-x86_64-windows-setup.exe.sha256
-# The folder runs without MSYS2: <Name>\bin has the stripped app, every DLL it, GLib's
-# gdbus.exe, and gdk-pixbuf's loaders import (recursively, delay-loaded ones too) from
-# MSYS2 or the rebuilt libraries, and GTK's data is beside it in MSYS2's prefix layout,
-# where GLib, GTK, gdk-pixbuf, and fontconfig look relative to their DLLs. <Name>\licenses
+# The folder runs without MSYS2: <Name>\bin has the stripped app and every DLL it and
+# gdk-pixbuf's loaders import (recursively, delay-loaded ones too) from MSYS2 or the
+# rebuilt libraries, and GTK's data is beside it in MSYS2's prefix layout, where GLib,
+# GTK, gdk-pixbuf, and fontconfig look relative to their DLLs. GLib's gdbus.exe stays out:
+# without it GLib starts no D-Bus session bus, which nothing on Windows uses, and
+# GApplication (the apps are NON_UNIQUE) goes on without one. <Name>\licenses
 # has every bundled MSYS2 package's licence files and THIRD-PARTY.txt
 # (scripts/win_licenses.py), and THIRD-PARTY-RUST.txt, the Rust crates compiled into the
 # app for x86_64-pc-windows-gnu (scripts/rust_licenses.py). It fails if a PE file imports
@@ -51,18 +53,16 @@ mkdir -p "$B/bin"
 libs=${WIN_LIBS:-$root/target/win-libs}
 "$root/scripts/win_libs.sh" "$libs"
 
-# The app, GLib's session bus (GApplication starts it, DEC-11 R13), the app's licences, and
-# the bundled fonts (WIN-4; Brick, Slate, and Frame: Etch uses Windows' fonts), which the
-# app finds in ..\fonts beside bin (suite_ui::fonts).
+# The app, its licences, and the bundled fonts (WIN-4; Brick, Slate, and Frame: Etch uses
+# Windows' fonts), which the app finds in ..\fonts beside bin (suite_ui::fonts).
 cp "$bin/$app.exe" "$B/bin/"
 strip "$B/bin/$app.exe"
-cp /ucrt64/bin/gdbus.exe "$B/bin/"
 cp "$root"/LICENSE* "$B/"
 if [[ $app != etch ]]; then
   python3 "$root/scripts/fetch_fonts.py" "$root/target/fonts" >/dev/null
   cp -r "$root/target/fonts" "$B/fonts"
 fi
-printf '%s\t%s\n' "bin/gdbus.exe" /ucrt64/bin/gdbus.exe >"$work/sources.tsv"
+: >"$work/sources.tsv"
 
 # The icon: the Linux SVG as a .ico for Setup, the Start menu, and Settings > Apps.
 svg=$root/packaging/$id.svg
