@@ -97,21 +97,26 @@ for line in open(cache).read().splitlines():
     print(line)
 EOF
 
-# fontconfig: Homebrew's fonts.conf (the Mac's font folders) with its cache in the app's
-# Caches folder instead of Homebrew's, and conf.d (the metric aliases, MAC-6).
+# fontconfig: Homebrew's fonts.conf (the Mac's font folders) without Homebrew's own paths,
+# its cache first in the app's Caches folder, and conf.d (the metric aliases, MAC-6).
 fc=$R/etc/fonts
 mkdir -p "$fc"
 python3 - "$brew" "$id" <"$brew/etc/fonts/fonts.conf" >"$fc/fonts.conf" <<'EOF'
 import sys
 brew, app_id = sys.argv[1:]
-for line in sys.stdin.read().splitlines():
+lines = sys.stdin.read().splitlines()
+has_conf_d = any(brew not in l and "conf.d</include>" in l for l in lines)
+for line in lines:
     if brew in line:
-        if "<cachedir>" in line:
-            print(line[: line.index("<")] + f"<cachedir>~/Library/Caches/{app_id}/fontconfig</cachedir>")
+        print(f"mac_bundle: fonts.conf drops: {line.strip()}", file=sys.stderr)
         continue
     print(line)
+    if line.strip().startswith("<fontconfig>"):
+        print(f"  <cachedir>~/Library/Caches/{app_id}/fontconfig</cachedir>")
+        if not has_conf_d:
+            print('  <include ignore_missing="yes">conf.d</include>')
 EOF
-grep -q "Caches/$id/fontconfig" "$fc/fonts.conf" || { echo "mac_bundle: no cachedir in fonts.conf"; exit 1; }
+grep -q "Caches/$id/fontconfig" "$fc/fonts.conf" || { echo "mac_bundle: no <fontconfig> in $brew/etc/fonts/fonts.conf"; exit 1; }
 cp -RL "$brew/etc/fonts/conf.d" "$fc/conf.d"
 
 # The libraries: every Homebrew dylib the app and the loaders need, copied into Frameworks

@@ -117,6 +117,7 @@ Built (ETCH-2 to ETCH-5):
 - **Eraser.** Dragging erases a line at the eraser's size to transparency, whatever the image was; the canvas's checkerboard shows through. Each drag is one undo step.
 - **Undo.** Ctrl+Z undoes the last stroke, Ctrl+Shift+Z and Ctrl+Y redo it; a new stroke after undoing drops what was undone.
 - **Install.** A per-user curl installer, as the other apps have (`sites/etch/install.sh`: `curl -fsSL https://etch.cronkite.cc/install.sh | sh`, `| sh -s -- --uninstall`), with no sudo. It checks the release against its sha256 and puts `etch` in `~/.local/bin` and its menu entry and icon (`dev.cronkite.Etch`, the app ID) in `~/.local/share`. Since ETCH-6 it also makes Etch the default app for PNG, JPEG, and BMP (see ET1). GTK 4 comes from the system; without it, the installer says how to get it. The download page is `sites/etch/` (etch.cronkite.cc), and cronkite.cc lists Etch as an early preview.
+- **Install on macOS (MAC-7).** Etch is `Etch.app` for Apple Silicon and macOS 14 or later, carrying GTK and everything it reads (no Homebrew), signed ad hoc. The same curl command puts it in `~/Applications` and registers it with Launch Services, so PNG, JPEG, and BMP images list it under Open With; it doesn't change the Mac's default apps (Finder's Get Info, Open with, Change All does), and `--uninstall` removes it and its registration. The download page also offers a DMG, with Gatekeeper's Open Anyway steps.
 
 ## ET1: a Paint replacement
 

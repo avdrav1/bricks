@@ -54,9 +54,9 @@ jobs:
           done
           echo "apps=$apps" >> "$GITHUB_OUTPUT"
       - run: brew install gtk4 pkgconf adwaita-icon-theme librsvg dylibbundler
-      - name: Build
-        run: cargo build --release --locked $(printf -- '-p %s ' ${{ steps.apps.outputs.apps }})
-      - name: Bundle
+      # Each app builds alone (`cargo build -p APP`), as its release always has: building
+      # them together unifies features and gives other binaries.
+      - name: Build and bundle
         run: |
           for a in ${{ steps.apps.outputs.apps }}; do
             scripts/ship.sh "$a" build --macos | tee -a "$RUNNER_TEMP/sizes.txt"
