@@ -129,8 +129,8 @@ dylibbundler -of -b "${xs[@]}" -d "$C/Frameworks" -p @executable_path/../Framewo
 # Nothing may point outside the bundle but the system's libraries.
 bad=0
 while IFS= read -r f; do
-  if otool -L "$f" | tail -n +2 | grep -vE '^\s+(/usr/lib/|/System/|@executable_path/\.\./Frameworks/)' | grep -q .; then
-    echo "mac_bundle: $f links outside the bundle:"; otool -L "$f" | tail -n +2 | grep -vE '^\s+(/usr/lib/|/System/|@executable_path/)'
+  if otool -L "$f" | tail -n +2 | grep -vE '^[[:space:]]+(/usr/lib/|/System/|@executable_path/\.\./Frameworks/)' | grep -q .; then
+    echo "mac_bundle: $f links outside the bundle:"; otool -L "$f" | tail -n +2 | grep -vE '^[[:space:]]+(/usr/lib/|/System/|@executable_path/\.\./Frameworks/)'
     bad=1
   fi
 done < <(find "$C" -type f \( -name '*.dylib' -o -name '*.so' -o -path "*/MacOS/*" \))
