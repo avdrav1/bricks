@@ -95,3 +95,12 @@ Not exercised on either: GPU rendering on real hardware, HiDPI (Windows), input 
 6. **Minimum OS:**
    - macOS 14 or later, which follows from the build runner;
    - for Windows, 10 or later is expected; confirm it against MSYS2's GTK 4 when the Windows work starts.
+
+## The user's decisions for Windows (2026-10-16)
+
+1. **An unsigned preview first.** A Setup.exe downloaded in a browser meets SmartScreen ("Windows protected your PC" → More info → Run anyway); the download page says so. The PowerShell one-liner isn't blocked, since `irm` sets no Mark-of-the-Web. Authenticode signing comes later.
+2. **Installers:** one per-user Inno Setup `Setup.exe` per app (no admin rights, into `%LOCALAPPDATA%\Programs\<App>`, uninstalled from Settings → Apps), plus `irm https://<app>.cronkite.cc/install.ps1 | iex`, which runs the same Setup silently. Windows doesn't let programs take default apps, so the installers register the file types for Open with and leave the defaults alone.
+3. **Windows-like windows:** Windows' own title bar instead of GTK header bars, the menus in a menu bar row under it, the toolbar row as on macOS, and Windows' light and dark mode followed. Shortcuts stay Control.
+4. **All four apps**, Windows 10 and 11 on x64. The work stops at the XP2 gate; releasing waits for the user.
+
+Folders follow decision 2 above (not asked again): settings and recent files in `%APPDATA%\Cronkite\<App>` (roaming); state, recovery, and caches in `%LOCALAPPDATA%\Cronkite\<App>`.
