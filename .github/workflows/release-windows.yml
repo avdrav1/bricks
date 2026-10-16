@@ -1,0 +1,67 @@
+name: release-windows
+on:
+  workflow_dispatch:
+  push:
+    branches: ["story/win-5-installers"]
+    paths: [.github/workflows/release-windows.yml]
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults: { run: { shell: "msys2 {0}" } }
+    env:
+      CARGO_HOME: D:\cargo-home
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-rust
+            mingw-w64-ucrt-x86_64-ntldd
+      - name: Probe the toolchain
+        run: |
+          set -x
+          pacman -Q | wc -l
+          pacman -Q | grep -i -E 'cairo|tiff|jbig|lzo|rsvg|gdk-pixbuf|adwaita|hicolor|fontconfig|gstreamer|glib2|gtk4|pango|librsvg|libgcc|winpthread|gettext|iconv'
+          ls /ucrt64/lib/gdk-pixbuf-2.0/2.10.0/loaders
+          cat /ucrt64/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache | head -30
+          cat /ucrt64/etc/fonts/fonts.conf
+          ls /ucrt64/etc/fonts/conf.d
+          ls "/c/Program Files (x86)/" ; ls "/c/Program Files (x86)/Inno Setup 6" || true; ls "/c/Program Files/" | head -80
+          which iscc rsvg-convert gdk-pixbuf-query-loaders glib-compile-schemas ntldd strip magick python3 python || true
+          ls /ucrt64/share/icons; du -sh /ucrt64/share/icons/* ; du -sh /ucrt64/share/icons/Adwaita/symbolic
+          ls /ucrt64/share/glib-2.0/schemas
+          ls /ucrt64/share/licenses | head -100
+          ls /ucrt64/lib/gtk-4.0 -R | head -30 || true
+          ls /ucrt64/lib/gio/modules || true
+      - uses: actions/cache@v4
+        with:
+          path: |
+            D:\cargo-home\registry
+            target
+          key: windows-release-probe-${{ hashFiles('Cargo.lock') }}-${{ github.run_id }}
+          restore-keys: windows-release-probe-
+      - run: cargo build --release -p etch
+      - name: Probe the DLLs
+        run: |
+          {
+            ntldd -R target/release/etch.exe /ucrt64/lib/gdk-pixbuf-2.0/2.10.0/loaders/*.dll | grep -i ucrt64 | awk '{print $3}' | tr '\\' '/' | sort -u
+          } > dlls.txt
+          cat dlls.txt
+          ldd target/release/etch.exe /ucrt64/lib/gdk-pixbuf-2.0/2.10.0/loaders/*.dll | awk '$3 ~ /^\/ucrt64\// {print $3}' | sort -u > dlls2.txt
+          wc -l dlls.txt dlls2.txt
+          for f in $(cat dlls2.txt) /ucrt64/bin/gdbus.exe; do
+            p=$(pacman -Qqo "$f")
+            echo "$(basename $f)  $p  $(pacman -Qi $p | sed -n 's/^Version *: //p')  [$(pacman -Qi $p | sed -n 's/^Licenses *: //p')]  $(ls /ucrt64/share/licenses/${p#mingw-w64-ucrt-x86_64-} 2>/dev/null | tr '\n' ' ')"
+          done | sort -k2
+          echo "--- gtk links:"; ldd /ucrt64/bin/libgtk-4-1.dll | grep -i -E 'cairo|tiff|jbig|lzo|gst'
+          echo "--- cairo-script-interpreter:"; ldd /ucrt64/bin/libcairo-script-interpreter-2.dll | grep -i lzo || true
+          echo "--- cairo:"; ldd /ucrt64/bin/libcairo-2.dll | grep ucrt64
+          echo "--- tiff:"; ldd /ucrt64/bin/libtiff-6.dll | grep ucrt64 || true
+          pacman -Qi mingw-w64-ucrt-x86_64-cairo mingw-w64-ucrt-x86_64-libtiff
