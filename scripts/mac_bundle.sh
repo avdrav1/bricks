@@ -122,15 +122,21 @@ cp -RL "$brew/etc/fonts/conf.d" "$fc/conf.d"
 # The libraries: every Homebrew dylib the app and the loaders need, copied into Frameworks
 # and relinked to @executable_path/../Frameworks.
 xs=(-x "$C/MacOS/$app")
-for so in "$loaders"/*.so; do xs+=(-x "$so"); done
+for so in "$loaders"/*.so; do
+  xs+=(-x "$so")
+  # librsvg builds its loader as a dylib named .so, still named by its Homebrew path.
+  if [[ -n $(otool -D "$so" | tail -n +2) ]]; then
+    install_name_tool -id "@executable_path/../Resources/$pixbuf/loaders/$(basename "$so")" "$so" 2>>"$work/install_name_tool.log"
+  fi
+done
 dylibbundler -of -b "${xs[@]}" -d "$C/Frameworks" -p @executable_path/../Frameworks/ -s "$brew/lib" </dev/null >"$work/dylibbundler.log" 2>&1 ||
   { cat "$work/dylibbundler.log"; exit 1; }
 
 # Nothing may point outside the bundle but the system's libraries.
 bad=0
 while IFS= read -r f; do
-  if otool -L "$f" | tail -n +2 | grep -vE '^[[:space:]]+(/usr/lib/|/System/|@executable_path/\.\./Frameworks/)' | grep -q .; then
-    echo "mac_bundle: $f links outside the bundle:"; otool -L "$f" | tail -n +2 | grep -vE '^[[:space:]]+(/usr/lib/|/System/|@executable_path/\.\./Frameworks/)'
+  if otool -L "$f" | tail -n +2 | grep -vE '^[[:space:]]+(/usr/lib/|/System/|@executable_path/\.\./(Frameworks|Resources)/)' | grep -q .; then
+    echo "mac_bundle: $f links outside the bundle:"; otool -L "$f" | tail -n +2 | grep -vE '^[[:space:]]+(/usr/lib/|/System/|@executable_path/\.\./(Frameworks|Resources)/)'
     bad=1
   fi
 done < <(find "$C" -type f \( -name '*.dylib' -o -name '*.so' -o -path "*/MacOS/*" \))
