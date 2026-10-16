@@ -164,6 +164,10 @@ mod tests {
         [Folder::Config, Folder::State, Folder::Cache].map(|f| folder(platform, f, app, env))
     }
 
+    // Linux's and macOS's folders are tested with Unix paths (`/home/me`), which Windows
+    // doesn't take as absolute: those tests run on Unix, Windows' with paths absolute on
+    // the system running them.
+    #[cfg(unix)]
     #[test]
     fn linux_without_xdg_variables_uses_the_home_folder() {
         let env = vars(&[("HOME", "/home/me")]);
@@ -179,6 +183,7 @@ mod tests {
         assert_eq!(runtime(Platform::Linux, AppKind::Brick, &env), None);
     }
 
+    #[cfg(unix)]
     #[test]
     fn linux_follows_the_xdg_variables() {
         let env = vars(&[
@@ -193,6 +198,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn relative_or_empty_xdg_variables_are_ignored() {
         let env = vars(&[
@@ -226,6 +232,7 @@ mod tests {
         assert_eq!(runtime(Platform::Linux, AppKind::Slate, &env), None);
     }
 
+    #[cfg(unix)]
     #[test]
     fn macos_uses_the_library_by_bundle_identifier() {
         let env = vars(&[("HOME", "/Users/me"), ("XDG_STATE_HOME", "/st")]);

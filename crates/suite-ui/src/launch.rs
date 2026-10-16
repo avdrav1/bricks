@@ -88,9 +88,17 @@ mod tests {
     }
 
     #[test]
-    fn files_reach_open_and_none_activates() {
-        let cwd = std::env::current_dir().unwrap();
+    fn no_file_activates() {
         assert_eq!(emitted(&[]), ["activate"]);
+    }
+
+    /// Not on Windows: there GLib ignores the arguments `g_application_run` is given and
+    /// reads the process's own command line (`g_win32_get_command_line`), so `run` can't
+    /// hand it files; how files reach a Windows app is WIN-4's.
+    #[cfg(not(windows))]
+    #[test]
+    fn files_reach_open() {
+        let cwd = std::env::current_dir().unwrap();
         assert_eq!(
             emitted(&[
                 PathBuf::from("a b.csv"),

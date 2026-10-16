@@ -28,7 +28,7 @@
 //! Elsewhere (Linux, a build in `target/`, MAC-5's minimal bundles without `Frameworks`)
 //! nothing changes.
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", all(test, unix)))]
 use std::ffi::OsString;
 #[cfg(any(target_os = "macos", test))]
 use std::path::Path;
@@ -36,7 +36,7 @@ use std::path::PathBuf;
 use suite_core::AppKind;
 
 /// gdk-pixbuf's folder in `Contents/Resources`: the loaders and their list.
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", all(test, unix)))]
 const PIXBUF: &str = "lib/gdk-pixbuf-2.0/2.10.0";
 
 /// Point GTK and its libraries at the bundle's files when the app runs from a
@@ -69,7 +69,7 @@ fn contents_of(exe: &Path) -> Option<PathBuf> {
 
 /// The variables for the bundle at `contents`, given the loader list's path (when written)
 /// and the environment's `XDG_DATA_DIRS`, which the bundle's `share` goes before.
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", all(test, unix)))]
 fn variables(
     contents: &Path,
     loaders: Option<&Path>,
@@ -107,7 +107,7 @@ fn variables(
 /// gdk-pixbuf's loader list `template`, whose module paths are relative to the bundle's
 /// `Resources`, with those paths made absolute under `res`. A module's path is the line
 /// holding nothing but one quoted relative path ending in `.so`; every other line stays.
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", all(test, unix)))]
 fn loaders_list(template: &str, res: &Path) -> String {
     let mut out = String::with_capacity(template.len() + 64 * 16);
     for line in template.lines() {
@@ -201,6 +201,9 @@ mod tests {
         std::fs::remove_dir_all(&tmp).unwrap();
     }
 
+    // A macOS bundle's paths are Unix paths: these run on Unix, where they're built the
+    // same way.
+    #[cfg(unix)]
     #[test]
     fn the_variables_point_into_the_bundle() {
         let contents = Path::new("/Users/me/Applications/Slate.app/Contents");
@@ -251,6 +254,7 @@ mod tests {
         assert_eq!(dirs.1, OsString::from(format!("{res}/share")));
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_loader_list_gets_the_bundles_paths() {
         // As scripts/mac_bundle.sh writes it, from gdk-pixbuf-query-loaders' output.
