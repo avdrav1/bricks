@@ -1,9 +1,11 @@
-# The Windows release (WIN-5): each app's self-contained folder and its per-user Inno Setup
-# installer, <app>-<version>-x86_64-windows-setup.exe, built on windows-latest with MSYS2's
-# UCRT64 GTK (scripts/win_bundle.sh), then installed, started, used, and uninstalled on a
-# fresh runner with MSYS2 moved away and nothing of it on PATH, through Setup.exe and
-# through install.ps1 (scripts/check_win_install.ps1). WIN-6 brings the artifacts
-# `windows-<app>` into ship.sh's release. A release tag builds its app; a push that changes
+# The Windows release (WIN-5, WIN-6): each app's self-contained folder and its per-user Inno
+# Setup installer, <app>-<version>-x86_64-windows-setup.exe, built on windows-latest with
+# MSYS2's UCRT64 GTK (`scripts/ship.sh APP build --windows`, which runs
+# scripts/win_bundle.sh), then installed, started, used, and uninstalled on a fresh runner
+# with MSYS2 moved away and nothing of it on PATH, through Setup.exe and through install.ps1
+# (scripts/check_win_install.ps1). `scripts/ship.sh APP build --windows` elsewhere
+# dispatches it and `scripts/ship.sh APP fetch-windows RUN_ID` takes a green run's artifact
+# `windows-APP` into dist/ for the upload. A release tag builds its app; a push that changes
 # the bundling builds and checks all four.
 name: release-windows
 on:
@@ -101,8 +103,7 @@ jobs:
       - name: Build and bundle
         run: |
           for a in ${{ steps.apps.outputs.apps }}; do
-            cargo build --release --locked -p "$a"
-            scripts/win_bundle.sh "$a" target/release dist | tee -a sizes.txt
+            scripts/ship.sh "$a" build --windows | tee -a sizes.txt
           done
           { echo '```'; cat sizes.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: The bundles' DLLs and licences

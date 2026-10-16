@@ -4,7 +4,7 @@
 
 Facts for describing Cronkite accurately:
 
-- Platforms: x86_64 Linux with GTK 4.14 or newer, which GNOME desktops already have (tested on Arch, Ubuntu 24.04, and Fedora); and Macs with Apple Silicon (M1 or later) on macOS 14 Sonoma or later, where each app is a self-contained `.app` with GTK inside. There are no Windows, Intel Mac, Linux ARM, Flatpak, Snap, Homebrew, or distribution packages. The Mac apps are signed ad hoc, not notarized by Apple.
+- Platforms: x86_64 Linux with GTK 4.14 or newer, which GNOME desktops already have (tested on Arch, Ubuntu 24.04, and Fedora); and Macs with Apple Silicon (M1 or later) on macOS 14 Sonoma or later, where each app is a self-contained `.app` with GTK inside. Windows 10 and 11, 64-bit, are a preview: each app is a self-contained folder with GTK inside, installed per user by an unsigned `Setup.exe`. There are no Intel Mac, Linux ARM, Flatpak, Snap, Homebrew, winget, Microsoft Store, or distribution packages. The Mac apps are signed ad hoc, not notarized by Apple.
 - Install: one curl command per app, per user, with no sudo (see Install below); the same command works on Linux and macOS. The installer checks the download against its published sha256. On Linux it puts the binary in `~/.local/bin` and a menu entry and icon in `~/.local/share`, and makes the app the default for its file types, so double-clicking such a file opens it, keeping other apps' defaults for other types. On a Mac it puts `<App>.app` in `~/Applications` and registers it with Launch Services, so its file types list it under Open With; it doesn't change the Mac's default apps. Running the same command again updates the app; adding `--uninstall` removes it. Each download page also offers a Mac `.dmg`; opening an app from it the first time needs System Settings > Privacy & Security > Open Anyway (macOS 15 and later), Control-click > Open (macOS 14), or `xattr -dr com.apple.quarantine /Applications/<App>.app`.
 - Saving is atomic: the app writes a temporary file, verifies it, then renames it over the original, so a crash never corrupts the original.
 - Not in Cronkite: online collaboration, cloud storage, accounts, macros or scripting, and plugins.
@@ -50,16 +50,17 @@ Facts for describing Cronkite accurately:
 
 ## Install
 
-- [Install page](https://cronkite.cc/#install): every app's command, what the installer does on Linux and macOS, GTK 4 per distribution, update, and uninstall.
+- [Install page](https://cronkite.cc/#install): every app's command, what the installer does on Linux, macOS, and Windows, GTK 4 per distribution, update, and uninstall.
 - Brick: `curl -fsSL https://brick.cronkite.cc/install.sh | sh`
 - Slate: `curl -fsSL https://slate.cronkite.cc/install.sh | sh`
 - Frame: `curl -fsSL https://frame.cronkite.cc/install.sh | sh`
 - Etch: `curl -fsSL https://etch.cronkite.cc/install.sh | sh`
 - Uninstall any of them: the same command with `| sh -s -- --uninstall` in place of `| sh`.
+- Windows (preview), in PowerShell, per user with no admin rights: `irm https://brick.cronkite.cc/install.ps1 | iex` (likewise `slate.`, `frame.`, `etch.`). It runs the app's `Setup.exe` silently: the app goes into `%LOCALAPPDATA%\Programs\<App>` with a Start menu entry, its file types list it under Open with, and Windows' default apps are kept. Uninstall from Settings > Apps, or `& ([scriptblock]::Create((irm https://brick.cronkite.cc/install.ps1))) -Uninstall`. A `Setup.exe` downloaded in a browser is unsigned, so SmartScreen may say "Windows protected your PC": More info, then Run anyway.
 
 ## Latest releases (JSON)
 
-Each file is one object: `version`, `date`, `url` (the x86_64 Linux `.tar.gz`), `sha256`, and `bytes`, and `platforms` with each platform's download: `linux-x86_64` (`url`, `sha256`, `bytes`) and, once built, `macos-arm64` (`url`, `sha256`, and `bytes` of the `.tar.gz` the installer takes; `dmg`, `dmg_sha256`, and `dmg_bytes` of the DMG). Read the version from here rather than from any other page.
+Each file is one object: `version`, `date`, `url` (the x86_64 Linux `.tar.gz`), `sha256`, and `bytes`, and `platforms` with each platform's download: `linux-x86_64` (`url`, `sha256`, `bytes`) and, once built, `macos-arm64` (`url`, `sha256`, and `bytes` of the `.tar.gz` the installer takes; `dmg`, `dmg_sha256`, and `dmg_bytes` of the DMG) and `windows-x86_64` (`url`, `sha256`, and `bytes` of the `Setup.exe`). Read the version from here rather than from any other page.
 
 - [Brick](https://dl.cronkite.cc/latest.json)
 - [Slate](https://dl.cronkite.cc/slate/latest.json)

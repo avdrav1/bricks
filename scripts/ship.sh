@@ -10,9 +10,16 @@
 #                                            elsewhere release-macos.yml on GitHub at this commit
 #                                            (pushed), waited for, then fetch-macos
 #   scripts/ship.sh [APP] fetch-macos RUN_ID release-macos.yml run RUN_ID's DMG and tarball -> dist/
-#   scripts/ship.sh [APP] verify             the binary starts on clean Arch, Ubuntu 24.04, and Fedora; the installer works there
-#   scripts/ship.sh [APP] upload [--dry-run] tarballs, DMG, checksums, latest.json -> Cloudflare R2
-#   scripts/ship.sh [APP] site   [--dry-run] the app's download page (sites/APP) -> Cloudflare Pages
+#   scripts/ship.sh [APP] build --windows    the Windows installer (x86_64): in MSYS2's UCRT64 shell,
+#                                            scripts/win_bundle.sh here; elsewhere release-windows.yml
+#                                            on GitHub at this commit (pushed), waited for, then
+#                                            fetch-windows
+#   scripts/ship.sh [APP] fetch-windows RUN_ID
+#                                            release-windows.yml run RUN_ID's Setup.exe -> dist/
+#   scripts/ship.sh [APP] verify             the binary starts on clean Arch, Ubuntu 24.04, and Fedora; the
+#                                            installer works there; latest.json matches dist/
+#   scripts/ship.sh [APP] upload [--dry-run] tarballs, DMG, Setup.exe, checksums, latest.json -> Cloudflare R2
+#   scripts/ship.sh [APP] site   [--dry-run] the app's download page and installers (sites/APP) -> Cloudflare Pages
 #   scripts/ship.sh suite-site [--dry-run]   suite install page (sites/cronkite) -> Cloudflare Pages
 #   scripts/ship.sh video [--dry-run]        the explainer's English cuts (dist/video/, from
 #                                            video/render.mjs) and a poster -> R2 video/ID/
@@ -21,7 +28,8 @@
 #
 # Brick's release sits at the bucket's root (latest.json, releases/), the other apps' under
 # their name (slate/, frame/, etch/). A release is the Linux tarball and, when built, the
-# macOS tarball and DMG beside it; latest.json lists each platform (see `latest` below).
+# macOS tarball and DMG and the Windows Setup.exe beside it; latest.json lists each platform
+# (scripts/release_json.py).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -67,6 +75,9 @@ TAR="dist/$NAME.tar.gz"
 MAC_NAME="$APP-$V-arm64-macos"
 MAC_TAR="dist/$MAC_NAME.tar.gz"
 MAC_DMG="dist/$MAC_NAME.dmg"
+# The Windows build (WIN-5, WIN-6): scripts/win_bundle.sh's installer, x86_64.
+WIN_NAME="$APP-$V-x86_64-windows-setup.exe"
+WIN_SETUP="dist/$WIN_NAME"
 DRY=false; [ "${2:-}" = "--dry-run" ] && DRY=true
 BUILD_IMAGE=brick-build:ubuntu-24.04
 need() { for v in "$@"; do [ -n "${!v:-}" ] || { echo "missing env: $v (see .env.ship.example)"; exit 1; }; done; }
@@ -75,33 +86,58 @@ wr() { npx --yes wrangler@4 "$@"; }
 # Where the app's latest.json and releases/ are.
 base() { echo "$DOWNLOAD_BASE_URL${PREFIX:+/${PREFIX%/}}"; }
 sha256_of() { python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1"; }
-# Write $OUT/latest.json from the release files in dist/: one line, each platform's
-# download under "platforms" ("linux-x86_64": url, sha256, bytes; "macos-arm64": the same
-# for the tarball the installer takes, and dmg, dmg_sha256, dmg_bytes for the DMG), then
-# Linux's version, date, url, sha256, and bytes at the top level, last. Installers from
-# before MAC-7 read those top-level fields with a sed that takes a key's last match on the
-# line, so the order matters. Needs the Linux tarball: until it's built, nothing is written.
+# Write $OUT/latest.json from the release files in dist/ (scripts/release_json.py has its
+# shape: each platform under "platforms", then Linux's fields at the top level, last). Needs
+# the Linux tarball: until it's built, nothing is written.
 latest() {
   need DOWNLOAD_BASE_URL
   if [ ! -f "$TAR" ]; then echo "latest.json waits for the Linux tarball (scripts/ship.sh $APP build)"; return 0; fi
   mkdir -p "$OUT"
-  python3 - "$(base)/releases/v$V" "$V" "$TAR" "$MAC_TAR" "$MAC_DMG" > "$OUT/latest.json" <<'EOF'
-import datetime, hashlib, json, os, sys
-url, version, tar, mac_tar, mac_dmg = sys.argv[1:]
-def release(path):
-    data = open(path, "rb").read()
-    return f"{url}/{os.path.basename(path)}", hashlib.sha256(data).hexdigest(), len(data)
-u, s, b = release(tar)
-platforms = {"linux-x86_64": {"url": u, "sha256": s, "bytes": b}}
-if os.path.isfile(mac_tar) and os.path.isfile(mac_dmg):
-    mu, ms, mb = release(mac_tar)
-    du, ds, db = release(mac_dmg)
-    platforms["macos-arm64"] = {"url": mu, "sha256": ms, "bytes": mb, "dmg": du, "dmg_sha256": ds, "dmg_bytes": db}
-date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
-rel = {"platforms": platforms, "version": version, "date": date, "url": u, "sha256": s, "bytes": b}
-print(json.dumps(rel, separators=(",", ":")))
-EOF
+  python3 scripts/release_json.py write "$(base)/releases/v$V" "$V" "$TAR" "$MAC_TAR" "$MAC_DMG" "$WIN_SETUP" > "$OUT/latest.json"
   echo "$OUT/latest.json: $APP $V for $(python3 -c 'import json, sys; print(", ".join(json.load(open(sys.argv[1]))["platforms"]))' "$OUT/latest.json")"
+}
+# Build on GitHub: run release-$1.yml (macos or windows) for APP at HEAD, which must be on
+# GitHub already (pushing is the user's call), wait for it, then fetch-$1 its artifact.
+on_github() {
+  branch=$(git branch --show-current); sha=$(git rev-parse HEAD)
+  if [ -z "$branch" ] || [ -n "$(git status --porcelain)" ] ||
+    [ "$(git rev-parse -q --verify "origin/$branch" || true)" != "$sha" ]; then
+    echo "the $1 build runs on GitHub at origin/${branch:-BRANCH}: commit, then push $sha first (ask before pushing)"
+    exit 1
+  fi
+  since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  gh workflow run "release-$1.yml" --ref "$branch" -f apps="$APP"
+  id=""
+  for _ in $(seq 30); do
+    sleep 4
+    id=$(gh run list --workflow "release-$1.yml" --branch "$branch" --event workflow_dispatch --limit 10 \
+      --json databaseId,headSha,createdAt \
+      --jq "map(select(.headSha == \"$sha\" and .createdAt >= \"$since\")) | .[-1].databaseId // empty")
+    [ -n "$id" ] && break
+  done
+  [ -n "$id" ] || { echo "release-$1.yml didn't start on $branch"; exit 1; }
+  echo "release-$1.yml run $id: $(gh run view "$id" --json url --jq .url)"
+  gh run watch "$id" --exit-status >/dev/null || { echo "run $id failed: gh run view $id --log-failed"; exit 1; }
+  exec "$0" "$APP" "fetch-$1" "$id"
+}
+# fetch_run KIND RUN_ID FILE...: a green release-KIND.yml run's artifact KIND-APP (it built
+# at HEAD, and its verify job installed and started the app on a clean runner), whose FILEs
+# (names in dist/, so this version's) and their .sha256 files go into dist/; then latest.json.
+fetch_run() {
+  kind=$1 id=$2; shift 2
+  read -r conclusion head <<<"$(gh run view "$id" --json conclusion,headSha --jq '"\(.conclusion) \(.headSha)"')"
+  [ "$conclusion" = success ] || { echo "run $id: ${conclusion:-still running}; only a green run ships"; exit 1; }
+  [ "$head" = "$(git rev-parse HEAD)" ] || { echo "run $id built $head, not HEAD ($(git rev-parse HEAD))"; exit 1; }
+  tmp="dist/.$kind-$id"; rm -rf "$tmp"; mkdir -p dist
+  gh run download "$id" -n "$kind-$APP" -D "$tmp"
+  for f in "$@"; do
+    [ -f "$tmp/$f" ] || { echo "run $id has no $f (not $APP $V?): $(ls "$tmp" | tr '\n' ' ')"; exit 1; }
+    [ "$(sha256_of "$tmp/$f")" = "$(cut -d' ' -f1 "$tmp/$f.sha256")" ] || { echo "$f doesn't match its sha256"; exit 1; }
+    mv -f "$tmp/$f" "$tmp/$f.sha256" dist/
+    echo "fetched dist/$f ($(wc -c < "dist/$f" | tr -d ' ') bytes, sha256 $(cut -d' ' -f1 "dist/$f.sha256"))"
+  done
+  rm -rf "$tmp"
+  latest
 }
 # Create Pages project $1 unless it exists. Match the name exactly: the list's domains
 # column holds brick.cronkite.cc.
@@ -120,7 +156,7 @@ preflight)
   [ -z "$(git status --porcelain)" ] || { echo "FAIL working tree not clean"; fail=1; }
   b=$(git branch --show-current); [ "$b" = main ] || { echo "FAIL on branch $b, not main"; fail=1; }
   git rev-parse "$TAG" >/dev/null 2>&1 && { echo "FAIL tag $TAG already exists; bump first"; fail=1; }
-  for f in packaging/$ID.desktop packaging/$ID.svg sites/$APP/index.html sites/$APP/install.sh "$INSTALL_CHECK"; do
+  for f in packaging/$ID.desktop packaging/$ID.svg sites/$APP/index.html sites/$APP/install.sh sites/$APP/install.ps1 "$INSTALL_CHECK"; do
     [ -f "$f" ] || { echo "FAIL $f missing: $APP has no packaging, download page, or install check yet"; fail=1; }
   done
   cargo fmt --all --check || { echo "FAIL fmt"; fail=1; }
@@ -153,28 +189,18 @@ build)
       if [ -n "${DOWNLOAD_BASE_URL:-}" ]; then latest; fi
       exit 0
     fi
-    # Elsewhere GitHub's macos-14 runner builds it: release-macos.yml at this commit, which
-    # must be on GitHub already (pushing is the user's call), then its artifacts land here.
-    branch=$(git branch --show-current); sha=$(git rev-parse HEAD)
-    if [ -z "$branch" ] || [ -n "$(git status --porcelain)" ] ||
-      [ "$(git rev-parse -q --verify "origin/$branch" || true)" != "$sha" ]; then
-      echo "the macOS build runs on GitHub at origin/${branch:-BRANCH}: commit, then push $sha first (ask before pushing)"
-      exit 1
+    on_github macos
+  fi
+  if [ "${2:-}" = --windows ]; then
+    if [ "${MSYSTEM:-}" = UCRT64 ]; then
+      # In MSYS2's UCRT64 shell with its GTK and Inno Setup 6 (release-windows.yml runs this
+      # on windows-latest).
+      cargo build --release --locked -p $APP
+      scripts/win_bundle.sh $APP target/release dist
+      if [ -n "${DOWNLOAD_BASE_URL:-}" ]; then latest; fi
+      exit 0
     fi
-    since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    gh workflow run release-macos.yml --ref "$branch" -f apps="$APP"
-    id=""
-    for _ in $(seq 30); do
-      sleep 4
-      id=$(gh run list --workflow release-macos.yml --branch "$branch" --event workflow_dispatch --limit 10 \
-        --json databaseId,headSha,createdAt \
-        --jq "map(select(.headSha == \"$sha\" and .createdAt >= \"$since\")) | .[-1].databaseId // empty")
-      [ -n "$id" ] && break
-    done
-    [ -n "$id" ] || { echo "release-macos.yml didn't start on $branch"; exit 1; }
-    echo "release-macos.yml run $id: $(gh run view "$id" --json url --jq .url)"
-    gh run watch "$id" --exit-status >/dev/null || { echo "run $id failed: gh run view $id --log-failed"; exit 1; }
-    exec "$0" "$APP" fetch-macos "$id"
+    on_github windows
   fi
   need DOWNLOAD_BASE_URL
   # Built in Ubuntu 24.04 so it runs on that and anything newer (PKG-3); its own target
@@ -199,27 +225,20 @@ build)
   latest
   ;;
 fetch-macos)
-  # A green release-macos.yml run's artifact for APP: it built the bundle at HEAD, and its
-  # verify job installed and started it on a clean runner.
   id="${2:?usage: scripts/ship.sh APP fetch-macos RUN_ID (a release-macos.yml run)}"
-  read -r conclusion head <<<"$(gh run view "$id" --json conclusion,headSha --jq '"\(.conclusion) \(.headSha)"')"
-  [ "$conclusion" = success ] || { echo "run $id: ${conclusion:-still running}; only a green run ships"; exit 1; }
-  [ "$head" = "$(git rev-parse HEAD)" ] || { echo "run $id built $head, not HEAD ($(git rev-parse HEAD))"; exit 1; }
-  tmp="dist/.macos-$id"; rm -rf "$tmp"; mkdir -p dist
-  gh run download "$id" -n "macos-$APP" -D "$tmp"
-  for f in "$MAC_NAME.tar.gz" "$MAC_NAME.dmg"; do
-    [ -f "$tmp/$f" ] || { echo "run $id has no $f: $(ls "$tmp" | tr '\n' ' ')"; exit 1; }
-    [ "$(sha256_of "$tmp/$f")" = "$(cut -d' ' -f1 "$tmp/$f.sha256")" ] || { echo "$f doesn't match its sha256"; exit 1; }
-    mv -f "$tmp/$f" "$tmp/$f.sha256" dist/
-    echo "fetched dist/$f ($(wc -c < "dist/$f" | tr -d ' ') bytes, sha256 $(cut -d' ' -f1 "dist/$f.sha256"))"
-  done
-  rm -rf "$tmp"
-  latest
+  fetch_run macos "$id" "$MAC_NAME.tar.gz" "$MAC_NAME.dmg"
+  ;;
+fetch-windows)
+  id="${2:?usage: scripts/ship.sh APP fetch-windows RUN_ID (a release-windows.yml run)}"
+  fetch_run windows "$id" "$WIN_NAME"
   ;;
 verify)
   [ -x "dist/$NAME/$APP" ] || { echo "run build first"; exit 1; }
   scripts/check_release.sh "dist/$NAME/$APP"
   "$INSTALL_CHECK" "$TAR"
+  # The macOS and Windows builds were checked on their runners (release-*.yml's verify
+  # jobs); here, that latest.json names this version's files in dist/ as they are.
+  python3 scripts/release_json.py check "$OUT/latest.json" dist
   ;;
 upload)
   need CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID R2_BUCKET DOWNLOAD_BASE_URL
@@ -232,13 +251,20 @@ upload)
     run wr r2 object put "$R2_BUCKET/${PREFIX}releases/v$V/$MAC_NAME.dmg" --file "$MAC_DMG" --content-type application/x-apple-diskimage --remote
     run wr r2 object put "$R2_BUCKET/${PREFIX}releases/v$V/$MAC_NAME.dmg.sha256" --file "$MAC_DMG.sha256" --content-type text/plain --remote
   else
-    echo "no macOS build in dist/ ($MAC_NAME.tar.gz and .dmg; build --macos or fetch-macos): Linux only"
+    echo "no macOS build in dist/ ($MAC_NAME.tar.gz and .dmg; build --macos or fetch-macos)"
+  fi
+  if [ -f "$WIN_SETUP" ]; then
+    run wr r2 object put "$R2_BUCKET/${PREFIX}releases/v$V/$WIN_NAME" --file "$WIN_SETUP" --content-type application/octet-stream --remote
+    run wr r2 object put "$R2_BUCKET/${PREFIX}releases/v$V/$WIN_NAME.sha256" --file "$WIN_SETUP.sha256" --content-type text/plain --remote
+  else
+    echo "no Windows build in dist/ ($WIN_NAME; build --windows or fetch-windows)"
   fi
   # Last, so it never names a file that isn't there yet.
   latest
   run wr r2 object put "$R2_BUCKET/${PREFIX}latest.json" --file "$OUT/latest.json" --content-type application/json --remote
   echo "check: curl -fsSI $(base)/releases/v$V/$NAME.tar.gz"
   if [ -f "$MAC_DMG" ]; then echo "check: curl -fsSI $(base)/releases/v$V/$MAC_NAME.dmg"; fi
+  if [ -f "$WIN_SETUP" ]; then echo "check: curl -fsSI $(base)/releases/v$V/$WIN_NAME"; fi
   ;;
 site)
   need CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID "$PAGES_VAR"
@@ -295,5 +321,5 @@ tag)
   git tag -a "$TAG" -m "$TAG"
   echo "tagged $TAG locally; push with: git push origin main $TAG"
   ;;
-*) sed -n '2,24p' "$0"; exit 1 ;;
+*) sed -n '2,32p' "$0"; exit 1 ;;
 esac

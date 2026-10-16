@@ -47,7 +47,7 @@
 <body>
 <main class="page">
   <h1>Write on one endless page.<span class="caret" aria-hidden="true"></span></h1>
-  <p class="lede">Slate is a lightweight, native word processor for Linux and macOS. It opens Word documents, Markdown, and plain text, lets you edit them as they look, and saves them back without touching what you didn't change.</p>
+  <p class="lede">Slate is a lightweight, native word processor for Linux and macOS, and in preview for Windows. It opens Word documents, Markdown, and plain text, lets you edit them as they look, and saves them back without touching what you didn't change.</p>
   <a class="get" id="dl" href="#install">Download</a>
   <ul class="facts">
     <li><b>Word, Markdown, text</b><span>.docx, .md, and .txt, opened as they look.</span></li>
@@ -56,17 +56,29 @@
   </ul>
   <section id="install">
     <h2>Install</h2>
-    <p>For your user, no sudo, on Linux or a Mac. Run the command again to update.</p>
-    <pre id="cmd">curl -fsSL https://this-site/install.sh | sh</pre>
-    <p>On Linux it installs the app, its menu entry, and Word documents and Markdown files opening with it; start it from your app menu or with <code>slate</code>. It needs GTK 4, which GNOME desktops have; otherwise the installer says how to get it.</p>
-    <p>On a Mac with Apple Silicon and macOS 14 or later, it puts Slate in your Applications folder, with everything it needs inside. Word documents, Markdown, and plain text list Slate under Open With; to open them with Slate by default, select one in Finder, then File &gt; Get Info &gt; Open with &gt; Change All.</p>
-    <p>To remove it:</p>
-    <pre id="uninstall">curl -fsSL https://this-site/install.sh | sh -s -- --uninstall</pre>
+    <div id="install-unix">
+      <p>For your user, no sudo, on Linux or a Mac. Run the command again to update.</p>
+      <pre id="cmd">curl -fsSL https://this-site/install.sh | sh</pre>
+      <p>On Linux it installs the app, its menu entry, and Word documents and Markdown files opening with it; start it from your app menu or with <code>slate</code>. It needs GTK 4, which GNOME desktops have; otherwise the installer says how to get it.</p>
+      <p>On a Mac with Apple Silicon and macOS 14 or later, it puts Slate in your Applications folder, with everything it needs inside. Word documents, Markdown, and plain text list Slate under Open With; to open them with Slate by default, select one in Finder, then File &gt; Get Info &gt; Open with &gt; Change All.</p>
+      <p>To remove it:</p>
+      <pre id="uninstall">curl -fsSL https://this-site/install.sh | sh -s -- --uninstall</pre>
+    </div>
+    <div id="install-windows">
+      <p>On Windows 10 and 11, 64-bit (a preview): for your user, no admin rights. Paste this into PowerShell; run it again to update.</p>
+      <pre id="ps-cmd">irm https://this-site/install.ps1 | iex</pre>
+      <p>It puts Slate in your user's Programs folder, with everything it needs inside, and in the Start menu. Word documents, Markdown, and plain text list Slate under Open with, and Windows keeps your default apps; to open them with Slate by default, right-click one, then Open with &gt; Choose another app &gt; Slate &gt; Always.</p>
+      <p>To remove it, use Settings &gt; Apps &gt; Installed apps, or:</p>
+      <pre id="ps-uninstall">&amp; ([scriptblock]::Create((irm https://this-site/install.ps1))) -Uninstall</pre>
+    </div>
     <h2>Downloads</h2>
     <ul id="downloads"><li>No release published yet</li></ul>
-    <p id="gatekeeper">From the DMG: open it and drag Slate to Applications. Slate isn't notarized by Apple yet, so the first time you open it macOS says it can't check it. On macOS 15 or later, open System Settings &gt; Privacy &amp; Security and click Open Anyway beside Slate's name; on macOS 14, Control-click Slate in Applications and choose Open. Or run this once in Terminal:</p>
-    <pre>xattr -dr com.apple.quarantine /Applications/Slate.app</pre>
-    <p>The install command needs none of this: what curl downloads isn't flagged. Check a download against its sha256 with <code>shasum -a 256</code> on a Mac or <code>sha256sum</code> on Linux.</p>
+    <div id="gatekeeper">
+      <p>From the DMG: open it and drag Slate to Applications. Slate isn't notarized by Apple yet, so the first time you open it macOS says it can't check it. On macOS 15 or later, open System Settings &gt; Privacy &amp; Security and click Open Anyway beside Slate's name; on macOS 14, Control-click Slate in Applications and choose Open. Or run this once in Terminal:</p>
+      <pre>xattr -dr com.apple.quarantine /Applications/Slate.app</pre>
+    </div>
+    <p id="smartscreen">From Setup.exe: Slate isn't signed yet, so when you open it Windows may say “Windows protected your PC”. Click More info, then Run anyway. Setup installs for your user and asks for no admin rights.</p>
+    <p>The install commands need none of this: what curl and PowerShell download isn't flagged. Check a download against its sha256 with <code>shasum -a 256</code> on a Mac, <code>sha256sum</code> on Linux, or <code>Get-FileHash</code> in PowerShell.</p>
   </section>
 </main>
 <footer class="status" aria-live="polite">
@@ -75,23 +87,35 @@
 <!-- The release (latest.json): scripts/ship.sh site writes it in when it deploys the page. -->
 <script id="release" type="application/json">@RELEASE_JSON@</script>
 <script>
-  // The install command names this page's own address.
-  const script = location.origin + "/install.sh";
+  // The install commands name this page's own address.
+  const script = location.origin + "/install.sh", ps = location.origin + "/install.ps1";
   document.getElementById("cmd").textContent = "curl -fsSL " + script + " | sh";
   document.getElementById("uninstall").textContent = "curl -fsSL " + script + " | sh -s -- --uninstall";
+  document.getElementById("ps-cmd").textContent = "irm " + ps + " | iex";
+  document.getElementById("ps-uninstall").textContent = "& ([scriptblock]::Create((irm " + ps + "))) -Uninstall";
   let rel = null;
   try { rel = JSON.parse(document.getElementById("release").textContent); } catch (e) {}
-  // Each platform's download (MAC-7): the button offers the visitor's, the list both. A
-  // release from before MAC-7 has only the top-level Linux fields.
+  // Each platform's download (MAC-7, WIN-6): the button offers the visitor's, the list
+  // every one. A release from before MAC-7 has only the top-level Linux fields.
   const platforms = (rel && rel.platforms) || {};
   const linux = platforms["linux-x86_64"] || (rel && rel.url ? { url: rel.url, sha256: rel.sha256, bytes: rel.bytes } : null);
   const macos = platforms["macos-arm64"];
-  const onMac = /mac/i.test((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent);
+  const windows = platforms["windows-x86_64"];
+  const os = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent;
+  const onWindows = /^win|windows/i.test(os) || /Windows NT/.test(navigator.userAgent);
+  const onMac = !onWindows && /mac/i.test(os);
+  // A Windows visitor reads Windows' install and Setup.exe's warning first.
+  if (onWindows) {
+    const install = document.getElementById("install");
+    install.insertBefore(document.getElementById("install-windows"), document.getElementById("install-unix"));
+    install.insertBefore(document.getElementById("smartscreen"), document.getElementById("gatekeeper"));
+  }
   const mb = (bytes) => (bytes / 1048576).toFixed(1) + " MB";
   if (rel && rel.version && linux) {
     const files = [{ name: "Linux", label: "x86_64 Linux", what: "tarball", url: linux.url, bytes: linux.bytes, sha: linux.sha256 }];
     if (macos) files.push({ name: "Mac", label: "Apple Silicon, macOS 14+", what: "DMG", url: macos.dmg, bytes: macos.dmg_bytes, sha: macos.dmg_sha256 });
-    const pick = files.find((f) => f.name === (onMac ? "Mac" : "Linux")) || files[0];
+    if (windows) files.push({ name: "Windows", label: "Windows 10 and 11, 64-bit", what: "Setup.exe", url: windows.url, bytes: windows.bytes, sha: windows.sha256 });
+    const pick = files.find((f) => f.name === (onWindows ? "Windows" : onMac ? "Mac" : "Linux")) || files[0];
     document.getElementById("dl").href = pick.url;
     document.getElementById("dl").textContent = "Download v" + rel.version + " for " + pick.name;
     document.getElementById("ver").textContent = "v" + rel.version + " released " + rel.date;
@@ -108,6 +132,7 @@
       return li;
     }));
     if (!macos) list.append(Object.assign(document.createElement("li"), { textContent: "Mac: not in this release yet" }));
+    if (!windows) list.append(Object.assign(document.createElement("li"), { textContent: "Windows: not in this release yet" }));
   } else {
     document.getElementById("ver").textContent = "No release published yet";
   }
