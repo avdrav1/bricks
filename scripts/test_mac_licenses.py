@@ -37,6 +37,12 @@ class Licences(unittest.TestCase):
         self.assertIsNone(mac_licenses.cellar_formula(self.cellar, self.cellar))
 
     def test_licence_files_are_found_in_the_keg_and_its_docs(self):
+        found = [os.path.relpath(p, self.keg) for p in mac_licenses.licence_files(self.keg)]
+        self.assertEqual(found, ["COPYING", os.path.join("share", "doc", "glib", "LICENSE.md")])
+        for name in ["COPYING.LIB", "LICENSE", "licence.txt", "NOTICE", "COPYRIGHT"]:
+            self.assertTrue(mac_licenses.is_licence(name), name)
+        for name in ["README", "AUTHORS", "INSTALL", "ChangeLog"]:
+            self.assertFalse(mac_licenses.is_licence(name), name)
 
     def test_a_source_tarballs_licences_are_its_top_level_and_reuse_files(self):
         import io
@@ -56,12 +62,6 @@ class Licences(unittest.TestCase):
             mac_licenses.source_licences(tarball),
             [("COPYING", b"see LICENSES"), ("LGPL-2.1-or-later.txt", b"LGPL text")],
         )
-        found = [os.path.relpath(p, self.keg) for p in mac_licenses.licence_files(self.keg)]
-        self.assertEqual(found, ["COPYING", os.path.join("share", "doc", "glib", "LICENSE.md")])
-        for name in ["COPYING.LIB", "LICENSE", "licence.txt", "NOTICE", "COPYRIGHT"]:
-            self.assertTrue(mac_licenses.is_licence(name), name)
-        for name in ["README", "AUTHORS", "INSTALL", "ChangeLog"]:
-            self.assertFalse(mac_licenses.is_licence(name), name)
 
     def test_the_notice_names_each_formula_its_licence_source_and_files(self):
         entries = {
