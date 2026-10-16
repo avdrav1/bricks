@@ -17,6 +17,7 @@ use deck_edit::SlideEdit;
 use gtk::prelude::*;
 use gtk::{gdk, gio, graphene};
 use std::rc::Rc;
+use suite_ui::chrome::Toolbar;
 
 /// A thumbnail's width in the slide list.
 pub const THUMB_WIDTH: i32 = 176;
@@ -171,11 +172,11 @@ fn drop_index(list: &gtk::ListBox, n: usize, from: usize, y: f64) -> Option<usiz
 
 /// The slide list's drop target, context menu (parented to `side`, the box the list's
 /// scrolled window is in: a list box's children must all be rows), and slide actions,
-/// and the header bar's New Slide button with its menu of layouts.
+/// and the window's New Slide button with its menu of layouts, in `bar`.
 pub fn attach(
     view: &Rc<DeckWindow>,
     window: &gtk::ApplicationWindow,
-    bar: &gtk::HeaderBar,
+    bar: &Toolbar,
     side: &gtk::Box,
 ) {
     let list = &view.list;
@@ -244,7 +245,7 @@ pub fn attach(
     });
     list.add_controller(click);
 
-    // The header bar: New Slide, and beside it the menu of layouts.
+    // The toolbar: New Slide, and beside it the menu of layouts.
     let add = gtk::Button::with_label("New Slide");
     add.set_action_name(Some("win.new-slide"));
     let tip = format!("New Slide ({})", keys::label(Action::NewSlide));

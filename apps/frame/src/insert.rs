@@ -1,4 +1,4 @@
-//! Inserting (FRAME-12, spec "Content goes where it belongs"). The header bar's Insert
+//! Inserting (FRAME-12, spec "Content goes where it belongs"). The toolbar's Insert
 //! menu adds a text box (its text selected, so typing replaces it), a shape, a picture
 //! (chosen in the file dialog), or a table to the slide shown, and selects it. Pictures
 //! also come by drop, image files on the canvas, and by paste (Ctrl+V): a picture fills
@@ -16,6 +16,7 @@ use presentation_model::{Image, ImageFormat};
 use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
+use suite_ui::chrome::Toolbar;
 
 /// The rows and columns of a table Insert adds.
 const TABLE: (usize, usize) = (3, 3);
@@ -295,14 +296,49 @@ fn accept_drops(view: &Rc<DeckWindow>) {
     view.canvas.add_controller(target);
 }
 
-/// The header bar's Insert menu, and the canvas's drops.
-pub fn attach(view: &Rc<DeckWindow>, bar: &gtk::HeaderBar) {
+/// The toolbar's Insert menu, the menu bar's Insert actions (macOS), and the canvas's
+/// drops.
+pub fn attach(view: &Rc<DeckWindow>, bar: &Toolbar) {
     let button = gtk::MenuButton::new();
     button.set_label("Insert");
     button.set_tooltip_text(Some("Insert a text box, shape, picture, or table"));
     button.update_property(&[gtk::accessible::Property::Label("Insert")]);
     button.set_popover(Some(&menu(view)));
     bar.pack_start(&button);
+    if let Some(window) = view.window() {
+        let run = |name: &str, run: fn(&Rc<DeckWindow>)| {
+            let view = Rc::downgrade(view);
+            gio::ActionEntry::builder(name)
+                .activate(move |_: &gtk::ApplicationWindow, _, _| {
+                    if let Some(view) = view.upgrade() {
+                        run(&view);
+                        to_page_later(&view);
+                    }
+                })
+                .build()
+        };
+        // Insert → Shape's items: the preset.
+        let shape_entry = {
+            let view = Rc::downgrade(view);
+            gio::ActionEntry::builder("insert-shape")
+                .parameter_type(Some(glib::VariantTy::STRING))
+                .activate(move |_: &gtk::ApplicationWindow, _, preset| {
+                    let preset = preset.and_then(|p| p.str());
+                    let known = SHAPES.iter().find(|(p, _)| Some(*p) == preset);
+                    if let (Some(view), Some(&(preset, _))) = (view.upgrade(), known) {
+                        shape(&view, preset);
+                        to_page_later(&view);
+                    }
+                })
+                .build()
+        };
+        window.add_action_entries([
+            run("insert-text", |v| text(v)),
+            shape_entry,
+            run("insert-picture", choose),
+            run("insert-table", |v| table(v)),
+        ]);
+    }
     accept_drops(view);
 }
 

@@ -1,8 +1,9 @@
-//! Saving (FRAME-8, ADR 0006): Ctrl+S (the header bar's Save button) saves over the deck's
-//! file, Ctrl+Shift+S saves it as another file through the file dialog; a new deck, never
-//! saved, saves as Save As does. Either patches the package the deck was read from
-//! (`pptx::save`), atomically and off the UI thread; the window waits meanwhile, so the
-//! deck saved is the deck shown. A save that fails leaves the file as it was and says why.
+//! Saving (FRAME-8, ADR 0006): Ctrl+S (the header bar's Save button on Linux, File → Save
+//! on macOS) saves over the deck's file, Ctrl+Shift+S saves it as another file through the
+//! file dialog; a new deck, never saved, saves as Save As does. Either patches the package
+//! the deck was read from (`pptx::save`), atomically and off the UI thread; the window
+//! waits meanwhile, so the deck saved is the deck shown. A save that fails leaves the file
+//! as it was and says why.
 
 use crate::window::{self, DeckWindow};
 use gtk::prelude::*;

@@ -23,6 +23,7 @@ use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Instant;
+use suite_ui::chrome::Toolbar;
 use suite_ui::keys::Primary;
 
 thread_local! {
@@ -53,8 +54,12 @@ fn file_name(path: &Path) -> String {
     )
 }
 
-/// The header bar every window has: New (Ctrl+N) and Open (Ctrl+O) buttons.
-fn header() -> gtk::HeaderBar {
+/// The header bar every window has on Linux: New (Ctrl+N) and Open (Ctrl+O) buttons.
+/// macOS windows keep their own title bar, and New and Open are in the menu bar.
+fn put_header(window: &gtk::ApplicationWindow) {
+    if suite_ui::chrome::MENU_BAR {
+        return;
+    }
     let bar = gtk::HeaderBar::new();
     let new = gtk::Button::from_icon_name("document-new-symbolic");
     new.set_action_name(Some("app.new"));
@@ -66,7 +71,7 @@ fn header() -> gtk::HeaderBar {
     open.set_tooltip_text(Some(&format!("Open… ({})", keys::label(Action::Open))));
     open.update_property(&[gtk::accessible::Property::Label("Open")]);
     bar.pack_start(&open);
-    bar
+    window.set_titlebar(Some(&bar));
 }
 
 /// File → New (Ctrl+N), and `frame` without a file: a window with a new deck, Frame's
@@ -87,7 +92,7 @@ pub fn new_deck(app: &gtk::Application) {
                     .default_width(1280)
                     .default_height(760)
                     .build();
-                window.set_titlebar(Some(&header()));
+                put_header(&window);
                 accept_file_drops(&app, &window);
                 let view = show_deck(&app, &window, Rc::new(deck), None);
                 window.present();
@@ -237,7 +242,7 @@ pub fn open(app: &gtk::Application, path: &Path, bench: Option<u32>) {
         .default_width(1280)
         .default_height(760)
         .build();
-    window.set_titlebar(Some(&header()));
+    put_header(&window);
     let opening = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     opening.set_halign(gtk::Align::Center);
     opening.set_valign(gtk::Align::Center);
@@ -827,22 +832,59 @@ fn show_deck(
             move |_: &gtk::ApplicationWindow, _, _| saving::save(&view)
         })
         .build();
-    window.add_action_entries([from_start, from_here, save]);
-    if let Some(bar) = window.titlebar().and_downcast::<gtk::HeaderBar>() {
-        slide_list::attach(&view, window, &bar, &side);
-        insert::attach(&view, &bar);
+    // The menu bar's (macOS): Save As, Undo, Redo, the outline, and moving the slide, as
+    // the window's keys do them.
+    let run = |name: &str, run: fn(&Rc<DeckWindow>)| {
+        let view = Rc::downgrade(&view);
+        gio::ActionEntry::builder(name)
+            .activate(move |_: &gtk::ApplicationWindow, _, _| {
+                if let Some(view) = view.upgrade() {
+                    run(&view);
+                }
+            })
+            .build()
+    };
+    window.add_action_entries([
+        from_start,
+        from_here,
+        save,
+        run("save-as", saving::save_as),
+        run("undo", |v| v.undo()),
+        run("redo", |v| v.redo()),
+        run("outline", |v| v.outline.toggle()),
+        run("move-slide-up", |v| slide_list::move_by(v, -1)),
+        run("move-slide-down", |v| slide_list::move_by(v, 1)),
+    ]);
+    // The deck's buttons: in the header bar on Linux, after its New and Open; on macOS in
+    // a toolbar row over the deck, as the menu bar has New, Open, and Save.
+    let bar = match window.titlebar().and_downcast::<gtk::HeaderBar>() {
+        Some(header) => Toolbar::Header(header),
+        None => {
+            let bar = Toolbar::new();
+            if let Some(row) = bar.put_on(window) {
+                page.prepend(&row);
+            }
+            bar
+        }
+    };
+    slide_list::attach(&view, window, &bar, &side);
+    insert::attach(&view, &bar);
+    if !suite_ui::chrome::MENU_BAR {
         let save = gtk::Button::from_icon_name("document-save-symbolic");
         save.set_action_name(Some("win.save"));
         save.set_tooltip_text(Some(&format!("Save ({})", keys::label(Action::Save))));
         save.update_property(&[gtk::accessible::Property::Label("Save")]);
         bar.pack_start(&save);
-        let play = gtk::Button::from_icon_name("media-playback-start-symbolic");
-        play.set_action_name(Some("win.slideshow"));
-        play.set_tooltip_text(Some("Slideshow (F5)"));
-        play.update_property(&[gtk::accessible::Property::Label("Slideshow")]);
-        bar.pack_end(&play);
-        bar.pack_end(view.outline.button());
     }
+    let play = gtk::Button::from_icon_name("media-playback-start-symbolic");
+    play.set_action_name(Some("win.slideshow"));
+    play.set_tooltip_text(Some(&format!(
+        "Slideshow ({})",
+        keys::label(Action::Slideshow)
+    )));
+    play.update_property(&[gtk::accessible::Property::Label("Slideshow")]);
+    bar.pack_end(&play);
+    bar.pack_end(view.outline.button());
     view.go(0);
     if let Some(frames) = bench {
         bench_draw(app, &view, frames);

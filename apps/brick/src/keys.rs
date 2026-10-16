@@ -35,6 +35,10 @@ pub enum Command {
     Format(&'static str),
     /// The next (1) or previous (-1) sheet (XLSX-1).
     Sheet(isize),
+    /// The menu bar's Close Window (macOS).
+    Close,
+    /// The app menu's Quit (macOS).
+    Quit,
 }
 
 /// Who takes a window key.
@@ -146,6 +150,12 @@ pub const WINDOW: &[Binding] = &[
     key("Next Sheet", "<Control>KP_Page_Down", Command::Sheet(1)),
     key("Previous Sheet", "<Control>Page_Up", Command::Sheet(-1)),
     key("Previous Sheet", "<Control>KP_Page_Up", Command::Sheet(-1)),
+    // The menu bar's Close Window and Quit (MAC-4); Linux has neither.
+    only(
+        Primary::Command,
+        accel("Close Window", "<Primary>w", Command::Close),
+    ),
+    only(Primary::Command, accel("Quit", "<Primary>q", Command::Quit)),
 ];
 
 /// The window keys bound under `primary`.
@@ -169,6 +179,8 @@ pub fn action(command: Command) -> Option<&'static str> {
         Command::Open => Some("app.open"),
         Command::New => Some("app.new"),
         Command::Replace => Some("win.replace"),
+        Command::Close => Some("app.close"),
+        Command::Quit => Some("app.quit"),
         _ => None,
     }
 }
@@ -195,6 +207,13 @@ pub fn label_for(primary: Primary, command: Command) -> String {
         .find(|b| b.command == command)
         .map(|b| primary.label(b.spec))
         .unwrap_or_default()
+}
+
+/// The accelerator a menu item for `command` shows under `primary`: its first binding's.
+pub fn accel_for(primary: Primary, command: Command) -> Option<String> {
+    window(primary)
+        .find(|b| b.command == command)
+        .map(|b| primary.accel(b.spec))
 }
 
 /// `command`'s key on this platform, as a tooltip shows it.
@@ -229,25 +248,22 @@ pub fn grid_key(primary: Primary, key: gdk::Key, state: ModifierType) -> Option<
     }
 }
 
-#[cfg(test)]
 const CTRL: grid::Mods = grid::Mods {
     shift: false,
     ctrl: true,
 };
-#[cfg(test)]
 const SHIFT: grid::Mods = grid::Mods {
     shift: true,
     ctrl: false,
 };
-#[cfg(test)]
 const BOTH: grid::Mods = grid::Mods {
     shift: true,
     ctrl: true,
 };
 
 /// The grid's modified keys (plain arrows, Tab, Enter and typing aside), each checked
-/// against [`grid_key`] for both platforms.
-#[cfg(test)]
+/// against [`grid_key`] for both platforms; the menu bar's Cut, Copy, and Paste show
+/// theirs.
 pub const GRID: &[(&str, &str, GridKey)] = &[
     ("Copy", "<Primary>c", GridKey::Clip(ClipCommand::Copy)),
     ("Copy", "<Primary>Insert", GridKey::Clip(ClipCommand::Copy)),
@@ -321,6 +337,14 @@ pub const GRID: &[(&str, &str, GridKey)] = &[
         GridKey::Nav(grid::Key::Space, BOTH),
     ),
 ];
+
+/// The accelerator a menu item for the grid's `name` (`"Copy"`) shows under `primary`:
+/// its first key's.
+pub fn grid_accel(primary: Primary, name: &str) -> Option<String> {
+    GRID.iter()
+        .find(|(n, _, _)| *n == name)
+        .map(|(_, spec, _)| primary.accel(spec))
+}
 
 #[cfg(test)]
 mod tests {
@@ -480,8 +504,17 @@ mod tests {
                 ("app.open", vec!["<Meta>o".to_string()]),
                 ("app.new", vec!["<Meta>n".to_string()]),
                 ("win.replace", vec!["<Alt><Meta>f".to_string()]),
+                ("app.close", vec!["<Meta>w".to_string()]),
+                ("app.quit", vec!["<Meta>q".to_string()]),
             ]
         );
+        // A menu item shows a command's first key; Close Window's is macOS's alone.
+        assert_eq!(
+            accel_for(p, Command::Redo).as_deref(),
+            Some("<Meta><Shift>z")
+        );
+        assert_eq!(accel_for(p, Command::Close).as_deref(), Some("<Meta>w"));
+        assert_eq!(accel_for(Primary::Control, Command::Close), None);
         assert_eq!(label_for(p, Command::Replace), "⌥⌘F");
         assert_eq!(label_for(p, Command::SaveAs), "⇧⌘S");
         assert!(

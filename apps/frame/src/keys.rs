@@ -41,6 +41,10 @@ pub enum Action {
     SelectAll,
     /// In the outline: an empty slide after the caret's.
     OutlineSlide,
+    /// macOS's File → Close Window.
+    Close,
+    /// macOS's Quit (the app menu's).
+    Quit,
 }
 
 /// Who takes a shortcut.
@@ -103,6 +107,14 @@ const fn linux(action: Action, via: Via, spec: &'static str) -> Binding {
     }
 }
 
+/// A key bound on macOS only.
+const fn mac(action: Action, via: Via, spec: &'static str) -> Binding {
+    Binding {
+        control: None,
+        ..both(action, via, spec)
+    }
+}
+
 /// A key that's another on macOS.
 const fn pick(action: Action, via: Via, control: &'static str, command: &'static str) -> Binding {
     Binding {
@@ -139,6 +151,9 @@ pub const BINDINGS: &[Binding] = &[
     shift_too(both(A::NextPlaceholder, Via::Canvas, "<Primary>Return")),
     shift_too(both(A::SelectAll, Via::Canvas, "<Primary>a")),
     both(A::OutlineSlide, Via::Outline, "<Primary>Return"),
+    // The menu bar's Close Window and Quit (MAC-4); Linux has neither.
+    mac(A::Close, Via::Accel("app.close"), "<Primary>w"),
+    mac(A::Quit, Via::Accel("app.quit"), "<Primary>q"),
 ];
 
 /// The actions' accelerators under `p`, each action's in the table's order.
@@ -175,6 +190,15 @@ pub fn label_for(p: Primary, action: Action) -> String {
 /// The key a tooltip shows for `action` on this platform.
 pub fn label(action: Action) -> String {
     label_for(Primary::HERE, action)
+}
+
+/// The accelerator a menu item for `action` shows under `p`: its first binding's.
+pub fn accel_for(p: Primary, action: Action) -> Option<String> {
+    BINDINGS
+        .iter()
+        .filter(|b| b.action == action)
+        .find_map(|b| b.spec(p))
+        .map(|spec| p.accel(spec))
 }
 
 /// The keypad's keys as the main ones: a binding names only those.
@@ -420,6 +444,18 @@ mod tests {
         assert_eq!(find(p, Via::Window, Key::m, CMD), None);
         assert_eq!(find(p, Via::Window, Key::y, CMD), None);
         assert_eq!(find(p, Via::Window, Key::Z, CMD | SHIFT), Some(A::Redo));
+        // The menu bar's Close Window and Quit, macOS's alone.
+        let accels = accels_for(p);
+        assert!(accels.contains(&("app.close", vec!["<Meta>w".to_owned()])));
+        assert!(accels.contains(&("app.quit", vec!["<Meta>q".to_owned()])));
+        assert_eq!(accel_for(p, A::Close).as_deref(), Some("<Meta>w"));
+        assert_eq!(accel_for(Primary::Control, A::Quit), None);
+        // A menu item shows an action's first key.
+        assert_eq!(accel_for(p, A::NewSlide).as_deref(), Some("<Meta><Shift>n"));
+        assert_eq!(
+            accel_for(Primary::Control, A::Redo).as_deref(),
+            Some("<Control><Shift>z")
+        );
     }
 
     #[test]

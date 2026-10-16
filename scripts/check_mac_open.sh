@@ -23,39 +23,23 @@ out=$(cd "$out" && pwd)
 shots=$out/shots files=$out/files logs=$out/logs
 root=$(cd "$(dirname "$0")/.." && pwd)
 lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
-failed=0
+# shellcheck source=scripts/mac_helpers.sh
+source "$root/scripts/mac_helpers.sh"
+# The apps choose the renderer on macOS themselves (suite_ui::renderer): that's under test.
+unset GSK_RENDERER
 
-note() { echo "$*" | tee -a "$out/summary.txt"; }
-pass() { note "ok   $*"; }
-fail() { note "FAIL $*"; failed=1; }
-
-# The windows on screen of process $1, one per line: layer, title, bounds.
-cat >"$out/windows.swift" <<'EOF'
-import CoreGraphics
-import Foundation
-let pid = Int(CommandLine.arguments[1]) ?? 0
-let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
-for w in list where (w[kCGWindowOwnerPID as String] as? Int) == pid {
-    let b = w[kCGWindowBounds as String] as? [String: Any] ?? [:]
-    print("\(w[kCGWindowLayer as String] ?? 0)\t\(w[kCGWindowName as String] ?? "")\t\(b["X"] ?? 0),\(b["Y"] ?? 0) \(b["Width"] ?? 0)x\(b["Height"] ?? 0)")
-}
-EOF
-swiftc -O "$out/windows.swift" -o "$out/windows" >"$logs/swiftc.log" 2>&1 || {
-    note "FAIL the window lister didn't build"; cat "$logs/swiftc.log"; exit 1
-}
 # The app's document windows (layer 0).
-windows() { "$out/windows" "$1" | awk -F'\t' '$1 == 0'; }
-shot() { sleep "${2:-1}"; screencapture -x "$shots/$1.png" || note "screencapture $1 failed"; }
+documents() { windows "$1" | awk -F'\t' '$1 == 0'; }
 
 # Wait up to 20 s for process $1 to show $2 windows; print the list.
 wait_windows() {
     local i
     for i in $(seq 40); do
-        (($(windows "$1" | wc -l) >= $2)) && break
+        (($(documents "$1" | wc -l) >= $2)) && break
         sleep 0.5
     done
     sleep 2
-    windows "$1"
+    documents "$1"
 }
 
 # The pids running bundle $1's executable.

@@ -20,6 +20,7 @@ mod fit;
 mod insert;
 mod inspector;
 mod keys;
+mod menus;
 mod outline;
 mod render;
 mod saving;
@@ -108,7 +109,26 @@ fn main() -> glib::ExitCode {
         let open = gio::ActionEntry::builder("open")
             .activate(|app: &gtk::Application, _, _| window::choose_and_open(app))
             .build();
-        app.add_action_entries([new, open]);
+        // The menu bar's Close Window and Quit (macOS): Quit closes each window.
+        let close = gio::ActionEntry::builder("close")
+            .activate(|app: &gtk::Application, _, _| {
+                if let Some(w) = app.active_window() {
+                    w.close();
+                }
+            })
+            .build();
+        let quit = gio::ActionEntry::builder("quit")
+            .activate(|app: &gtk::Application, _, _| {
+                for window in app.windows() {
+                    window.close();
+                }
+            })
+            .build();
+        app.add_action_entries([new, open, close, quit]);
+        suite_ui::chrome::install(app, APP, env!("CARGO_PKG_VERSION"));
+        if suite_ui::chrome::MENU_BAR {
+            app.set_menubar(Some(&menus::bar()));
+        }
         for (action, accels) in keys::accels() {
             let accels: Vec<&str> = accels.iter().map(String::as_str).collect();
             app.set_accels_for_action(action, &accels);
