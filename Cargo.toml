@@ -80,6 +80,8 @@ serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 # Etch's image codecs: pure Rust, only the formats Etch opens and saves.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp"] }
+# The Windows API, for the little the apps call directly (WIN-3); each crate names its features.
+windows-sys = "0.61.2"
 
 [workspace.lints.rust]
 unsafe_code = "warn"

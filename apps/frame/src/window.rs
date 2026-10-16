@@ -52,7 +52,8 @@ fn file_name(path: &Path) -> String {
 }
 
 /// The header bar every window has on Linux: New (Ctrl+N) and Open (Ctrl+O) buttons.
-/// macOS windows keep their own title bar, and New and Open are in the menu bar.
+/// macOS and Windows windows keep their own title bar, and New and Open are in the menu
+/// bar.
 fn put_header(window: &gtk::ApplicationWindow) {
     if suite_ui::chrome::MENU_BAR {
         return;
@@ -725,7 +726,7 @@ fn show_deck(
     keys.set_propagation_phase(gtk::PropagationPhase::Capture);
     keys.connect_key_pressed({
         let view = view.clone();
-        move |_, key, _, mods| {
+        move |controller, key, _, mods| {
             use gdk::{Key, ModifierType};
             let shift = mods.contains(ModifierType::SHIFT_MASK);
             let outline = view.outline.has_focus();
@@ -756,9 +757,15 @@ fn show_deck(
                 return glib::Propagation::Stop;
             }
             // While text is edited, the keys are the text's (crate::editing, or
-            // crate::outline); in the inspector, its controls'.
+            // crate::outline); in the inspector, its controls'; in the menu bar (Windows'
+            // row, after F10), the menus'.
             let modified = keys::modified(Primary::HERE, mods);
-            if text || modified || view.inspector.has_focus() {
+            let menu_bar = controller
+                .widget()
+                .and_downcast::<gtk::Window>()
+                .and_then(|w| GtkWindowExt::focus(&w))
+                .is_some_and(|f| f.ancestor(gtk::PopoverMenuBar::static_type()).is_some());
+            if text || modified || view.inspector.has_focus() || menu_bar {
                 return glib::Propagation::Proceed;
             }
             // A selected shape: the arrows nudge it a pixel (Shift: ten), Escape lets go,
@@ -852,8 +859,8 @@ fn show_deck(
         run("move-slide-up", |v| slide_list::move_by(v, -1)),
         run("move-slide-down", |v| slide_list::move_by(v, 1)),
     ]);
-    // The deck's buttons: in the header bar on Linux, after its New and Open; on macOS in
-    // a toolbar row over the deck, as the menu bar has New, Open, and Save.
+    // The deck's buttons: in the header bar on Linux, after its New and Open; on macOS and
+    // Windows in a toolbar row over the deck, as the menu bar has New, Open, and Save.
     let bar = match window.titlebar().and_downcast::<gtk::HeaderBar>() {
         Some(header) => Toolbar::Header(header),
         None => {

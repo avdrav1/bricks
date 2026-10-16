@@ -13,6 +13,9 @@
 //! `--bench-draw` redraws the deck's densest slide for FRAMES frames and prints how long
 //! each took (FRAME-4's acceptance test).
 
+// On Windows a GUI program: no console window opens with it (WIN-3).
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod arrange;
 mod deck;
 mod editing;
@@ -74,6 +77,8 @@ fn parse_args() -> Result<Args, String> {
 }
 
 fn main() -> glib::ExitCode {
+    // Before anything prints: on Windows the terminal Frame was started from (WIN-3).
+    suite_platform::console::attach();
     let args = match parse_args() {
         Ok(a) => a,
         Err(e) => {
@@ -99,14 +104,15 @@ fn main() -> glib::ExitCode {
         Err(e) => tracing::warn!("bundle: {e}"),
     }
     suite_ui::renderer::init();
+    suite_ui::chrome::init();
     suite_ui::fonts::init();
 
     let app = gtk::Application::builder()
         .application_id(APP_ID)
         .flags(gio::ApplicationFlags::NON_UNIQUE | gio::ApplicationFlags::HANDLES_OPEN)
         .build();
-    // GTK on macOS doesn't follow the Mac's light or dark appearance by itself.
-    #[cfg(target_os = "macos")]
+    // macOS and Windows: the system's light or dark mode (GTK doesn't follow the Mac's).
+    #[cfg(any(target_os = "macos", windows))]
     app.connect_startup(|_| suite_platform::appearance::follow(suite_ui::appearance::set_dark));
     app.connect_startup(|app| {
         let new = gio::ActionEntry::builder("new")
@@ -115,7 +121,8 @@ fn main() -> glib::ExitCode {
         let open = gio::ActionEntry::builder("open")
             .activate(|app: &gtk::Application, _, _| window::choose_and_open(app))
             .build();
-        // The menu bar's Close Window and Quit (macOS): Quit closes each window.
+        // The menu bar's Close Window and Quit (macOS) and Exit (Windows): Quit closes each
+        // window.
         let close = gio::ActionEntry::builder("close")
             .activate(|app: &gtk::Application, _, _| {
                 if let Some(w) = app.active_window() {

@@ -20,6 +20,9 @@
 //! - `--bench-find TEXT` (SRCH-2) types TEXT into the find bar a character at a time and
 //!   prints each keystroke, search start, and result (`FIND …`).
 
+// On Windows a GUI program: no console window opens with it (WIN-3).
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod crash;
 mod editor;
 mod format_bar;
@@ -33,6 +36,7 @@ mod recovery;
 mod sheets;
 mod state;
 mod status;
+#[cfg(not(windows))]
 mod theme;
 
 use csv_engine::{Charset, Encoding, IndexError};
@@ -127,6 +131,8 @@ fn parse_args() -> Result<Args, String> {
 }
 
 fn main() -> glib::ExitCode {
+    // Before anything prints: on Windows the terminal Brick was started from (WIN-3).
+    suite_platform::console::attach();
     let args = match parse_args() {
         Ok(a) => a,
         Err(e) => {
@@ -149,6 +155,7 @@ fn main() -> glib::ExitCode {
         Err(e) => tracing::warn!("bundle: {e}"),
     }
     suite_ui::renderer::init();
+    suite_ui::chrome::init();
     suite_ui::fonts::init();
     // The save benchmark overwrites its file: only ever a scratch copy.
     if let (Some(Bench::Save { .. }), Some(file)) = (&args.bench, &args.file) {
@@ -192,10 +199,13 @@ fn main() -> glib::ExitCode {
         .application_id(APP_ID)
         .flags(gtk::gio::ApplicationFlags::NON_UNIQUE | gtk::gio::ApplicationFlags::HANDLES_OPEN)
         .build();
-    // GTK on macOS doesn't follow the Mac's light or dark appearance by itself.
-    #[cfg(target_os = "macos")]
+    // macOS and Windows: the system's light or dark mode (GTK doesn't follow the Mac's).
+    #[cfg(any(target_os = "macos", windows))]
     app.connect_startup(|_| suite_platform::appearance::follow(suite_ui::appearance::set_dark));
     app.connect_startup(|app| {
+        // The settings portal (Linux; on macOS it finds none). Windows has no portal, and
+        // asking would start a D-Bus session bus (DEC-11 R13).
+        #[cfg(not(windows))]
         theme::follow_color_scheme();
         let open = gtk::gio::ActionEntry::builder("open")
             .activate(|app: &gtk::Application, _, _| choose_and_open(app))
@@ -219,8 +229,8 @@ fn main() -> glib::ExitCode {
                 menus::refresh_recent();
             })
             .build();
-        // The menu bar's Close Window and Quit (macOS). Quit closes each window, so a
-        // window with unsaved edits asks first.
+        // The menu bar's Close Window and Quit (macOS), and Exit (Windows). Quit closes
+        // each window, so a window with unsaved edits asks first.
         let close = gtk::gio::ActionEntry::builder("close")
             .activate(|app: &gtk::Application, _, _| {
                 if let Some(w) = app.active_window() {
@@ -458,7 +468,7 @@ fn start_window(app: &gtk::Application) -> gtk::ApplicationWindow {
         .build();
     window.set_widget_name(START_WINDOW);
     accept_file_drops(app, &window);
-    // Linux's empty header bar; macOS keeps its own title bar.
+    // Linux's empty header bar; macOS and Windows keep their own title bar.
     if !suite_ui::chrome::MENU_BAR {
         window.set_titlebar(Some(&gtk::HeaderBar::new()));
     }
@@ -589,6 +599,16 @@ fn accept_file_drops(app: &gtk::Application, window: &gtk::ApplicationWindow) {
         gtk::gdk::FileList::static_type(),
         gtk::gdk::DragAction::COPY,
     );
+    // Windows: GDK sets the drop's actions to those of each status GTK reports. When the
+    // pointer crosses into another widget, GTK reports none for a moment. If the pointer
+    // then stops, no new move puts the actions back, and letting go there was refused
+    // (WIN-3's runner logs: the actions empty from the last move on). Answering COPY on
+    // every enter and move sets them again.
+    #[cfg(windows)]
+    {
+        target.connect_enter(|_, _, _| gtk::gdk::DragAction::COPY);
+        target.connect_motion(|_, _, _| gtk::gdk::DragAction::COPY);
+    }
     target.connect_drop({
         let (app, window) = (app.clone(), window.downgrade());
         move |_, value, _, _| {
@@ -977,8 +997,8 @@ fn build_window(
     let delimiter = delimiter_dropdown(session, &grid);
     let save = Rc::new(RefCell::new(SaveState::Idle));
     // The window's buttons. Linux: the header bar with Open, Recent, New, and Save As, then
-    // the delimiter and Header row. macOS has those commands in the menu bar: the delimiter
-    // and Header row are a toolbar row over the format bar.
+    // the delimiter and Header row. macOS and Windows have those commands in the menu bar:
+    // the delimiter and Header row are a toolbar row over the format bar.
     let toolbar = Toolbar::new();
     if !suite_ui::chrome::MENU_BAR {
         let open = gtk::Button::from_icon_name("document-open-symbolic");
@@ -1040,7 +1060,8 @@ fn build_window(
         }
     });
 
-    // What a window command does, for the window's keys and the menu bar's items (macOS).
+    // What a window command does, for the window's keys and the menu bar's items (macOS,
+    // Windows).
     // `false`: it's an accelerator's (Open, New, Replace, Close Window, Quit), not this.
     let run: Rc<dyn Fn(keys::Command) -> bool> = Rc::new({
         let (window, grid, save, session, find, tabs, formula_bar, format_bar) = (

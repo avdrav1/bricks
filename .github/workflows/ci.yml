@@ -90,6 +90,21 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@v4
         with: { name: windows-open, path: "out/win-open/shots\nout/win-open/logs\nout/win-open/summary.txt\nout/win-open/env.txt", if-no-files-found: warn }
+      # Windows-like windows (WIN-3): each app's exe is a GUI program whose --version still
+      # prints from a terminal, its window has Windows' title bar (snaps with Win+Left), its
+      # menus are in a menu bar row (Help → About, File → Exit), and it follows the app mode
+      # (AppsUseLightTheme) live; the screenshots are the artifact.
+      - name: Windows' title bars, menu bars, and dark mode
+        if: always() && steps.build.outcome == 'success'
+        # Windows PowerShell 5.1: its Add-Type compiles the script's Win32 and System.Drawing
+        # helpers against .NET Framework.
+        shell: powershell
+        run: |
+          $env:PATH = "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin;$env:PATH"
+          scripts/check_win_ui.ps1 -Bin target\debug -Out out\win-ui
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: windows-ui, path: out/win-ui, if-no-files-found: warn }
   macos:
     # arm64, the oldest macOS the suite supports (ADR 0011). GUI checks stay on Linux.
     runs-on: macos-14

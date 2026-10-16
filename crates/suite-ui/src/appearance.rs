@@ -1,6 +1,10 @@
 //! The light or dark look of GTK's theme. Brick follows the desktop's preference on Linux
-//! (`theme.rs`, APP-6); every app follows the Mac's appearance through
-//! `suite_platform::appearance` on macOS (MAC-6).
+//! (`theme.rs`, APP-6); every app follows the Mac's appearance on macOS (MAC-6) and
+//! Windows' app mode on Windows (WIN-3), through `suite_platform::appearance`. On Windows
+//! the system draws the title bars, so they're told too (`title_bars`).
+
+#[cfg(windows)]
+mod title_bars;
 
 use gtk::glib;
 use gtk::prelude::*;
@@ -19,6 +23,8 @@ pub fn set_dark(dark: bool) {
 }
 
 fn apply(dark: bool) {
+    #[cfg(windows)]
+    title_bars::set_dark(dark);
     let Some(settings) = gtk::Settings::default() else {
         return;
     };
