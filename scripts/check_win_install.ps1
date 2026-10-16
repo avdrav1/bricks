@@ -496,7 +496,7 @@ function Check-Installed([string]$app, [string]$tag, $defaults) {
     if ($friendly -ne $name) { $bad += "FriendlyAppName '$friendly'" }
     Check ($bad.Count -eq 0) "${tag}: HKCU registers $($Types[$app] -join ' ') for Open with (ProgIDs, OpenWithProgids, Applications\$app.exe, Capabilities, RegisteredApplications)$(if ($bad) { ': ' + ($bad -join '; ') })"
 
-    $offered = @(); $notOffered = @(); $changed = @()
+    $offered = @(); $notOffered = @(); $changed = @(); $kept = @(); $unowned = @()
     foreach ($ext in $Types[$app]) {
         $handlers = [Win]::Handlers($ext)
         if ($handlers | Where-Object { ($_ -split "`t")[1] -ieq $exe }) { $offered += $ext } else { $notOffered += "$ext ($((@($handlers | ForEach-Object { ($_ -split "`t")[0] })) -join ', '))" }
@@ -506,13 +506,17 @@ function Check-Installed([string]$app, [string]$tag, $defaults) {
             opener     = [Win]::Opener($ext)
         }
         $was = $defaults[$ext]
-        if ($now.default -ne $was.default -or $now.userChoice -ne $was.userChoice -or ($was.opener -and $now.opener -ne $was.opener)) {
+        # A default the user (or Windows) had: an HKCU ProgID, Explorer's UserChoice, or a
+        # program other than Open with's picker. With none, Windows may now open the type
+        # with the one program registered for it; that's Windows' choice, not a default set.
+        $had = $was.default -or $was.userChoice -or ($was.opener -and $was.opener -notlike "*\OpenWith.exe")
+        if ($now.default -ne $was.default -or $now.userChoice -ne $was.userChoice -or ($had -and $now.opener -ne $was.opener)) {
             $changed += "$ext ($($was.default)/$($was.userChoice)/$($was.opener) -> $($now.default)/$($now.userChoice)/$($now.opener))"
-        }
+        } elseif ($had) { $kept += "$ext ($([IO.Path]::GetFileName([string]$was.opener)))" } else { $unowned += $ext }
         Add-Content -Encoding utf8 "$logs\$tag-associations.txt" "$ext before: default '$($was.default)', UserChoice '$($was.userChoice)', opens with '$($was.opener)'; after: '$($now.default)', '$($now.userChoice)', '$($now.opener)'; Open with: $($handlers -join ' | ')"
     }
     Check ($notOffered.Count -eq 0) "${tag}: the shell's Open with offers $name for $($offered -join ' ')$(if ($notOffered) { '; not for ' + ($notOffered -join ', ') })"
-    Check ($changed.Count -eq 0) "${tag}: the extensions' defaults are the user's, as before$(if ($changed) { '; changed: ' + ($changed -join ', ') })"
+    Check ($changed.Count -eq 0) "${tag}: no default written; the user's stay ($(if ($kept) { $kept -join ', ' } else { 'none' }); types with none before: $(if ($unowned) { $unowned -join ' ' } else { 'none' }))$(if ($changed) { '; changed: ' + ($changed -join ', ') })"
     return $exe
 }
 
@@ -663,7 +667,7 @@ function Uninstall-By-Hand([string]$app, [string]$tag) {
         do {
             foreach ($w in [Win]::Windows(0)) {
                 $h, $owner, $class, $t = $w -split "`t", 4
-                $uninstaller = (Get-Process -Id $owner -ErrorAction SilentlyContinue).Name -match '^(_iu|unins)'
+                $uninstaller = (Get-Process -Id $owner -ErrorAction SilentlyContinue).Name -match '^_?(iu|unins)'
                 if ($class -eq "#32770" -and ($uninstaller -or $t -like "*$name*") -and -not $handled.ContainsKey($h)) { $dialog = $w; break }
             }
             if (-not $dialog) {
@@ -688,12 +692,15 @@ function Uninstall-By-Hand([string]$app, [string]$tag) {
         Start-Sleep -Seconds 2
     }
     Wait-Uninstalled $name
-    if (Test-Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\dev.cronkite.${name}_is1") {
-        # A dialog this didn't find: keep a picture, then finish silently for the next checks.
+    $left = @(Get-Process | Where-Object { $_.Name -match '^_?(iu|unins)' })
+    if ($left -or (Test-Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\dev.cronkite.${name}_is1")) {
+        # A dialog this didn't answer: keep a picture, then end the uninstaller.
         [Win]::Screen("$shots\$tag-uninstall-stuck.png")
-        Get-Process | Where-Object { $_.Name -like "_iu*" -or $_.Name -like "unins*" } | Stop-Process -Force -ErrorAction SilentlyContinue
-        Start-Process -FilePath $u.UninstallString.Trim('"') -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
-        Wait-Uninstalled $name
+        $left | Stop-Process -Force -ErrorAction SilentlyContinue
+        if (Test-Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\dev.cronkite.${name}_is1") {
+            Start-Process -FilePath $u.UninstallString.Trim('"') -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+            Wait-Uninstalled $name
+        }
     }
     Check ($seen.Count -eq 3) "${tag}: uninstalling by hand asked to confirm, then whether to remove the user's data, then said it was done ($($seen -join '; '))"
 }

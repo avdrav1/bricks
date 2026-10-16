@@ -104,11 +104,9 @@ begin
     RemoveDir(Roaming);
     RemoveDir(ExpandConstant('{localappdata}\Cronkite'));
     RemoveDir(ExpandConstant('{userappdata}\Cronkite'));
-  end
-  else if CurUninstallStep = usDone then
-  begin
+    // By now the uninstaller's own files are gone too: the app's folder goes, then
     // %LOCALAPPDATA%\Programs, which Setup made if this was the user's first per-user
-    // program, goes too when nothing else is in it (the app's folder, once empty, first).
+    // program, when nothing else is in it.
     RemoveDir(ExpandConstant('{app}'));
     RemoveDir(ExpandConstant('{userpf}'));
   end;
