@@ -1,6 +1,8 @@
-//! Running from a self-contained macOS app bundle (MAC-7). Call [`init`] first thing in
-//! `main`, before any thread starts and before GTK, fontconfig, or GLib read their
-//! settings.
+//! Running from a self-contained app bundle: macOS's app bundle (MAC-7) and Windows'
+//! install folder (WIN-5). Call [`init`] first thing in `main`, before any thread starts
+//! and before GTK, fontconfig, or GLib read their settings.
+//!
+//! ## macOS
 //!
 //! A release bundle (`scripts/mac_bundle.sh`) carries GTK and everything it reads at run
 //! time, so it needs no Homebrew:
@@ -25,12 +27,33 @@
 //! anywhere, so the loader list is written with this bundle's paths into the app's cache
 //! folder (`~/Library/Caches/<app id>/gdk-pixbuf-loaders.cache`) when it differs.
 //!
+//! ## Windows
+//!
+//! The install folder (`scripts/win_bundle.sh`; `%LOCALAPPDATA%\Programs\<Name>`) is laid
+//! out as MSYS2's UCRT64 prefix, which GLib, GTK, gdk-pixbuf, and fontconfig find relative
+//! to their DLLs, so they need no variables:
+//!
+//! | In `<Name>\` | What |
+//! |---|---|
+//! | `bin\<app>.exe` | the app, beside every DLL it loads and `gdbus.exe` (GLib's session bus) |
+//! | `lib\gdk-pixbuf-2.0\2.10.0` | gdk-pixbuf's loaders and `loaders.cache` (paths relative to `<Name>`) |
+//! | `share\glib-2.0\schemas`, `share\icons` | GTK's schemas, compiled; Adwaita's symbolic icons, hicolor with the app's icon |
+//! | `etc\fonts` | fontconfig's `fonts.conf`, whose cache is `<cachedir prefix="xdg">`, and `conf.d` |
+//! | `fonts` | the bundled fonts (`suite_ui::fonts`) |
+//! | `licenses` | each bundled MSYS2 package's licence files, `THIRD-PARTY.txt`, `THIRD-PARTY-RUST.txt` |
+//!
+//! [`init`] sets only `XDG_CACHE_HOME`, to the app's cache folder
+//! (`%LOCALAPPDATA%\Cronkite\<Name>`), so fontconfig keeps its cache in
+//! `%LOCALAPPDATA%\Cronkite\<Name>\fontconfig`, which the uninstaller removes, rather than
+//! in a folder other programs share. It's set in the C library's environment too, where
+//! fontconfig reads it.
+//!
 //! Elsewhere (Linux, a build in `target/`, MAC-5's minimal bundles without `Frameworks`)
 //! nothing changes.
 
 #[cfg(any(target_os = "macos", all(test, unix)))]
 use std::ffi::OsString;
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", windows, test))]
 use std::path::Path;
 use std::path::PathBuf;
 use suite_core::AppKind;
@@ -40,19 +63,40 @@ use suite_core::AppKind;
 const PIXBUF: &str = "lib/gdk-pixbuf-2.0/2.10.0";
 
 /// Point GTK and its libraries at the bundle's files when the app runs from a
-/// self-contained bundle; see the module docs. `Ok(Some(resources))` names the bundle's
-/// `Contents/Resources`, `Ok(None)` means not a bundle (nothing set). An error says the
-/// loader list couldn't be written: everything else is set, and pictures gdk-pixbuf
-/// decodes (SVG) won't show.
+/// self-contained bundle; see the module docs. `Ok(Some(folder))` names the bundle's
+/// `Contents/Resources` on macOS and the install folder on Windows, `Ok(None)` means not a
+/// bundle (nothing set). An error says a file or folder couldn't be written: everything
+/// else is set; on macOS pictures gdk-pixbuf decodes (SVG) won't show, on Windows
+/// fontconfig keeps no cache.
 #[cfg(target_os = "macos")]
 pub fn init(app: AppKind) -> Result<Option<PathBuf>, String> {
     mac::init(app)
 }
 
-/// Not a macOS bundle: nothing to set.
-#[cfg(not(target_os = "macos"))]
+/// See the macOS `init` above: the same contract for Windows' install folder.
+#[cfg(windows)]
+pub fn init(app: AppKind) -> Result<Option<PathBuf>, String> {
+    windows::init(app)
+}
+
+/// Not a bundle: nothing to set.
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn init(_app: AppKind) -> Result<Option<PathBuf>, String> {
     Ok(None)
+}
+
+/// The install folder for an executable at `exe`, when that's a self-contained Windows
+/// bundle's: `<Name>\bin\<app>.exe` beside `<Name>\etc\fonts\fonts.conf` and
+/// `<Name>\licenses\THIRD-PARTY.txt`. (MSYS2's own prefix has no licences file, and a build
+/// in `target\` no `etc`.)
+#[cfg(any(windows, test))]
+fn root_of(exe: &Path) -> Option<PathBuf> {
+    let bin = exe.parent()?;
+    let root = bin.parent()?;
+    let bundled = bin.file_name()?.eq_ignore_ascii_case("bin")
+        && root.join("etc").join("fonts").join("fonts.conf").is_file()
+        && root.join("licenses").join("THIRD-PARTY.txt").is_file();
+    bundled.then(|| root.to_path_buf())
 }
 
 /// The bundle's `Contents` folder for an executable at `exe`, when that's a self-contained
@@ -176,6 +220,51 @@ mod mac {
     }
 }
 
+#[cfg(windows)]
+mod windows {
+    #![allow(unsafe_code)]
+
+    use super::root_of;
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use std::path::PathBuf;
+    use suite_core::AppKind;
+
+    // UCRT's environment, which fontconfig reads with `getenv` (the apps and MSYS2's DLLs
+    // share ucrtbase.dll). Setting the wide one updates the narrow one too.
+    extern "C" {
+        fn _wputenv_s(name: *const u16, value: *const u16) -> i32;
+    }
+
+    pub fn init(app: AppKind) -> Result<Option<PathBuf>, String> {
+        let exe = std::env::current_exe();
+        let Some(root) = exe.ok().as_deref().and_then(root_of) else {
+            return Ok(None);
+        };
+        // fontconfig's cache, `<cachedir prefix="xdg">fontconfig</cachedir>` in the
+        // bundle's fonts.conf, goes into the app's own cache folder.
+        let cache = crate::dirs::cache_dir(app);
+        set("XDG_CACHE_HOME", cache.as_os_str())?;
+        let fontconfig = cache.join("fontconfig");
+        std::fs::create_dir_all(&fontconfig)
+            .map_err(|e| format!("can't make {}: {e}", fontconfig.display()))?;
+        Ok(Some(root))
+    }
+
+    /// Set `name` in the process's environment (GLib reads it there) and the C library's.
+    pub(super) fn set(name: &str, value: &OsStr) -> Result<(), String> {
+        // Before any other thread runs (the caller's contract), so nothing reads the
+        // environment meanwhile.
+        std::env::set_var(name, value);
+        let wide = |s: &OsStr| s.encode_wide().chain([0]).collect::<Vec<u16>>();
+        // SAFETY: two NUL-terminated UTF-16 strings, which the C library copies.
+        match unsafe { _wputenv_s(wide(OsStr::new(name)).as_ptr(), wide(value).as_ptr()) } {
+            0 => Ok(()),
+            e => Err(format!("the C library's environment refused {name} (error {e})")),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,6 +288,51 @@ mod tests {
         assert_eq!(contents_of(&tmp.join("target/release/brick")), None);
         assert_eq!(contents_of(Path::new("/brick")), None);
         std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    #[test]
+    fn only_a_windows_install_folder_with_its_files_counts() {
+        let tmp = std::env::temp_dir().join(format!(
+            "suite-platform-win-bundle-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let root = tmp.join("Programs").join("Brick");
+        let exe = root.join("bin").join("brick.exe");
+        std::fs::create_dir_all(root.join("bin")).unwrap();
+        std::fs::create_dir_all(root.join("etc").join("fonts")).unwrap();
+        std::fs::create_dir_all(root.join("licenses")).unwrap();
+        std::fs::write(root.join("etc").join("fonts").join("fonts.conf"), "").unwrap();
+        assert_eq!(root_of(&exe), None, "MSYS2's own prefix: no licences file");
+        std::fs::write(root.join("licenses").join("THIRD-PARTY.txt"), "").unwrap();
+        assert_eq!(root_of(&exe), Some(root.clone()));
+        // A build in target\ isn't one, nor an exe outside a bin folder.
+        let target = tmp.join("target").join("release").join("brick.exe");
+        assert_eq!(root_of(&target), None);
+        assert_eq!(root_of(&root.join("brick.exe")), None);
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    // fontconfig reads its cache folder's variable with the C library's getenv.
+    #[cfg(windows)]
+    #[test]
+    fn a_variable_reaches_the_c_librarys_environment() {
+        extern "C" {
+            fn getenv(name: *const std::ffi::c_char) -> *const std::ffi::c_char;
+        }
+        let name = "SUITE_PLATFORM_BUNDLE_TEST";
+        let value = std::ffi::OsString::from(r"C:\Users\me\AppData\Local\Cronkite\Brick");
+        windows::set(name, &value).unwrap();
+        assert_eq!(std::env::var_os(name), Some(value));
+        #[allow(unsafe_code)]
+        // SAFETY: a NUL-terminated name; getenv's result is read before the environment
+        // changes again.
+        let got = unsafe {
+            let p = getenv(c"SUITE_PLATFORM_BUNDLE_TEST".as_ptr());
+            assert!(!p.is_null(), "getenv doesn't see it");
+            std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned()
+        };
+        assert_eq!(got, r"C:\Users\me\AppData\Local\Cronkite\Brick");
     }
 
     // A macOS bundle's paths are Unix paths: these run on Unix, where they're built the

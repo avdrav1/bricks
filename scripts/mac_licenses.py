@@ -143,9 +143,10 @@ def spdx_tokens(expr):
     return re.findall(r"\(|\)|[^\s()]+", expr)
 
 
-def without_gpl(expr):
+def without_gpl(expr, exceptions=frozenset()):
     """Whether SPDX expression `expr` can be met without the GPL: a GPL or AGPL licence
-    (LGPL is fine) fails a term, AND needs every term, OR one of them."""
+    (LGPL is fine) fails a term unless it's WITH one of `exceptions`, AND needs every
+    term, OR one of them."""
     tokens = spdx_tokens(expr)
     pos = 0
 
@@ -167,10 +168,11 @@ def without_gpl(expr):
                 raise ValueError(f"unbalanced SPDX expression {expr!r}")
             return ok
         name = take()
+        exception = None
         if peek() == "WITH":
             take()
-            take()
-        return not name.upper().startswith(("GPL-", "AGPL-"))
+            exception = take()
+        return exception in exceptions or not name.upper().startswith(("GPL-", "AGPL-"))
 
     def all_of():
         ok = atom()

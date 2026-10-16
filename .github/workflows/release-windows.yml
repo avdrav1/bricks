@@ -1,17 +1,45 @@
+# The Windows release (WIN-5): each app's self-contained folder and its per-user Inno Setup
+# installer, <app>-<version>-x86_64-windows-setup.exe, built on windows-latest with MSYS2's
+# UCRT64 GTK (scripts/win_bundle.sh), then installed, started, used, and uninstalled on a
+# fresh runner with MSYS2 moved away and nothing of it on PATH, through Setup.exe and
+# through install.ps1 (scripts/check_win_install.ps1). WIN-6 brings the artifacts
+# `windows-<app>` into ship.sh's release. A release tag builds its app; a push that changes
+# the bundling builds and checks all four.
 name: release-windows
 on:
   workflow_dispatch:
+    inputs:
+      apps:
+        description: "Apps to build (brick slate frame etch)"
+        default: "brick slate frame etch"
   push:
-    branches: ["story/win-5-installers"]
-    paths: [.github/workflows/release-windows.yml]
+    # GitHub skips path filters for tags, so a release tag always runs.
+    tags: ["v*", "slate-v*", "frame-v*", "etch-v*"]
+    branches: ["**"]
+    paths:
+      - .github/workflows/release-windows.yml
+      - scripts/win_bundle.sh
+      - scripts/win_libs.sh
+      - scripts/win_licenses.py
+      - scripts/win_app.py
+      - scripts/mac_app.py
+      - scripts/mac_licenses.py
+      - scripts/rust_licenses.py
+      - scripts/check_win_install.ps1
+      - packaging/windows/**
+      - crates/suite-platform/src/bundle.rs
+      - "sites/*/install.ps1"
 jobs:
-  probe:
+  bundle:
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     defaults: { run: { shell: "msys2 {0}" } }
     env:
       CARGO_HOME: D:\cargo-home
       CARGO_INCREMENTAL: "0"
+      CARGO_TERM_COLOR: always
+    outputs:
+      apps: ${{ steps.apps.outputs.apps }}
     steps:
       - uses: actions/checkout@v4
       - uses: msys2/setup-msys2@v2
@@ -23,45 +51,103 @@ jobs:
             mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-rust
-            mingw-w64-ucrt-x86_64-ntldd
-      - name: Probe the toolchain
+            mingw-w64-ucrt-x86_64-librsvg
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-meson
+            mingw-w64-ucrt-x86_64-ninja
+            make
+            patch
+            zstd
+      - id: apps
+        name: Which apps
+        shell: bash
+        env: { INPUT_APPS: "${{ inputs.apps }}" }
         run: |
-          set -x
-          pacman -Q | wc -l
-          pacman -Q | grep -i -E 'cairo|tiff|jbig|lzo|rsvg|gdk-pixbuf|adwaita|hicolor|fontconfig|gstreamer|glib2|gtk4|pango|librsvg|libgcc|winpthread|gettext|iconv'
-          ls /ucrt64/lib/gdk-pixbuf-2.0/2.10.0/loaders
-          cat /ucrt64/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache | head -30
-          cat /ucrt64/etc/fonts/fonts.conf
-          ls /ucrt64/etc/fonts/conf.d
-          ls "/c/Program Files (x86)/" ; ls "/c/Program Files (x86)/Inno Setup 6" || true; ls "/c/Program Files/" | head -80
-          which iscc rsvg-convert gdk-pixbuf-query-loaders glib-compile-schemas ntldd strip magick python3 python || true
-          ls /ucrt64/share/icons; du -sh /ucrt64/share/icons/* ; du -sh /ucrt64/share/icons/Adwaita/symbolic
-          ls /ucrt64/share/glib-2.0/schemas
-          ls /ucrt64/share/licenses | head -100
-          ls /ucrt64/lib/gtk-4.0 -R | head -30 || true
-          ls /ucrt64/lib/gio/modules || true
+          case "$GITHUB_REF" in
+            refs/tags/slate-v*) apps=slate ;;
+            refs/tags/frame-v*) apps=frame ;;
+            refs/tags/etch-v*) apps=etch ;;
+            refs/tags/v*) apps=brick ;;
+            *) apps=${INPUT_APPS:-brick slate frame etch} ;;
+          esac
+          for a in $apps; do
+            case $a in brick|slate|frame|etch) ;; *) echo "unknown app $a"; exit 1 ;; esac
+          done
+          echo "apps=$apps" >> "$GITHUB_OUTPUT"
+      - id: toolchain
+        run: echo "rustc=$(rustc -V | tr -cd '[:alnum:].-')" >> "$GITHUB_OUTPUT"
+      # The crates' sources and the release build, keyed by the toolchain and the lock file.
       - uses: actions/cache@v4
         with:
           path: |
             D:\cargo-home\registry
-            target
-          key: windows-release-probe-${{ hashFiles('Cargo.lock') }}-${{ github.run_id }}
-          restore-keys: windows-release-probe-
-      - run: cargo build --release -p etch
-      - name: Probe the DLLs
+            target/release
+          key: windows-release-${{ steps.toolchain.outputs.rustc }}-${{ hashFiles('Cargo.lock') }}-${{ github.run_id }}
+          restore-keys: |
+            windows-release-${{ steps.toolchain.outputs.rustc }}-${{ hashFiles('Cargo.lock') }}-
+            windows-release-${{ steps.toolchain.outputs.rustc }}-
+      # cairo without lzo and libtiff without jbig (scripts/win_libs.sh), kept between runs;
+      # the script rebuilds a library whose record differs from its own.
+      - uses: actions/cache@v4
+        with: { path: target/win-libs, key: "win-libs-${{ hashFiles('scripts/win_libs.sh') }}" }
+      - name: cairo without lzo, libtiff without jbig
+        run: scripts/win_libs.sh target/win-libs
+      # The metric-compatible fonts Brick, Slate, and Frame carry (WIN-4).
+      - name: Fetch the bundled fonts
+        shell: pwsh
+        run: python scripts/fetch_fonts.py target/fonts
+      # Each app builds alone (`cargo build -p APP`), as its release always has: building
+      # them together unifies features.
+      - name: Build and bundle
         run: |
-          {
-            ntldd -R target/release/etch.exe /ucrt64/lib/gdk-pixbuf-2.0/2.10.0/loaders/*.dll | grep -i ucrt64 | awk '{print $3}' | tr '\\' '/' | sort -u
-          } > dlls.txt
-          cat dlls.txt
-          ldd target/release/etch.exe /ucrt64/lib/gdk-pixbuf-2.0/2.10.0/loaders/*.dll | awk '$3 ~ /^\/ucrt64\// {print $3}' | sort -u > dlls2.txt
-          wc -l dlls.txt dlls2.txt
-          for f in $(cat dlls2.txt) /ucrt64/bin/gdbus.exe; do
-            p=$(pacman -Qqo "$f")
-            echo "$(basename $f)  $p  $(pacman -Qi $p | sed -n 's/^Version *: //p')  [$(pacman -Qi $p | sed -n 's/^Licenses *: //p')]  $(ls /ucrt64/share/licenses/${p#mingw-w64-ucrt-x86_64-} 2>/dev/null | tr '\n' ' ')"
-          done | sort -k2
-          echo "--- gtk links:"; ldd /ucrt64/bin/libgtk-4-1.dll | grep -i -E 'cairo|tiff|jbig|lzo|gst'
-          echo "--- cairo-script-interpreter:"; ldd /ucrt64/bin/libcairo-script-interpreter-2.dll | grep -i lzo || true
-          echo "--- cairo:"; ldd /ucrt64/bin/libcairo-2.dll | grep ucrt64
-          echo "--- tiff:"; ldd /ucrt64/bin/libtiff-6.dll | grep ucrt64 || true
-          pacman -Qi mingw-w64-ucrt-x86_64-cairo mingw-w64-ucrt-x86_64-libtiff
+          for a in ${{ steps.apps.outputs.apps }}; do
+            cargo build --release --locked -p "$a"
+            scripts/win_bundle.sh "$a" target/release dist | tee -a sizes.txt
+          done
+          { echo '```'; cat sizes.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: The bundles' DLLs and licences
+        run: |
+          for d in dist/*-x86_64-windows/*/; do
+            echo "== $d: $(ls "$d/bin" | grep -ci '\.dll$') DLLs"
+            ls "$d/bin" | tr '\n' ' '; echo
+            grep -E '^[a-z0-9].* [0-9].*: ' "$d/licenses/THIRD-PARTY.txt" || true
+          done
+      - name: Upload brick
+        if: contains(steps.apps.outputs.apps, 'brick')
+        uses: actions/upload-artifact@v4
+        with: { name: windows-brick, path: "dist/brick-*-x86_64-windows-setup.exe*", if-no-files-found: error, compression-level: 0 }
+      - name: Upload slate
+        if: contains(steps.apps.outputs.apps, 'slate')
+        uses: actions/upload-artifact@v4
+        with: { name: windows-slate, path: "dist/slate-*-x86_64-windows-setup.exe*", if-no-files-found: error, compression-level: 0 }
+      - name: Upload frame
+        if: contains(steps.apps.outputs.apps, 'frame')
+        uses: actions/upload-artifact@v4
+        with: { name: windows-frame, path: "dist/frame-*-x86_64-windows-setup.exe*", if-no-files-found: error, compression-level: 0 }
+      - name: Upload etch
+        if: contains(steps.apps.outputs.apps, 'etch')
+        uses: actions/upload-artifact@v4
+        with: { name: windows-etch, path: "dist/etch-*-x86_64-windows-setup.exe*", if-no-files-found: error, compression-level: 0 }
+  verify:
+    # A fresh runner with MSYS2 moved away and a PATH of Windows' own folders: the installer
+    # must be enough.
+    needs: bundle
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { pattern: "windows-*", path: dist, merge-multiple: true }
+      - name: Move MSYS2 away
+        shell: pwsh
+        run: if (Test-Path C:\msys64) { Rename-Item C:\msys64 C:\msys64-away }
+      - name: Install, start, use, and uninstall each app through Setup.exe and install.ps1
+        shell: powershell
+        run: '& .\scripts\check_win_install.ps1 -Dist dist -Apps "${{ needs.bundle.outputs.apps }}"'
+      - name: MSYS2 back
+        if: always()
+        shell: pwsh
+        run: if (Test-Path C:\msys64-away) { Rename-Item C:\msys64-away C:\msys64 }
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: windows-install, path: "out/win-install/shots\nout/win-install/logs\nout/win-install/summary.txt", if-no-files-found: warn }
