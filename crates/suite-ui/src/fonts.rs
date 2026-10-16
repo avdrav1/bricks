@@ -26,6 +26,12 @@
 //! SF itself (`System Font`, `SFNS.ttf`) draws every `i` without its dot through
 //! FreeType (MAC-6's runner screenshots). Windows' system font (`Segoe UI`, GTK's
 //! `gtk-font-name` there) is a font file fontconfig reads like any other.
+//!
+//! Document text lays out with the fonts' own widths: GDK on Windows tells GTK to hint
+//! font metrics (`gtk-hint-font-metrics`, `gdkwin32misc.c`), which rounds each glyph's
+//! width to whole pixels, so Courier New and Cambria broke lines elsewhere than on Linux
+//! (WIN-4's runs). Slate's page and Frame's slides take [`unhinted_metrics`]; the apps'
+//! own interface keeps GTK's.
 
 use std::ffi::CString;
 use std::path::Path;
@@ -66,6 +72,55 @@ pub fn fontconfig_path(path: &Path) -> Option<CString> {
         use std::os::windows::ffi::OsStrExt;
         let wide: Vec<u16> = path.as_os_str().encode_wide().collect();
         ansi::encode(&wide).or_else(|| ansi::encode(&ansi::short(&wide)?))
+    }
+}
+
+/// Lay `context`'s text out with the fonts' own (unhinted) widths and unrounded glyph
+/// positions, as GTK does on Linux, so lines break there as on Linux and in Word. Changes
+/// only Windows' contexts, where GTK hints font metrics.
+pub fn unhinted_metrics(context: &gtk::pango::Context) {
+    #[cfg(windows)]
+    unhinted::set(context);
+    #[cfg(not(windows))]
+    let _ = context;
+}
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+mod unhinted {
+    use gtk::cairo::{self, FontOptions, HintMetrics};
+    use gtk::glib::translate::ToGlibPtr;
+    use gtk::pango;
+
+    #[link(name = "pangocairo-1.0")]
+    extern "C" {
+        fn pango_cairo_context_get_font_options(
+            context: *mut pango::ffi::PangoContext,
+        ) -> *const cairo::ffi::cairo_font_options_t;
+        fn pango_cairo_context_set_font_options(
+            context: *mut pango::ffi::PangoContext,
+            options: *const cairo::ffi::cairo_font_options_t,
+        );
+    }
+
+    pub fn set(context: &pango::Context) {
+        let ptr = context.to_glib_none().0;
+        // SAFETY: a live context; the options it holds are copied before they change.
+        let had = unsafe { pango_cairo_context_get_font_options(ptr) };
+        let options = if had.is_null() {
+            FontOptions::new()
+        } else {
+            // SAFETY: a copy the wrapper owns.
+            Ok(unsafe { FontOptions::from_raw_full(cairo::ffi::cairo_font_options_copy(had)) })
+        };
+        let Ok(mut options) = options else {
+            tracing::warn!("cairo has no font options: text keeps hinted widths");
+            return;
+        };
+        options.set_hint_metrics(HintMetrics::Off);
+        // SAFETY: a live context and options, which Pango copies.
+        unsafe { pango_cairo_context_set_font_options(ptr, options.to_raw_none()) };
+        context.set_round_glyph_positions(false);
     }
 }
 
@@ -367,7 +422,9 @@ mod fc {
         // One test, as above. The bundled fonts are read from folders whose names aren't
         // ASCII, as a user's profile folder (where the apps install) may be: Liberation
         // from one the ANSI code page can name (é), Carlito and Caladea from one only its
-        // short name can (文件, on a Western system).
+        // short name can (文件, on a Western system). Both are in %LOCALAPPDATA%, on the
+        // system drive, which keeps short names (MSYS2's temp folder is on D:, which
+        // doesn't).
         #[cfg(windows)]
         #[test]
         fn pango_takes_fontconfig_which_reads_windows_fonts_and_the_bundled_ones() {
@@ -391,7 +448,7 @@ mod fc {
                 "Windows has no Liberation of its own"
             );
             assert_ne!(matched("Carlito"), "Carlito", "nor Carlito");
-            let tmp = std::env::temp_dir();
+            let tmp = PathBuf::from(std::env::var_os("LOCALAPPDATA").expect("LOCALAPPDATA"));
             let pid = std::process::id();
             let latin = tmp.join(format!("suite-ui fonts é {pid}"));
             let cjk = tmp.join(format!("suite-ui fonts 文件 {pid}"));

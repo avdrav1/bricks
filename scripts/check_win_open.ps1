@@ -1,7 +1,7 @@
-# WIN-4 acceptance on a Windows runner (ci.yml, job windows-open): each app opens its files
+# WIN-4 acceptance on a Windows runner (ci.yml, job windows): each app opens its files
 # from the command line, as Explorer's Open with and a registered file type start it, and
-# from a drag out of another program; its own options still work; the documents draw in
-# the bundled fonts through fontconfig; and the renderer GTK picks is logged.
+# dropped from Explorer; its own options still work; documents draw through fontconfig,
+# in the bundled fonts where Windows has none; and the renderer GTK picks is logged.
 #
 #   powershell -File scripts/check_win_open.ps1 [-Bin target\debug] [-Out out\win-open] [-PathPrefix DIR]
 #
@@ -11,7 +11,11 @@
 # (python scripts/fetch_fonts.py). The sample files sit in a folder whose name has spaces
 # and letters outside ASCII, as a user's folders may. The environment is Explorer's: no
 # HOME, no XDG_* variables.
-#   1. Command line: `app FILE` with a relative name, from that folder, for each sample.
+#   1. Command line: `app FILE` with a relative name, from that folder, for each sample:
+#      among them office-fonts.docx (scripts/office_fonts.py: Calibri, Cambria, Arial,
+#      Times New Roman, Courier New, which Windows has), the same naming the bundled
+#      stand-ins (Carlito, Caladea, Liberation), and Frame's fixture deck with its Arial
+#      renamed to Liberation Sans; each log names the fonts folder added.
 #   2. Open with: `cmd /c start "" app.exe "C:\...\FILE"`, the command line Explorer's Open
 #      with runs (`"app.exe" "%1"`), with a file name outside ASCII.
 #   3. A registered type: a ProgID under HKCU with `"app.exe" "%1"` as its open command;
@@ -21,11 +25,13 @@
 #   4. The apps' own options: a benchmark with the file named first and the option after
 #      it (GLib on Windows used to hand the last arguments to GApplication).
 #   5. Drag and drop: the app starts with no file; a small window of this script starts an
-#      OLE drag of the file (CF_HDROP, as Explorer offers it), and SendInput carries the
-#      pointer onto the app's window and lets go. The file must open.
-#   6. Look: Slate on office-fonts.docx and on Markdown (Liberation Sans), Frame's deck,
-#      and Brick's grid with Pango's Win32 font map (PANGOCAIRO_BACKEND=win32) beside the
-#      apps' own (fontconfig); GSK_RENDERER=gl and =vulkan beside GTK's own choice.
+#      OLE drag of the shell's own data object for the file (SHCreateDataObject: Shell
+#      IDList Array and CF_HDROP, as Explorer drags it), and SendInput carries the pointer
+#      onto the app's window and lets go. The file must open.
+#   6. Look: Slate on office-fonts.docx, the stand-ins, and Markdown (Liberation Sans),
+#      Frame's deck, and Brick's grid with Pango's Win32 font map
+#      (PANGOCAIRO_BACKEND=win32) beside the apps' own (fontconfig); GSK_RENDERER=gl, =ngl,
+#      and =vulkan beside GTK's own choice.
 # Every window is screenshotted into $Out\shots and every app's stderr kept in $Out\logs;
 # each check is a line of $Out\summary.txt. Ends with "check_win_open: OK" or "FAILED".
 param(
@@ -121,6 +127,13 @@ public static class Win {
         SHChangeNotify(0x08000000, 0, IntPtr.Zero, IntPtr.Zero);
     }
 
+    [DllImport("user32.dll")] static extern bool MoveWindow(IntPtr h, int x, int y, int w, int hh, bool repaint);
+
+    // Move and size a window (its frame, shadows included).
+    public static void Place(long h, int x, int y, int w, int hh) {
+        MoveWindow(new IntPtr(h), x, y, w, hh, true);
+    }
+
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     struct SHELLEXECUTEINFO {
         public int cbSize; public uint fMask; public IntPtr hwnd; public string lpVerb; public string lpFile;
@@ -141,11 +154,35 @@ public static class Win {
     }
 }
 
+[ComImport, Guid("00000121-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface IOleDropSource {
+    [PreserveSig] int QueryContinueDrag(int fEscapePressed, int grfKeyState);
+    [PreserveSig] int GiveFeedback(int dwEffect);
+}
+
+// The drag's source as Explorer's is: it drops when the left button goes up.
+[ComVisible(true)]
+public class DropSource : IOleDropSource {
+    public int QueryContinueDrag(int fEscapePressed, int grfKeyState) {
+        if (fEscapePressed != 0) return 0x00040101; // DRAGDROP_S_CANCEL
+        if ((grfKeyState & 1) == 0) return 0x00040100; // DRAGDROP_S_DROP: MK_LBUTTON is up
+        return 0;
+    }
+    public int GiveFeedback(int dwEffect) { return 0x00040102; } // DRAGDROP_S_USEDEFAULTCURSORS
+}
+
 public static class Drag {
     [StructLayout(LayoutKind.Sequential)] struct MOUSEINPUT { public int dx, dy; public uint mouseData, dwFlags, time; public IntPtr dwExtraInfo; }
     [StructLayout(LayoutKind.Sequential)] struct INPUT { public uint type; public MOUSEINPUT mi; }
     [DllImport("user32.dll", SetLastError = true)] static extern uint SendInput(uint n, INPUT[] inputs, int size);
     const uint MOVE = 0x1, LEFTDOWN = 0x2, LEFTUP = 0x4, ABSOLUTE = 0x8000;
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)] static extern int SHParseDisplayName(string name, IntPtr bindCtx, out IntPtr pidl, uint sfgaoIn, out uint sfgaoOut);
+    [DllImport("shell32.dll")] static extern IntPtr ILClone(IntPtr pidl);
+    [DllImport("shell32.dll")] static extern bool ILRemoveLastID(IntPtr pidl);
+    [DllImport("shell32.dll")] static extern IntPtr ILFindLastID(IntPtr pidl);
+    [DllImport("shell32.dll")] static extern int SHCreateDataObject(IntPtr pidlFolder, uint cidl, IntPtr[] apidl, IntPtr inner, ref Guid riid, out System.Runtime.InteropServices.ComTypes.IDataObject data);
+    [DllImport("ole32.dll")] static extern int DoDragDrop(System.Runtime.InteropServices.ComTypes.IDataObject data, IOleDropSource source, int okEffects, out int effect);
 
     // The pointer to (x, y) on the primary screen, with `button` (LEFTDOWN, LEFTUP, or 0).
     static void Send(uint button, int x, int y) {
@@ -158,24 +195,47 @@ public static class Drag {
         SendInput(1, new INPUT[] { i }, Marshal.SizeOf(typeof(INPUT)));
     }
 
-    // Drag `path` from a small window at (sx, sy) and drop it at (x, y): the window starts an
-    // OLE drag of the file as a file drop (CF_HDROP) when the button goes down on it, and the
-    // pointer carries it across and lets go. Returns the drop effect the target chose
-    // ("None" if it refused), then keeps the source alive 3 s for the target to read it.
+    // The shell's own data object for `path`, as Explorer drags it: Shell IDList Array
+    // (which GTK reads as text/uri-list), CF_HDROP, and the shell's other formats.
+    static System.Runtime.InteropServices.ComTypes.IDataObject ShellData(string path) {
+        IntPtr pidl;
+        uint attributes;
+        int hr = SHParseDisplayName(path, IntPtr.Zero, out pidl, 0, out attributes);
+        if (hr != 0) throw new Exception("SHParseDisplayName 0x" + hr.ToString("x8"));
+        IntPtr folder = ILClone(pidl);
+        ILRemoveLastID(folder);
+        Guid iid = new Guid("0000010e-0000-0000-C000-000000000046");
+        System.Runtime.InteropServices.ComTypes.IDataObject data;
+        hr = SHCreateDataObject(folder, 1, new IntPtr[] { ILFindLastID(pidl) }, IntPtr.Zero, ref iid, out data);
+        if (hr != 0) throw new Exception("SHCreateDataObject 0x" + hr.ToString("x8"));
+        return data;
+    }
+
+    // Drag `path` from a small window centred on (sx, sy) and drop it at (x, y): the window
+    // starts an OLE drag of the shell's data object for the file when the button goes down
+    // on it, and the pointer carries it across and lets go. Returns DoDragDrop's result and
+    // the drop effect the target chose (0: refused, 1: copy), then keeps the source alive
+    // 3 s more for the target to read it.
     public static string Run(string path, int sx, int sy, int x, int y) {
         string result = "no drag started";
         var t = new Thread(delegate () {
             var form = new Form();
             form.FormBorderStyle = FormBorderStyle.None;
             form.StartPosition = FormStartPosition.Manual;
-            form.Location = new Point(sx - 40, sy - 40);
-            form.Size = new Size(80, 80);
+            form.Location = new Point(sx - 60, sy - 60);
+            form.Size = new Size(120, 120);
             form.TopMost = true;
             form.ShowInTaskbar = false;
             form.BackColor = Color.DarkOrange;
             form.MouseDown += delegate (object s, MouseEventArgs e) {
-                var data = new DataObject(DataFormats.FileDrop, new string[] { path });
-                result = form.DoDragDrop(data, DragDropEffects.Copy | DragDropEffects.Move | DragDropEffects.Link).ToString();
+                result = "drag started";
+                try {
+                    int effect;
+                    int hr = DoDragDrop(ShellData(path), new DropSource(), 1 | 2 | 4, out effect);
+                    result = "DoDragDrop 0x" + hr.ToString("x8") + ", effect " + effect;
+                } catch (Exception ex) {
+                    result = "failed: " + ex.Message;
+                }
                 var close = new System.Windows.Forms.Timer();
                 close.Interval = 3000;
                 close.Tick += delegate (object a, EventArgs b) { close.Stop(); form.Close(); };
@@ -311,7 +371,11 @@ foreach ($i in 0..1999) {
 Copy-Item "$root\apps\brick\crates\xlsx\tests\data\fixture.xlsx" "$files\book.xlsx"
 [IO.File]::WriteAllText("$files\read me.md", "# Read me`n`nOpened on **Windows**, in Liberation Sans: the quick brown fox jumps over the lazy dog, and the sphinx of black quartz judges my vow while the line runs long enough to wrap.`n`n- one`n- two`n")
 Copy-Item "$root\apps\slate\crates\docx\tests\data\fixture.docx" "$files\letter.docx"
-python "$root\scripts\office_fonts_docx.py" "$files\office-fonts.docx"
+python "$root\scripts\office_fonts.py" docx "$files\office-fonts.docx"
+# The same document and the fixture deck naming the bundled fonts themselves (Carlito,
+# Caladea, Liberation), which Windows doesn't have: they must draw in the bundled ones.
+python "$root\scripts\office_fonts.py" docx "$files\stand-ins.docx" --stand-ins
+python "$root\scripts\office_fonts.py" pptx "$root\apps\frame\crates\pptx\tests\data\fixture.pptx" "$files\deck stand-ins.pptx"
 Copy-Item "$root\apps\frame\crates\pptx\tests\data\fixture.pptx" "$files\deck.pptx"
 Copy-Item "$root\apps\slate\crates\document-model\tests\data\picture.png" "$files\picture.png"
 # One file per app named outside ASCII, for Explorer's launches.
@@ -335,7 +399,9 @@ Say "start to window: first $first ms (cold fontconfig cache), second $second ms
 Open-Check slate @('"read me.md"') "read me.md" "slate-cmd-md" "slate read me.md" | Out-Null
 Open-Check slate @('"letter.docx"') "letter.docx" "slate-cmd-docx" "slate letter.docx" | Out-Null
 Open-Check slate @('"office-fonts.docx"') "office-fonts.docx" "slate-cmd-office-fonts" "slate office-fonts.docx" | Out-Null
+Open-Check slate @('"stand-ins.docx"') "stand-ins.docx" "slate-cmd-stand-ins" "slate stand-ins.docx (Carlito, Caladea, Liberation by name)" | Out-Null
 Open-Check frame @('"deck.pptx"') "deck.pptx" "frame-cmd-pptx" "frame deck.pptx" | Out-Null
+Open-Check frame @('"deck stand-ins.pptx"') "deck stand-ins.pptx" "frame-cmd-stand-ins" "frame deck stand-ins.pptx (Liberation by name)" | Out-Null
 Open-Check etch @('"picture.png"') "picture.png" "etch-cmd-png" "etch picture.png" | Out-Null
 foreach ($n in "brick-cmd-csv", "slate-cmd-docx", "frame-cmd-pptx", "etch-cmd-png") {
     $log = Get-Content -Raw "$logs\$n.err.txt" -ErrorAction SilentlyContinue
@@ -417,16 +483,20 @@ $untitled = @{ brick = "Brick"; slate = "Slate"; frame = "Untitled"; etch = "Unt
 $dropped = @{ brick = "people list.csv"; slate = "letter.docx"; frame = "deck.pptx"; etch = "picture.png" }
 foreach ($app in "brick", "slate", "frame", "etch") {
     $t0 = Get-Date
+    $env:GDK_DEBUG = "dnd"
     $p = Start-App $app @() "$app-drop"
+    Remove-Item env:GDK_DEBUG
     $h = Wait-Window (Of $app $t0) $untitled[$app]
     if (-not $h) { Fail "$app without a file: no window '$($untitled[$app])' (titles: $($script:titles -join ' | '))"; Stop-Apps; continue }
     Start-Sleep -Seconds 2
+    # The window on the right, the drag's source on the left, clear of its borders.
+    [Win]::Place($h, 320, 40, 680, 600)
     [Win]::Front($h)
-    Start-Sleep -Milliseconds 800
+    Start-Sleep -Milliseconds 1500
     $r = [Win]::Rect($h)
     $x = [int](($r[0] + $r[2]) / 2); $y = [int](($r[1] + $r[3]) / 2)
     [Win]::Screen("$shots\$app-drop-1-before.png")
-    $effect = [Drag]::Run("$files\$($dropped[$app])", 60, $screen.Height - 120, $x, $y)
+    $effect = [Drag]::Run("$files\$($dropped[$app])", 120, 340, $x, $y)
     $h2 = Wait-Window (Of $app $t0) $dropped[$app] 20
     if ($h2) { Shot $h2 "$app-drop-2-opened"; Pass "$app opens $($dropped[$app]) dropped on its window (drop effect $effect)" }
     else { [Win]::Screen("$shots\$app-drop-2-screen.png"); Fail "${app}: dropping $($dropped[$app]) at $x,$y (effect $effect) opened nothing (titles: $($script:titles -join ' | '))" }
@@ -437,6 +507,7 @@ foreach ($app in "brick", "slate", "frame", "etch") {
 Say "== 6. look: Pango's Win32 font map and other renderers beside the apps' own"
 $env:PANGOCAIRO_BACKEND = "win32"
 Open-Check slate @('"office-fonts.docx"') "office-fonts.docx" "slate-win32-office-fonts" "slate office-fonts.docx with PANGOCAIRO_BACKEND=win32" | Out-Null
+Open-Check slate @('"stand-ins.docx"') "stand-ins.docx" "slate-win32-stand-ins" "slate stand-ins.docx with PANGOCAIRO_BACKEND=win32" | Out-Null
 Open-Check slate @('"read me.md"') "read me.md" "slate-win32-md" "slate read me.md with PANGOCAIRO_BACKEND=win32" | Out-Null
 Open-Check frame @('"deck.pptx"') "deck.pptx" "frame-win32-pptx" "frame deck.pptx with PANGOCAIRO_BACKEND=win32" | Out-Null
 Open-Check brick @('"people list.csv"') "people list.csv" "brick-win32-csv" "brick people list.csv with PANGOCAIRO_BACKEND=win32" | Out-Null

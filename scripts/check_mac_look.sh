@@ -9,7 +9,7 @@
 # drew black windows on the runner VMs (DEC-11).
 #
 #   1. Light appearance. Brick on a CSV of digits and Slate on office-fonts.docx
-#      (scripts/office_fonts_docx.py: Calibri, Cambria, Arial, Times New Roman, Courier
+#      (scripts/office_fonts.py docx: Calibri, Cambria, Arial, Times New Roman, Courier
 #      New), each with the suite's Pango backend (fontconfig) and, for comparison,
 #      CoreText (PANGOCAIRO_BACKEND=coretext); Frame on its fixture deck. Each app's log
 #      names the fonts folder it added.
@@ -131,7 +131,7 @@ with open(sys.argv[1], "w") as f:
                 f"0{random.randint(1000, 9999)},{random.random() * 1000:.2f},"
                 f"2026-{random.randint(1, 12):02d}-{random.randint(1, 28):02d}\n")
 PY
-python3 scripts/office_fonts_docx.py "$work/office-fonts.docx"
+python3 scripts/office_fonts.py docx "$work/office-fonts.docx"
 cp apps/frame/crates/pptx/tests/data/fixture.pptx apps/slate/crates/document-model/tests/data/picture.png "$work/"
 cp "$work/office-fonts.docx" "$shots/"
 

@@ -334,7 +334,8 @@ impl SlideView {
         self.imp().last_ms.get()
     }
 
-    /// The Pango context text is laid out with: fractional glyph positions.
+    /// The Pango context text is laid out with: fractional glyph positions, and on Windows
+    /// the fonts' own widths, unhinted as on Linux (`suite_ui::fonts::unhinted_metrics`).
     pub(crate) fn pango(&self) -> pango::Context {
         self.imp()
             .pango
@@ -343,6 +344,7 @@ impl SlideView {
                 let c = self.create_pango_context();
                 // Fractional glyph positions: text scales smoothly with the slide.
                 c.set_round_glyph_positions(false);
+                suite_ui::fonts::unhinted_metrics(&c);
                 c
             })
             .clone()
