@@ -599,6 +599,16 @@ fn accept_file_drops(app: &gtk::Application, window: &gtk::ApplicationWindow) {
         gtk::gdk::FileList::static_type(),
         gtk::gdk::DragAction::COPY,
     );
+    // Windows: GDK sets the drop's actions to those of each status GTK reports. When the
+    // pointer crosses into another widget, GTK reports none for a moment. If the pointer
+    // then stops, no new move puts the actions back, and letting go there was refused
+    // (WIN-3's runner logs: the actions empty from the last move on). Answering COPY on
+    // every enter and move sets them again.
+    #[cfg(windows)]
+    {
+        target.connect_enter(|_, _, _| gtk::gdk::DragAction::COPY);
+        target.connect_motion(|_, _, _| gtk::gdk::DragAction::COPY);
+    }
     target.connect_drop({
         let (app, window) = (app.clone(), window.downgrade());
         move |_, value, _, _| {
