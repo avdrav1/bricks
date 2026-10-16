@@ -27,7 +27,9 @@
 #   5. Drag and drop: the app starts with no file; a small window of this script starts an
 #      OLE drag of the shell's own data object for the file (SHCreateDataObject: Shell
 #      IDList Array and CF_HDROP, as Explorer drags it), and SendInput carries the pointer
-#      onto the app's window and lets go. The file must open.
+#      onto the app's window, rests, then crosses into another widget and lets go there
+#      (where GDK's Win32 drop kept a refusal; WIN-3's Notes). The file must open; each
+#      app's GDK_DEBUG=dnd output is in logs\<app>-drop.*.txt.
 #   6. Look: Slate on office-fonts.docx, the stand-ins, and Markdown (Liberation Sans),
 #      Frame's deck, and Brick's grid with Pango's Win32 font map
 #      (PANGOCAIRO_BACKEND=win32) beside the apps' own (fontconfig); GSK_RENDERER=gl, =ngl,
@@ -211,12 +213,12 @@ public static class Drag {
         return data;
     }
 
-    // Drag `path` from a small window centred on (sx, sy) and drop it at (x, y): the window
+    // Drag `path` from a small window centred on (sx, sy) and drop it at (bx, by): the window
     // starts an OLE drag of the shell's data object for the file when the button goes down
-    // on it, and the pointer carries it across and lets go. Returns DoDragDrop's result and
-    // the drop effect the target chose (0: refused, 1: copy), then keeps the source alive
-    // 3 s more for the target to read it.
-    public static string Run(string path, int sx, int sy, int x, int y) {
+    // on it, and the pointer carries it to (x, y), rests, then moves to (bx, by) and lets
+    // go. Returns DoDragDrop's result and the drop effect the target chose (0: refused,
+    // 1: copy), then keeps the source alive 3 s more for the target to read it.
+    public static string Run(string path, int sx, int sy, int x, int y, int bx, int by) {
         string result = "no drag started";
         var t = new Thread(delegate () {
             var form = new Form();
@@ -251,8 +253,8 @@ public static class Drag {
                         Thread.Sleep(40);
                     }
                     Thread.Sleep(800);
-                    Send(0, x + 3, y + 3); Thread.Sleep(500);
-                    Send(LEFTUP, x + 3, y + 3);
+                    Send(0, bx, by); Thread.Sleep(500);
+                    Send(LEFTUP, bx, by);
                 });
                 mover.IsBackground = true;
                 mover.Start();
@@ -493,6 +495,13 @@ foreach ($b in $benches) {
 Say "== 5. drag and drop onto the app's window"
 $untitled = @{ brick = "Brick"; slate = "Slate"; frame = "Untitled"; etch = "Untitled" }
 $dropped = @{ brick = "people list.csv"; slate = "letter.docx"; frame = "deck.pptx"; etch = "picture.png" }
+# Each drag's last move, from the window's centre (680x600 at 320,40): Brick's into the
+# "Recent" heading, Slate's over the Open button's top edge, Frame's from the canvas into
+# the slide list, Etch's from the tool column into the canvas.
+$edges = @{
+    brick = @(@(0, 0), @(3, 3)); slate = @(@(-65, 34), @(-65, 44))
+    frame = @(@(-80, 60), @(-100, 60)); etch = @(@(-290, 0), @(-270, 0))
+}
 foreach ($app in "brick", "slate", "frame", "etch") {
     $t0 = Get-Date
     $env:GDK_DEBUG = "dnd"
@@ -506,12 +515,16 @@ foreach ($app in "brick", "slate", "frame", "etch") {
     [Win]::Front($h)
     Start-Sleep -Milliseconds 1500
     $r = [Win]::Rect($h)
-    $x = [int](($r[0] + $r[2]) / 2); $y = [int](($r[1] + $r[3]) / 2)
+    $cx = [int](($r[0] + $r[2]) / 2); $cy = [int](($r[1] + $r[3]) / 2)
+    # The drag rests, then its last move crosses into another widget and stops: there GTK
+    # reports no action for that move and GDK's Win32 drop kept it (WIN-3's Notes).
+    $a, $b = $edges[$app]
+    $x = $cx + $a[0]; $y = $cy + $a[1]; $bx = $cx + $b[0]; $by = $cy + $b[1]
     [Win]::Screen("$shots\$app-drop-1-before.png")
-    $effect = [Drag]::Run("$files\$($dropped[$app])", 120, 340, $x, $y)
+    $effect = [Drag]::Run("$files\$($dropped[$app])", 120, 340, $x, $y, $bx, $by)
     $h2 = Wait-Window (Of $app $t0) $dropped[$app] 20
-    if ($h2) { Shot $h2 "$app-drop-2-opened"; Pass "$app opens $($dropped[$app]) dropped on its window (drop effect $effect)" }
-    else { [Win]::Screen("$shots\$app-drop-2-screen.png"); Fail "${app}: dropping $($dropped[$app]) at $x,$y (effect $effect) opened nothing (titles: $($script:titles -join ' | '))" }
+    if ($h2) { Shot $h2 "$app-drop-2-opened"; Pass "$app opens $($dropped[$app]) dropped on its window, last move $x,$y to $bx,$by (drop effect $effect)" }
+    else { [Win]::Screen("$shots\$app-drop-2-screen.png"); Fail "${app}: dropping $($dropped[$app]) with the last move $x,$y to $bx,$by (effect $effect) opened nothing (titles: $($script:titles -join ' | '))" }
     Stop-Apps
 }
 
