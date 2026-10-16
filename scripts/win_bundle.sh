@@ -202,9 +202,10 @@ cat "$work/licenses.txt"
 # licenses folder afresh.
 python3 "$root/scripts/rust_licenses.py" "$app" x86_64-pc-windows-gnu "$(win "$B/licenses/THIRD-PARTY-RUST.txt")"
 
-# The installer.
-# MSYS2 would take Inno Setup's /D options for paths and convert them.
+# The installer: the app's settings and file types for packaging/windows/setup.iss.
+python3 "$root/scripts/win_app.py" iss "$app" "$(win "$work/app.iss")"
 [[ -s $work/app.iss ]] || { echo "win_bundle: win_app.py wrote no $work/app.iss"; exit 1; }
+# MSYS2 would take Inno Setup's /D options for paths and convert them.
 MSYS2_ARG_CONV_EXCL="*" "$iscc" /Q "/DAppDefs=$(win "$work/app.iss")" "/DSource=$(win "$B")" \
   "/DOutputDir=$(win "$out")" "$(win "$root/packaging/windows/setup.iss")" >"$work/iscc.log" 2>&1 ||
   { cat "$work/iscc.log"; exit 1; }
