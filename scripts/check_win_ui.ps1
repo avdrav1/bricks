@@ -63,6 +63,7 @@ public static class Win {
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] public static extern void mouse_event(uint flags, int dx, int dy, uint data, UIntPtr extra);
     [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int attr, out RECT r, int size);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, System.Text.StringBuilder text, int max);
 
     // The visible windows of process `pid`.
     public static List<IntPtr> Windows(uint pid) {
@@ -74,6 +75,13 @@ public static class Win {
             return true;
         }, IntPtr.Zero);
         return found;
+    }
+
+    // The title of window `h`.
+    public static string Title(IntPtr h) {
+        var text = new System.Text.StringBuilder(256);
+        GetWindowText(h, text, text.Capacity);
+        return text.ToString();
     }
 
     // The window's visible bounds (without the invisible resize borders).
@@ -290,7 +298,7 @@ foreach ($app in $samples.Keys) {
     $looks = Looks $h
     Check ($looks.title -gt 150 -and $looks.menu -gt 150) "${app}: light: title bar $($looks.title), menu bar row $($looks.menu)"
 
-    # The menus: File, then Help, then About.
+    # The menus: File, then Help (Left from File wraps to the last menu), then About.
     $before = ([Win]::Windows($p.Id)).Count
     [void][Win]::Front($h)
     Press F10; Press Down
@@ -307,12 +315,19 @@ foreach ($app in $samples.Keys) {
     DesktopShot "$app-2-file-menu"
     Press Left
     DesktopShot "$app-3-help-menu"
-    Press Down; Press Return
-    Start-Sleep -Seconds 1
-    $about = [Win]::Windows($p.Id)
+    # Help's one item, About, has the focus.
+    Press Return
+    $title = (Get-Culture).TextInfo.ToTitleCase($app)
+    $about = $null
+    for ($i = 0; $i -lt 20 -and -not $about; $i++) {
+        Start-Sleep -Milliseconds 250
+        $about = [Win]::Windows($p.Id) | Where-Object { [Win]::Title($_) -eq "About $title" } | Select-Object -First 1
+    }
+    Start-Sleep -Milliseconds 500
     DesktopShot "$app-4-about"
-    Check ($about.Count -gt $before) "${app}: Help -> About opens a window ($before -> $($about.Count) windows)"
-    foreach ($w in $about) { if ($w -ne $h) { [void][Win]::Front($w); Press Escape } }
+    $titles = ([Win]::Windows($p.Id) | ForEach-Object { "'" + [Win]::Title($_) + "'" }) -join ", "
+    Check ($null -ne $about) "${app}: Help -> About opens 'About $title' (windows: $titles)"
+    if ($about) { [void][Win]::Front($about); Press Escape }
 
     # Live: dark, then light again.
     SetDark $true
@@ -331,7 +346,8 @@ foreach ($app in $samples.Keys) {
     $looks = Looks $h
     Check ($looks.title -gt 150 -and $looks.menu -gt 150) "${app}: turns light again: title bar $($looks.title), menu bar row $($looks.menu)"
 
-    # Snap: Win+Left fills the left half of the screen.
+    # Snap: Win+Left puts it on the left of the screen at the work area's full height, half
+    # its width unless the window's narrowest is wider.
     [void][Win]::Front($h); Start-Sleep -Milliseconds 500
     [Win]::Keys(@($VK_LWIN), $VK.Left)
     Start-Sleep -Seconds 1
@@ -339,8 +355,9 @@ foreach ($app in $samples.Keys) {
     $r = [Win]::Bounds($h)
     $work = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
     DesktopShot "$app-8-snapped"
+    $left = [math]::Abs($r.Left - $work.Left) -le 8 -and [math]::Abs($r.Top - $work.Top) -le 8 -and [math]::Abs($r.Bottom - $work.Bottom) -le 8
     $half = [math]::Abs(($r.Right - $r.Left) - $work.Width / 2) -le 16
-    Check ($r.Left -le $work.Left + 8 -and $half) "${app}: Win+Left snaps it to the left half ($($r.Left),$($r.Top),$($r.Right),$($r.Bottom))"
+    Check $left "${app}: Win+Left snaps it to the left ($($r.Left),$($r.Top),$($r.Right),$($r.Bottom) in $($work.Width)x$($work.Height); half the width: $half)"
 
     # File's last item, Exit, ends the app (no changes to ask about).
     [void][Win]::Front($h)

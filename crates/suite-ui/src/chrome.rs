@@ -46,7 +46,8 @@ const MACOS_SPECIAL: &str = "gtk-macos-special";
 
 /// Install the app actions every app has, at startup: `app.about` (the About dialog, the
 /// app menu's first item on macOS, Help's on Windows) and the Window menu's `app.minimize`
-/// (⌘M on macOS) and `app.zoom`, which act on the active window.
+/// (⌘M on macOS) and `app.zoom`, which act on the active window. On Windows also the
+/// windows' conventions there (`windows_conventions`).
 pub fn install(app: &gtk::Application, kind: AppKind, version: &'static str) {
     let about_entry = gio::ActionEntry::builder("about")
         .activate(move |app: &gtk::Application, _, _| {
@@ -75,6 +76,32 @@ pub fn install(app: &gtk::Application, kind: AppKind, version: &'static str) {
     if cfg!(target_os = "macos") {
         app.set_accels_for_action("app.minimize", &["<Meta>m"]);
     }
+    if cfg!(windows) {
+        windows_conventions(app, kind);
+    }
+}
+
+/// Windows: every app window shows the menu bar in a row of its own under the title bar
+/// (`GtkApplicationWindow` doesn't unless asked), and a window without a title (GTK's
+/// alerts) takes the app's name, which Windows shows in its title bar and taskbar (GDK
+/// would show ".").
+fn windows_conventions(app: &gtk::Application, kind: AppKind) {
+    app.connect_window_added(|_, window| {
+        if let Some(window) = window.downcast_ref::<gtk::ApplicationWindow>() {
+            window.set_show_menubar(true);
+        }
+    });
+    gtk::Window::toplevels().connect_items_changed(move |model, position, _removed, added| {
+        for i in position..position + added {
+            if let Some(window) = model.item(i).and_downcast::<gtk::Window>() {
+                window.connect_realize(move |window| {
+                    if window.title().is_none_or(|t| t.is_empty()) {
+                        window.set_title(Some(kind.display_name()));
+                    }
+                });
+            }
+        }
+    });
 }
 
 /// The menu bar of `menus`, each a submenu with its label; after them the Window menu on
