@@ -68,7 +68,8 @@ glib-compile-schemas "$schemas"
 icons=$R/share/icons
 mkdir -p "$icons/Adwaita" "$icons/hicolor"
 cp "$brew/share/icons/Adwaita/index.theme" "$icons/Adwaita/"
-cp -R "$brew/share/icons/Adwaita/symbolic" "$icons/Adwaita/"
+# Dereferenced: the theme's aliases are links, some to folders this copy leaves out.
+cp -RL "$brew/share/icons/Adwaita/symbolic" "$icons/Adwaita/"
 cp "$brew/share/icons/hicolor/index.theme" "$icons/hicolor/"
 for s in 16 32 48 64 128 256 512; do
   mkdir -p "$icons/hicolor/${s}x${s}/apps"
@@ -143,10 +144,12 @@ done < <(find "$C" -type f \( -name '*.dylib' -o -name '*.so' -o -path "*/MacOS/
 ((bad == 0)) || exit 1
 
 # Ad-hoc signatures: each library and loader, then the app (arm64 runs no unsigned code).
+broken=$(find "$C" -type l ! -exec test -e {} \; -print)
+[[ -z $broken ]] || { echo "mac_bundle: broken links in the bundle: $broken"; exit 1; }
 find "$C/Frameworks" "$loaders" -type f \( -name '*.dylib' -o -name '*.so' \) -exec codesign --force -s - {} + 2>"$work/codesign.log" ||
   { cat "$work/codesign.log"; exit 1; }
 codesign --force -s - "$bundle"
-codesign --verify --deep --strict "$bundle"
+codesign --verify --deep --strict --verbose=2 "$bundle"
 
 # The tarball for the installer and the DMG for the browser.
 COPYFILE_DISABLE=1 tar -C "$stage" -czf "$out/$name.tar.gz" "$title.app"
