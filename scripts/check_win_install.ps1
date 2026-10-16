@@ -626,12 +626,14 @@ function Check-Gone([string]$app, [string]$tag, $before) {
     # Windows' own records (Software\Microsoft, Classes\Local Settings) and those of other
     # programs on the runner that run on their own schedule (Firefox's default browser
     # agent, Software\Mozilla) aren't the app's.
-    $windows = @($added | Where-Object { $_ -like "HKEY_CURRENT_USER\Software\Microsoft\*" -or $_ -like "HKEY_CURRENT_USER\Software\Classes\Local Settings*" -or $_ -like "HKEY_CURRENT_USER\Software\Mozilla*" })
+    function Theirs($key) { $key -like "HKEY_CURRENT_USER\Software\Microsoft\*" -or $key -like "HKEY_CURRENT_USER\Software\Classes\Local Settings*" -or $key -like "HKEY_CURRENT_USER\Software\Mozilla*" }
+    $windows = @($added | Where-Object { Theirs $_ })
     $left = @($added | Where-Object { $windows -notcontains $_ })
     Set-Content -Encoding utf8 "$logs\$tag-registry-windows.txt" $windows
     Check ($left.Count -eq 0) "${tag}: nothing it wrote is left under HKCU\Software ($($windows.Count) records of Windows' and other programs', in logs)$(if ($left) { '; left: ' + ($left -join '; ') })"
     $removed = Added $after.reg $before.reg
-    $removedOutside = @($removed | Where-Object { $_ -notlike "HKEY_CURRENT_USER\Software\Microsoft\*" -and $_ -notlike "HKEY_CURRENT_USER\Software\Mozilla*" })
+    # The shell drops its own records too (Local Settings\...\AppModel\ShellRefresh).
+    $removedOutside = @($removed | Where-Object { -not (Theirs $_) })
     Check ($removedOutside.Count -eq 0) "${tag}: and nothing that was there before is gone$(if ($removedOutside) { ': ' + ($removedOutside -join '; ') })"
     $newFiles = Added $before.files $after.files
     $others = @($newFiles | Where-Object { $_ -like "$env:LOCALAPPDATA\Mozilla*" -or $_ -like "$env:APPDATA\Mozilla*" })
