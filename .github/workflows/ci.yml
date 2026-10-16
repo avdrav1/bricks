@@ -50,7 +50,8 @@ jobs:
           grep FULLFSYNC "$RUNNER_TEMP/fs_usage.log" | grep -q atomic
       # Command keys (MAC-3): System Events drives each release build with ⌘O, ⌘S, and ⌘Z
       # and the files show the saves; the screenshots are the artifact.
-      - run: cargo build --release -p brick -p slate -p frame -p etch
+      - id: release
+        run: cargo build --release -p brick -p slate -p frame -p etch
       - name: Command keys drive each app
         run: scripts/check_mac_keys.sh target/release
       - if: always()
@@ -60,7 +61,7 @@ jobs:
       # app runs, and no file, through a minimal bundle per app (scripts/mac_app.py), drawn
       # with the renderer the apps choose on macOS (cairo); the screenshots are the artifact.
       - name: Launch Services opens files in each app
-        if: success() || failure()
+        if: always() && steps.release.outcome == 'success'
         run: scripts/check_mac_open.sh target/release
       - if: always()
         uses: actions/upload-artifact@v4

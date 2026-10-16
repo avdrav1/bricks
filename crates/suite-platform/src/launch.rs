@@ -31,10 +31,13 @@ mod mac {
     use std::cell::{Cell, RefCell};
     use std::ffi::c_void;
 
+    /// What waits for the launch to finish.
+    type Waiting = Vec<Box<dyn FnOnce()>>;
+
     thread_local! {
         static FINISHED: Cell<bool> = const { Cell::new(false) };
-        /// What waits for the launch to finish; `None` until the first wait observes it.
-        static WAITING: RefCell<Option<Vec<Box<dyn FnOnce()>>>> = const { RefCell::new(None) };
+        /// `None` until the first wait observes the notification.
+        static WAITING: RefCell<Option<Waiting>> = const { RefCell::new(None) };
     }
 
     extern "C" fn finished(
