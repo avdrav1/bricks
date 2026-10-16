@@ -143,6 +143,12 @@ check() {
     pass "$app: THIRD-PARTY.txt names all $(ls "$appdir/Contents/Frameworks" | wc -l | tr -d ' ') libraries; licence files of $(ls -d "$appdir"/Contents/Resources/licenses/*/ | wc -l | tr -d ' ') formulas"
   else fail "$app: third-party notice missing or without:$unnamed"; fi
   cp "$notice" "$logs/$app-THIRD-PARTY.txt" 2>/dev/null
+  # No GPL code (user decision): no lzo anywhere, cairo our build, hicolor's index ours.
+  local lzo
+  lzo=$(find "$appdir/Contents" -type f \( -name '*.dylib' -o -name '*.so' -o -path '*/MacOS/*' \) -exec otool -L {} + | grep -ci lzo)
+  if ((lzo == 0)) && ! grep -qi "^lzo\|^hicolor" "$notice" && grep -q "Built for $name.app without lzo" "$notice"; then
+    pass "$app: no file links lzo (otool -L), THIRD-PARTY.txt names no lzo or hicolor and cairo built without lzo"
+  else fail "$app: lzo references: $lzo; notice: $(grep -iE '^(lzo|hicolor|cairo)' "$notice" | tr '\n' '|')"; fi
   if "$lsregister" -dump 2>/dev/null | grep -q "path: *$appdir "; then
     pass "$app: registered with Launch Services"
   elif "$lsregister" -dump 2>/dev/null | grep -qF "$appdir"; then

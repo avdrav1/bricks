@@ -68,12 +68,21 @@ class Licences(unittest.TestCase):
             "glib": {
                 "version": "2.86.0_1", "stable": "2.86.0", "spdx": "LGPL-2.1-or-later",
                 "source": "https://download.gnome.org/sources/glib/2.86/glib-2.86.0.tar.xz",
+                "recipe": "https://formulae.brew.sh/formula/glib", "notes": [],
                 "files": ["Frameworks/libglib-2.0.0.dylib"], "licences": ["glib/COPYING"],
             },
             "cairo": {
-                "version": "1.18.4", "stable": "1.18.6", "spdx": "LGPL-2.1-only OR MPL-1.1",
+                "version": "1.18.4", "stable": None, "spdx": "LGPL-2.1-only OR MPL-1.1",
                 "source": "https://cairographics.org/releases/cairo-1.18.4.tar.xz",
+                "recipe": mac_licenses.CAIRO_RECIPE,
+                "notes": ["Built for Slate.app without lzo (GPL-2.0-or-later), with meson -Dlzo=disabled"],
                 "files": ["Frameworks/libcairo.2.dylib"], "licences": ["cairo/COPYING"],
+            },
+            "pango": {
+                "version": "1.58.0", "stable": "1.58.2", "spdx": "LGPL-2.0-or-later",
+                "source": "https://download.gnome.org/sources/pango/1.58/pango-1.58.2.tar.xz",
+                "recipe": "https://formulae.brew.sh/formula/pango", "notes": [],
+                "files": ["Frameworks/libpango-1.0.0.dylib"], "licences": ["pango/COPYING"],
             },
         }
         text = mac_licenses.render("Slate", ["LICENSE", "LICENSE-APACHE"], entries, ["OFL-Carlito.txt"])
@@ -81,12 +90,36 @@ class Licences(unittest.TestCase):
         self.assertIn("../LICENSE, ../LICENSE-APACHE", text)
         self.assertIn("codesign --force --deep -s - Slate.app", text)
         self.assertIn("glib 2.86.0_1: LGPL-2.1-or-later\n", text)
-        self.assertIn("cairo 1.18.4 (formula's current release 1.18.6): LGPL-2.1-only OR MPL-1.1", text)
+        self.assertIn("pango 1.58.0 (formula's current release 1.58.2): LGPL-2.0-or-later", text)
+        self.assertIn("cairo 1.18.4: LGPL-2.1-only OR MPL-1.1\n  Built for Slate.app without lzo", text)
+        self.assertIn("  Recipe:   scripts/mac_cairo.sh in https://github.com/avdrav1/cronkite", text)
         self.assertIn("  Source:   https://download.gnome.org/sources/glib/2.86/glib-2.86.0.tar.xz", text)
         self.assertIn("  Recipe:   https://formulae.brew.sh/formula/glib", text)
         self.assertIn("  In Slate.app: Frameworks/libglib-2.0.0.dylib", text)
         self.assertIn("../fonts/OFL-Carlito.txt", text)
         self.assertLess(text.index("cairo 1.18.4"), text.index("glib 2.86.0_1"), "sorted by formula")
+
+    def test_a_licence_passes_only_if_it_can_be_met_without_the_gpl(self):
+        ok = [
+            "LGPL-2.1-or-later", "MIT", "0BSD", "LGPL-2.1-only OR MPL-1.1",
+            "LGPL-3.0-or-later OR CC-BY-SA-3.0",
+            "MIT OR MPL-2.0 OR LGPL-2.1-or-later OR GPL-2.0-or-later",
+            "(BSD-3-Clause OR GPL-2.0-only) AND BSD-2-Clause AND MIT",
+            "HPND-sell-variant AND Unicode-3.0 AND MIT-Modern-Variant AND MIT AND LicenseRef-Homebrew-public-domain",
+            "IJG AND Zlib AND BSD-3-Clause",
+        ]
+        gpl = [
+            "GPL-2.0-or-later", "GPL-2.0-only", "AGPL-3.0-only",
+            "0BSD AND GPL-2.0-or-later", "GPL-3.0-or-later AND LGPL-2.1-or-later",
+            "(MIT AND GPL-2.0-only) OR GPL-3.0-only",
+            "GPL-2.0-or-later WITH Classpath-exception-2.0",
+        ]
+        for expr in ok:
+            self.assertTrue(mac_licenses.without_gpl(expr), expr)
+        for expr in gpl:
+            self.assertFalse(mac_licenses.without_gpl(expr), expr)
+        with self.assertRaises(ValueError):
+            mac_licenses.without_gpl("(MIT OR GPL-2.0-only")
 
 
 if __name__ == "__main__":

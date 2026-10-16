@@ -5,7 +5,9 @@
 #
 # On an arm64 Mac (release-macos.yml's macos-14 runner, or `scripts/ship.sh APP build
 # --macos` on a Mac) with Homebrew's gtk4, adwaita-icon-theme, librsvg (rsvg-convert and
-# gdk-pixbuf's SVG loader), and dylibbundler. Makes in OUT, for APP's version V:
+# gdk-pixbuf's SVG loader), dylibbundler, meson, and ninja (cairo without lzo:
+# scripts/mac_cairo.sh, into $CAIRO_PREFIX, default target/mac-cairo). Makes in OUT, for
+# APP's version V:
 #   APP-V-arm64-macos/<Name>.app        the bundle (suite_platform::bundle has its layout)
 #   APP-V-arm64-macos.tar.gz            <Name>.app alone, for the curl installer (sites/APP/install.sh)
 #   APP-V-arm64-macos.dmg               <Name>.app and a link to /Applications
@@ -24,8 +26,8 @@ out=${3:-$root/dist}
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
 [[ $(uname -s) == Darwin && $(uname -m) == arm64 ]] || { echo "mac_bundle: needs an arm64 Mac"; exit 1; }
-for tool in brew dylibbundler rsvg-convert glib-compile-schemas iconutil hdiutil codesign; do
-  command -v "$tool" >/dev/null || { echo "mac_bundle: $tool not found (brew install gtk4 adwaita-icon-theme librsvg dylibbundler)"; exit 1; }
+for tool in brew dylibbundler rsvg-convert glib-compile-schemas iconutil hdiutil codesign meson ninja; do
+  command -v "$tool" >/dev/null || { echo "mac_bundle: $tool not found (brew install gtk4 adwaita-icon-theme librsvg dylibbundler meson ninja)"; exit 1; }
 done
 brew=$(brew --prefix)
 [[ -x $bin/$app ]] || { echo "mac_bundle: no $bin/$app (cargo build --release -p $app)"; exit 1; }
@@ -66,14 +68,21 @@ cp "$brew"/share/glib-2.0/schemas/org.gtk.gtk4.*.gschema.xml "$schemas/"
 glib-compile-schemas "$schemas"
 
 # Icons: Adwaita's symbolic icons (GTK's widgets draw them; GTK renders them itself) and
-# hicolor with the app's icon as PNGs, which GTK decodes itself (the About dialog's).
+# hicolor with the app's icon as PNGs, which GTK decodes itself (the About dialog's). The
+# hicolor index is written here for those folders alone: hicolor-icon-theme's is GPL-2.0.
 icons=$R/share/icons
 mkdir -p "$icons/Adwaita" "$icons/hicolor"
 cp "$brew/share/icons/Adwaita/index.theme" "$icons/Adwaita/"
 # Dereferenced: the theme's aliases are links, some to folders this copy leaves out.
 cp -RL "$brew/share/icons/Adwaita/symbolic" "$icons/Adwaita/"
-cp "$brew/share/icons/hicolor/index.theme" "$icons/hicolor/"
-for s in 16 32 48 64 128 256 512; do
+sizes="16 32 48 64 128 256 512"
+{
+  printf '[Icon Theme]\nName=Hicolor\nComment=Fallback icon theme\nHidden=true\nDirectories='
+  for s in $sizes; do printf '%s' "${s}x${s}/apps,"; done
+  printf '\n'
+  for s in $sizes; do printf '\n[%sx%s/apps]\nSize=%s\nContext=Applications\nType=Threshold\n' "$s" "$s" "$s"; done
+} >"$icons/hicolor/index.theme"
+for s in $sizes; do
   mkdir -p "$icons/hicolor/${s}x${s}/apps"
   rsvg-convert -w $s -h $s "$svg" -o "$icons/hicolor/${s}x${s}/apps/$id.png"
 done
@@ -137,6 +146,62 @@ done
 dylibbundler -of -b "${xs[@]}" -d "$C/Frameworks" -p @executable_path/../Frameworks/ -s "$brew/lib" </dev/null >"$work/dylibbundler.log" 2>&1 ||
   { cat "$work/dylibbundler.log"; exit 1; }
 
+# cairo without lzo (GPL): scripts/mac_cairo.sh's build of Homebrew's cairo release takes
+# the place of Homebrew's cairo libraries, under the same names, so everything linking them
+# (GTK, Pango, librsvg) loads ours. Then Frameworks keeps only what the app and the loaders
+# reach, which drops liblzo2.
+cairo=${CAIRO_PREFIX:-$root/target/mac-cairo}
+"$root/scripts/mac_cairo.sh" "$cairo"
+python3 - "$C" "$cairo/lib" "$app" "$loaders" <<'EOF'
+import os, shutil, subprocess, sys
+contents, cairo_lib, app, loaders = sys.argv[1:]
+fw = os.path.join(contents, "Frameworks")
+REF = "@executable_path/../Frameworks/"
+
+def otool(flag, f):
+    out = subprocess.run(["otool", flag, f], capture_output=True, text=True, check=True).stdout
+    return [l.strip().split(" (")[0] for l in out.splitlines()[1:] if l.strip()]
+
+def deps(f):
+    own = otool("-D", f)
+    return [d for d in otool("-L", f) if d not in own]
+
+def tool(*args):
+    subprocess.run(["install_name_tool", *args], check=True)
+
+for base in ("libcairo.2.dylib", "libcairo-gobject.2.dylib", "libcairo-script-interpreter.2.dylib"):
+    dest = os.path.join(fw, base)
+    if not os.path.exists(dest):
+        continue
+    os.remove(dest)
+    shutil.copy2(os.path.realpath(os.path.join(cairo_lib, base)), dest)
+    os.chmod(dest, 0o755)
+    tool("-id", REF + base, dest)
+    for d in deps(dest):
+        if d.startswith(("/usr/lib/", "/System/", REF)):
+            continue
+        name = os.path.basename(d)
+        if not os.path.exists(os.path.join(fw, name)):
+            sys.exit(f"mac_bundle: our {base} needs {d}, which the bundle lacks")
+        tool("-change", d, REF + name, dest)
+    print(f"mac_bundle: {base} is cairo built without lzo")
+
+keep, todo = set(), [os.path.join(contents, "MacOS", app)]
+todo += [os.path.join(loaders, s) for s in os.listdir(loaders)]
+while todo:
+    for d in deps(todo.pop()):
+        if d.startswith(REF) and d[len(REF):] not in keep:
+            keep.add(d[len(REF):])
+            todo.append(os.path.join(fw, d[len(REF):]))
+for base in sorted(os.listdir(fw)):
+    if base not in keep:
+        os.remove(os.path.join(fw, base))
+        print(f"mac_bundle: dropped {base}, which nothing loads now")
+for base in sorted(keep):
+    if "lzo" in base.lower() or any("lzo" in d.lower() for d in deps(os.path.join(fw, base))):
+        sys.exit(f"mac_bundle: {base} still brings lzo")
+EOF
+
 # Nothing may point outside the bundle but the system's libraries.
 bad=0
 while IFS= read -r f; do
@@ -149,7 +214,7 @@ done < <(find "$C" -type f \( -name '*.dylib' -o -name '*.so' -o -path "*/MacOS/
 
 # Third-party licence notices: each bundled library's and data's Homebrew formula, its
 # licence files, version, SPDX licence, and source (Resources/licenses/THIRD-PARTY.txt).
-python3 "$root/scripts/mac_licenses.py" "$C" "$work/loader-sources.tsv" >"$work/licenses.txt" ||
+python3 "$root/scripts/mac_licenses.py" "$C" "$work/loader-sources.tsv" "$cairo" >"$work/licenses.txt" ||
   { cat "$work/licenses.txt"; exit 1; }
 cat "$work/licenses.txt"
 
