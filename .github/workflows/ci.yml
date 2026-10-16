@@ -59,22 +59,46 @@ jobs:
             windows-${{ steps.toolchain.outputs.rustc }}-${{ hashFiles('Cargo.lock') }}-
             windows-${{ steps.toolchain.outputs.rustc }}-
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      # The metric-compatible fonts the apps carry (MAC-6, WIN-4); suite-ui's tests use them.
+      - name: Fetch the bundled fonts
+        shell: pwsh
+        run: python scripts/fetch_fonts.py target/fonts
       # Every failing test target reports, not only the first.
       - run: cargo test --workspace --no-fail-fast
+      # Opening files on Windows (WIN-4): each app opens its samples from the command line,
+      # as Explorer's Open with and a registered type start it, and dropped from another
+      # program, in the bundled fonts; its own options still work. Screenshots, logs, and
+      # the renderer GTK picks are the artifact.
+      - id: build
+        if: always()
+        run: cargo build -p brick -p slate -p frame -p etch
+      - name: Each app opens its files
+        if: always() && steps.build.outcome == 'success'
+        shell: powershell
+        run: '& .\scripts\check_win_open.ps1 -Bin target\debug -Out out\win-open -PathPrefix "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin"'
+      - name: GTK, Pango, and fontconfig's matches
+        if: always() && steps.build.outcome == 'success'
+        run: |
+          mkdir -p out/win-open
+          {
+            for m in gtk4 pango cairo fontconfig freetype2; do echo "$m $(pkg-config --modversion $m)"; done
+            for f in Calibri 'Calibri Light' Cambria Arial 'Times New Roman' 'Courier New' 'Segoe UI' 'Liberation Sans' sans-serif; do
+              echo "fc-match (system config, no bundled fonts) '$f': $(fc-match "$f")"
+            done
+          } > out/win-open/env.txt 2>&1
+          cat out/win-open/env.txt
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: windows-open, path: "out/win-open/shots\nout/win-open/logs\nout/win-open/summary.txt\nout/win-open/env.txt", if-no-files-found: warn }
       # Windows-like windows (WIN-3): each app's exe is a GUI program whose --version still
       # prints from a terminal, its window has Windows' title bar (snaps with Win+Left), its
       # menus are in a menu bar row (Help → About, File → Exit), and it follows the app mode
       # (AppsUseLightTheme) live; the screenshots are the artifact.
-      - id: apps
-        if: always()
-        run: cargo build -p brick -p slate -p frame -p etch
       - name: Windows' title bars, menu bars, and dark mode
-        if: always() && steps.apps.outcome == 'success'
+        if: always() && steps.build.outcome == 'success'
         # Windows PowerShell 5.1: its Add-Type compiles the script's Win32 and System.Drawing
         # helpers against .NET Framework.
         shell: powershell
-        env:
-          GSK_RENDERER: cairo
         run: |
           $env:PATH = "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin;$env:PATH"
           scripts/check_win_ui.ps1 -Bin target\debug -Out out\win-ui

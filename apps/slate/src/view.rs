@@ -1709,10 +1709,21 @@ impl Page {
     /// 96 dpi on every system (a twip is 1/15 px). GTK on macOS gives widgets the Mac's
     /// 72 dpi (`gtk-xft-dpi`), which would draw text at three quarters of its size on the
     /// same page and break lines where Word doesn't, so there the page gets a context of
-    /// its own at 96 dpi (MAC-6). Linux keeps the widget's, at the desktop's resolution.
-    #[cfg(not(target_os = "macos"))]
+    /// its own at 96 dpi (MAC-6). GTK on Windows hints font metrics, rounding every
+    /// glyph's width to whole pixels, which broke Courier New and Cambria lines elsewhere
+    /// than on Linux; there the page's own context keeps the fonts' widths
+    /// (`suite_ui::fonts::unhinted_metrics`, WIN-4). Linux keeps the widget's, at the
+    /// desktop's resolution.
+    #[cfg(not(any(target_os = "macos", windows)))]
     fn document_context(&self) -> pango::Context {
         self.pango_context()
+    }
+
+    #[cfg(windows)]
+    fn document_context(&self) -> pango::Context {
+        let context = self.create_pango_context();
+        suite_ui::fonts::unhinted_metrics(&context);
+        context
     }
 
     #[cfg(target_os = "macos")]

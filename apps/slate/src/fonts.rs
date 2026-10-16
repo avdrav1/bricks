@@ -229,7 +229,7 @@ mod fc {
     use gtk::glib;
     use gtk::glib::translate::{from_glib, ToGlibPtr};
     use gtk::prelude::*;
-    use std::ffi::{c_char, c_int, c_void, CStr, CString};
+    use std::ffi::{c_char, c_int, c_void, CStr};
     use std::path::Path;
 
     #[repr(C)]
@@ -280,9 +280,10 @@ mod fc {
 
         /// Add the font file at `path` to the configuration's application fonts; the
         /// families fontconfig reads from it, or `None` if it can't. Fontconfig takes the
-        /// path's bytes: on Windows UTF-8, as `suite_file::path_bytes` gives them.
+        /// path as `suite_ui::fonts::fontconfig_path` names it (on Windows in the ANSI
+        /// code page, or by its short name).
         pub fn add(&self, path: &Path) -> Option<Vec<String>> {
-            let file = CString::new(suite_file::path_bytes(path)?).ok()?;
+            let file = suite_ui::fonts::fontconfig_path(path)?;
             let config = self.config();
             // SAFETY: a valid configuration (or null for the current one) and a
             // NUL-terminated path; fontconfig copies what it keeps.
