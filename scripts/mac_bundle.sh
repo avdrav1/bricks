@@ -97,9 +97,9 @@ with open(sources, "w") as tsv:
             os.chmod(os.path.join(dest, base), 0o755)
             tsv.write(f"{base}\t{os.path.realpath(src)}\n")
             line = f'"{rel}/{base}"'
-    elif line.startswith("# LoaderDir"):
-        line = f"# LoaderDir = {rel}"
-    print(line)
+        elif line.startswith("# LoaderDir"):
+            line = f"# LoaderDir = {rel}"
+        print(line)
 EOF
 
 # fontconfig: Homebrew's fonts.conf (the Mac's font folders) without Homebrew's own paths,
