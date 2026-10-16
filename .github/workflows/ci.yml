@@ -70,7 +70,9 @@ jobs:
         run: cargo build -p brick -p slate -p frame -p etch
       - name: Windows' title bars, menu bars, and dark mode
         if: always() && steps.apps.outcome == 'success'
-        shell: pwsh
+        # Windows PowerShell 5.1: its Add-Type compiles the script's Win32 and System.Drawing
+        # helpers against .NET Framework.
+        shell: powershell
         env:
           GSK_RENDERER: cairo
         run: |

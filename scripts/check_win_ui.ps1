@@ -3,8 +3,9 @@
 # close, snap), its menus are in a menu bar row under it (Help with About, File with
 # Exit), and it follows Windows' light and dark app mode, live.
 #
-#   scripts/check_win_ui.ps1 [-Bin target\debug] [-Out out\win-ui]
+#   powershell -File scripts\check_win_ui.ps1 [-Bin target\debug] [-Out out\win-ui]
 #
+# Windows PowerShell 5.1 (its Add-Type builds the helpers below against .NET Framework).
 # Runs on GitHub's Windows runner (ci.yml's windows job) with MSYS2's GTK on PATH and
 # GSK_RENDERER=cairo (the runner has no GPU). For each app:
 #   - the exe's PE header says GUI subsystem (2), and no console process starts with it;
