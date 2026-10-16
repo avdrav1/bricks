@@ -141,7 +141,13 @@ fn main() -> glib::ExitCode {
         .init();
     tracing::info!("application starting");
     eprintln!("{}", suite_ui::startup_message(APP));
-    // Before the file's indexing threads start: they may set the environment (macOS).
+    // Before the file's indexing threads start: these may set the environment (macOS).
+    // In a macOS app bundle, GTK and its libraries find their files there (MAC-7).
+    match suite_platform::bundle::init(APP) {
+        Ok(Some(res)) => tracing::info!("running from the bundle {}", res.display()),
+        Ok(None) => {}
+        Err(e) => tracing::warn!("bundle: {e}"),
+    }
     suite_ui::renderer::init();
     suite_ui::fonts::init();
     // The save benchmark overwrites its file: only ever a scratch copy.

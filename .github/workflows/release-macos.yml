@@ -1,0 +1,104 @@
+# The macOS release (MAC-7): each app's self-contained, ad-hoc-signed .app, its DMG, and
+# the tarball the curl installer takes, built on macos-14 (arm64; Homebrew's bottles there
+# need macOS 14, the suite's floor, ADR 0011), then installed and started on a fresh runner
+# with Homebrew moved away. `scripts/ship.sh APP build --macos` dispatches it and
+# `scripts/ship.sh APP fetch-macos RUN_ID` takes a green run's artifact `macos-APP` into
+# dist/ for the upload. A release tag builds its app; a push that changes the bundling
+# builds and checks all four.
+name: release-macos
+on:
+  workflow_dispatch:
+    inputs:
+      apps:
+        description: "Apps to build (brick slate frame etch)"
+        default: "brick slate frame etch"
+  push:
+    # GitHub skips path filters for tags, so a release tag always runs.
+    tags: ["v*", "slate-v*", "frame-v*", "etch-v*"]
+    branches: ["**"]
+    paths:
+      - .github/workflows/release-macos.yml
+      - scripts/mac_bundle.sh
+      - scripts/mac_app.py
+      - scripts/check_mac_install.sh
+      - crates/suite-platform/src/bundle.rs
+      - "sites/*/install.sh"
+jobs:
+  bundle:
+    runs-on: macos-14
+    timeout-minutes: 60
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+    outputs:
+      apps: ${{ steps.apps.outputs.apps }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - id: apps
+        name: Which apps
+        env: { INPUT_APPS: "${{ inputs.apps }}" }
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/slate-v*) apps=slate ;;
+            refs/tags/frame-v*) apps=frame ;;
+            refs/tags/etch-v*) apps=etch ;;
+            refs/tags/v*) apps=brick ;;
+            *) apps=${INPUT_APPS:-brick slate frame etch} ;;
+          esac
+          for a in $apps; do
+            case $a in brick|slate|frame|etch) ;; *) echo "unknown app $a"; exit 1 ;; esac
+          done
+          echo "apps=$apps" >> "$GITHUB_OUTPUT"
+      - run: brew install gtk4 pkgconf adwaita-icon-theme librsvg dylibbundler
+      - name: Build
+        run: cargo build --release --locked $(printf -- '-p %s ' ${{ steps.apps.outputs.apps }})
+      - name: Bundle
+        run: |
+          for a in ${{ steps.apps.outputs.apps }}; do
+            scripts/ship.sh "$a" build --macos | tee -a "$RUNNER_TEMP/sizes.txt"
+          done
+          { echo '```'; cat "$RUNNER_TEMP/sizes.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Minimum macOS of the bundled libraries
+        run: |
+          for a in ${{ steps.apps.outputs.apps }}; do
+            for f in dist/$a-*-arm64-macos/*.app/Contents/Frameworks/*.dylib dist/$a-*-arm64-macos/*.app/Contents/MacOS/*; do
+              otool -l "$f" | awk '/LC_BUILD_VERSION/{b=1} b&&/minos/{print $2; exit}'
+            done
+          done | sort -V | uniq -c
+      - name: Upload brick
+        if: contains(steps.apps.outputs.apps, 'brick')
+        uses: actions/upload-artifact@v4
+        with: { name: macos-brick, path: "dist/brick-*-arm64-macos.*", if-no-files-found: error, compression-level: 0 }
+      - name: Upload slate
+        if: contains(steps.apps.outputs.apps, 'slate')
+        uses: actions/upload-artifact@v4
+        with: { name: macos-slate, path: "dist/slate-*-arm64-macos.*", if-no-files-found: error, compression-level: 0 }
+      - name: Upload frame
+        if: contains(steps.apps.outputs.apps, 'frame')
+        uses: actions/upload-artifact@v4
+        with: { name: macos-frame, path: "dist/frame-*-arm64-macos.*", if-no-files-found: error, compression-level: 0 }
+      - name: Upload etch
+        if: contains(steps.apps.outputs.apps, 'etch')
+        uses: actions/upload-artifact@v4
+        with: { name: macos-etch, path: "dist/etch-*-arm64-macos.*", if-no-files-found: error, compression-level: 0 }
+  verify:
+    # A fresh runner, Homebrew moved away: the installer and the DMG must be enough.
+    needs: bundle
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { pattern: "macos-*", path: dist, merge-multiple: true }
+      - name: Move Homebrew away
+        run: sudo mv /opt/homebrew /opt/homebrew-away
+      - name: Install and start each app from its installer and its DMG
+        run: scripts/check_mac_install.sh dist "${{ needs.bundle.outputs.apps }}"
+      - name: Homebrew back
+        if: always()
+        run: if [ -d /opt/homebrew-away ]; then sudo mv /opt/homebrew-away /opt/homebrew; fi
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: macos-install, path: "out/mac-install/shots\nout/mac-install/logs\nout/mac-install/summary.txt", if-no-files-found: warn }

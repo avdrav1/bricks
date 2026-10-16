@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
-"""Wrap an app's release binary in a minimal macOS app bundle (MAC-5).
+"""Wrap an app's release binary in a macOS app bundle's skeleton (MAC-5, MAC-7).
 
     python3 scripts/mac_app.py APP BIN_DIR DEST     # e.g. slate target/release out/apps
 
 makes DEST/<Name>.app with:
 - Contents/Info.plist: CFBundleIdentifier dev.cronkite.<Name> (the folder names of
-  MAC-2's ~/Library folders), the executable, and CFBundleDocumentTypes for the file
-  types in the app's Linux desktop entry (packaging/dev.cronkite.<Name>.desktop), so
-  Launch Services opens those files with it (`open -a`, Finder's Open With);
+  MAC-2's ~/Library folders), the executable, the icon (<app>.icns), and
+  CFBundleDocumentTypes for the file types in the app's Linux desktop entry
+  (packaging/dev.cronkite.<Name>.desktop), so Launch Services opens those files with it
+  (`open -a`, Finder's Open With); types macOS may not declare itself are imported
+  (UTImportedTypeDeclarations);
 - Contents/MacOS/<app>: the binary, still linked to Homebrew's GTK;
-- Contents/Resources/fonts: target/fonts (scripts/fetch_fonts.py), if it's there.
+- Contents/Resources/fonts: target/fonts (scripts/fetch_fonts.py), if it's there, for the
+  apps that draw Office documents' fonts (Brick, Slate, Frame; Etch uses the Mac's).
 
 It prints the bundle's path. Enough for Launch Services and MAC-5's smoke test
-(scripts/check_mac_open.sh); MAC-7 makes the real, self-contained bundles.
+(scripts/check_mac_open.sh); scripts/mac_bundle.sh builds the self-contained release
+bundle on it (MAC-7).
 """
 
 import plistlib
@@ -38,6 +42,23 @@ UTIS = {
     "image/bmp": "com.microsoft.bmp",
 }
 
+# Declarations of the types above that macOS 14 may lack: Launch Services uses an imported
+# declaration only when nothing on the Mac exports the type.
+IMPORTED = {
+    "net.daringfireball.markdown": ("Markdown document", ["public.plain-text"], ["md", "markdown"], "text/markdown"),
+    "org.openxmlformats.spreadsheetml.sheet.macroenabled": (
+        "Excel macro-enabled workbook", ["public.data", "public.composite-content"], ["xlsm"],
+        "application/vnd.ms-excel.sheet.macroEnabled.12",
+    ),
+    "org.openxmlformats.presentationml.presentation.macroenabled": (
+        "PowerPoint macro-enabled presentation", ["public.data", "public.composite-content"], ["pptm"],
+        "application/vnd.ms-powerpoint.presentation.macroEnabled.12",
+    ),
+}
+
+# The apps that carry the metric-compatible fonts (MAC-6).
+FONT_APPS = {"brick", "slate", "frame"}
+
 
 def desktop_entry(app):
     """The app's display name and MIME types, from its desktop entry."""
@@ -62,14 +83,19 @@ def version(app):
 
 def info_plist(app):
     name, mimes = desktop_entry(app)
+    utis = [UTIS[m] for m in mimes]
     return {
         "CFBundleExecutable": app,
         "CFBundleIdentifier": f"dev.cronkite.{name}",
         "CFBundleName": name,
         "CFBundleDisplayName": name,
+        "CFBundleIconFile": app,
         "CFBundlePackageType": "APPL",
         "CFBundleShortVersionString": version(app),
         "CFBundleVersion": version(app),
+        "LSApplicationCategoryType": "public.app-category.graphics-design"
+        if app == "etch"
+        else "public.app-category.productivity",
         "LSMinimumSystemVersion": "14.0",
         "NSHighResolutionCapable": True,
         "CFBundleDocumentTypes": [
@@ -77,8 +103,21 @@ def info_plist(app):
                 "CFBundleTypeName": f"{name} Document",
                 "CFBundleTypeRole": "Editor",
                 "LSHandlerRank": "Alternate",
-                "LSItemContentTypes": [UTIS[m] for m in mimes],
+                "LSItemContentTypes": utis,
             }
+        ],
+        "UTImportedTypeDeclarations": [
+            {
+                "UTTypeIdentifier": uti,
+                "UTTypeDescription": description,
+                "UTTypeConformsTo": conforms,
+                "UTTypeTagSpecification": {
+                    "public.filename-extension": extensions,
+                    "public.mime-type": [mime],
+                },
+            }
+            for uti, (description, conforms, extensions, mime) in IMPORTED.items()
+            if uti in utis
         ],
     }
 
@@ -92,7 +131,7 @@ def bundle(app, bin_dir, dest):
         plistlib.dump(info, f)
     shutil.copy2(Path(bin_dir) / app, path / "Contents" / "MacOS" / app)
     fonts = ROOT / "target" / "fonts"
-    if fonts.is_dir():
+    if app in FONT_APPS and fonts.is_dir():
         shutil.copytree(fonts, path / "Contents" / "Resources" / "fonts")
     return path
 

@@ -1,15 +1,23 @@
 #!/bin/sh
-# Slate installer (SLATE-9). Installs or updates the latest release for this user, without
-# sudo:
+# Slate installer (SLATE-9, MAC-7). Installs or updates the latest release for this user,
+# without sudo:
 #
 #   curl -fsSL https://slate.cronkite.cc/install.sh | sh
 #   curl -fsSL https://slate.cronkite.cc/install.sh | sh -s -- --uninstall
 #
-# Puts the binary in ~/.local/bin, its icon and desktop entry in ~/.local/share, and makes
-# it the default for Word documents (.docx) and Markdown (.md) (~/.config/mimeapps.list),
-# so double-clicking one opens it; it also offers to open plain text. The download is
-# checked against the release's sha256 before anything is installed. GTK 4 comes from the
-# system: if it is missing, this says how to install it.
+# Linux: puts the binary in ~/.local/bin, its icon and desktop entry in ~/.local/share, and
+# makes it the default for Word documents (.docx) and Markdown (.md)
+# (~/.config/mimeapps.list), so double-clicking one opens it; it also offers to open plain
+# text. GTK 4 comes from the system: if it is missing, this says how to install it.
+#
+# macOS (Apple Silicon, macOS 14 or later): puts Slate.app, which carries its own GTK, in
+# ~/Applications and registers it with Launch Services, so Word documents, Markdown, and
+# plain text list it under Open With. Default apps stay the user's choice on macOS
+# (Finder's Get Info, Open with, Change All). The tarball is latest.json's "platforms"
+# "macos-arm64" entry.
+#
+# Either way, the download is checked against the release's sha256 before anything is
+# installed.
 set -eu
 
 # Where latest.json is: filled in when the page is deployed (scripts/ship.sh slate site).
@@ -141,8 +149,63 @@ install_app() {
   fi
 }
 
+# macOS (MAC-7). Files curl downloads carry no quarantine flag, so Gatekeeper lets the
+# ad-hoc-signed app start without asking.
+MAC_APP="$HOME/Applications/Slate.app"
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+
+# Platform $1's flat object in latest.json $2 ("url":…,"sha256":…), on one line.
+platform() { sed -n "s/.*\"$1\" *: *{\([^}]*\)}.*/\1/p" "$2"; }
+
+mac_uninstall() {
+  if [ -d "$MAC_APP" ]; then
+    "$LSREGISTER" -u "$MAC_APP" 2>/dev/null || true
+    rm -rf "$MAC_APP"
+  fi
+  say "Removed Slate. Your documents and its settings (~/Library/Application Support/$ID) are untouched."
+}
+
+mac_install() {
+  [ "$(uname -m)" = arm64 ] || [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = 1 ] ||
+    die "the macOS release is for Apple Silicon Macs (M1 or later); this Mac has an Intel processor"
+  os=$(sw_vers -productVersion)
+  [ "${os%%.*}" -ge 14 ] || die "needs macOS 14 Sonoma or later; this is macOS $os"
+  case "$BASE_URL" in @*) die "no download URL set (SLATE_DOWNLOAD_URL)" ;; esac
+  tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+  fetch "$BASE_URL/latest.json" "$tmp/latest.json" || die "cannot reach $BASE_URL/latest.json"
+  version=$(field version "$tmp/latest.json")
+  [ -n "$version" ] || die "latest.json is not a release"
+  platform macos-arm64 "$tmp/latest.json" > "$tmp/mac"
+  url=$(field url "$tmp/mac")
+  want=$(field sha256 "$tmp/mac")
+  [ -n "$url" ] && [ -n "$want" ] || die "Slate $version has no macOS release yet"
+  say "Downloading Slate $version for macOS"
+  fetch "$url" "$tmp/release.tar.gz" || die "cannot download $url"
+  got=$(sha256 "$tmp/release.tar.gz")
+  [ "$got" = "$want" ] || die "checksum mismatch (expected $want, got $got); nothing installed"
+  mkdir "$tmp/x"
+  tar -xzf "$tmp/release.tar.gz" -C "$tmp/x"
+  [ -x "$tmp/x/Slate.app/Contents/MacOS/$APP" ] || die "the release has no Slate.app"
+
+  before=""
+  if [ -x "$MAC_APP/Contents/MacOS/$APP" ]; then before=$("$MAC_APP/Contents/MacOS/$APP" --version 2>/dev/null | cut -d' ' -f2 || true); fi
+  mkdir -p "$HOME/Applications"
+  # The whole bundle is replaced; a Slate still running keeps the files it has open.
+  rm -rf "$MAC_APP"
+  mv "$tmp/x/Slate.app" "$MAC_APP"
+  "$LSREGISTER" -f "$MAC_APP" || say "  Launch Services didn't take it now; Finder registers it when it sees it"
+  "$MAC_APP/Contents/MacOS/$APP" --version >/dev/null 2>&1 || die "the installed Slate doesn't start ($MAC_APP)"
+
+  if [ -n "$before" ] && [ "$before" != "$version" ]; then say "Updated Slate $before -> $version"
+  else say "Installed Slate $version"; fi
+  say "  $MAC_APP: open it from Launchpad, Spotlight, or Finder"
+  say "  Word documents (.docx), Markdown, and plain text list it under Open With; to make it their"
+  say "  default, select one in Finder, then File > Get Info > Open with: Slate > Change All"
+}
+
+mac=false; [ "$(uname -s)" = Darwin ] && mac=true
 case "${1:-}" in
-  --uninstall) uninstall ;;
-  "") install_app ;;
+  --uninstall) if $mac; then mac_uninstall; else uninstall; fi ;;
+  "") if $mac; then mac_install; else install_app; fi ;;
   *) die "unknown option $1 (use --uninstall, or nothing to install or update)" ;;
 esac

@@ -107,6 +107,12 @@ fn main() -> glib::ExitCode {
         return glib::ExitCode::FAILURE;
     }
     eprintln!("{}", suite_ui::startup_message(APP));
+    // In a macOS app bundle, GTK and its libraries find their files there (MAC-7).
+    match suite_platform::bundle::init(APP) {
+        Ok(Some(res)) => tracing::info!("running from the bundle {}", res.display()),
+        Ok(None) => {}
+        Err(e) => tracing::warn!("bundle: {e}"),
+    }
     suite_ui::renderer::init();
     suite_ui::fonts::init();
 
