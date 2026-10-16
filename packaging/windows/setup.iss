@@ -85,8 +85,9 @@ begin
     Roaming := ExpandConstant('{userappdata}\Cronkite\{#Name}');
     Local := ExpandConstant('{localappdata}\Cronkite\{#Name}');
     DelTree(Local + '\fontconfig', True, True, True);
-    Log(Format('User data: %s (%d), %s (%d); silent: %d',
-      [Roaming, Ord(DirExists(Roaming)), Local, Ord(DirExists(Local)), Ord(UninstallSilent)]));
+    // (A line of [Code] mustn't start with "[": Inno would take it for a section.)
+    Log(Format('User data: %s (%d), %s (%d); silent: %d', [Roaming, Ord(DirExists(Roaming)),
+      Local, Ord(DirExists(Local)), Ord(UninstallSilent)]));
     if (not UninstallSilent) and (DirExists(Roaming) or DirExists(Local)) then
       if MsgBox('Also remove your {#Name} settings, recent files, and recovered work?' + #13#10#13#10 +
                 Roaming + #13#10 + Local + #13#10#13#10 +
