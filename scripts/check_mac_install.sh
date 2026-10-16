@@ -256,22 +256,31 @@ if [[ -n $gk_dmg ]]; then
   hdiutil detach "$out/mnt-gk" >/dev/null 2>&1 || hdiutil detach -force "$out/mnt-gk" >/dev/null 2>&1
   xattr -w com.apple.quarantine "0083;$(printf %x "$(date +%s)");Safari;$(uuidgen)" "$gk"
   note "$gk_app: quarantined like a browser download: $(xattr -p com.apple.quarantine "$gk"); spctl: $(spctl --assess --type execute "$gk" 2>&1 | tr '\n' ' ')"
-  open -a "$gk" >"$logs/gatekeeper-open.log" 2>&1
-  sleep 8
+  # `open` waits while Gatekeeper's alert is up, so it runs in the background.
+  open -a "$gk" >"$logs/gatekeeper-open.log" 2>&1 &
+  opener=$!
+  sleep 10
   shot gatekeeper-1-quarantined
   pid=$(pids "$gk" | head -1)
-  note "$gk_app: opening it quarantined: $([[ -n $pid ]] && echo "it started (pid $pid; Gatekeeper let it)" || echo "it didn't start (Gatekeeper)") $(tr '\n' ' ' <"$logs/gatekeeper-open.log")"
+  note "$gk_app: opening it quarantined: $([[ -n $pid ]] && echo "it started (pid $pid; Gatekeeper let it)" || echo "it didn't start (Gatekeeper)"); open: $(kill -0 "$opener" 2>/dev/null && echo "still waiting" || echo "returned") $(tr '\n' ' ' <"$logs/gatekeeper-open.log")"
+  kill "$opener" 2>/dev/null
   [[ -n $pid ]] && { kill "$pid"; sleep 2; kill -9 "$pid" 2>/dev/null; }
   killall CoreServicesUIAgent 2>/dev/null
+  sleep 2
   xattr -dr com.apple.quarantine "$gk"
-  open -a "$gk" "$files/wide.png"
-  sleep 1
-  pid=$(pids "$gk" | head -1)
+  open -a "$gk" "$files/wide.png" &
+  opener=$!
+  for _ in $(seq 20); do
+    pid=$(pids "$gk" | head -1)
+    [[ -n $pid ]] && break
+    sleep 0.5
+  done
   if [[ -n $pid ]] && [[ -n $(wait_windows "$pid" 1) ]]; then
     pass "$gk_app: after xattr -dr com.apple.quarantine it starts"
   else fail "$gk_app: after xattr -dr com.apple.quarantine it doesn't start"; fi
   shot gatekeeper-2-after-xattr
   [[ -n $pid ]] && { kill "$pid"; sleep 2; kill -9 "$pid" 2>/dev/null; }
+  kill "$opener" 2>/dev/null
   "$lsregister" -u "$gk" 2>/dev/null
   rm -rf "$gk"
 fi

@@ -157,7 +157,8 @@ mkdir -p "$work/dmg"
 ditto "$bundle" "$work/dmg/$title.app"
 ln -s /Applications "$work/dmg/Applications"
 for try in 1 2 3; do
-  hdiutil create -quiet -volname "$title" -srcfolder "$work/dmg" -fs HFS+ -format UDZO -ov "$out/$name.dmg" && break
+  # ULMO (LZMA): the smallest of hdiutil's formats; macOS 10.15 and later read it.
+  hdiutil create -quiet -volname "$title" -srcfolder "$work/dmg" -fs HFS+ -format ULMO -ov "$out/$name.dmg" && break
   ((try < 3)) || exit 1
   sleep 5 # hdiutil now and then finds the image busy on CI
 done
