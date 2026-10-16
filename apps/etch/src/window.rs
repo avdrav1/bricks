@@ -425,7 +425,7 @@ fn new_window(app: &gtk::Application, title: &str) -> gtk::ApplicationWindow {
 /// alerts with the reason. They open once the drop is done, so the drag's source isn't
 /// kept waiting on the alerts.
 fn accept_drops(app: &gtk::Application, window: &gtk::ApplicationWindow) {
-    let target = gtk::DropTarget::new(gdk::FileList::static_type(), gdk::DragAction::COPY);
+    let target = suite_ui::launch::file_drop_target();
     target.connect_drop({
         let app = app.downgrade();
         move |_, value, _, _| {

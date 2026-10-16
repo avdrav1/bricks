@@ -73,6 +73,26 @@ pub fn no_file(
     }));
 }
 
+/// A drop target for files dragged from the file manager (Explorer, Finder, Files): a
+/// [`gtk::gdk::FileList`] with [`gtk::gdk::DragAction::COPY`]. The caller connects `drop`.
+pub fn file_drop_target() -> gtk::DropTarget {
+    let target = gtk::DropTarget::new(
+        gtk::gdk::FileList::static_type(),
+        gtk::gdk::DragAction::COPY,
+    );
+    // Windows: GDK sets the drop's actions to those of each status GTK reports. When the
+    // pointer crosses into another widget, GTK reports none for a moment. If the pointer
+    // then stops, no new move puts the actions back, and letting go there was refused
+    // (WIN-3's runner logs: the actions empty from the last move on). Answering COPY on
+    // every enter and move sets them again.
+    #[cfg(windows)]
+    {
+        target.connect_enter(|_, _, _| gtk::gdk::DragAction::COPY);
+        target.connect_motion(|_, _, _| gtk::gdk::DragAction::COPY);
+    }
+    target
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

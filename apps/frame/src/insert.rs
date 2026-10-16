@@ -272,7 +272,7 @@ pub fn paste(view: &Rc<DeckWindow>) -> bool {
 /// Files dropped on the canvas: pictures go onto the slide shown (into the placeholder
 /// under the pointer when it takes one), decks open in their own windows.
 fn accept_drops(view: &Rc<DeckWindow>) {
-    let target = gtk::DropTarget::new(gdk::FileList::static_type(), gdk::DragAction::COPY);
+    let target = suite_ui::launch::file_drop_target();
     target.connect_drop({
         let view = Rc::downgrade(view);
         move |_, value, x, y| {

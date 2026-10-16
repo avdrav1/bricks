@@ -7,7 +7,8 @@
 //!
 //! [`fonts`] chooses how text finds its fonts and adds the bundled ones on macOS;
 //! [`appearance`] switches the theme (and Windows' title bars) between light and dark;
-//! [`launch`] hands the files an app is asked to open to GApplication's `open`;
+//! [`launch`] hands the files an app is asked to open to GApplication's `open` and makes
+//! the drop target for files dragged onto a window;
 //! [`renderer`] picks how GTK draws. The command palette and dialogs may move here once
 //! two apps need the same one.
 
