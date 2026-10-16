@@ -37,6 +37,25 @@ class Licences(unittest.TestCase):
         self.assertIsNone(mac_licenses.cellar_formula(self.cellar, self.cellar))
 
     def test_licence_files_are_found_in_the_keg_and_its_docs(self):
+
+    def test_a_source_tarballs_licences_are_its_top_level_and_reuse_files(self):
+        import io
+        import tarfile
+        tarball = self.root / "glib-2.88.3.tar.xz"
+        with tarfile.open(tarball, "w:xz") as tar:
+            for name, data in [
+                ("glib-2.88.3/COPYING", b"see LICENSES"),
+                ("glib-2.88.3/README.md", b"readme"),
+                ("glib-2.88.3/LICENSES/LGPL-2.1-or-later.txt", b"LGPL text"),
+                ("glib-2.88.3/gio/COPYING", b"deeper, not taken"),
+            ]:
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                tar.addfile(info, io.BytesIO(data))
+        self.assertEqual(
+            mac_licenses.source_licences(tarball),
+            [("COPYING", b"see LICENSES"), ("LGPL-2.1-or-later.txt", b"LGPL text")],
+        )
         found = [os.path.relpath(p, self.keg) for p in mac_licenses.licence_files(self.keg)]
         self.assertEqual(found, ["COPYING", os.path.join("share", "doc", "glib", "LICENSE.md")])
         for name in ["COPYING.LIB", "LICENSE", "licence.txt", "NOTICE", "COPYRIGHT"]:

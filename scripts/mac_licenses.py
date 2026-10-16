@@ -10,11 +10,13 @@ and the Homebrew file it was copied from, tab-separated.
 For every dylib in Contents/Frameworks and every loader it finds the Homebrew formula the
 file came from (the formula's copy under $(brew --prefix)/opt/*/lib, resolved into the
 Cellar), and adds the formulas whose data the bundle carries (DATA). Each formula's licence
-files (COPYING, LICENSE, NOTICE, ... in its keg, its share/doc, or its share/licenses) go to
-Contents/Resources/licenses/<formula>/, and Contents/Resources/licenses/THIRD-PARTY.txt
-lists every formula: version, SPDX licence (`brew info`), upstream source, Homebrew's
-recipe, its licence files, and what of it the app carries. It fails when a library comes
-from no formula or a formula has no licence file. It prints one line per formula.
+files (COPYING, LICENSE, NOTICE, ... in its keg, its share/doc, or its share/licenses; for a
+keg with none, the top level and LICENSES/ of the formula's source tarball, which
+`brew fetch --build-from-source` downloads) go to Contents/Resources/licenses/<formula>/,
+and Contents/Resources/licenses/THIRD-PARTY.txt lists every formula: version, SPDX licence
+(`brew info`), upstream source, Homebrew's recipe, its licence files, and what of it the
+app carries. It fails when a library comes from no formula or a formula has no licence
+file. It prints one line per formula.
 """
 
 import glob
@@ -24,6 +26,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 
 # Formulas whose data the bundle carries (scripts/mac_bundle.sh), and what.
 DATA = {
@@ -62,6 +65,20 @@ def licence_files(keg):
             if os.path.isfile(path) and is_licence(name):
                 found.append(path)
     return found
+
+
+def source_licences(tarball):
+    """(name, bytes) of the licence files at a source tarball's top level and in its
+    LICENSES/ folder (REUSE's layout, which GLib uses)."""
+    found = []
+    with tarfile.open(tarball) as tar:
+        for member in tar.getmembers():
+            parts = member.name.strip("/").split("/")
+            top = len(parts) == 2 and is_licence(parts[1])
+            reuse = len(parts) == 3 and parts[1] == "LICENSES"
+            if member.isfile() and (top or reuse):
+                found.append((parts[-1], tar.extractfile(member).read()))
+    return sorted(found)
 
 
 def render(title, own, entries, fonts):
@@ -144,18 +161,27 @@ def main(contents, sources):
     entries = {}
     for (name, version), what in files.items():
         keg = os.path.join(cellar, name, version)
-        texts = licence_files(keg)
+        texts = []
+        for path in licence_files(keg):
+            target = os.path.basename(path)
+            if target in [t for t, _ in texts]:
+                target = f"{os.path.basename(os.path.dirname(path))}-{target}"
+            texts.append((target, open(path, "rb").read()))
         if not texts:
-            problems.append(f"{name} {version}: no licence file in {keg}")
+            # Homebrew installs only top-level licence files; take them from the source.
+            subprocess.run(["brew", "fetch", "--quiet", "--build-from-source", name], check=False,
+                           stdout=subprocess.DEVNULL)
+            tarball = brew("--cache", "--build-from-source", name).strip()
+            if os.path.isfile(tarball) and tarfile.is_tarfile(tarball):
+                texts = source_licences(tarball)
+        if not texts:
+            problems.append(f"{name} {version}: no licence file in {keg} or its source")
             continue
         os.makedirs(os.path.join(dest, name))
         copied = []
-        for path in texts:
-            target = os.path.basename(path)
-            if target in copied:
-                target = f"{os.path.basename(os.path.dirname(path))}-{target}"
-            shutil.copy2(path, os.path.join(dest, name, target))
-            os.chmod(os.path.join(dest, name, target), 0o644)
+        for target, data in texts:
+            with open(os.path.join(dest, name, target), "wb") as out:
+                out.write(data)
             copied.append(target)
         f = info.get(name, {})
         entries[name] = {
