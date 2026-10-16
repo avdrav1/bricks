@@ -44,6 +44,7 @@
   h2 { font-size: 24px; margin: 48px 0 12px; }
   pre { background: var(--backdrop); border-left: 3px solid var(--accent); padding: 14px 16px; overflow-x: auto; font-size: 14px; }
   #downloads code { word-break: break-all; font-size: 13px; }
+  #ps-uninstall { white-space: pre-wrap; overflow-wrap: anywhere; }
   .status { grid-column: 1 / -1; position: sticky; bottom: 0; display: flex; align-items: center; border-top: 1px solid var(--rule);
             background: var(--backdrop); font-size: 13px; color: var(--muted); }
   .status .swatches { display: flex; gap: 3px; padding: 6px 14px; border-right: 1px solid var(--rule); }
@@ -141,9 +142,12 @@
     const files = [{ name: "Linux", label: "x86_64 Linux", what: "tarball", url: linux.url, bytes: linux.bytes, sha: linux.sha256 }];
     if (macos) files.push({ name: "Mac", label: "Apple Silicon, macOS 14+", what: "DMG", url: macos.dmg, bytes: macos.dmg_bytes, sha: macos.dmg_sha256 });
     if (windows) files.push({ name: "Windows", label: "Windows 10 and 11, 64-bit", what: "Setup.exe", url: windows.url, bytes: windows.bytes, sha: windows.sha256 });
-    const pick = files.find((f) => f.name === (onWindows ? "Windows" : onMac ? "Mac" : "Linux")) || files[0];
-    document.getElementById("dl").href = pick.url;
-    document.getElementById("dl").textContent = "Download v" + rel.version + " for " + pick.name;
+    // Without the visitor's platform in this release, the button goes to the list, not
+    // to another platform's file.
+    const want = onWindows ? "Windows" : onMac ? "Mac" : "Linux";
+    const mine = files.find((f) => f.name === want), pick = mine || files[0];
+    document.getElementById("dl").href = mine ? pick.url : "#downloads";
+    document.getElementById("dl").textContent = mine ? "Download v" + rel.version + " for " + want : "v" + rel.version + ": not yet for " + want;
     document.getElementById("ver").textContent = "v" + rel.version + " released " + rel.date;
     document.getElementById("size").textContent = mb(pick.bytes);
     document.getElementById("sha").textContent = "sha256 " + pick.sha;

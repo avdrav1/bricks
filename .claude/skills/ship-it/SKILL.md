@@ -1,14 +1,14 @@
 ---
 name: ship-it
-description: Cut a release of a Cronkite app (Brick, the spreadsheet; Slate, the word processor; Frame, the presentation app; or Etch, the image editor) for Linux and macOS and deploy it to Cloudflare: preflight checks, version bump, release builds (Linux in a container, macOS on GitHub's macos-14 runner), tarball and DMG upload to R2, download page to Cloudflare Pages, git tag. Use whenever the user says "ship it", "release", "deploy", "cut a build", "publish a version", "push to Cloudflare", or asks to put a new build online, even if they don't name Cloudflare.
+description: Cut a release of a Cronkite app (Brick, the spreadsheet; Slate, the word processor; Frame, the presentation app; or Etch, the image editor) for Linux, macOS, and Windows (a preview) and deploy it to Cloudflare: preflight checks, version bump, release builds (Linux in a container, macOS on GitHub's macos-14 runner, Windows on windows-latest), tarball, DMG, and Setup.exe upload to R2, download page to Cloudflare Pages, git tag. Use whenever the user says "ship it", "release", "deploy", "cut a build", "publish a version", "push to Cloudflare", or asks to put a new build online, even if they don't name Cloudflare.
 ---
 
 # ship-it
 
-The app is a native Linux binary and a macOS app bundle, so Cloudflare hosts the release, not the app itself:
+The app is a native Linux binary, a macOS app bundle, and a Windows installer, so Cloudflare hosts the release, not the app itself:
 
-- **R2** stores the Linux tarball, the macOS tarball and DMG (Apple Silicon, MAC-7), their `.sha256` files, and `latest.json` (version, each platform's URL and checksum).
-- **Pages** serves the app's download page (`sites/<app>/` at `<app>.cronkite.cc`), which shows the release in `latest.json` and offers the visitor's platform first.
+- **R2** stores the Linux tarball, the macOS tarball and DMG (Apple Silicon, MAC-7), the Windows `Setup.exe` (x86_64, WIN-6), their `.sha256` files, and `latest.json` (version, each platform's URL and checksum).
+- **Pages** serves the app's download page (`sites/<app>/` at `<app>.cronkite.cc`), which shows the release in `latest.json` and offers the visitor's platform first, and its installers, `install.sh` (Linux, macOS) and `install.ps1` (Windows).
 
 Every step runs through `scripts/ship.sh`. Anything that leaves the machine (upload, site deploy, push) needs an explicit yes from the user in chat first, every time.
 
@@ -78,7 +78,15 @@ scripts/ship.sh <app> build --macos   # dispatches release-macos.yml at HEAD, wa
 
 Check: the run's URL, its `verify` job's `check_mac_install: OK`, the run summary's sizes, and the screenshots in its `macos-install` artifact (`gh run download RUN_ID -n macos-install`). Report the DMG's size and sha256.
 
-Windows (WIN-5, a preview: nothing ships for Windows until WIN-6 wires it into `ship.sh` and the pages, and the user decides to release). `.github/workflows/release-windows.yml` (the same `apps` input; release tags and pushes that change the bundling run it too) builds each app's self-contained folder and its unsigned per-user Inno Setup installer, `dist/<app>-X.Y.Z-x86_64-windows-setup.exe` and `.sha256`, on `windows-latest` with MSYS2's UCRT64 GTK (`scripts/win_bundle.sh`: the stripped exe and every DLL it needs in `bin\`, GTK's data, the fonts, `licenses\THIRD-PARTY.txt` from `scripts/win_licenses.py`, which refuses GPL code, and `THIRD-PARTY-RUST.txt`; cairo and libtiff rebuilt without lzo and jbig by `scripts/win_libs.sh`, whose pins follow MSYS2's packages: when MSYS2 updates cairo or libtiff the build stops until the pin is updated). Its `verify` job, on a fresh runner with MSYS2 moved away, installs each app through Setup.exe and through `install.ps1`, starts it, opens and saves a file, and uninstalls it with nothing left (`scripts/check_win_install.ps1`). Check: `check_win_install: OK`, the run summary's sizes, and the `windows-install` artifact's screenshots. The artifact `windows-<app>` holds the installer.
+Then Windows, a preview (ADR 0011: unsigned, per user, Windows 10 and 11 x64). Windows ships only when the user says so; a release without it is complete. It also builds on GitHub at the pushed release commit:
+
+```sh
+scripts/ship.sh <app> build --windows   # dispatches release-windows.yml at HEAD, waits, then fetch-windows
+```
+
+`.github/workflows/release-windows.yml` (the same `apps` input; release tags and pushes that change the bundling run it too) runs `scripts/ship.sh <app> build --windows` on `windows-latest` in MSYS2's UCRT64 shell, which builds the app and `scripts/win_bundle.sh` makes its self-contained folder and unsigned per-user Inno Setup installer, `dist/<app>-X.Y.Z-x86_64-windows-setup.exe` and `.sha256` (the stripped exe and every DLL it needs in `bin\`, GTK's data, the fonts, `licenses\THIRD-PARTY.txt` from `scripts/win_licenses.py`, which refuses GPL code, and `THIRD-PARTY-RUST.txt`; cairo and libtiff rebuilt without lzo and jbig by `scripts/win_libs.sh`, whose pins follow MSYS2's packages: when MSYS2 updates cairo or libtiff the build stops until the pin is updated). Its `verify` job, on a fresh runner with MSYS2 moved away, installs each app through Setup.exe and through `install.ps1`, starts it, opens and saves a file, and uninstalls it with nothing left (`scripts/check_win_install.ps1`). `fetch-windows` only takes a green run at HEAD: it puts the Setup.exe and its `.sha256` from the artifact `windows-<app>` in `dist/` (a run of another version has no file of this version's name, and `fetch-windows` says so) and rewrites `latest.json` with `windows-x86_64`, keeping Linux and macOS. For all four apps: `gh workflow run release-windows.yml --ref main`, `gh run watch RUN_ID --exit-status`, then `scripts/ship.sh <app> fetch-windows RUN_ID` per app.
+
+Check: the run's URL, its `verify` job's `check_win_install: OK (N checks)`, the run summary's sizes, and the screenshots in its `windows-install` artifact (`gh run download RUN_ID -n windows-install`), per app and install way (`<app>-setup-*` through Setup.exe, `<app>-ps1-*` through `install.ps1`): `1-start-menu`, the window started from its Start menu entry (a new file or the start window), with Windows' own title bar, the menu bar row, and on Brick and Frame the toolbar row; `2-open-with`, the sample file opened through Open with's command, its name in the title; `3-saved`, the edit before Control+S saved it. Also `settings-apps.png` (Settings → Apps → Installed apps listing the app with its version and "Cronkite"), `programs-and-features.png`, and `brick-setup-uninstall-*` (the uninstaller's own dialogs). Look for drawn windows (not black or empty) and text in the bundled fonts. Report the Setup.exe's size and sha256.
 
 ## 4. Dry run, then confirm
 
@@ -91,13 +99,13 @@ Show the user what will happen in this shape and wait for a clear yes:
 
 ```
 Ready to ship vX.Y.Z
-- Upload <app>-X.Y.Z-x86_64-linux.tar.gz (N MB), <app>-X.Y.Z-arm64-macos.tar.gz (N MB) and .dmg (N MB) + checksums + latest.json to R2 bucket <bucket>/<prefix>
+- Upload <app>-X.Y.Z-x86_64-linux.tar.gz (N MB), <app>-X.Y.Z-arm64-macos.tar.gz (N MB) and .dmg (N MB), <app>-X.Y.Z-x86_64-windows-setup.exe (N MB) + checksums + latest.json to R2 bucket <bucket>/<prefix>
 - Deploy download page to Pages project <project>
 - Tag vX.Y.Z locally
 Proceed?
 ```
 
-A release without the macOS files (`upload` says "Linux only") still ships; its `latest.json` then has no `macos-arm64`, and the Mac installer says there's no macOS release yet.
+A release without the macOS or Windows files (`upload` says "no macOS build in dist/" or "no Windows build in dist/") still ships; its `latest.json` then has no `macos-arm64` or `windows-x86_64`, the Mac installer and `install.ps1` say there's no release for them yet, and the page lists the platform as not in this release yet.
 
 ## 5. Ship
 
@@ -111,10 +119,10 @@ scripts/ship.sh <app> tag
 
 Then verify, and report each check:
 
-- `curl -fsSI <download base>/releases/vX.Y.Z/<name>.tar.gz` returns 200, and so do the macOS tarball and DMG.
+- `curl -fsSI <download base>/releases/vX.Y.Z/<name>.tar.gz` returns 200, and so do the macOS tarball and DMG and the Windows Setup.exe.
 - `curl -fsS <pages URL from wrangler output>/ | grep -c '"version":"X.Y.Z"'` is 1: the deploy writes `latest.json` into the page (Pages fails to publish a `.json` file in the `slate` project).
-- `curl -fsS <pages URL>/install.sh | grep -c "<download base>"` is 1 (the deploy filled in the download URL).
-- Downloaded tarball and DMG match their sha256.
+- `curl -fsS <pages URL>/install.sh | grep -c "<download base>"` is 1, and so is `curl -fsS <pages URL>/install.ps1 | grep -c "<download base>"` (the deploy filled in the download URL).
+- Downloaded tarball, DMG, and Setup.exe match their sha256.
 - Optionally, on this machine: `curl -fsSL <pages URL>/install.sh | sh` reports the new version (in a throwaway `HOME`, `XDG_CONFIG_HOME`, and `XDG_DATA_HOME` to leave this machine's defaults alone).
 
 If upload succeeds but the site deploy fails, the old page still points at the old version; rerun `site` alone after fixing. If a step fails mid-way, do not delete uploaded objects; report what landed.
@@ -129,11 +137,14 @@ Ask before running `git push origin main vX.Y.Z`.
 Shipped vX.Y.Z
 Download: <url>  (N MB, sha256 <first 12 chars>)
 Mac DMG: <url>  (N MB, sha256 <first 12 chars>; release-macos.yml run <url>)
+Windows Setup.exe: <url>  (N MB, sha256 <first 12 chars>; release-windows.yml run <url>)
 Page: <pages url>
 Stories: <IDs>
 Not done: <push pending | none>
 ```
 
-The download page also serves `install.sh` (stories PKG-1, MAC-7), which reads `latest.json`: the top-level `url` and `sha256` on Linux (installers from before MAC-7 read only those, so `latest.json` keeps them, last on its line), `platforms.macos-arm64` on a Mac. So a site deploy is all a new version needs; nothing goes to a package registry. Pushing a release tag runs `release-macos.yml` again for that app; that run is a check, not the release.
+The download page also serves `install.sh` (stories PKG-1, MAC-7), which reads `latest.json`: the top-level `url` and `sha256` on Linux (installers from before MAC-7 read only those, so `latest.json` keeps them, last on its line), `platforms.macos-arm64` on a Mac; and `install.ps1` (WIN-5), which reads `platforms.windows-x86_64` and runs the Setup.exe silently. `scripts/release_json.py` writes `latest.json` (and `verify` checks it against `dist/`). So a site deploy is all a new version needs; nothing goes to a package registry. Pushing a release tag runs `release-macos.yml` and `release-windows.yml` again for that app; those runs are checks, not the release.
+
+The download page offers Windows visitors (`navigator.userAgentData.platform`, `navigator.platform`, or "Windows NT" in the user agent) the Setup.exe on its button, the PowerShell command `irm https://<app>.cronkite.cc/install.ps1 | iex` first under Install, and SmartScreen's way past an unsigned download first under Downloads: "Windows protected your PC" → More info → Run anyway. Until Authenticode signing, a browser-downloaded Setup.exe always gets that prompt; `irm | iex` doesn't (PowerShell's downloads carry no mark of the web).
 
 The suite page at cronkite.cc (`sites/cronkite/`) is not part of a release: it links to the apps' installers and holds no version. Deploy it only when it changes (an app's first release adds its row), with the same yes first: `scripts/ship.sh suite-site --dry-run`, then `scripts/ship.sh suite-site` (Pages project `CF_SUITE_PAGES_PROJECT`).
