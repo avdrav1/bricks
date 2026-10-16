@@ -45,11 +45,11 @@ pub struct Docx {
 }
 
 /// A private copy of the package a Word document was read from or last saved as, in Slate's
-/// cache folder (`$XDG_CACHE_HOME/slate`, on macOS `~/Library/Caches/dev.cronkite.Slate`;
-/// [`suite_platform::dirs`]), removed with it: the next save patches it, so the file may
-/// change, move, or be saved over meanwhile. The process holds its owner lock there
-/// ([`suite_file::owner`]) before making its first copy, so another Slate's [`sweep`]
-/// leaves its copies alone while it runs.
+/// cache folder (`$XDG_CACHE_HOME/slate`, on macOS `~/Library/Caches/dev.cronkite.Slate`, on
+/// Windows `%LOCALAPPDATA%\Cronkite\Slate`; [`suite_platform::dirs`]), removed with it: the
+/// next save patches it, so the file may change, move, or be saved over meanwhile. The
+/// process holds its owner lock there ([`suite_file::owner`]) before making its first copy,
+/// so another Slate's [`sweep`] leaves its copies alone while it runs.
 ///
 /// [`sweep`]: Original::sweep
 #[derive(Debug)]
@@ -703,7 +703,8 @@ mod tests {
     }
 
     /// A second Slate's sweep keeps a running Slate's copy, whatever its pid, and removes a
-    /// gone one's: one that was killed, and one whose lock nobody holds.
+    /// gone one's: one that was killed, and one whose lock nobody holds. This test is the
+    /// second Slate, a child process the first; on every system, Windows included (WIN-2).
     #[test]
     fn a_sweep_keeps_the_copies_of_running_slates() {
         let dir = std::env::temp_dir().join(format!("slate-sweep-{}", std::process::id()));
@@ -736,6 +737,11 @@ mod tests {
         other.kill().unwrap();
         other.wait().unwrap();
         assert!(copy.exists(), "a killed Slate leaves its copy behind");
+        // Windows drops a killed process's locks soon after it ends, not always at once.
+        let start = std::time::Instant::now();
+        while owner::alive(&dir, other.id()) && start.elapsed().as_secs() < 10 {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
         Original::sweep_in(&dir);
         assert!(!copy.exists(), "which the next sweep removes");
         assert!(!owner::lock_path(&dir, other.id()).exists());

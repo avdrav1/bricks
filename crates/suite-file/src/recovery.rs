@@ -5,8 +5,14 @@
 //! be taken belongs to a process that ended without closing its windows: that is a crash
 //! (or a kill), and its edits are offered back. Another running instance's journals are
 //! left alone. What a journal holds is the app's business.
+//!
+//! A process's id can be one an earlier, crashed process had (Windows hands ids out again
+//! soon, WIN-2): a journal named for this process that it didn't name itself is that
+//! earlier process's, offered back like any other, and a new journal never takes an
+//! existing one's name.
 
 use crate::owner;
+use parking_lot::Mutex;
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -19,15 +25,25 @@ pub struct Store {
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
+/// The journals this process named and hasn't removed.
+static ISSUED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
 impl Store {
     pub fn at(dir: PathBuf) -> Self {
         Self { dir }
     }
 
-    /// A journal name for a new window of this process.
+    /// A journal name for a new window of this process, one no file has.
     pub fn new_journal(&self) -> PathBuf {
-        let n = NEXT.fetch_add(1, Ordering::Relaxed);
-        self.dir.join(format!("{}-{n}.journal", std::process::id()))
+        let pid = std::process::id();
+        loop {
+            let n = NEXT.fetch_add(1, Ordering::Relaxed);
+            let journal = self.dir.join(format!("{pid}-{n}.journal"));
+            if !journal.exists() && !journal.with_extension("tmp").exists() {
+                ISSUED.lock().push(journal.clone());
+                return journal;
+            }
+        }
     }
 
     /// Write `journal` from `fill`: to a temporary file, synced, then renamed over it, so
@@ -58,6 +74,7 @@ impl Store {
         };
         let mut found = Vec::new();
         let mut live = std::collections::HashMap::new();
+        let me = std::process::id();
         for e in entries.flatten() {
             let path = e.path();
             if path.extension().is_none_or(|x| x != "journal") {
@@ -66,9 +83,13 @@ impl Store {
             let Some(pid) = journal_pid(&path) else {
                 continue;
             };
-            let alive = *live
-                .entry(pid)
-                .or_insert_with(|| owner::alive(&self.dir, pid));
+            let alive = if pid == me {
+                ISSUED.lock().contains(&path)
+            } else {
+                *live
+                    .entry(pid)
+                    .or_insert_with(|| owner::alive(&self.dir, pid))
+            };
             if !alive {
                 let written = e.metadata().and_then(|m| m.modified()).ok();
                 found.push((written, path));
@@ -82,6 +103,7 @@ impl Store {
     /// process has no journals left, its lock file goes too.
     pub fn remove(&self, journal: &Path) {
         let _ = std::fs::remove_file(journal);
+        ISSUED.lock().retain(|j| j != journal);
         if let Some(pid) = journal_pid(journal).filter(|&p| p != std::process::id()) {
             let prefix = format!("{pid}-");
             let left = std::fs::read_dir(&self.dir)
@@ -206,5 +228,102 @@ mod tests {
             "the earlier journal is still whole"
         );
         assert!(!j.with_extension("tmp").exists(), "no temporary file left");
+    }
+
+    /// WIN-2: an earlier process with this process's id left journals: they're offered,
+    /// and this process's new journals take other names.
+    #[test]
+    fn an_earlier_process_with_this_id_left_its_journals() {
+        let d = dir("reused");
+        let store = Store::at(d.0.clone());
+        let me = std::process::id();
+        let next = NEXT.load(Ordering::Relaxed);
+        let earlier: Vec<PathBuf> = (next..next + 3)
+            .map(|n| d.0.join(format!("{me}-{n}.journal")))
+            .collect();
+        for j in &earlier {
+            write(&store, j, "earlier");
+        }
+        let mine = store.new_journal();
+        assert!(!earlier.contains(&mine), "{}", mine.display());
+        write(&store, &mine, "mine");
+        let mut crashed = store.crashed();
+        crashed.sort();
+        assert_eq!(crashed, earlier, "the earlier process's, not this one's");
+        store.remove(&earlier[0]);
+        assert!(
+            owner::lock_path(&d.0, me).exists(),
+            "this process's own lock stays"
+        );
+        assert_eq!(std::fs::read_to_string(&mine).unwrap(), "mine");
+    }
+
+    /// Run in a child process by [`a_killed_processs_journal_is_offered`]: writes a
+    /// journal in `$SUITE_RECOVERY_CHILD` and runs until it's killed (or its stdin closes).
+    #[test]
+    fn write_a_journal_for_parent() {
+        let Some(dir) = std::env::var_os("SUITE_RECOVERY_CHILD") else {
+            return;
+        };
+        let store = Store::at(PathBuf::from(dir));
+        let journal = store.new_journal();
+        write(&store, &journal, "unsaved");
+        println!("journal\t{}", journal.display());
+        let _ = std::io::stdin().read_line(&mut String::new());
+    }
+
+    /// WIN-2: another process's journal is left alone while it runs and offered once it's
+    /// killed, its lock file going with its journal; on every system, Windows' file locks
+    /// included.
+    #[test]
+    fn a_killed_processs_journal_is_offered() {
+        use std::io::BufRead;
+        use std::process::{Command, Stdio};
+        let d = dir("killed");
+        let store = Store::at(d.0.clone());
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "recovery::tests::write_a_journal_for_parent",
+                "--nocapture",
+            ])
+            .env("SUITE_RECOVERY_CHILD", &d.0)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let journal = std::io::BufReader::new(child.stdout.take().unwrap())
+            .lines()
+            .find_map(|l| l.ok()?.strip_prefix("journal\t").map(PathBuf::from))
+            .expect("the child's journal");
+        assert_eq!(journal.parent(), Some(d.0.as_path()));
+        assert!(
+            store.crashed().is_empty(),
+            "a running process's journal stays"
+        );
+
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert_eq!(
+            after_exit(|| store.crashed()),
+            std::slice::from_ref(&journal)
+        );
+        assert_eq!(std::fs::read_to_string(&journal).unwrap(), "unsaved");
+        store.remove(&journal);
+        assert!(!journal.exists());
+        assert!(!owner::lock_path(&d.0, child.id()).exists());
+    }
+
+    /// What `look` finds once it finds anything, asking for up to 10 s: Windows drops a
+    /// killed process's file locks soon after it ends, not always at once.
+    fn after_exit<T>(look: impl Fn() -> Vec<T>) -> Vec<T> {
+        let start = std::time::Instant::now();
+        loop {
+            let found = look();
+            if !found.is_empty() || start.elapsed() > std::time::Duration::from_secs(10) {
+                return found;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
     }
 }

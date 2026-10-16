@@ -1,10 +1,11 @@
 //! Owner locks: which processes that keep files in a folder are still running, the same
-//! way on Linux and macOS (MAC-2). A process holds `owner-<pid>.lock` in the folder
-//! locked (`File::lock`, `flock` on Unix) from its first file there until it exits. The
-//! system drops the lock however the process ends, crash or kill included, so files named
-//! for a process whose lock can be taken belong to one that's gone. Unlike looking the pid
-//! up (`/proc/<pid>`, which macOS lacks, or `kill(pid, 0)`), a gone process's pid used
-//! again by another program doesn't keep its files. Crash recovery journals
+//! way on Linux, macOS (MAC-2), and Windows (WIN-2). A process holds `owner-<pid>.lock` in
+//! the folder locked (`File::lock`: `flock` on Unix, `LockFileEx` on Windows) from its first
+//! file there until it exits. The system drops the lock however the process ends, crash or
+//! kill included (Windows soon after, not always at once), so files named for a process
+//! whose lock can be taken belong to one that's gone. Unlike looking the pid up
+//! (`/proc/<pid>`, which macOS and Windows lack, or `kill(pid, 0)`), a gone process's pid
+//! used again by another program doesn't keep its files. Crash recovery journals
 //! ([`crate::recovery`]) and Slate's package copies use it.
 
 use parking_lot::Mutex;

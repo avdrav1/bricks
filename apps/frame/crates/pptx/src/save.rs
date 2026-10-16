@@ -53,10 +53,10 @@ const RELS_NS: &str = "http://schemas.openxmlformats.org/package/2006/relationsh
 const XML_DECLARATION: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n";
 
 /// A private copy of the package a deck was read from, in Frame's cache folder
-/// (`$XDG_CACHE_HOME/frame`, on macOS `~/Library/Caches/dev.cronkite.Frame`;
-/// [`suite_platform::dirs`]), removed with it. Every save patches it, so the file may
-/// change, move, or be saved over meanwhile, and a deck saved more than once (with undo
-/// in between) still finds every part it was read with.
+/// (`$XDG_CACHE_HOME/frame`, on macOS `~/Library/Caches/dev.cronkite.Frame`, on Windows
+/// `%LOCALAPPDATA%\Cronkite\Frame`; [`suite_platform::dirs`]), removed with it. Every save
+/// patches it, so the file may change, move, or be saved over meanwhile, and a deck saved
+/// more than once (with undo in between) still finds every part it was read with.
 #[derive(Debug)]
 pub struct Original {
     copy: PathBuf,
@@ -1990,6 +1990,22 @@ fn copy_rels(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// WIN-2: a package copy is in Frame's cache folder (`%LOCALAPPDATA%\Cronkite\Frame` on
+    /// Windows) and goes with its `Original`.
+    #[test]
+    fn package_copies_are_in_frames_cache_folder() {
+        let original = Original::of_bytes(b"deck").unwrap();
+        let copy = original.path().to_owned();
+        let cache = suite_platform::dirs::cache_dir(suite_core::AppKind::Frame);
+        assert_eq!(copy.parent(), Some(cache.as_path()));
+        if cfg!(windows) {
+            assert!(cache.ends_with(r"Cronkite\Frame"), "{}", cache.display());
+        }
+        assert_eq!(std::fs::read(&copy).unwrap(), b"deck");
+        drop(original);
+        assert!(!copy.exists());
+    }
 
     #[test]
     fn the_longest_run_of_slides_in_section_order_keeps_its_sections() {
