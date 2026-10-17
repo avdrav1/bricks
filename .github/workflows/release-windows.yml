@@ -31,6 +31,8 @@ on:
       - packaging/windows/**
       - crates/suite-platform/src/bundle.rs
       - "sites/*/install.ps1"
+      # The suite's installer runs the apps' installers; install-suite.yml checks it.
+      - "!sites/cronkite/install.ps1"
 jobs:
   bundle:
     runs-on: windows-latest

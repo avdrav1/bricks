@@ -1,0 +1,51 @@
+# The suite installers (PKG-7): cronkite.cc's install.sh and install.ps1 install all four
+# apps from the live releases, or the apps named, report one app's failure beside the
+# others' installs, and uninstall them all, on clean Linux containers (Arch, Ubuntu 24.04,
+# Fedora), a macOS runner with Homebrew moved away, and a Windows runner. No build: each
+# app's own installer from sites/ downloads its live release.
+name: install-suite
+on:
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+    paths:
+      - .github/workflows/install-suite.yml
+      - "sites/*/install.sh"
+      - "sites/*/install.ps1"
+      - scripts/check_install_suite.sh
+      - scripts/check_mac_install_suite.sh
+      - scripts/check_win_install_suite.ps1
+# Explicitly bash: GitHub then runs steps with -eo pipefail.
+defaults: { run: { shell: bash } }
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/check_install_suite.sh
+  macos:
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Move Homebrew away
+        run: sudo mv /opt/homebrew /opt/homebrew-away
+      - run: scripts/check_mac_install_suite.sh
+      - name: Homebrew back
+        if: always()
+        run: if [ -d /opt/homebrew-away ]; then sudo mv /opt/homebrew-away /opt/homebrew; fi
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: macos-install-suite, path: "out/mac-install-suite/logs\nout/mac-install-suite/summary.txt", if-no-files-found: warn }
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install and uninstall the suite through install.ps1
+        shell: powershell
+        run: '& .\scripts\check_win_install_suite.ps1'
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: windows-install-suite, path: "out/win-install-suite/shots\nout/win-install-suite/logs\nout/win-install-suite/summary.txt", if-no-files-found: warn }

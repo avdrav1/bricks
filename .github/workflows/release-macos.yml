@@ -26,6 +26,8 @@ on:
       - scripts/check_mac_install.sh
       - crates/suite-platform/src/bundle.rs
       - "sites/*/install.sh"
+      # The suite's installer runs the apps' installers; install-suite.yml checks it.
+      - "!sites/cronkite/install.sh"
 # Explicitly bash: GitHub then runs steps with -eo pipefail.
 defaults: { run: { shell: bash } }
 jobs:
