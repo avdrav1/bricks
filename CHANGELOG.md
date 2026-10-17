@@ -2,6 +2,50 @@
 
 Releases are added by the ship-it skill.
 
+## Etch v0.4.0 (2026-10-17)
+
+Etch runs on Windows 10 and 11 (64-bit) as a preview: install it for your user, without admin rights, with `irm https://etch.cronkite.cc/install.ps1 | iex` in PowerShell or the Setup.exe. It has Windows' own title bar with a menu bar under it, follows Windows' light and dark mode, opens images from Explorer's Open with and by drag and drop, keeps its settings in `%APPDATA%` and its recovery in `%LOCALAPPDATA%`, and uninstalls from Settings → Apps. The Setup.exe isn't signed yet, so a browser download meets SmartScreen once (More info → Run anyway). On every platform, a file dragged onto a window opens even when the drag's last move crosses into another part of it.
+
+- WIN-1: Build and test every crate on Windows; atomic saves and recent lists work there
+- WIN-2: Keep each app's data in %APPDATA% and %LOCALAPPDATA%; crash recovery on Windows
+- WIN-3: No console window, Windows' own title bar, a menu bar row, and Windows' dark mode
+- WIN-4: Open files from Explorer and the command line, and by drag and drop from Explorer
+- WIN-5: Per-user Setup.exe and PowerShell installer, uninstalled from Settings → Apps
+- WIN-6: Offer Windows on the download page
+
+## Frame v0.3.0 (2026-10-17)
+
+Frame runs on Windows 10 and 11 (64-bit) as a preview: install it for your user, without admin rights, with `irm https://frame.cronkite.cc/install.ps1 | iex` in PowerShell or the Setup.exe. It has Windows' own title bar with a menu bar and toolbar row, follows Windows' light and dark mode, opens decks from Explorer's Open with and by drag and drop, draws PowerPoint's fonts (Windows' own, or the bundled metric-compatible ones), and uninstalls from Settings → Apps. The Setup.exe isn't signed yet, so a browser download meets SmartScreen once (More info → Run anyway).
+
+- WIN-1: Build and test every crate on Windows; atomic saves work there
+- WIN-2: Keep each app's data in %APPDATA% and %LOCALAPPDATA%
+- WIN-3: No console window, Windows' own title bar, a menu bar row, and Windows' dark mode
+- WIN-4: Fonts on Windows; open files from Explorer and the command line, and by drag and drop
+- WIN-5: Per-user Setup.exe and PowerShell installer, uninstalled from Settings → Apps
+- WIN-6: Offer Windows on the download page
+
+## Slate v0.5.0 (2026-10-17)
+
+Slate runs on Windows 10 and 11 (64-bit) as a preview: install it for your user, without admin rights, with `irm https://slate.cronkite.cc/install.ps1 | iex` in PowerShell or the Setup.exe. It has Windows' own title bar with a menu bar under it, follows Windows' light and dark mode, opens documents from Explorer's Open with and by drag and drop, draws Word documents in Windows' Office fonts or the bundled metric-compatible ones, keeps its settings in `%APPDATA%` and its recovery in `%LOCALAPPDATA%`, and uninstalls from Settings → Apps. The Setup.exe isn't signed yet, so a browser download meets SmartScreen once (More info → Run anyway).
+
+- WIN-1: Build and test every crate on Windows; atomic saves and recent lists work there
+- WIN-2: Keep each app's data in %APPDATA% and %LOCALAPPDATA%; crash recovery and package copies on Windows
+- WIN-3: No console window, Windows' own title bar, a menu bar row, and Windows' dark mode
+- WIN-4: Fonts on Windows; open files from Explorer and the command line, and by drag and drop
+- WIN-5: Per-user Setup.exe and PowerShell installer, uninstalled from Settings → Apps
+- WIN-6: Offer Windows on the download page
+
+## v0.5.0 (2026-10-17)
+
+Brick runs on Windows 10 and 11 (64-bit) as a preview: install it for your user, without admin rights, with `irm https://brick.cronkite.cc/install.ps1 | iex` in PowerShell or the Setup.exe. It has Windows' own title bar with a menu bar and toolbar row, follows Windows' light and dark mode, opens spreadsheets from Explorer's Open with and by drag and drop, keeps its settings and recent files in `%APPDATA%` and its recovery in `%LOCALAPPDATA%`, and uninstalls from Settings → Apps. While Brick has a CSV open on Windows, other programs can't overwrite or truncate that file. The Setup.exe isn't signed yet, so a browser download meets SmartScreen once (More info → Run anyway).
+
+- WIN-1: Build and test every crate on Windows; atomic saves, recent lists, and the mapped CSV work there
+- WIN-2: Keep each app's data in %APPDATA% and %LOCALAPPDATA%; crash recovery on Windows
+- WIN-3: No console window, Windows' own title bar, a menu bar row, and Windows' dark mode
+- WIN-4: Open files from Explorer and the command line, and by drag and drop from Explorer
+- WIN-5: Per-user Setup.exe and PowerShell installer, uninstalled from Settings → Apps
+- WIN-6: Offer Windows on the download page
+
 ## Etch v0.3.0 (2026-10-16)
 
 Etch runs on macOS (Apple Silicon, macOS 14 or later) as a preview: install it with the same curl command or a DMG. It uses Command shortcuts and the macOS menu bar with native title bars, follows light and dark mode, opens images from Finder, and keeps its settings in `~/Library`. The download isn't signed by Apple yet, so a DMG from the browser needs Open Anyway once (the download page says how). On Linux, files now reach Etch through GTK's open handling, and every release carries the licence notices of the Rust crates and libraries inside it.
