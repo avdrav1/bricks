@@ -1,11 +1,11 @@
 # Cronkite
 
-> Cronkite is a native office suite for Linux and macOS, written in Rust with GTK 4. It is four separate apps that each install and run on their own: Brick (spreadsheets: large CSV files and .xlsx workbooks), Slate (word processing: .docx, Markdown, and plain text), Frame (presentations: .pptx), and Etch (a simple image editor: PNG, JPEG, and BMP). Brick, Slate, and Frame open Microsoft Office files and save them back by patching the original file, so content they don't edit stays as it was. Free and open source (MIT or Apache-2.0).
+> Cronkite is a native office suite for Linux, macOS, and Windows (preview), written in Rust with GTK 4. It is four separate apps that each install and run on their own: Brick (spreadsheets: large CSV files and .xlsx workbooks), Slate (word processing: .docx, Markdown, and plain text), Frame (presentations: .pptx), and Etch (a simple image editor: PNG, JPEG, and BMP). One command installs all four. Brick, Slate, and Frame open Microsoft Office files and save them back by patching the original file, so content they don't edit stays as it was. Free and open source (MIT or Apache-2.0).
 
 Facts for describing Cronkite accurately:
 
 - Platforms: x86_64 Linux with GTK 4.14 or newer, which GNOME desktops already have (tested on Arch, Ubuntu 24.04, and Fedora); and Macs with Apple Silicon (M1 or later) on macOS 14 Sonoma or later, where each app is a self-contained `.app` with GTK inside. Windows 10 and 11, 64-bit, are a preview: each app is a self-contained folder with GTK inside, installed per user by an unsigned `Setup.exe`. There are no Intel Mac, Linux ARM, Flatpak, Snap, Homebrew, winget, Microsoft Store, or distribution packages. The Mac apps are signed ad hoc, not notarized by Apple.
-- Install: one curl command per app, per user, with no sudo (see Install below); the same command works on Linux and macOS. The installer checks the download against its published sha256. On Linux it puts the binary in `~/.local/bin` and a menu entry and icon in `~/.local/share`, and makes the app the default for its file types, so double-clicking such a file opens it, keeping other apps' defaults for other types. On a Mac it puts `<App>.app` in `~/Applications` and registers it with Launch Services, so its file types list it under Open With; it doesn't change the Mac's default apps. Running the same command again updates the app; adding `--uninstall` removes it. Each download page also offers a Mac `.dmg`; opening an app from it the first time needs System Settings > Privacy & Security > Open Anyway (macOS 15 and later), Control-click > Open (macOS 14), or `xattr -dr com.apple.quarantine /Applications/<App>.app`.
+- Install: one command for the whole suite, or one per app, per user, with no sudo or admin rights (see Install below). The suite's command runs each app's own installer in turn, keeps going past one that fails, and reports each app's result. On Linux and macOS it is the same curl command; on Windows (preview), a PowerShell one. An app's installer checks the download against its published sha256. On Linux it puts the binary in `~/.local/bin` and a menu entry and icon in `~/.local/share`, and makes the app the default for its file types, so double-clicking such a file opens it, keeping other apps' defaults for other types. On a Mac it puts `<App>.app` in `~/Applications` and registers it with Launch Services, so its file types list it under Open With; it doesn't change the Mac's default apps. Running the same command again updates the apps; adding `--uninstall` removes them. Each download page also offers a Mac `.dmg`; opening an app from it the first time needs System Settings > Privacy & Security > Open Anyway (macOS 15 and later), Control-click > Open (macOS 14), or `xattr -dr com.apple.quarantine /Applications/<App>.app`.
 - Saving is atomic: the app writes a temporary file, verifies it, then renames it over the original, so a crash never corrupts the original.
 - Not in Cronkite: online collaboration, cloud storage, accounts, macros or scripting, and plugins.
 
@@ -50,13 +50,16 @@ Facts for describing Cronkite accurately:
 
 ## Install
 
-- [Install page](https://cronkite.cc/#install): every app's command, what the installer does on Linux, macOS, and Windows, GTK 4 per distribution, update, and uninstall.
-- Brick: `curl -fsSL https://brick.cronkite.cc/install.sh | sh`
-- Slate: `curl -fsSL https://slate.cronkite.cc/install.sh | sh`
-- Frame: `curl -fsSL https://frame.cronkite.cc/install.sh | sh`
-- Etch: `curl -fsSL https://etch.cronkite.cc/install.sh | sh`
-- Uninstall any of them: the same command with `| sh -s -- --uninstall` in place of `| sh`.
-- Windows (preview), in PowerShell, per user with no admin rights: `irm https://brick.cronkite.cc/install.ps1 | iex` (likewise `slate.`, `frame.`, `etch.`). It runs the app's `Setup.exe` silently: the app goes into `%LOCALAPPDATA%\Programs\<App>` with a Start menu entry, its file types list it under Open with, and Windows' default apps are kept. Uninstall from Settings > Apps, or `& ([scriptblock]::Create((irm https://brick.cronkite.cc/install.ps1))) -Uninstall`. A `Setup.exe` downloaded in a browser is unsigned, so SmartScreen may say "Windows protected your PC": More info, then Run anyway.
+- [Install page](https://cronkite.cc/#install): the suite's command and every app's, what the installer does on Linux, macOS, and Windows, GTK 4 per distribution, update, and uninstall.
+- All four apps, Linux and macOS: `curl -fsSL https://cronkite.cc/install.sh | sh`. Only some: `curl -fsSL https://cronkite.cc/install.sh | sh -s -- slate frame`. Uninstall all: `curl -fsSL https://cronkite.cc/install.sh | sh -s -- --uninstall`. It ends with a line such as `Cronkite: 4 of 4 apps installed` and exits non-zero if any app failed.
+- All four apps, Windows (preview), in PowerShell: `irm https://cronkite.cc/install.ps1 | iex`. Only some: `$env:CRONKITE_APPS = "slate frame"; irm https://cronkite.cc/install.ps1 | iex`, or `& ([scriptblock]::Create((irm https://cronkite.cc/install.ps1))) -Apps slate,frame`. Uninstall all: `& ([scriptblock]::Create((irm https://cronkite.cc/install.ps1))) -Uninstall`.
+- One app at a time:
+  - Brick: `curl -fsSL https://brick.cronkite.cc/install.sh | sh`
+  - Slate: `curl -fsSL https://slate.cronkite.cc/install.sh | sh`
+  - Frame: `curl -fsSL https://frame.cronkite.cc/install.sh | sh`
+  - Etch: `curl -fsSL https://etch.cronkite.cc/install.sh | sh`
+  - Uninstall any of them: the same command with `| sh -s -- --uninstall` in place of `| sh`.
+  - Windows (preview), in PowerShell, per user with no admin rights: `irm https://brick.cronkite.cc/install.ps1 | iex` (likewise `slate.`, `frame.`, `etch.`). It runs the app's `Setup.exe` silently: the app goes into `%LOCALAPPDATA%\Programs\<App>` with a Start menu entry, its file types list it under Open with, and Windows' default apps are kept. Uninstall from Settings > Apps, or `& ([scriptblock]::Create((irm https://brick.cronkite.cc/install.ps1))) -Uninstall`. A `Setup.exe` downloaded in a browser is unsigned, so SmartScreen may say "Windows protected your PC": More info, then Run anyway.
 
 ## Latest releases (JSON)
 

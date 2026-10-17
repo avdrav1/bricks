@@ -20,7 +20,7 @@
 #                                            installer works there; latest.json matches dist/
 #   scripts/ship.sh [APP] upload [--dry-run] tarballs, DMG, Setup.exe, checksums, latest.json -> Cloudflare R2
 #   scripts/ship.sh [APP] site   [--dry-run] the app's download page and installers (sites/APP) -> Cloudflare Pages
-#   scripts/ship.sh suite-site [--dry-run]   suite install page (sites/cronkite) -> Cloudflare Pages
+#   scripts/ship.sh suite-site [--dry-run]   suite page and the suite's installers (sites/cronkite) -> Cloudflare Pages
 #   scripts/ship.sh video [--dry-run]        the explainer's English cuts (dist/video/, from
 #                                            video/render.mjs) and a poster -> R2 video/ID/
 #   scripts/ship.sh [APP] tag                annotated git tag (local only): vX.Y.Z for Brick,
@@ -297,6 +297,12 @@ def stamp(m):
     data = open(os.path.join(site, m.group(1)), "rb").read()
     return m.group(1) + "?v=" + hashlib.sha256(data).hexdigest()[:8]
 open(page, "w").write(re.sub(r"(shots/[A-Za-z0-9_.-]+\.webp)", stamp, html))' dist/cronkite-site
+  # The suite's installers (PKG-7) run each app's from its own site (https://APP.cronkite.cc),
+  # so they have nothing to fill in.
+  for f in install.sh install.ps1; do
+    [ -f "dist/cronkite-site/$f" ] || { echo "sites/cronkite/$f missing"; exit 1; }
+  done
+  echo "cronkite.cc: $(ls dist/cronkite-site | tr '\n' ' ')"
   pages_project "$CF_SUITE_PAGES_PROJECT"
   run wr pages deploy dist/cronkite-site --project-name "$CF_SUITE_PAGES_PROJECT" --branch main --commit-dirty=true
   ;;
